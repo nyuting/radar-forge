@@ -20,8 +20,8 @@ teaching
 
 from __future__ import annotations
 
-from radar_forge import core
+from radar_forge import core, pipelines
 
 __version__ = "0.0.0"
 
-__all__ = ["__version__", "core"]
+__all__ = ["__version__", "core", "pipelines"]
