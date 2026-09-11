@@ -103,7 +103,8 @@ CONSTANT_LITERALS: tuple[tuple[float, str], ...] = (
     (1.38e-23, "BOLTZMANN_JPK"),
     (1.381e-23, "BOLTZMANN_JPK"),
     (6_371_000.0, "EARTH_RADIUS_M"),
-    (6_378_137.0, "EARTH_RADIUS_M"),
+    (6_378_137.0, "WGS84_SEMI_MAJOR_AXIS_M"),
+    (298.257_223_563, "WGS84_FLATTENING"),
 )
 
 

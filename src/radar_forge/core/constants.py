@@ -26,6 +26,8 @@ References
 .. [2] IEEE Std 686-2017, *IEEE Standard Radar Definitions*.
 .. [3] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
        McGraw-Hill, 2014, §1.4, §2.3.
+.. [4] National Imagery and Mapping Agency, *Department of Defense World
+       Geodetic System 1984*, NIMA TR8350.2, 3rd ed., 2000.
 """
 
 from __future__ import annotations
@@ -38,6 +40,8 @@ __all__ = [
     "FOUR_THIRDS_EARTH_RADIUS_M",
     "SPEED_OF_LIGHT_MPS",
     "STANDARD_NOISE_TEMPERATURE_K",
+    "WGS84_FLATTENING",
+    "WGS84_SEMI_MAJOR_AXIS_M",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -79,4 +83,31 @@ FOUR_THIRDS_EARTH_RADIUS_M: Final[float] = 4.0 / 3.0 * EARTH_RADIUS_M
 The standard 4/3 approximation models atmospheric refraction bending rays
 towards the Earth, so the radar horizon sits further out than the geometric
 one [3]_. Valid for a standard atmosphere only; it does not model ducting.
+"""
+
+
+# --------------------------------------------------------------------------- #
+# Earth shape — WGS-84 reference ellipsoid
+# --------------------------------------------------------------------------- #
+
+WGS84_SEMI_MAJOR_AXIS_M: Final[float] = 6_378_137.0
+"""WGS-84 ellipsoid semi-major axis :math:`a`, m. Defining constant of [4]_.
+
+This is the *equatorial* radius of the reference ellipsoid, not a mean radius.
+It is 7.1 km larger than :data:`EARTH_RADIUS_M`, and the two are not
+interchangeable: use this one to convert geodetic latitude and longitude to
+Cartesian coordinates, and :data:`EARTH_RADIUS_M` only where a spherical Earth
+is good enough (radar horizon, great-circle rules of thumb).
+"""
+
+WGS84_FLATTENING: Final[float] = 1.0 / 298.257_223_563
+"""WGS-84 ellipsoid flattening :math:`f = (a - b) / a`, dimensionless.
+
+Defining constant of [4]_, given there as the inverse flattening
+:math:`1/f = 298.257223563`. The Earth is about 21 km shorter pole-to-pole than
+it is wide; ignoring that puts a position error of up to ~20 km into a
+geodetic-to-Cartesian conversion.
+
+The first eccentricity squared follows as :math:`e^2 = f(2 - f)`; derive it
+where it is needed rather than retyping a second constant here.
 """
