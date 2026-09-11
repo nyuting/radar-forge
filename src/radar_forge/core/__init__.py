@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from radar_forge.core import constants, dsp, geodesy, windows
+from radar_forge.core import constants, dsp, geodesy, radar, targets, windows
 from radar_forge.core.constants import (
     BOLTZMANN_JPK,
     EARTH_RADIUS_M,
@@ -27,7 +27,9 @@ from radar_forge.core.geodesy import (
     geodetic_to_ecef_m,
     geodetic_to_enu_m,
 )
+from radar_forge.core.radar import Radar, Receiver, Transmitter, WaveformKind
 from radar_forge.core.radar_equation import received_power_w
+from radar_forge.core.targets import PointTarget, dbsm_to_m2, m2_to_dbsm
 from radar_forge.core.waveforms import (
     beat_frequency_hz,
     lfm_chirp,
@@ -52,10 +54,16 @@ __all__ = [
     "TAPER_NAMES",
     "WGS84_FLATTENING",
     "WGS84_SEMI_MAJOR_AXIS_M",
+    "PointTarget",
+    "Radar",
+    "Receiver",
+    "Transmitter",
+    "WaveformKind",
     "apply_taper",
     "beat_frequency_hz",
     "coherent_gain_linear",
     "constants",
+    "dbsm_to_m2",
     "doppler_bin_centers_mps",
     "doppler_fft",
     "dsp",
@@ -65,9 +73,11 @@ __all__ = [
     "geodetic_to_ecef_m",
     "geodetic_to_enu_m",
     "lfm_chirp",
+    "m2_to_dbsm",
     "matched_filter",
     "mti_filter",
     "processing_loss_db",
+    "radar",
     "range_bin_centers_m",
     "range_doppler_map",
     "range_fft",
@@ -76,5 +86,6 @@ __all__ = [
     "received_power_w",
     "sweep_rate_hzps",
     "taper",
+    "targets",
     "windows",
 ]
