@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from radar_forge.core import constants, dsp, geodesy, radar, signal, targets, windows
+from radar_forge.core import ambiguity, constants, dsp, geodesy, radar, signal, targets, windows
+from radar_forge.core.ambiguity import fold_velocity_mps, unfold_doppler_dual_prf
 from radar_forge.core.constants import (
     BOLTZMANN_JPK,
     EARTH_RADIUS_M,
@@ -67,6 +68,7 @@ __all__ = [
     "Receiver",
     "Transmitter",
     "WaveformKind",
+    "ambiguity",
     "apply_taper",
     "beat_frequency_hz",
     "coherent_gain_linear",
@@ -78,6 +80,7 @@ __all__ = [
     "ecef_to_enu_m",
     "enu_to_range_azimuth_elevation",
     "fmcw_deramp_baseband",
+    "fold_velocity_mps",
     "geodesy",
     "geodetic_to_ecef_m",
     "geodetic_to_enu_m",
@@ -100,5 +103,6 @@ __all__ = [
     "taper",
     "targets",
     "thermal_noise",
+    "unfold_doppler_dual_prf",
     "windows",
 ]

@@ -12,6 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from radar_forge.core.ambiguity import fold_velocity_mps
 from radar_forge.core.dsp import (
     doppler_bin_centers_mps,
     matched_filter,
@@ -41,12 +42,6 @@ S2_RADAR = Radar(
     Receiver(2.5e6, 30.0, 3.0),
     *DSO_SITE,
 )
-
-
-def _fold_velocity_mps(velocity_mps: float, unambiguous_velocity_mps: float) -> float:
-    """Wrap a true velocity into the unambiguous interval, as the radar does."""
-    span = 2.0 * unambiguous_velocity_mps
-    return float((velocity_mps + unambiguous_velocity_mps) % span - unambiguous_velocity_mps)
 
 
 def _fmcw_peak(range_m: float, velocity_mps: float) -> tuple[float, float]:
@@ -192,7 +187,7 @@ class TestFmcwDerampBaseband:
         true_velocity_mps = 80.0
         peak_range_m, peak_velocity_mps = _fmcw_peak(10_000.0, true_velocity_mps)
 
-        expected_velocity_mps = _fold_velocity_mps(
+        expected_velocity_mps = fold_velocity_mps(
             true_velocity_mps, S1_RADAR.unambiguous_velocity_mps
         )
         assert abs(peak_range_m - 10_000.0) < S1_RADAR.range_resolution_m
