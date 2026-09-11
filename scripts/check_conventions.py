@@ -297,7 +297,7 @@ def check_constants(tree: ast.AST, rel: Path, canonical: set[str]) -> list[Probl
                 problems.append(
                     Problem(
                         rel,
-                        node.lineno,
+                        target.lineno,
                         "R4 constants",
                         f"'{name}' is defined in {CONSTANTS_MODULE.as_posix()}; "
                         f"assigning it here creates a second, divergent definition.",

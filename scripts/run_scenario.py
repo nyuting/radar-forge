@@ -17,8 +17,10 @@ import json
 import shutil
 import subprocess
 import sys
+from collections.abc import Sequence
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -26,6 +28,7 @@ from radar_forge import __version__
 from radar_forge.core.ambiguity import fold_velocity_mps
 from radar_forge.pipelines.scenarios import (
     Frame,
+    RangeDopplerProduct,
     Scenario,
     iterate_frames,
     leg_range_doppler,
@@ -43,7 +46,7 @@ TRUTH_COLUMNS = [
 ]
 
 
-def parse_args(argv=None):
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run a radar-forge scenario and write its outputs.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -67,7 +70,7 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def git_commit():
+def git_commit() -> str | None:
     """The commit the run was made at, or None outside a checkout."""
     try:
         result = subprocess.run(
@@ -82,9 +85,9 @@ def git_commit():
     return result.stdout.strip()
 
 
-def leg_metadata(scenario: Scenario):
+def leg_metadata(scenario: Scenario) -> list[dict[str, Any]]:
     """Everything about each leg a reader needs to interpret the cubes."""
-    legs = []
+    legs: list[dict[str, Any]] = []
     for index, (leg, n_chirps) in enumerate(zip(scenario.legs, scenario.n_chirps, strict=True)):
         legs.append(
             {
@@ -131,13 +134,23 @@ def write_metadata(scenario: Scenario, out_dir: Path, n_frames: int) -> None:
     (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
 
 
-def render_frame(frame: Frame, scenario: Scenario, out_dir: Path, dynamic_range_db: float) -> None:
-    """Draw one range-Doppler panel per leg and save it."""
+def render_frame(
+    frame: Frame,
+    scenario: Scenario,
+    products: Sequence[RangeDopplerProduct],
+    out_dir: Path,
+    dynamic_range_db: float,
+) -> None:
+    """Draw one range-Doppler panel per leg and save it.
+
+    Takes the already-processed ``products`` rather than processing the cubes
+    itself, so the receive chain runs once per frame however many consumers a
+    frame has.
+    """
     from radar_forge.teaching.plotting import save_figure
     from radar_forge.teaching.scopes.rd_map import render_range_doppler
 
-    for index, (cube, leg) in enumerate(zip(frame.iq, scenario.legs, strict=True)):
-        product = leg_range_doppler(cube, leg)
+    for index, (product, leg) in enumerate(zip(products, scenario.legs, strict=True)):
         suffix = "" if len(scenario.legs) == 1 else f"_leg{index}"
         # Where this leg's ambiguities oblige the target to appear: Doppler
         # wraps into the unambiguous interval, range modulo the unambiguous
@@ -164,9 +177,31 @@ def render_frame(frame: Frame, scenario: Scenario, out_dir: Path, dynamic_range_
         save_figure(figure, out_dir / f"rd{suffix}_{frame.index:05d}.png")
 
 
+def clear_previous_frames(out_dir: Path) -> int:
+    """Delete the per-frame files an earlier run left in ``out_dir``.
+
+    Returns the number removed.
+
+    Without this a shorter re-run into the same directory leaves the tail of
+    the previous run behind, and :func:`assemble_movie` globs whatever is
+    present -- splicing stale frames onto the new ones with nothing to warn
+    you. Only this script's own numbered outputs are touched; ``truth.csv``
+    and ``metadata.json`` are overwritten in place, and anything else in the
+    directory is left alone.
+    """
+    stale = sorted(out_dir.glob("rd*_[0-9][0-9][0-9][0-9][0-9].png"))
+    stale += sorted(out_dir.glob("iq_[0-9][0-9][0-9][0-9][0-9].npz"))
+    for path in stale:
+        path.unlink()
+    return len(stale)
+
+
 def assemble_movie(out_dir: Path, pattern: str, stem: str, frame_rate_hz: float) -> str | None:
     """Assemble the PNG frames into an MP4, falling back to an animated GIF."""
-    frames = sorted(out_dir.glob(pattern.replace("%05d", "*")))
+    # Match the five digits the pattern formats, so a single-leg run's
+    # ``rd_%05d.png`` does not also sweep up a previous multi-leg run's
+    # ``rd_leg0_00000.png``.
+    frames = sorted(out_dir.glob(pattern.replace("%05d", "[0-9][0-9][0-9][0-9][0-9]")))
     if not frames:
         return None
 
@@ -199,7 +234,12 @@ def assemble_movie(out_dir: Path, pattern: str, stem: str, frame_rate_hz: float)
         return None
 
     target = out_dir / f"{stem}.gif"
-    first, *rest = [Image.open(path).convert("P", palette=Image.ADAPTIVE) for path in frames]
+    # A generator, not a list: Pillow consumes append_images one at a time, so
+    # only the frame being appended is decoded. Materialising them all is what
+    # makes the fallback path -- the one taken by whoever lacks ffmpeg -- run
+    # out of memory on a long scenario.
+    first = Image.open(frames[0]).convert("P", palette=Image.ADAPTIVE)
+    rest = (Image.open(path).convert("P", palette=Image.ADAPTIVE) for path in frames[1:])
     first.save(
         target,
         save_all=True,
@@ -210,7 +250,7 @@ def assemble_movie(out_dir: Path, pattern: str, stem: str, frame_rate_hz: float)
     return str(target)
 
 
-def main(argv=None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     scenario = load_scenario(args.scenario)
     out_dir = args.out
@@ -218,6 +258,10 @@ def main(argv=None) -> int:
 
     n_frames = scenario.n_frames if args.frames is None else min(args.frames, scenario.n_frames)
     print(f"{scenario.name}: {n_frames} frames, {len(scenario.legs)} leg(s) -> {out_dir}")
+
+    removed = clear_previous_frames(out_dir)
+    if removed:
+        print(f"  removed {removed} frame file(s) from an earlier run")
 
     truth_path = out_dir / "truth.csv"
     written = 0
@@ -242,19 +286,33 @@ def main(argv=None) -> int:
             )
 
             if not args.no_iq:
+                arrays = {f"leg{index}": cube for index, cube in enumerate(frame.iq)}
+                # One named array per leg. The ignore is a stub limitation:
+                # savez_compressed takes **kwds of arrays, but the stub's
+                # `allow_pickle` keyword makes mypy read the unpacked dict as
+                # a candidate for it.
                 np.savez_compressed(
                     out_dir / f"iq_{frame.index:05d}.npz",
-                    **{f"leg{index}": cube for index, cube in enumerate(frame.iq)},
+                    **arrays,  # type: ignore[arg-type]
                 )
-            if not args.no_plots:
-                render_frame(frame, scenario, out_dir, args.dynamic_range_db)
 
             written += 1
-            if written % 10 == 0 or written == n_frames:
-                peaks = [
-                    peak_range_velocity(leg_range_doppler(c, r))
-                    for c, r in zip(frame.iq, scenario.legs, strict=True)
+            show_progress = written % 10 == 0 or written == n_frames
+            # The receive chain is the expensive part of a frame, and both the
+            # render and the progress line want the same maps. Run it once,
+            # and only when something is actually going to read the result --
+            # a --no-plots run processes nothing but its progress frames.
+            products: list[RangeDopplerProduct] = []
+            if not args.no_plots or show_progress:
+                products = [
+                    leg_range_doppler(cube, leg)
+                    for cube, leg in zip(frame.iq, scenario.legs, strict=True)
                 ]
+
+            if not args.no_plots:
+                render_frame(frame, scenario, products, out_dir, args.dynamic_range_db)
+            if show_progress:
+                peaks = [peak_range_velocity(product) for product in products]
                 summary = "  ".join(f"[{r / 1e3:6.2f} km {v:+7.2f} m/s]" for r, v in peaks)
                 print(f"  frame {written}/{n_frames}  peak {summary}")
 

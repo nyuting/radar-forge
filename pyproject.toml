@@ -95,7 +95,7 @@ known-first-party = ["radar_forge"]
 # --------------------------------------------------------------------------- #
 [tool.mypy]
 python_version = "3.11"
-files = ["src"]
+files = ["src", "scripts"]
 strict = true
 warn_unreachable = true
 plugins = []
@@ -114,6 +114,7 @@ module = [
     "ovrtx.*",
     "scipy.*",
     "matplotlib.*",
+    "PIL.*",
     "pyroomacoustics.*",
 ]
 ignore_missing_imports = true
