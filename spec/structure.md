@@ -121,7 +121,25 @@ written from the published equations, not transcribed.
 licence, so ECA and Wiener-SMI clutter cancellation are reimplemented from the published papers for
 `core/clutter.py`. No pyAPRiL code enters the tree, and it is not a runtime dependency.
 
-### A.7 RadarSim (GUI)
+### A.7 RASPNet *(dataset)*
+
+- **Link:** https://github.com/shyamven/RASPNet
+- **Language / licence:** Python (examples) · **no LICENSE file in the repository** — treat as
+  all-rights-reserved. Dataset itself is distributed via the AFRL SDMS portal under its own terms.
+
+| Area | Responsibility |
+| :--- | :--- |
+| Processed datasets | Feature-label pairs (EXAMPLES and CVNN variants) over several numbered airborne-radar scenarios |
+| `examples/` | Radar target localization models; transfer learning from pre-trained baselines |
+| Data access | Downloaded separately from the AFRL SDMS collection portal, not bundled with the repo |
+
+**What radar-forge borrows:** the *dataset conventions* only — feature/label pair layout, scenario
+indexing, and the target-localization and transfer-learning task definitions, as a benchmark to
+check `pipelines/` exporters against. No code enters the tree and no RASPNet data is committed;
+it is not a runtime dependency. The complex-valued model trained on this dataset — Steinmetz Neural
+Networks, by the same author — is surveyed in §A.12.
+
+### A.8 RadarSim (GUI)
 
 - **Link:** https://github.com/SpaceEngineerSS/RadarSim
 - **Language / licence:** Python + PySide6 (Qt6) · MIT
@@ -139,7 +157,7 @@ licence, so ECA and Wiener-SMI clutter cancellation are reimplemented from the p
 `teaching/`, and the YAML-scenario idea for `pipelines/scenarios.py`. Its CFAR-variant and tracking
 coverage is a useful checklist for `core/`.
 
-### A.8 AIRadarLib *(PyPI, optional)*
+### A.9 AIRadarLib *(PyPI, optional)*
 
 - **Link:** https://pypi.org/project/AIRadarLib/ · v0.1.0 (2025-06-29) · licence unstated
 
@@ -155,7 +173,7 @@ coverage is a useful checklist for `core/`.
 `core/waveforms.py`, and the PyTorch dataset-wrapper pattern for `pipelines/datasets.py`. Unstated
 licence ⇒ reference only, never a dependency.
 
-### A.9 ovrtx *(PyPI, optional)*
+### A.10 ovrtx *(PyPI, optional)*
 
 - **Link:** https://github.com/NVIDIA-Omniverse/ovrtx · https://pypi.org/project/ovrtx/
 - **Language / licence:** C + Python · **proprietary** (NVIDIA Software Licence Agreement)
@@ -167,7 +185,7 @@ Exposes physically accurate real-time camera, lidar and radar sensor simulation 
 `raytracing/backends/ovrtx.py`, gated on hardware and licence acceptance, never installed by default and
 never imported at package import time.
 
-### A.10 pyroomacoustics
+### A.11 pyroomacoustics
 
 - **Link:** https://github.com/LCAV/pyroomacoustics
 - **Language / licence:** Python · MIT (EPFL-LCAV)
@@ -183,7 +201,73 @@ never imported at package import time.
 pattern for `array/doa.py`, and its estimators serve as the cross-check benchmark for radar-forge's own
 MUSIC/ESPRIT. MIT licence permits direct adaptation with attribution.
 
-### A.11 Licence summary
+### A.12 Complex-valued neural networks
+
+Radar data is natively complex: every stage from baseband I/Q through the range-Doppler cube carries
+amplitude *and* phase. The design question these three projects answer is what a network does with
+that — keep the signal complex end to end, or flatten it into two real channels and hope the network
+relearns the coupling. The first two are general-purpose libraries; the third is a specific
+architecture, and the reason this section exists at all.
+
+**A.12a torchcvnn**
+
+- **Link:** https://github.com/torchcvnn/torchcvnn · PyPI `torchcvnn`
+- **Language / licence:** Python (PyTorch) · **MIT**
+- **Origin:** CentraleSupélec — V. Dhédin, J. Levi, J. Fix, Q. Gabot et al. (IJCNN '25)
+
+| Module | Responsibility |
+| :--- | :--- |
+| `torchcvnn.nn` | Complex-valued layers, activations and initialisers, including the ones needing genuinely complex implementations rather than a real-valued layer applied twice |
+| `torchcvnn.datasets` | Complex-valued SAR and radar loaders: `MSTAR`, `SAMPLE`, `PolSF`, `ALOS2`, `SLC` (UAVSAR), `S1SLC`, `Bretigny`, `ATRNet-STAR`; plus `MICCAI2023` MRI k-space |
+| `torchcvnn.transforms` | Amplitude/phase handling, FFT, crop and resize, `LogAmplitude`, `RandomPhase` |
+| `examples/` | End-to-end training scripts over the above |
+
+**What radar-forge borrows:** primarily `datasets` and `transforms` — the layout its SAR loaders
+present to PyTorch is the reference `pipelines/datasets.py` should match, so that a radar-forge
+export drops into an existing complex-valued training loop unchanged. The `nn` layer API is the
+model for anything complex-valued radar-forge later wraps. MIT ⇒ this may be a real optional
+dependency behind the `cvnn` extra (§B.3) and is adaptable with attribution.
+
+**A.12b complexPyTorch**
+
+- **Link:** https://github.com/wavefrontshaping/complexPyTorch · PyPI `complexPyTorch`
+- **Language / licence:** Python (PyTorch) · **MIT**
+- **Paper:** follows C. Trabelsi et al., *Deep Complex Networks*, ICLR 2018.
+
+| Area | Responsibility |
+| :--- | :--- |
+| Layers | `ComplexLinear`, `ComplexConv2d`, `ComplexConvTranspose2d`, complex max/avg pooling, `ComplexDropout2d`, complex GRU and BN-GRU cells |
+| Activations | ℂReLU, complex sigmoid and tanh |
+| Normalisation | Complex batch norm (1d/2d) in two forms: the covariance method of Trabelsi et al., and a naive per-part method that is faster and often comparable |
+
+**What radar-forge borrows:** the complex batch-norm formulation and the minimal layer set. Older
+and smaller than A.12a, and carried mainly because A.12c is built on it — but MIT, so equally
+available behind the `cvnn` extra.
+
+**A.12c Steinmetz Neural Networks**
+
+- **Link:** https://github.com/shyamven/SteinmetzNeuralNetworks
+- **Language / licence:** Python (PyTorch, on `complexPyTorch`) · **no LICENSE file in the
+  repository** — treat as all-rights-reserved, the same footing as A.7.
+- **Paper:** S. Venkatasubramanian, A. Pezeshki and V. Tarokh, *Steinmetz Neural Networks for
+  Complex-Valued Data*, AISTATS '25.
+
+| Area | Responsibility |
+| :--- | :--- |
+| `models/` | Steinmetz and analytic-signal network definitions: complex-valued layers carrying I/Q as an analytic pair, with a consistency penalty on the Steinmetz decomposition |
+| `utils/` | Training, evaluation and complex-tensor helpers |
+| `main.py` | Driver for the classification and regression tasks |
+| `RASPNet.ipynb` | Complex-valued regression on the §A.7 dataset — dataset and model as one benchmark |
+| `FSDD.ipynb` | Complex-valued regression on spoken digits; the non-radar comparison task |
+
+**What radar-forge borrows:** the architectural idea — an analytic-signal representation held
+together by a consistency penalty on the Steinmetz decomposition, rather than two unconstrained real
+channels — and, concretely, the complex-valued feature convention that follows from it, which is the
+contract `pipelines/datasets.py` exports against. Its `RASPNet.ipynb` is the bridge back to §A.7:
+the two together are the dataset-plus-model benchmark for the `pipelines/` exporters. Licence
+undeclared ⇒ no code enters the tree and it is never a runtime dependency.
+
+### A.13 Licence summary
 
 | Project | Licence | Usable as dependency? | Usable as code source? |
 | :--- | :--- | :--- | :--- |
@@ -194,6 +278,10 @@ MUSIC/ESPRIT. MIT licence permits direct adaptation with attribution.
 | FMCW Radar Target Simulator | MIT | no (MATLAB) | format spec only |
 | RadarSimPy | GPL-3.0 | optional extra only, arm's length | **no** |
 | pyAPRiL | GPL-3.0 | **no** | **no** — reimplement from papers |
+| RASPNet | none declared | no (data via SDMS portal) | **no** — dataset conventions only |
+| torchcvnn | MIT | yes (extra: `cvnn`) | yes, with attribution |
+| complexPyTorch | MIT | yes (extra: `cvnn`) | yes, with attribution |
+| Steinmetz Neural Networks | none declared | no | **no** — architectural reference only |
 | RadarBook Software | none declared | no | **no** — textbook reference only |
 | AIRadarLib | unstated | no | **no** — reference only |
 | ovrtx | NVIDIA proprietary | optional extra, user-accepted | **no** |
@@ -281,7 +369,7 @@ src/radar_forge/
 | `raytracing/backends/ovrtx.py` | ovrtx sensor-simulation API |
 | `pipelines/exporters/*` | FMCW Radar Target Simulator `JSONCoco.py` and its label schema |
 | `pipelines/scenarios.py` | RadarSim YAML scenario files |
-| `pipelines/datasets.py` | AIRadarLib PyTorch dataset/training wrappers |
+| `pipelines/datasets.py` | AIRadarLib PyTorch dataset/training wrappers; torchcvnn `datasets`/`transforms` (complex SAR loader layout); Steinmetz Neural Networks (complex-valued I/Q feature convention) |
 | `teaching/scopes/*`, `teaching/app.py` | RadarSim PySide6 GUI (PPI, RHI, A-Scope) |
 | `teaching/notebooks/` | RadarBook `jupyter/`; RadarSimNb |
 
@@ -295,7 +383,7 @@ src/radar_forge/
 3. **One scene, many backends.** `raytracing.Scene` is backend-neutral; swapping `analytic` for
    `mitsuba` changes fidelity and runtime, not user code.
 4. **Licence hygiene is a design constraint.** GPL and unlicensed references are reimplemented from
-   published equations, with the source cited in the module docstring. See §A.11.
+   published equations, with the source cited in the module docstring. See §A.13.
 5. **Every core algorithm is teachable.** Each `core/` and `array/` module pairs with a notebook in
    `teaching/notebooks/` and a numerical test against a textbook-published value.
 
@@ -308,6 +396,7 @@ src/radar_forge/
 | `radarsimpy` | radarsimpy | RadarSimPy backend (note: GPL-3.0 — user-installed) |
 | `ovrtx` | ovrtx, ovstage | Omniverse RTX backend (NVIDIA licence, RTX GPU) |
 | `ml` | torch | `pipelines.datasets`, training loops |
+| `cvnn` | torch, torchcvnn, complexPyTorch | complex-valued layers and SAR dataset loaders for `pipelines.datasets` |
 | `teaching` | PySide6, matplotlib, jupyter | GUI scopes and notebooks |
 | `dev` | pytest, ruff, mypy, build tooling | development |
 
