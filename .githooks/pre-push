@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Full gate: everything CI runs, run before anything leaves your machine.
+# Order is cheapest-first so a formatting slip fails in a second, not a minute.
+
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=_lib.sh
+. "${HOOK_DIR}/_lib.sh"
+
+REMOTE_NAME="${1:-origin}"
+ZERO='0000000000000000000000000000000000000000'
+
+# git feeds refs on stdin as: <local ref> <local sha> <remote ref> <remote sha>
+HAS_WORK=0
+while read -r local_ref local_sha remote_ref _remote_sha; do
+    # Branch deletions have nothing to test.
+    [ "$local_sha" = "$ZERO" ] && continue
+    HAS_WORK=1
+
+    if [ "$remote_ref" = "refs/heads/main" ] && [ "${RADAR_FORGE_ALLOW_MAIN_PUSH:-0}" != "1" ]; then
+        fail "Direct push to main on '$REMOTE_NAME' (from $local_ref)." \
+             "Open a branch and a pull request instead:" \
+             "  git switch -c feat/<short-name> && git push -u $REMOTE_NAME HEAD" \
+             "" \
+             "Solo maintenance escape hatch:" \
+             "  RADAR_FORGE_ALLOW_MAIN_PUSH=1 git push"
+    fi
+done
+
+[ "$HAS_WORK" = "0" ] && exit 0
+
+require_uv
+say "running the full gate (lint → types → tests)…"
+
+uv run ruff format --check . >/dev/null || fail \
+    "Repository is not formatted." "Fix:  make fmt"
+ok "ruff format"
+
+uv run ruff check . || fail \
+    "Ruff found lint errors." "Fix what is auto-fixable:  make fmt"
+ok "ruff check"
+
+uv run mypy || fail \
+    "mypy found type errors in src/." \
+    "Public functions need complete annotations; see docs/conventions/style.md."
+ok "mypy"
+
+python3 "${HOOK_DIR}/../scripts/check_conventions.py" || exit 1
+
+if ! uv run pytest -q; then
+    fail "The test suite failed." \
+         "Re-run it directly:  make test" \
+         "If the slow tests are the bottleneck day to day, iterate with:  make test-fast" \
+         "(pre-push still runs everything — that is deliberate.)"
+fi
+ok "pytest"
+
+say "${GREEN}all checks passed${RESET} — pushing."

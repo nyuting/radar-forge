@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Fast gate: only the staged files, only checks that finish in well under a second.
+# The heavy gate (mypy, full pytest) lives in .githooks/pre-push.
+
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=_lib.sh
+. "${HOOK_DIR}/_lib.sh"
+
+PY_FILES="$(staged_files py)"
+ALL_FILES="$(staged_files)"
+
+[ -z "$ALL_FILES" ] && exit 0
+
+require_uv
+
+# --- 1. Formatting ---------------------------------------------------------
+# `--check` rather than an in-place rewrite: auto-fixing would leave the index
+# disagreeing with the worktree, which silently commits unreviewed content.
+if [ -n "$PY_FILES" ]; then
+    if ! echo "$PY_FILES" | xargs uv run ruff format --check --quiet; then
+        fail "Some staged Python files are not formatted." \
+             "Fix:  make fmt   (then re-stage with: git add -u)"
+    fi
+    ok "ruff format"
+
+    # --- 2. Lint -----------------------------------------------------------
+    if ! echo "$PY_FILES" | xargs uv run ruff check; then
+        fail "Ruff found lint errors in staged Python files." \
+             "Many are auto-fixable:  make fmt" \
+             "See docs/conventions/style.md for the rules and why they are on."
+    fi
+    ok "ruff check"
+fi
+
+# --- 3. Big files and stray simulation output ------------------------------
+# A radar repo generates large cubes; keeping them out of history is much
+# cheaper than removing them from history later.
+MAX_BYTES=$((1024 * 1024))
+while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    size=$(wc -c < "$f" | tr -d ' ')
+    if [ "$size" -gt "$MAX_BYTES" ]; then
+        fail "'$f' is $((size / 1024)) KiB, over the 1 MiB limit." \
+             "Simulation output does not belong in git — regenerate it instead." \
+             "Small golden reference arrays go in tests/data/golden/ (see docs/conventions/testing.md)."
+    fi
+    case "$f" in
+        tests/data/golden/*) ;;
+        *.npy|*.npz|*.h5|*.hdf5|*.mat)
+            fail "'$f' is a binary array outside tests/data/golden/." \
+                 "Commit the script that generates it, not the array." ;;
+    esac
+done <<< "$ALL_FILES"
+ok "no oversized or stray binary files"
+
+# --- 4. Leftover debugging and conflict markers ----------------------------
+for f in $PY_FILES; do
+    [ -f "$f" ] || continue
+    if grep -nE '(^|[^#[:alnum:]_])(breakpoint\(\)|pdb\.set_trace\(\))' "$f"; then
+        fail "'$f' contains a debugger breakpoint." "Remove it before committing."
+    fi
+done
+while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    if grep -qE '^(<{7}|={7}|>{7})( |$)' "$f"; then
+        fail "'$f' still contains merge conflict markers."
+    fi
+done <<< "$ALL_FILES"
+ok "no debug statements or conflict markers"
+
+# --- 5. Notebooks must be committed without outputs ------------------------
+NB_FILES="$(staged_files ipynb)"
+if [ -n "$NB_FILES" ]; then
+    for nb in $NB_FILES; do
+        if ! python3 "${HOOK_DIR}/../scripts/check_notebook_clean.py" "$nb"; then
+            fail "'$nb' has stored cell outputs or execution counts." \
+                 "Clear them:  uv run jupyter nbconvert --clear-output --inplace '$nb'" \
+                 "Teaching notebooks are reviewed as source, and outputs make diffs unreadable."
+        fi
+    done
+    ok "notebooks clean"
+fi
+
+# --- 6. Repo conventions ---------------------------------------------------
+python3 "${HOOK_DIR}/../scripts/check_conventions.py" --staged || exit 1
