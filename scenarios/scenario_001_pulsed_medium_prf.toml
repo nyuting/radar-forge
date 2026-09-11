@@ -1,0 +1,42 @@
+# Scenario 001 -- X-band radar at DSO National Laboratories, Singapore.
+# See spec/scenario-001-singapore-xband.md. The three variants share every
+# block below except [[leg]]; that is the whole point of the comparison.
+
+[scenario]
+name = "scenario-001-pulsed-medium-prf"
+description = "S2: LFM pulses at 25 kHz PRF. Velocity is unambiguous to +-191 m/s; range folds at 5.996 km, so the target at 8.4-17.9 km wraps once or twice. The exact mirror of S1."
+seed = 20260911
+
+[radar]
+# DSO National Laboratories, 12 Science Park Drive. 60 m rooftop antenna.
+latitude_deg = 1.29150
+longitude_deg = 103.78710
+altitude_m = 60.0
+
+[receiver]
+gain_rx_dbi = 30.0
+noise_figure_db = 3.0
+
+[target]
+name = "light-aircraft"
+rcs_dbsm = 10.0        # 10 m^2, Swerling 0 (non-fluctuating)
+altitude_m = 1500.0    # the CSV has no altitude column; held constant
+
+[trajectory]
+path = "../data/flight_coordinates.csv"
+start_time_s = 0.0
+duration_s = 120.0     # the full track is ~16,500 frames; this window is opt-out
+frame_rate_hz = 1.0
+
+# One leg. 10 us LFM pulse, B = 2 MHz (time-bandwidth 20), matched-filtered.
+# PRI 40 us at 2.5 MHz -> 100 samples/PRI. 256 pulses = 10.24 ms of CPI.
+[[leg]]
+waveform = "pulsed"
+f0_hz = 9.8e9
+bandwidth_hz = 2.0e6
+transmit_power_w = 1.0e3
+gain_tx_dbi = 30.0
+chirp_time_s = 10.0e-6
+prf_hz = 25.0e3
+sample_rate_hz = 2.5e6
+n_chirps = 256
