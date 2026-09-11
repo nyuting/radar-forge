@@ -36,3 +36,6 @@ coverage.xml
 .DS_Store
 .idea/
 .vscode/
+
+# Scenario output — regenerable by scripts/run_scenario.py.
+out/
