@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from radar_forge.core import constants, dsp, geodesy, radar, targets, windows
+from radar_forge.core import constants, detection, dsp, geodesy, radar, targets, windows
 from radar_forge.core.constants import (
     BOLTZMANN_JPK,
     EARTH_RADIUS_M,
@@ -11,6 +11,19 @@ from radar_forge.core.constants import (
     STANDARD_NOISE_TEMPERATURE_K,
     WGS84_FLATTENING,
     WGS84_SEMI_MAJOR_AXIS_M,
+)
+from radar_forge.core.detection import (
+    CFAR_VARIANTS,
+    CfarVariant,
+    Detection,
+    cfar_detect,
+    cfar_noise_estimate_w,
+    cfar_probability_of_false_alarm,
+    cfar_threshold_factor,
+    cfar_threshold_w,
+    cfar_valid_mask,
+    cluster_detections,
+    default_os_rank,
 )
 from radar_forge.core.dsp import (
     doppler_bin_centers_mps,
@@ -47,6 +60,7 @@ from radar_forge.core.windows import (
 
 __all__ = [
     "BOLTZMANN_JPK",
+    "CFAR_VARIANTS",
     "EARTH_RADIUS_M",
     "FOUR_THIRDS_EARTH_RADIUS_M",
     "SPEED_OF_LIGHT_MPS",
@@ -54,6 +68,8 @@ __all__ = [
     "TAPER_NAMES",
     "WGS84_FLATTENING",
     "WGS84_SEMI_MAJOR_AXIS_M",
+    "CfarVariant",
+    "Detection",
     "PointTarget",
     "Radar",
     "Receiver",
@@ -61,9 +77,18 @@ __all__ = [
     "WaveformKind",
     "apply_taper",
     "beat_frequency_hz",
+    "cfar_detect",
+    "cfar_noise_estimate_w",
+    "cfar_probability_of_false_alarm",
+    "cfar_threshold_factor",
+    "cfar_threshold_w",
+    "cfar_valid_mask",
+    "cluster_detections",
     "coherent_gain_linear",
     "constants",
     "dbsm_to_m2",
+    "default_os_rank",
+    "detection",
     "doppler_bin_centers_mps",
     "doppler_fft",
     "dsp",
