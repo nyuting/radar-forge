@@ -10,8 +10,8 @@ from radar_forge.core import received_power_w
 # A representative 77 GHz automotive front-end.
 NOMINAL = {
     "transmit_power_w": 0.01,
-    "gain_tx": 10 ** (15.0 / 10.0),
-    "gain_rx": 10 ** (15.0 / 10.0),
+    "gain_tx_linear": 10 ** (15.0 / 10.0),
+    "gain_rx_linear": 10 ** (15.0 / 10.0),
     "wavelength_m": 3.896e-3,
     "rcs_m2": 10 ** (5.0 / 10.0),
 }
@@ -23,8 +23,8 @@ def test_matches_closed_form() -> None:
     range_m = 42.0
     expected = (
         NOMINAL["transmit_power_w"]
-        * NOMINAL["gain_tx"]
-        * NOMINAL["gain_rx"]
+        * NOMINAL["gain_tx_linear"]
+        * NOMINAL["gain_rx_linear"]
         * NOMINAL["wavelength_m"] ** 2
         * NOMINAL["rcs_m2"]
     ) / ((4 * np.pi) ** 3 * range_m**4)
@@ -49,7 +49,7 @@ def test_broadcasts_over_range() -> None:
 
 def test_loss_attenuates() -> None:
     lossless = received_power_w(**NOMINAL, range_m=25.0)
-    lossy = received_power_w(**NOMINAL, range_m=25.0, loss=10.0)
+    lossy = received_power_w(**NOMINAL, range_m=25.0, loss_linear=10.0)
     np.testing.assert_allclose(lossy * 10.0, lossless, rtol=1e-12)
 
 
@@ -61,4 +61,4 @@ def test_rejects_non_positive_range(bad_range: float) -> None:
 
 def test_rejects_loss_below_one() -> None:
     with pytest.raises(ValueError, match="linear factor"):
-        received_power_w(**NOMINAL, range_m=25.0, loss=0.5)
+        received_power_w(**NOMINAL, range_m=25.0, loss_linear=0.5)

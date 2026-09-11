@@ -25,12 +25,12 @@ _FOUR_PI_CUBED = (4.0 * np.pi) ** 3
 
 def received_power_w(
     transmit_power_w: ArrayLike,
-    gain_tx: ArrayLike,
-    gain_rx: ArrayLike,
+    gain_tx_linear: ArrayLike,
+    gain_rx_linear: ArrayLike,
     wavelength_m: ArrayLike,
     rcs_m2: ArrayLike,
     range_m: ArrayLike,
-    loss: ArrayLike = 1.0,
+    loss_linear: ArrayLike = 1.0,
 ) -> NDArray[np.float64]:
     r"""Return the power received from a point target, in watts.
 
@@ -47,7 +47,7 @@ def received_power_w(
     ----------
     transmit_power_w : array_like
         Peak transmitted power :math:`P_t`, in watts.
-    gain_tx, gain_rx : array_like
+    gain_tx_linear, gain_rx_linear : array_like
         Transmit and receive antenna gains :math:`G_t`, :math:`G_r`, linear
         (a 30 dBi antenna is ``10 ** (30 / 10)``, not ``30``).
     wavelength_m : array_like
@@ -58,9 +58,9 @@ def received_power_w(
     range_m : array_like
         Range :math:`R` from the radar to the target, in metres. Must be
         strictly positive.
-    loss : array_like, optional
-        Aggregate linear loss factor :math:`L \ge 1` (atmospheric, system,
-        processing). Default 1.0, i.e. lossless.
+    loss_linear : array_like, optional
+        Aggregate loss factor :math:`L \ge 1` (atmospheric, system, processing),
+        linear rather than dB. Default 1.0, i.e. lossless.
 
     Returns
     -------
@@ -81,8 +81,8 @@ def received_power_w(
     >>> import numpy as np
     >>> p = received_power_w(
     ...     transmit_power_w=1.0,
-    ...     gain_tx=10 ** 3.0,
-    ...     gain_rx=10 ** 3.0,
+    ...     gain_tx_linear=10 ** 3.0,
+    ...     gain_rx_linear=10 ** 3.0,
     ...     wavelength_m=3.9e-3,
     ...     rcs_m2=10.0,
     ...     range_m=100.0,
@@ -91,19 +91,19 @@ def received_power_w(
     True
     """
     range_arr = np.asarray(range_m, dtype=np.float64)
-    loss_arr = np.asarray(loss, dtype=np.float64)
+    loss_arr = np.asarray(loss_linear, dtype=np.float64)
 
     if np.any(range_arr <= 0.0):
         msg = "range_m must be strictly positive; the range equation diverges at R = 0."
         raise ValueError(msg)
     if np.any(loss_arr < 1.0):
-        msg = "loss must be a linear factor >= 1.0 (1.0 means lossless), not a gain."
+        msg = "loss_linear must be a linear factor >= 1.0 (1.0 means lossless), not a gain."
         raise ValueError(msg)
 
     numerator = (
         np.asarray(transmit_power_w, dtype=np.float64)
-        * np.asarray(gain_tx, dtype=np.float64)
-        * np.asarray(gain_rx, dtype=np.float64)
+        * np.asarray(gain_tx_linear, dtype=np.float64)
+        * np.asarray(gain_rx_linear, dtype=np.float64)
         * np.asarray(wavelength_m, dtype=np.float64) ** 2
         * np.asarray(rcs_m2, dtype=np.float64)
     )

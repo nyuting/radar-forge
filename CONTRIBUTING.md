@@ -64,7 +64,21 @@ Runs in well under a second so it never gets in your way:
 3. Blocks leftover `breakpoint()`/`pdb.set_trace()` and merge-conflict markers.
 4. Blocks notebooks committed with stored outputs — teaching notebooks are reviewed as
    source, and outputs make diffs unreadable.
-5. Runs `scripts/check_conventions.py` on the staged files.
+5. Runs `scripts/check_conventions.py` on the staged files. That is where the project-specific
+   rules live, and it is the answer to "how is this actually enforced?":
+
+   | Rule | Catches |
+   | :--- | :--- |
+   | R1 `toml` | `setup.py`, `setup.cfg`, `requirements.txt`, standalone linter configs |
+   | R2 `layout` | Non-Python files inside the import package |
+   | R3 `docstring` | A library module with no module docstring |
+   | R4 `constants` | Redefining a shared constant, or hardcoding its literal (`3e8`, `1.38e-23`, …) |
+   | R5 `units` | A parameter named `range`, `gain_tx`, `power`… with no unit suffix |
+   | R6 `broadcast` | `np.tile`/`np.repeat`/`np.broadcast_to` with no justification comment |
+
+   Each failure prints the rule, the offending line, the fix, and a link to the guide. Rules that
+   a tool genuinely cannot judge are tagged **[review]** in
+   [style.md](docs/conventions/style.md) — that guide labels every rule with what enforces it.
 
 It deliberately **checks** rather than auto-formats: rewriting files mid-commit would leave
 the index disagreeing with your worktree and silently commit content you never saw. When it

@@ -6,8 +6,10 @@ These are the rules the git hooks and CI enforce. Read them before your first co
 
 - [**commits.md**](conventions/commits.md) — Conventional Commits, branch naming, PR titles,
   changelog policy.
-- [**style.md**](conventions/style.md) — naming, the SI **unit-suffix convention**, NumPy
-  docstrings and citation policy, typing, public API surface, NumPy practice, errors.
+- [**style.md**](conventions/style.md) — naming, the SI **unit-suffix convention**, the shared
+  **constants module**, NumPy docstrings and citation policy, typing, public API surface, NumPy
+  practice, errors. Every rule is tagged with what enforces it: `[ruff]`, `[mypy]`, `[hook]` or
+  `[review]`.
 - [**testing.md**](conventions/testing.md) — test layout, float-comparison tolerances,
   analytic ground truth over golden data, fixtures and seeding, property-based tests, markers.
 
@@ -17,6 +19,8 @@ These are the rules the git hooks and CI enforce. Read them before your first co
 - [CLAUDE.md](../CLAUDE.md) — the same conventions, condensed for AI agents.
 - [`src/radar_forge/core/radar_equation.py`](../src/radar_forge/core/radar_equation.py) — the
   worked example that demonstrates every convention at once.
+- [`src/radar_forge/core/constants.py`](../src/radar_forge/core/constants.py) — every physical
+  constant, defined once. Import from here; never redefine, never hardcode.
 
 ## Design
 

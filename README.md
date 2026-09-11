@@ -117,15 +117,15 @@ each part draws from.
 
 ## Related work & references
 
-`radar-forge` does not vendor these projects; it draws architectural inspiration from them and, where
-licences permit, integrates them as optional backends. Licences are listed because they constrain how
+`radar-forge` does not vendor these projects. It is inspired by them architecturally and, where licences
+and hardware permit, reaches them through optional arm's-length backends. Licences are listed because they constrain how
 much can be borrowed — GPL-licensed code is treated as a **reference to reimplement**, not to copy.
 
 ### Reference frameworks
 
 | Project | Licence | Description | Utility to radar-forge |
 | :--- | :--- | :--- | :--- |
-| [RadarSimPy](https://github.com/radarsimx/radarsimpy) | GPL-3.0 | Python/C++ ray-tracing radar simulator | High-performance propagation and automotive RCS backend; integrated as an optional ray-tracing engine |
+| [RadarSimPy](https://github.com/radarsimx/radarsimpy) | GPL-3.0 | Python/C++ ray-tracing radar simulator | High-performance propagation and automotive RCS backend; wrapped at arm's length as an optional ray-tracing backend |
 | [RF-Genesis](https://github.com/Asixa/RF-Genesis) | MIT | Differentiable mmWave radar simulator (UCSD, SenSys '23) on Mitsuba/Dr.Jit | Reference for GPU-accelerated ray-tracing pipelines and generative synthetic-dataset workflows |
 | [Phased-Array-Antenna-Model](https://github.com/jman4162/Phased-Array-Antenna-Model) | MIT | Vectorized 2D/3D radiation pattern computation library | Fills the phased array gap: conformal geometries, Taylor/Chebyshev tapering, phase quantization, beamforming math |
 | [FMCW Radar Target Simulator](https://github.com/thomaswengerter/FMCW_Radar_Target_Simulator) | MIT | MATLAB/Phased Array System Toolbox simulator for urban traffic scenarios | Functional spec for exporting baseband data as COCO bounding boxes over range-Doppler cubes |
@@ -133,9 +133,9 @@ much can be borrowed — GPL-licensed code is treated as a **reference to reimpl
 | [pyAPRiL](https://github.com/pyapril/pyapril) | GPL-3.0 | Passive radar signal processing library (BME, Budapest) | Reference for space-time clutter cancellation (Wiener-SMI, ECA) and bistatic geometries |
 | [RadarSim (GUI)](https://github.com/SpaceEngineerSS/RadarSim) | MIT | Educational pulse-Doppler visualizer with real-time PySide6 scopes | Blueprint for the interactive teaching modules (A-Scope, B-Scope, PPI, RHI) |
 
-> **Correction to the starter spec:** the FMCW Radar Target Simulator is not a Fraunhofer FHR release —
-> it is an independent MATLAB project by Thomas Wengerter. Fraunhofer FHR's ATRIUM is a separate,
-> unrelated hardware-in-the-loop target simulator.
+> **Attribution note:** the FMCW Radar Target Simulator is sometimes miscredited to Fraunhofer FHR. It is
+> an independent MATLAB project by Thomas Wengerter; FHR's ATRIUM is a separate, unrelated
+> hardware-in-the-loop target simulator.
 
 ### PyPI packages
 

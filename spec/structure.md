@@ -65,8 +65,9 @@ NumPy-only design make its module split the blueprint for `array/`, essentially 
 
 - **Link:** https://github.com/thomaswengerter/FMCW_Radar_Target_Simulator
 - **Language / licence:** MATLAB (Phased Array System Toolbox) + Python helpers · MIT
-- **Note:** the starter spec attributes this to Fraunhofer FHR; it is in fact an independent project by
-  Thomas Wengerter. Fraunhofer FHR's ATRIUM is unrelated.
+- **Note:** an earlier draft of [`starter.md`](starter.md) credited this to Fraunhofer FHR. It is an
+  independent project by Thomas Wengerter; FHR's ATRIUM is a separate hardware-in-the-loop simulator.
+  `starter.md` has been corrected.
 
 | File | Responsibility |
 | :--- | :--- |
@@ -312,21 +313,96 @@ src/radar_forge/
 
 ---
 
+## Decisions
+
+These were open questions on first draft; all are now settled. Recorded here with their rationale so the
+reasoning is not lost when implementation starts.
+
+### D1 — Backend contract returns propagation paths
+
+`RayTracingBackend.trace(scene, radar)` returns a **path set**, not baseband:
+
+```python
+@dataclass
+class PropagationPaths:
+    delay: np.ndarray  # (n_paths,) seconds
+    doppler: np.ndarray  # (n_paths,) Hz
+    amplitude: np.ndarray  # (n_paths,) complex
+    aoa: np.ndarray  # (n_paths, 2) az/el, radians
+    aod: np.ndarray  # (n_paths, 2) az/el, radians
+    bounce_count: np.ndarray
+```
+
+`core/signal.py` owns the path→baseband synthesis for every backend. This keeps waveform changes in one
+place, makes backends comparable on identical geometry, and makes them testable without synthesising
+signals. Backends that natively produce baseband (RadarSimPy, ovrtx) may additionally implement an
+optional `trace_baseband()` fast path; `base.py` declares it, and `generate.py` prefers it only when the
+requested waveform matches what the backend supports natively.
+
+### D2 — Clutter and tracking stay in `core/`, with a promotion trigger
+
+`core/clutter.py` and `core/tracking.py` remain single modules for now.
+
+> **Note.** Promote either to a subpackage as soon as it exceeds roughly one module's worth of
+> responsibility — concretely, when `tracking.py` gains a second association strategy beyond
+> nearest-neighbour gating (JPDA, MHT) or a track-fusion layer, or when `clutter.py` carries more than two
+> clutter models plus the cancellation algorithms. The promotion is `core/tracking.py` →
+> `core/tracking/{filters,association,fusion}.py`, re-exported from `core/tracking/__init__.py` so the
+> public import path never changes. Do not pre-split; do not let either file drift past the trigger.
+
+### D3 — ovrtx stays an opt-in, hardware-gated backend
+
+Proprietary NVIDIA licence and an RTX GPU requirement. Never a default dependency, never imported at
+package import time, and its absence must degrade to a descriptive `BackendUnavailableError`.
+
+### D4 — Everything from RadarBook is written from the published equations
+
+`RadarBook/software` has no LICENSE file (confirmed: no `LICENSE` at the repo root, null `spdx_id` from
+the GitHub API), so it is all-rights-reserved by default. No code is transcribed. Each affected module in
+`core/` cites the book chapter and equation number in its docstring, and its test asserts against a value
+published in the book — facts and formulae are not copyrightable, the expression is.
+
+### D5 — COCO label-schema parity is the bar; no MATLAB harness
+
+**The decision:** radar-forge matches the FMCW Radar Target Simulator's *label schema and cube
+conventions* exactly. It does not attempt bit-level agreement with MATLAB's simulation output, and no
+MATLAB validation harness is built.
+
+**Why this is enough.** The value of that project to radar-forge is interoperability — a model trained on
+its output should train on radar-forge output unchanged, and vice versa. That is entirely a function of
+the annotation contract, not of the physics matching. Bit-level parity would in any case be unreachable:
+it depends on MATLAB's `backscatterPedestrian` scattering-centre model, Phased Array System Toolbox
+internals, and its RNG stream — none of which are reproducible in NumPy, and two of which are closed
+source. Chasing it would anchor radar-forge's physics to a toolbox the project deliberately does not
+depend on.
+
+**What parity concretely requires** — this is the acceptance checklist for `pipelines/exporters/`:
+
+| Item | Contract |
+| :--- | :--- |
+| Label fields | `range, velocity, azimuth, radar velocity, x, y, width, height, heading`, plus `obstruction` for multi-target scenes — same names, same order, same units (m, m/s, degrees) |
+| Cube axes | range × Doppler × azimuth, in that order |
+| Cube scaling | decibel, matching the upstream dB reference |
+| COCO reduction | azimuth collapsed by maximum across channels to form the 2D image plane |
+| Sign conventions | closing velocity positive, azimuth zero at boresight and increasing clockwise |
+| Sequence packing | the 3-measurement RGB overlay of `JSONCoco_3SeqRGB.py` available as an export option |
+| Bounding boxes | COCO `[x, y, width, height]`, top-left origin, pixel coordinates in the reduced range-Doppler plane |
+
+**How it is verified.** A golden-file test: check a small number of upstream-produced `.mat` cubes and
+their COCO JSON into `tests/fixtures/`, and assert that radar-forge's exporter, handed the *same* cube
+array, emits byte-comparable JSON. This tests the exporter — the part that must interoperate — without
+testing the physics. A second test runs a radar-forge-generated cube through a standard COCO loader
+(`pycocotools`) to confirm the output is schema-valid.
+
+**What is deliberately not tested:** agreement between radar-forge's baseband and MATLAB's for the same
+scenario. If a physics cross-check is ever wanted, the reference of choice is RadarSimPy or the RadarBook
+worked examples — both Python, both already in the dependency story — not MATLAB.
+
+---
+
 ## Open questions
 
-1. **Backend abstraction boundary.** Should `RayTracingBackend.trace()` return propagation paths
-   (delay, Doppler, amplitude, AoA/AoD) and let `core/signal.py` synthesise baseband, or return baseband
-   directly? Paths are more composable and testable; RadarSimPy and ovrtx are happier returning baseband.
-   Leaning toward paths as the contract, with an optional fast path for backends that do both.
-2. **Clutter and tracking placement.** Both currently sit in `core/`. If either grows past a few modules
-   (multi-hypothesis tracking, JPDA; sea-state clutter models) they should be promoted to subpackages.
-3. **pyAPRiL provenance.** Reimplementing ECA/Wiener-SMI from papers keeps the MIT licence clean, but
-   requires independent validation — needs a test fixture with published expected clutter-attenuation
-   figures.
-4. **RadarBook licensing.** No LICENSE file exists in that repository. Everything derived from it must be
-   written from the book's published equations with a citation; confirm this is acceptable before
-   `core/` implementation begins.
-5. **MATLAB parity.** Is a validation harness comparing against the MATLAB FMCW Target Simulator in scope,
-   or is the COCO label-schema match sufficient?
-6. **GPU story.** Three of the backends require CUDA/RTX. Does CI test any of them, or are backend tests
-   mock-only with hardware validation left manual?
+1. **GPU story — deferred.** Three backends (Mitsuba, RadarSimPy, ovrtx) need CUDA or an RTX GPU. Whether
+   CI exercises any of them, or backend tests stay mock-only with hardware validation left manual, is a
+   question for when the first real backend lands. Until then `raytracing/backends/analytic.py` is the only
+   backend under test, and it runs anywhere. Revisit before merging the first GPU backend.

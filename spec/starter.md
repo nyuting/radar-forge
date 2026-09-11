@@ -11,20 +11,20 @@
 ## 2. Dependencies & Ecosystem Integration
 
 ### 2.1 Related Open-Source GitHub Repositories
-The codebase may draw architectural inspiration from the following open-source frameworks:
+The codebase draws architectural inspiration from the following open-source frameworks. None of them are vendored into the tree; where a project is available at runtime it is reached through an optional, arm's-length backend. See [`structure.md`](structure.md) for the per-project module map and the licence compatibility matrix that governs what may be borrowed.
 
 | Project Name | Description | Reason for Inclusion / Core Utility |
 | :--- | :--- | :--- |
-| **RadarSimPy** | Python/C++ Ray-Tracing Radar Simulator | High-performance physical propagation and automotive RCS simulation backend. Integrated as an optional ray-tracing engine module. |
+| **RadarSimPy** | Python/C++ Ray-Tracing Radar Simulator | High-performance physical propagation and automotive RCS simulation backend. Wrapped at arm's length as an optional ray-tracing backend (GPL-3.0 — no code vendored). |
 | **RF-Genesis / WiTwin Radar** | Differentiable mmWave radar simulator (UCSD) built on Mitsuba/Dr.Jit. | Provides zero-shot domain adaptation and synthetic generative dataset workflows. Used as a reference for GPU-accelerated ray-tracing pipelines. |
 | **Phased-Array-Antenna-Model** | Vectorized 2D/3D radiation pattern computation library. | Fills the phased array gap in existing simulators. Supplies conformal array geometries, spatial tapering (Taylor/Chebyshev), phase quantization, and beamforming math. |
-| **FMCW Radar Target Simulator (FHR)** | MATLAB/Phased Array System Toolbox simulator for traffic scenarios. | Provides functional specification for baseband signal exporting into standard deep learning annotation formats (e.g., COCO bounding boxes with range-Doppler cubes). |
+| **FMCW Radar Target Simulator** (Wengerter) | MATLAB/Phased Array System Toolbox simulator for urban traffic scenarios. | Provides functional specification for baseband signal exporting into standard deep learning annotation formats (e.g., COCO bounding boxes with range-Doppler cubes). |
 | **RadarBook Software** | Companion code for *Introduction to Radar Using Python and MATLAB*. | Used as standard baseline reference for canonical DSP blocks (range FFT, Doppler FFT, CFAR, SAR primitives). |
 | **pyapril** | Python library for passive radar signal processing (U. Budapest). | Reference implementation for space-time clutter cancellation (Wiener-SMI, ECA) and bistatic processing geometries. |
 | **RadarSim (GUI)** | Educational pulse-Doppler visualizer with real-time scopes. | Blueprint for interactive educational modules (A-Scope, B-Scope, PPI display scopes) for intern onboarding. |
 
 ### 2.2 PyPI Packages & Other Sources
-The codebase may also draw architectural inspiration from the following PyPI packages:
+The codebase is also inspired by the following PyPI packages:
 
 | PyPI Package | Role & Description | Inclusion Purpose |
 | :--- | :--- | :--- |
@@ -51,3 +51,8 @@ radar-forge/
         ├── raytracing/         # Wrappers for Mitsuba/RadarSimPy ray-tracing backends
         ├── pipelines/          # ML dataset generation & COCO / range-Doppler exporter
         └── teaching/           # Interactive GUI scopes (PPI, A-Scope) and Jupyter notebooks
+
+> **Note on attribution:** an earlier draft of this spec credited the FMCW Radar Target Simulator to
+> Fraunhofer FHR. It is in fact an independent MATLAB project by Thomas Wengerter
+> (<https://github.com/thomaswengerter/FMCW_Radar_Target_Simulator>, MIT). Fraunhofer FHR's ATRIUM is a
+> separate, unrelated hardware-in-the-loop radar target simulator.

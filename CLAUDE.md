@@ -19,7 +19,13 @@ code that is plain, documented, and cites its source passes it.
 - **`make check` must pass before you say you are done.** It runs lint, types,
   conventions and the full test suite — the same gate as `pre-push` and CI.
 - **SI units, with the unit in the name**: `range_m`, `f0_hz`, `chirp_time_s`, `rcs_dbsm`,
-  `power_w`. Linear internally; decibels only at API boundaries, and named `_db*`.
+  `power_w`. Linear internally; decibels only at API boundaries, and named `_db*`. Dimensionless
+  ratios say which: `gain_tx_linear` or `gain_tx_dbi`, never `gain_tx`. A commit hook rejects bare
+  names, matching on the leading token.
+- **Physical constants come from `radar_forge.core.constants`** — `SPEED_OF_LIGHT_MPS`,
+  `BOLTZMANN_JPK`, etc. Never define one elsewhere, never hardcode its value, never write `3e8`
+  (0.07% high = 70 cm of range error at 1 km). A commit hook rejects both the rebinding and the
+  literal.
 - **NumPy-style docstrings on everything public**, including a `References` section citing
   the textbook or paper the block implements, and array shapes written out as
   `(n_chirps, n_samples)`.
@@ -30,6 +36,8 @@ code that is plain, documented, and cites its source passes it.
 ## Working agreements
 
 - Vectorise with NumPy; if a Python loop is unavoidable, write a comment saying why.
+- Broadcast rather than `np.tile`/`np.repeat`/`np.broadcast_to`. A hook rejects those unless the
+  call carries `# broadcast-exempt: <reason>` on its line or the one above.
 - Never commit generated arrays (`.npy`, `.h5`, …). Commit the script that generates them.
   Small golden reference data goes in `tests/data/golden/` only.
 - Do not weaken a test tolerance to make a test pass. Find out why the number moved.
@@ -46,6 +54,8 @@ code that is plain, documented, and cites its source passes it.
 | `docs/conventions/style.md` | Naming, units, docstrings, typing, API surface |
 | `docs/conventions/commits.md` | Commit and branch conventions |
 | `docs/conventions/testing.md` | Test layout, tolerances, golden data, markers |
+| `src/radar_forge/core/constants.py` | Every physical constant, defined once |
 | `.githooks/` | pre-commit, commit-msg, pre-push |
+| `scripts/check_conventions.py` | Rules R1–R6: TOML config, layout, docstrings, constants, units, broadcasting |
 | `Makefile` | The single definition of every gate |
 | `spec/` | Design specification; the intended end state |
