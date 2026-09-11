@@ -121,7 +121,24 @@ written from the published equations, not transcribed.
 licence, so ECA and Wiener-SMI clutter cancellation are reimplemented from the published papers for
 `core/clutter.py`. No pyAPRiL code enters the tree, and it is not a runtime dependency.
 
-### A.7 RadarSim (GUI)
+### A.7 RASPNet *(dataset)*
+
+- **Link:** https://github.com/shyamven/RASPNet
+- **Language / licence:** Python (examples) · **no LICENSE file in the repository** — treat as
+  all-rights-reserved. Dataset itself is distributed via the AFRL SDMS portal under its own terms.
+
+| Area | Responsibility |
+| :--- | :--- |
+| Processed datasets | Feature-label pairs (EXAMPLES and CVNN variants) over several numbered airborne-radar scenarios |
+| `examples/` | Radar target localization models; transfer learning from pre-trained baselines |
+| Data access | Downloaded separately from the AFRL SDMS collection portal, not bundled with the repo |
+
+**What radar-forge borrows:** the *dataset conventions* only — feature/label pair layout, scenario
+indexing, and the target-localization and transfer-learning task definitions, as a benchmark to
+check `pipelines/` exporters against. No code enters the tree and no RASPNet data is committed;
+it is not a runtime dependency.
+
+### A.8 RadarSim (GUI)
 
 - **Link:** https://github.com/SpaceEngineerSS/RadarSim
 - **Language / licence:** Python + PySide6 (Qt6) · MIT
@@ -139,7 +156,7 @@ licence, so ECA and Wiener-SMI clutter cancellation are reimplemented from the p
 `teaching/`, and the YAML-scenario idea for `pipelines/scenarios.py`. Its CFAR-variant and tracking
 coverage is a useful checklist for `core/`.
 
-### A.8 AIRadarLib *(PyPI, optional)*
+### A.9 AIRadarLib *(PyPI, optional)*
 
 - **Link:** https://pypi.org/project/AIRadarLib/ · v0.1.0 (2025-06-29) · licence unstated
 
@@ -155,7 +172,7 @@ coverage is a useful checklist for `core/`.
 `core/waveforms.py`, and the PyTorch dataset-wrapper pattern for `pipelines/datasets.py`. Unstated
 licence ⇒ reference only, never a dependency.
 
-### A.9 ovrtx *(PyPI, optional)*
+### A.10 ovrtx *(PyPI, optional)*
 
 - **Link:** https://github.com/NVIDIA-Omniverse/ovrtx · https://pypi.org/project/ovrtx/
 - **Language / licence:** C + Python · **proprietary** (NVIDIA Software Licence Agreement)
@@ -167,7 +184,7 @@ Exposes physically accurate real-time camera, lidar and radar sensor simulation 
 `raytracing/backends/ovrtx.py`, gated on hardware and licence acceptance, never installed by default and
 never imported at package import time.
 
-### A.10 pyroomacoustics
+### A.11 pyroomacoustics
 
 - **Link:** https://github.com/LCAV/pyroomacoustics
 - **Language / licence:** Python · MIT (EPFL-LCAV)
@@ -183,7 +200,7 @@ never imported at package import time.
 pattern for `array/doa.py`, and its estimators serve as the cross-check benchmark for radar-forge's own
 MUSIC/ESPRIT. MIT licence permits direct adaptation with attribution.
 
-### A.11 Licence summary
+### A.12 Licence summary
 
 | Project | Licence | Usable as dependency? | Usable as code source? |
 | :--- | :--- | :--- | :--- |
@@ -194,6 +211,7 @@ MUSIC/ESPRIT. MIT licence permits direct adaptation with attribution.
 | FMCW Radar Target Simulator | MIT | no (MATLAB) | format spec only |
 | RadarSimPy | GPL-3.0 | optional extra only, arm's length | **no** |
 | pyAPRiL | GPL-3.0 | **no** | **no** — reimplement from papers |
+| RASPNet | none declared | no (data via SDMS portal) | **no** — dataset conventions only |
 | RadarBook Software | none declared | no | **no** — textbook reference only |
 | AIRadarLib | unstated | no | **no** — reference only |
 | ovrtx | NVIDIA proprietary | optional extra, user-accepted | **no** |
@@ -295,7 +313,7 @@ src/radar_forge/
 3. **One scene, many backends.** `raytracing.Scene` is backend-neutral; swapping `analytic` for
    `mitsuba` changes fidelity and runtime, not user code.
 4. **Licence hygiene is a design constraint.** GPL and unlicensed references are reimplemented from
-   published equations, with the source cited in the module docstring. See §A.11.
+   published equations, with the source cited in the module docstring. See §A.12.
 5. **Every core algorithm is teachable.** Each `core/` and `array/` module pairs with a notebook in
    `teaching/notebooks/` and a numerical test against a textbook-published value.
 
