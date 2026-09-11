@@ -121,7 +121,12 @@ written from the published equations, not transcribed.
 licence, so ECA and Wiener-SMI clutter cancellation are reimplemented from the published papers for
 `core/clutter.py`. No pyAPRiL code enters the tree, and it is not a runtime dependency.
 
-### A.7 RASPNet *(dataset)*
+### A.7 RASPNet & Steinmetz Neural Networks *(dataset + model)*
+
+Two repositories by the same author, covering the two halves of one machine-learning benchmark:
+the airborne-radar dataset, and the complex-valued architecture trained on it.
+
+**A.7a RASPNet** *(dataset)*
 
 - **Link:** https://github.com/shyamven/RASPNet
 - **Language / licence:** Python (examples) · **no LICENSE file in the repository** — treat as
@@ -137,6 +142,28 @@ licence, so ECA and Wiener-SMI clutter cancellation are reimplemented from the p
 indexing, and the target-localization and transfer-learning task definitions, as a benchmark to
 check `pipelines/` exporters against. No code enters the tree and no RASPNet data is committed;
 it is not a runtime dependency.
+
+**A.7b Steinmetz Neural Networks** *(model)*
+
+- **Link:** https://github.com/shyamven/SteinmetzNeuralNetworks
+- **Language / licence:** Python (PyTorch, `complexPyTorch`) · **no LICENSE file in the repository** —
+  treat as all-rights-reserved, the same footing as A.7a.
+- **Paper:** S. Venkatasubramanian, A. Pezeshki and V. Tarokh, *Steinmetz Neural Networks for
+  Complex-Valued Data*, AISTATS '25.
+
+| Area | Responsibility |
+| :--- | :--- |
+| `models/` | Steinmetz and analytic-signal network definitions: complex-valued layers carrying I/Q as an analytic pair, with a consistency penalty on the Steinmetz decomposition |
+| `utils/` | Training, evaluation and complex-tensor helpers |
+| `main.py` | Driver for the classification and regression tasks |
+| `RASPNet.ipynb` | Complex-valued regression on the A.7a dataset — the two repositories joined |
+| `FSDD.ipynb` | Complex-valued regression on spoken digits; the non-radar comparison task |
+
+**What radar-forge borrows:** the *complex-valued feature convention* — I/Q stays complex end to end
+rather than being flattened into two real channels — as the contract `pipelines/datasets.py` exports
+against, and the RASPNet regression task as a paired dataset-plus-model benchmark for those exporters.
+Licence undeclared ⇒ no code enters the tree and it is never a runtime dependency; `complexPyTorch` is
+named here as the upstream's own dependency, not as one of radar-forge's.
 
 ### A.8 RadarSim (GUI)
 
@@ -212,6 +239,7 @@ MUSIC/ESPRIT. MIT licence permits direct adaptation with attribution.
 | RadarSimPy | GPL-3.0 | optional extra only, arm's length | **no** |
 | pyAPRiL | GPL-3.0 | **no** | **no** — reimplement from papers |
 | RASPNet | none declared | no (data via SDMS portal) | **no** — dataset conventions only |
+| Steinmetz Neural Networks | none declared | no | **no** — architectural reference only |
 | RadarBook Software | none declared | no | **no** — textbook reference only |
 | AIRadarLib | unstated | no | **no** — reference only |
 | ovrtx | NVIDIA proprietary | optional extra, user-accepted | **no** |
@@ -299,7 +327,7 @@ src/radar_forge/
 | `raytracing/backends/ovrtx.py` | ovrtx sensor-simulation API |
 | `pipelines/exporters/*` | FMCW Radar Target Simulator `JSONCoco.py` and its label schema |
 | `pipelines/scenarios.py` | RadarSim YAML scenario files |
-| `pipelines/datasets.py` | AIRadarLib PyTorch dataset/training wrappers |
+| `pipelines/datasets.py` | AIRadarLib PyTorch dataset/training wrappers; Steinmetz Neural Networks (complex-valued I/Q feature layout) |
 | `teaching/scopes/*`, `teaching/app.py` | RadarSim PySide6 GUI (PPI, RHI, A-Scope) |
 | `teaching/notebooks/` | RadarBook `jupyter/`; RadarSimNb |
 

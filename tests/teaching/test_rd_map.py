@@ -67,8 +67,25 @@ class TestRenderRangeDoppler:
             axes.get_ylim(), (velocity_axis_mps[0], velocity_axis_mps[-1]), rtol=1e-12
         )
 
-    def test_the_truth_marker_is_drawn_where_it_was_asked_for(self) -> None:
-        """Unfolded truth on a folded map: the marker may sit off the peak."""
+    def test_an_on_scale_truth_is_drawn_where_it_was_asked_for(self) -> None:
+        """Nothing folded, so both markers coincide at the true position."""
+        import matplotlib
+
+        matplotlib.use("Agg")
+        range_axis_m, velocity_axis_mps = _axes()
+        figure = render_range_doppler(
+            _map_with_peak_at(16, 20),
+            range_axis_m,
+            velocity_axis_mps,
+            truth_range_m=10_000.0,
+            truth_velocity_mps=3.0,
+        )
+        for line in figure.axes[0].get_lines():
+            np.testing.assert_allclose(line.get_xdata(), [10.0], rtol=1e-12)
+            np.testing.assert_allclose(line.get_ydata(), [3.0], rtol=1e-12)
+
+    def test_the_folded_marker_goes_where_the_map_puts_the_target(self) -> None:
+        """The cross must sit on the peak even when the truth is far away."""
         import matplotlib
 
         matplotlib.use("Agg")
@@ -79,10 +96,64 @@ class TestRenderRangeDoppler:
             velocity_axis_mps,
             truth_range_m=10_000.0,
             truth_velocity_mps=80.0,
+            folded_range_m=10_000.0,
+            folded_velocity_mps=-2.5,
         )
-        (line,) = figure.axes[0].get_lines()
-        np.testing.assert_allclose(line.get_xdata(), [10.0], rtol=1e-12)
-        np.testing.assert_allclose(line.get_ydata(), [80.0], rtol=1e-12)
+        (folded,) = [line for line in figure.axes[0].get_lines() if line.get_marker() == "x"]
+        np.testing.assert_allclose(folded.get_xdata(), [10.0], rtol=1e-12)
+        np.testing.assert_allclose(folded.get_ydata(), [-2.5], rtol=1e-12)
+
+    def test_an_off_scale_truth_is_pinned_to_the_edge_it_left_by(self) -> None:
+        """A marker that silently vanishes leaves the map looking unambiguous."""
+        import matplotlib
+
+        matplotlib.use("Agg")
+        range_axis_m, velocity_axis_mps = _axes()
+        figure = render_range_doppler(
+            _map_with_peak_at(16, 20),
+            range_axis_m,
+            velocity_axis_mps,
+            truth_range_m=10_000.0,
+            truth_velocity_mps=80.0,
+            folded_velocity_mps=-2.5,
+        )
+        (edge,) = [line for line in figure.axes[0].get_lines() if line.get_marker() == "^"]
+        np.testing.assert_allclose(edge.get_ydata(), [velocity_axis_mps[-1]], rtol=1e-12)
+        np.testing.assert_allclose(edge.get_xdata(), [10.0], rtol=1e-12)
+        assert "m/s" in edge.get_label()
+
+    def test_an_off_scale_range_is_labelled_in_kilometres_not_velocity(self) -> None:
+        """S2 folds in range; naming the velocity there points at the wrong lesson."""
+        import matplotlib
+
+        matplotlib.use("Agg")
+        range_axis_m, velocity_axis_mps = _axes()
+        figure = render_range_doppler(
+            _map_with_peak_at(16, 20),
+            range_axis_m,
+            velocity_axis_mps,
+            truth_range_m=float(range_axis_m[-1]) * 3.0,
+            truth_velocity_mps=1.0,
+            folded_range_m=10_000.0,
+        )
+        (edge,) = [line for line in figure.axes[0].get_lines() if line.get_marker() == ">"]
+        np.testing.assert_allclose(edge.get_xdata(), [range_axis_m[-1] * 1e-3], rtol=1e-12)
+        assert "km" in edge.get_label()
+        assert "m/s" not in edge.get_label()
+
+    def test_a_target_below_the_velocity_axis_points_down(self) -> None:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        range_axis_m, velocity_axis_mps = _axes()
+        figure = render_range_doppler(
+            _map_with_peak_at(16, 20),
+            range_axis_m,
+            velocity_axis_mps,
+            truth_range_m=10_000.0,
+            truth_velocity_mps=-80.0,
+        )
+        assert any(line.get_marker() == "v" for line in figure.axes[0].get_lines())
 
     def test_no_marker_without_a_truth(self) -> None:
         import matplotlib

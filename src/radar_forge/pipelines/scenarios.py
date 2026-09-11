@@ -49,12 +49,35 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
+from radar_forge.core.constants import SPEED_OF_LIGHT_MPS
+from radar_forge.core.dsp import (
+    doppler_bin_centers_mps,
+    doppler_fft,
+    matched_filter,
+    range_bin_centers_m,
+    range_doppler_map,
+)
 from radar_forge.core.radar import Radar, Receiver, Transmitter, WaveformKind
 from radar_forge.core.signal import fmcw_deramp_baseband, line_of_sight_paths, pulsed_baseband
 from radar_forge.core.targets import PointTarget
-from radar_forge.pipelines.trajectories import load_flight_csv, resample, to_radar_frame
+from radar_forge.core.waveforms import lfm_chirp
+from radar_forge.pipelines.trajectories import (
+    TargetTrack,
+    Trajectory,
+    load_flight_csv,
+    resample,
+    to_radar_frame,
+)
 
-__all__ = ["Frame", "Scenario", "iterate_frames", "load_scenario"]
+__all__ = [
+    "Frame",
+    "RangeDopplerProduct",
+    "Scenario",
+    "iterate_frames",
+    "leg_range_doppler",
+    "load_scenario",
+    "peak_range_velocity",
+]
 
 _RADAR_KEYS = frozenset({"latitude_deg", "longitude_deg", "altitude_m"})
 _RECEIVER_KEYS = frozenset({"gain_rx_dbi", "noise_figure_db"})
@@ -185,6 +208,43 @@ class Frame:
     radial_velocity_mps: float
     azimuth_deg: float
     elevation_deg: float
+
+
+def _resampled_track(trajectory: Trajectory, scenario: Scenario) -> tuple[TargetTrack, int]:
+    """Resample onto the frame grid, padded by a frame each side where possible.
+
+    Returns the track and the index of the window's first frame within it.
+    """
+    frame_times_s = scenario.frame_times_s
+    frame_interval_s = 1.0 / scenario.frame_rate_hz
+    track_first_s = float(trajectory.time_s[0])
+    track_last_s = float(trajectory.time_s[-1])
+
+    if frame_times_s[0] < track_first_s or frame_times_s[-1] > track_last_s:
+        msg = (
+            f"the scenario window [{frame_times_s[0]}, {frame_times_s[-1]}] s lies outside "
+            f"the track's [{track_first_s}, {track_last_s}] s."
+        )
+        raise ValueError(msg)
+
+    pad_before = frame_times_s[0] - frame_interval_s >= track_first_s
+    pad_after = frame_times_s[-1] + frame_interval_s <= track_last_s
+    grid_s = np.concatenate(
+        [
+            [frame_times_s[0] - frame_interval_s] if pad_before else [],
+            frame_times_s,
+            [frame_times_s[-1] + frame_interval_s] if pad_after else [],
+        ]
+    )
+    if grid_s.size < 2:
+        msg = (
+            "a one-frame window at the very end of the track leaves nothing to "
+            "difference; radial velocity needs at least two samples."
+        )
+        raise ValueError(msg)
+
+    track = to_radar_frame(resample(trajectory, grid_s), scenario.legs[0])
+    return track, 1 if pad_before else 0
 
 
 def _require_keys(table: dict[str, Any], allowed: frozenset[str], name: str) -> None:
@@ -340,19 +400,27 @@ def iterate_frames(scenario: Scenario) -> Iterator[Frame]:
     The truth carried on each frame is unfolded. Folding it to match a
     particular leg's map is the *reader's* job, and the gap between the two is
     what the scenario exists to show.
+
+    The trajectory is resampled one frame either side of the window wherever
+    the track allows it, and those two samples are used for the velocity
+    difference and then discarded. Without the padding the first and last
+    reported frames would carry a one-sided difference -- a different, noisier
+    estimator than every frame between them -- and a one-frame window would
+    have no velocity at all.
     """
     trajectory = load_flight_csv(scenario.trajectory_path, altitude_m=scenario.target_altitude_m)
-    track = to_radar_frame(resample(trajectory, scenario.frame_times_s), scenario.legs[0])
+    track, first_frame = _resampled_track(trajectory, scenario)
     rng = np.random.default_rng(scenario.seed)
     rcs_m2 = scenario.target.rcs_m2
 
     # A Python loop over frames is the point: this is a generator, and each
     # frame's cube is built and handed out before the next one is allocated.
     for index in range(scenario.n_frames):
-        range_m = float(track.range_m[index])
-        radial_velocity_mps = float(track.radial_velocity_mps[index])
-        azimuth_deg = float(track.azimuth_deg[index])
-        elevation_deg = float(track.elevation_deg[index])
+        sample = first_frame + index
+        range_m = float(track.range_m[sample])
+        radial_velocity_mps = float(track.radial_velocity_mps[sample])
+        azimuth_deg = float(track.azimuth_deg[sample])
+        elevation_deg = float(track.elevation_deg[sample])
 
         cubes: list[NDArray[np.complex128]] = []
         for leg_radar, leg_n_chirps in zip(scenario.legs, scenario.n_chirps, strict=True):
@@ -373,10 +441,130 @@ def iterate_frames(scenario: Scenario) -> Iterator[Frame]:
 
         yield Frame(
             index=index,
-            time_s=float(track.time_s[index]),
+            time_s=float(track.time_s[sample]),
             iq=tuple(cubes),
             range_m=range_m,
             radial_velocity_mps=radial_velocity_mps,
             azimuth_deg=azimuth_deg,
             elevation_deg=elevation_deg,
         )
+
+
+@dataclass(frozen=True)
+class RangeDopplerProduct:
+    """One leg's range-Doppler map and the axes that label it.
+
+    Attributes
+    ----------
+    rd_map : numpy.ndarray
+        Complex map, shape ``(n_doppler_bins, n_range_bins)``.
+    range_axis_m : numpy.ndarray
+        Range bin centres, metres, shape ``(n_range_bins,)``. Unshifted: zero
+        range is bin 0.
+    velocity_axis_mps : numpy.ndarray
+        Velocity bin centres, metres/second, shape ``(n_doppler_bins,)``.
+        ``fftshift``-ed, zero in the middle, positive closing.
+    """
+
+    rd_map: NDArray[np.complex128]
+    range_axis_m: NDArray[np.float64]
+    velocity_axis_mps: NDArray[np.float64]
+
+
+def leg_range_doppler(cube: NDArray[np.complex128], leg: Radar) -> RangeDopplerProduct:
+    """Process one leg's IQ cube into a range-Doppler map with labelled axes.
+
+    Parameters
+    ----------
+    cube : numpy.ndarray
+        Baseband IQ, shape ``(n_chirps, n_samples)``, slow time on axis 0.
+    leg : radar_forge.core.radar.Radar
+        The leg that produced it; its waveform selects the receive chain.
+
+    Returns
+    -------
+    RangeDopplerProduct
+        The map and its two axes.
+
+    Notes
+    -----
+    The two waveform families need different receive chains, and this is the
+    one place that knows which:
+
+    **FMCW** deramps to a beat frequency, so range *is* a spectrum and
+    :func:`~radar_forge.core.dsp.range_doppler_map` applies directly.
+
+    **Pulsed** needs pulse compression first. Matched filtering runs in
+    ``full`` mode, so the output is longer than a repetition interval and a
+    target at delay :math:`d` peaks at ``d + n_reference - 1``: the reference's
+    own group delay. The window is trimmed by exactly that offset, which is
+    what puts a target back at its true range rather than one pulse length
+    beyond it. The trim also discards the convolution tail, whose energy
+    belongs to the previous interval.
+
+    Both paths return an unshifted range axis and an ``fftshift``-ed velocity
+    axis, from the ``dsp`` helpers rather than re-derived -- see the scenario
+    specification S7.1.
+    """
+    if leg.transmitter.waveform == "pulsed":
+        reference = lfm_chirp(
+            leg.transmitter.bandwidth_hz,
+            leg.transmitter.chirp_time_s,
+            leg.receiver.sample_rate_hz,
+        )
+        group_delay_samples = reference.size - 1
+        compressed = matched_filter(cube, reference, axis=-1)
+        n_samples = leg.n_samples_per_pri
+        window = compressed[:, group_delay_samples : group_delay_samples + n_samples]
+        rd_map = doppler_fft(window, axis=0)
+        sample_index = np.arange(window.shape[1], dtype=np.float64)
+        range_axis_m = sample_index * SPEED_OF_LIGHT_MPS / (2.0 * leg.receiver.sample_rate_hz)
+    else:
+        rd_map = range_doppler_map(cube)
+        range_axis_m = range_bin_centers_m(
+            rd_map.shape[1],
+            leg.transmitter.bandwidth_hz,
+            leg.transmitter.chirp_time_s,
+            leg.receiver.sample_rate_hz,
+        )
+
+    velocity_axis_mps = doppler_bin_centers_mps(
+        rd_map.shape[0],
+        leg.transmitter.pulse_repetition_interval_s,
+        leg.wavelength_m,
+    )
+    return RangeDopplerProduct(
+        rd_map=rd_map,
+        range_axis_m=np.asarray(range_axis_m, dtype=np.float64),
+        velocity_axis_mps=np.asarray(velocity_axis_mps, dtype=np.float64),
+    )
+
+
+def peak_range_velocity(product: RangeDopplerProduct) -> tuple[float, float]:
+    """Locate the brightest cell of a range-Doppler map.
+
+    Parameters
+    ----------
+    product : RangeDopplerProduct
+        The map and its axes.
+
+    Returns
+    -------
+    range_m : float
+        Range of the peak cell, metres. **As the map shows it** -- folded, if
+        the waveform folds in range.
+    velocity_mps : float
+        Velocity of the peak cell, metres/second, positive closing. Likewise
+        folded if the waveform folds in Doppler.
+
+    Notes
+    -----
+    A single-target scenario, so the brightest cell is the target. With
+    clutter or a second target this would need a detector; that is
+    ``core/detection.py``'s job and it is not part of this slice.
+    """
+    doppler_bin, range_bin = np.unravel_index(np.abs(product.rd_map).argmax(), product.rd_map.shape)
+    return (
+        float(product.range_axis_m[range_bin]),
+        float(product.velocity_axis_mps[doppler_bin]),
+    )

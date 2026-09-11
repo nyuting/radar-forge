@@ -16,7 +16,13 @@ import numpy as np
 import pytest
 
 from radar_forge.core.radar import Radar
-from radar_forge.pipelines.scenarios import Scenario, iterate_frames, load_scenario
+from radar_forge.pipelines.scenarios import (
+    Scenario,
+    iterate_frames,
+    leg_range_doppler,
+    load_scenario,
+    peak_range_velocity,
+)
 
 SCENARIOS_DIR = Path(__file__).parent.parent.parent / "scenarios"
 S1_TOML = SCENARIOS_DIR / "scenario_001_fmcw_low_prf.toml"
@@ -244,3 +250,108 @@ class TestScenarioValidation:
 
         with pytest.raises(ValueError, match="same length"):
             replace(load_scenario(S3_TOML), n_chirps=(128,))
+
+
+class TestLegRangeDoppler:
+    def test_fmcw_axes_match_the_map(self) -> None:
+        scenario = _short_window(load_scenario(S1_TOML), 1)
+        frame = next(iter(iterate_frames(scenario)))
+        product = leg_range_doppler(frame.iq[0], scenario.legs[0])
+        assert product.rd_map.shape == (
+            product.velocity_axis_mps.size,
+            product.range_axis_m.size,
+        )
+
+    def test_the_range_axis_is_unshifted_and_the_velocity_axis_is_centred(self) -> None:
+        """The dsp asymmetry the spec S7.1 insists on, carried through intact."""
+        scenario = _short_window(load_scenario(S1_TOML), 1)
+        product = leg_range_doppler(next(iter(iterate_frames(scenario))).iq[0], scenario.legs[0])
+        np.testing.assert_allclose(product.range_axis_m[0], 0.0, atol=1e-12)
+        assert product.range_axis_m[-1] > product.range_axis_m[0]
+        centre = product.velocity_axis_mps.size // 2
+        np.testing.assert_allclose(product.velocity_axis_mps[centre], 0.0, atol=1e-12)
+
+    def test_the_pulsed_range_axis_spans_one_unambiguous_range(self) -> None:
+        """The matched filter's group delay is trimmed off, not left as an offset."""
+        scenario = _short_window(load_scenario(S2_TOML), 1)
+        leg = scenario.legs[0]
+        product = leg_range_doppler(next(iter(iterate_frames(scenario))).iq[0], leg)
+        np.testing.assert_allclose(product.range_axis_m[0], 0.0, atol=1e-12)
+        assert product.range_axis_m[-1] < leg.unambiguous_range_m
+        np.testing.assert_allclose(
+            product.range_axis_m[-1] + product.range_axis_m[1],
+            leg.unambiguous_range_m,
+            rtol=1e-9,
+        )
+
+    def test_a_synthetic_fmcw_target_lands_at_its_true_range_and_velocity(self) -> None:
+        """Closed-form ground truth, bypassing the trajectory entirely."""
+        from radar_forge.core.signal import fmcw_deramp_baseband, line_of_sight_paths
+
+        leg = load_scenario(S1_TOML).legs[0]
+        true_range_m = 10_000.0
+        true_velocity_mps = 3.0
+        paths = line_of_sight_paths(leg, true_range_m, true_velocity_mps, 10.0)
+        cube = fmcw_deramp_baseband(paths, leg, 256)
+        peak_range_m, peak_velocity_mps = peak_range_velocity(leg_range_doppler(cube, leg))
+        assert abs(peak_range_m - true_range_m) < leg.range_resolution_m
+        assert abs(peak_velocity_mps - true_velocity_mps) < 0.1
+
+    def test_a_synthetic_pulsed_target_folds_into_the_unambiguous_range(self) -> None:
+        """S2's defining behaviour, through the pipeline's own receive chain."""
+        from radar_forge.core.signal import line_of_sight_paths, pulsed_baseband
+
+        leg = load_scenario(S2_TOML).legs[0]
+        true_range_m = 15_000.0
+        paths = line_of_sight_paths(leg, true_range_m, 0.0, 10.0)
+        cube = pulsed_baseband(paths, leg, 64)
+        peak_range_m, peak_velocity_mps = peak_range_velocity(leg_range_doppler(cube, leg))
+        expected_range_m = true_range_m % leg.unambiguous_range_m
+        assert abs(peak_range_m - expected_range_m) < leg.range_resolution_m
+        np.testing.assert_allclose(peak_velocity_mps, 0.0, atol=1e-12)
+
+    def test_a_pulsed_target_inside_the_unambiguous_range_does_not_fold(self) -> None:
+        """Pins that the group-delay trim is right, not merely self-consistent."""
+        from radar_forge.core.signal import line_of_sight_paths, pulsed_baseband
+
+        leg = load_scenario(S2_TOML).legs[0]
+        true_range_m = 3_000.0
+        paths = line_of_sight_paths(leg, true_range_m, 0.0, 10.0)
+        peak_range_m, _ = peak_range_velocity(
+            leg_range_doppler(pulsed_baseband(paths, leg, 64), leg)
+        )
+        assert abs(peak_range_m - true_range_m) < leg.range_resolution_m
+
+
+class TestVelocityIsIndependentOfTheWindow:
+    """The padding around the window, pinned by its observable consequence."""
+
+    def test_a_frame_reports_the_same_velocity_whatever_window_contains_it(self) -> None:
+        """Without padding the edge frames would carry a one-sided difference.
+
+        A target's radial velocity is a property of the target, so asking for a
+        window that starts on that frame must not change it. This is the only
+        way the difference is visible from outside.
+        """
+        from dataclasses import replace
+
+        base = load_scenario(S1_TOML)
+        long_window = replace(base, start_time_s=50.0, duration_s=5.0)
+        starts_here = replace(base, start_time_s=52.0, duration_s=1.0)
+
+        from_long = list(iterate_frames(long_window))[2]
+        (from_short,) = list(iterate_frames(starts_here))
+
+        np.testing.assert_allclose(from_short.time_s, from_long.time_s, rtol=1e-12)
+        np.testing.assert_allclose(
+            from_short.radial_velocity_mps, from_long.radial_velocity_mps, rtol=1e-12
+        )
+        np.testing.assert_allclose(from_short.range_m, from_long.range_m, rtol=1e-12)
+
+    def test_a_single_frame_window_still_has_a_velocity(self) -> None:
+        from dataclasses import replace
+
+        scenario = replace(load_scenario(S1_TOML), start_time_s=60.0, duration_s=1.0)
+        (frame,) = list(iterate_frames(scenario))
+        assert frame.radial_velocity_mps != 0.0
+        assert np.isfinite(frame.radial_velocity_mps)

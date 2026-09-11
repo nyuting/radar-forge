@@ -9,10 +9,16 @@ out -- range is unshifted, so zero range is bin 0, while Doppler is
 waveform's unambiguous limits. Re-deriving an axis is how a plot ends up
 mirrored or offset by half a span while still looking entirely reasonable.
 
-The truth marker is drawn at the **unfolded** truth, on a map that may be
-folded. When the marker sits away from the peak the plot is not wrong: that
-gap is the measurement the scenario is teaching. For S1 the marker walks off
-the velocity axis while the peak stays put; for S2 it walks off in range.
+Two markers, and the distance between them is the lesson. The **unfolded**
+truth is where the target really is; the **folded** truth is where a radar
+with these ambiguities is obliged to report it. For S1 they separate in
+velocity, for S2 in range, and for S3 they coincide because the dual-PRF pair
+resolved the ambiguity.
+
+The unfolded truth frequently falls outside the axes -- that is what folding
+means -- so when it does it is drawn as an arrow pinned to the edge, labelled
+with its real value. A marker that silently vanishes off-plot would leave the
+reader with a picture that looks unambiguous and is not.
 
 References
 ----------
@@ -42,6 +48,8 @@ def render_range_doppler(
     *,
     truth_range_m: float | None = None,
     truth_velocity_mps: float | None = None,
+    folded_range_m: float | None = None,
+    folded_velocity_mps: float | None = None,
     title: str | None = None,
     dynamic_range_db: float = _DEFAULT_DYNAMIC_RANGE_DB,
 ) -> Any:
@@ -61,9 +69,14 @@ def render_range_doppler(
         from :func:`radar_forge.core.dsp.doppler_bin_centers_mps`. Already
         ``fftshift``-ed, zero in the middle, positive closing.
     truth_range_m, truth_velocity_mps : float, optional
-        The true, **unfolded** target position. Drawn as a marker if both are
-        given. It is expected to sit away from the peak whenever the waveform
-        folds; see the module docstring.
+        The true, **unfolded** target position. Drawn as a hollow circle if it
+        falls inside the axes, and as an edge arrow labelled with its value if
+        it does not -- which is the usual case for a folding waveform.
+    folded_range_m, folded_velocity_mps : float, optional
+        Where that truth is obliged to appear on *this* map, from
+        :func:`radar_forge.core.ambiguity.fold_velocity_mps` and the range
+        modulo. Drawn as a cross, and it should sit on the peak. Defaults to
+        the unfolded values, which is right when nothing folds.
     title : str, optional
         Figure title.
     dynamic_range_db : float, optional
@@ -127,25 +140,103 @@ def render_range_doppler(
     )
     figure.colorbar(mesh, ax=axes, label="Magnitude relative to peak (dB)")
 
-    if truth_range_m is not None and truth_velocity_mps is not None:
-        axes.plot(
-            truth_range_m * 1.0e-3,
-            truth_velocity_mps,
-            marker="o",
-            markersize=11,
-            markerfacecolor="none",
-            markeredgecolor="red",
-            markeredgewidth=1.6,
-            linestyle="none",
-            label="truth (unfolded)",
-        )
-        axes.legend(loc="upper right", framealpha=0.8)
-
     axes.set_xlabel("Range (km)")
     axes.set_ylabel("Radial velocity (m/s, positive closing)")
-    axes.set_xlim(range_m[0] * 1.0e-3, range_m[-1] * 1.0e-3)
-    axes.set_ylim(velocity_mps[0], velocity_mps[-1])
+    range_limits_km = (range_m[0] * 1.0e-3, range_m[-1] * 1.0e-3)
+    velocity_limits_mps = (velocity_mps[0], velocity_mps[-1])
+    axes.set_xlim(*range_limits_km)
+    axes.set_ylim(*velocity_limits_mps)
+
+    if truth_range_m is not None and truth_velocity_mps is not None:
+        _mark_truth(
+            axes,
+            truth_range_m,
+            truth_velocity_mps,
+            truth_range_m if folded_range_m is None else folded_range_m,
+            truth_velocity_mps if folded_velocity_mps is None else folded_velocity_mps,
+            range_limits_km,
+            velocity_limits_mps,
+        )
+        axes.legend(loc="upper right", framealpha=0.85, fontsize="small")
     if title is not None:
         axes.set_title(title)
 
     return figure
+
+
+def _mark_truth(
+    axes: Any,
+    truth_range_m: float,
+    truth_velocity_mps: float,
+    folded_range_m: float,
+    folded_velocity_mps: float,
+    range_limits_km: tuple[float, float],
+    velocity_limits_mps: tuple[float, float],
+) -> None:
+    """Draw the folded and unfolded truth, pinning the latter to an edge if off-plot.
+
+    Kept separate from :func:`render_range_doppler` because it is all display
+    bookkeeping -- clamping, arrow placement, label text -- and none of it is
+    about the radar.
+    """
+    truth_range_km = truth_range_m * 1.0e-3
+    inside = (
+        range_limits_km[0] <= truth_range_km <= range_limits_km[1]
+        and velocity_limits_mps[0] <= truth_velocity_mps <= velocity_limits_mps[1]
+    )
+
+    axes.plot(
+        folded_range_m * 1.0e-3,
+        folded_velocity_mps,
+        marker="x",
+        markersize=10,
+        markeredgecolor="red",
+        markeredgewidth=1.8,
+        linestyle="none",
+        label="truth, folded onto this map",
+    )
+
+    if inside:
+        axes.plot(
+            truth_range_km,
+            truth_velocity_mps,
+            marker="o",
+            markersize=12,
+            markerfacecolor="none",
+            markeredgecolor="white",
+            markeredgewidth=1.6,
+            linestyle="none",
+            label="truth (unfolded)",
+        )
+        return
+
+    # Off the plot, which is what folding means. A triangle pinned to the edge
+    # it left by, pointing that way: short, unambiguous, and it cannot overlap
+    # the map the way a long arrow across it does. The real values are in the
+    # title, so the marker only has to say "that way".
+    clamped_range_km = float(np.clip(truth_range_km, *range_limits_km))
+    clamped_velocity_mps = float(np.clip(truth_velocity_mps, *velocity_limits_mps))
+    # The label names whichever axis it left by, because that is the axis that
+    # folded: saying "+39.3 m/s" on a map whose velocity axis reaches 191 m/s
+    # would point at the wrong lesson.
+    if truth_velocity_mps > velocity_limits_mps[1]:
+        edge_marker, off_scale = "^", f"{truth_velocity_mps:+.1f} m/s"
+    elif truth_velocity_mps < velocity_limits_mps[0]:
+        edge_marker, off_scale = "v", f"{truth_velocity_mps:+.1f} m/s"
+    elif truth_range_km > range_limits_km[1]:
+        edge_marker, off_scale = ">", f"{truth_range_km:.2f} km"
+    else:
+        edge_marker, off_scale = "<", f"{truth_range_km:.2f} km"
+
+    axes.plot(
+        clamped_range_km,
+        clamped_velocity_mps,
+        marker=edge_marker,
+        markersize=12,
+        markerfacecolor="white",
+        markeredgecolor="black",
+        markeredgewidth=0.8,
+        linestyle="none",
+        clip_on=False,
+        label=f"truth (unfolded) off scale: {off_scale}",
+    )
