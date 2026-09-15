@@ -5,7 +5,7 @@ range-Doppler map. It is deliberately *axis-agnostic*: every function takes an
 explicit ``axis`` rather than assuming a layout, so a cube from any simulator
 drops in. The canonical layout the docstrings refer to is
 
-``(n_chirps, n_samples, n_rx)`` — slow time on axis 0, fast time on axis 1.
+``(n_pulses, n_samples, n_rx)`` — slow time on axis 0, fast time on axis 1.
 
 "Fast time" is the sample index within one chirp, and maps to range. "Slow
 time" is the chirp index within a coherent processing interval, and maps to
@@ -81,7 +81,7 @@ def matched_filter(
     ----------
     samples : array_like
         Received complex baseband, of any shape. In the canonical cube layout
-        ``(n_chirps, n_samples, n_rx)`` this is compressed along fast time.
+        ``(n_pulses, n_samples, n_rx)`` this is compressed along fast time.
     reference : array_like
         Transmitted waveform of shape ``(n_reference,)``, typically from
         :func:`radar_forge.core.lfm_chirp`. Not conjugated or reversed by the
@@ -175,7 +175,7 @@ def range_fft(
     Parameters
     ----------
     samples : array_like
-        Complex baseband, typically of shape ``(n_chirps, n_samples, n_rx)``.
+        Complex baseband, typically of shape ``(n_pulses, n_samples, n_rx)``.
     n_fft : int, optional
         Transform length. Default is the length of ``samples`` along ``axis``.
         A larger value zero-pads, which interpolates the profile onto a finer
@@ -240,7 +240,7 @@ def doppler_fft(
     ----------
     profiles : array_like
         Complex range profiles, typically the output of :func:`range_fft` with
-        shape ``(n_chirps, n_range_bins, n_rx)``.
+        shape ``(n_pulses, n_range_bins, n_rx)``.
     n_fft : int, optional
         Transform length. Default is the length along ``axis``. Zero-padding
         interpolates the Doppler axis; it does not add velocity resolution,
@@ -304,7 +304,7 @@ def range_doppler_map(
     Parameters
     ----------
     samples : array_like
-        Complex baseband cube, canonically ``(n_chirps, n_samples, n_rx)``.
+        Complex baseband cube, canonically ``(n_pulses, n_samples, n_rx)``.
     fast_time_window, slow_time_window : array_like, optional
         Amplitude tapers for the respective axes. Default None.
     n_range_fft, n_doppler_fft : int, optional
@@ -494,7 +494,7 @@ def mti_filter(
     Parameters
     ----------
     samples : array_like
-        Complex baseband, canonically ``(n_chirps, n_samples, n_rx)`` with slow
+        Complex baseband, canonically ``(n_pulses, n_samples, n_rx)`` with slow
         time on axis 0.
     n_pulses : int, optional
         Canceller order, 2 (single) or 3 (double). Default 2. The double

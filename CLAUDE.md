@@ -28,7 +28,7 @@ code that is plain, documented, and cites its source passes it.
   literal.
 - **NumPy-style docstrings on everything public**, including a `References` section citing
   the textbook or paper the block implements, and array shapes written out as
-  `(n_chirps, n_samples)`.
+  `(n_pulses, n_samples)`.
 - **Complete type annotations**; arrays as `numpy.typing.NDArray[np.float64]` /
   `ArrayLike` in, `NDArray` out. `mypy --strict` must pass.
 - **Conventional Commits**: `feat(array): add Taylor tapering`. The `commit-msg` hook enforces it.
@@ -51,7 +51,7 @@ code that is plain, documented, and cites its source passes it.
 | Path | What |
 | :--- | :--- |
 | `src/radar_forge/core/radar_equation.py` | The style exemplar — copy its shape |
-| `docs/conventions/style.md` | Naming, units, docstrings, typing, API surface |
+| `docs/conventions/style.md` | Naming, units, data layout, docstrings, typing, API surface |
 | `docs/conventions/commits.md` | Commit and branch conventions |
 | `docs/conventions/testing.md` | Test layout, tolerances, golden data, markers |
 | `src/radar_forge/core/constants.py` | Every physical constant, defined once |

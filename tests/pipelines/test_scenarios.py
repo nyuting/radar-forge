@@ -18,8 +18,8 @@ import pytest
 from radar_forge.core.radar import Radar
 from radar_forge.pipelines.scenarios import (
     Scenario,
+    burst_range_doppler,
     iterate_frames,
-    leg_range_doppler,
     load_scenario,
     peak_range_velocity,
 )
@@ -44,8 +44,8 @@ class TestLoadScenario:
     @pytest.mark.parametrize("toml_path", [S1_TOML, S2_TOML, S3_TOML], ids=["s1", "s2", "s3"])
     def test_every_shipped_scenario_loads(self, toml_path: Path) -> None:
         scenario = load_scenario(toml_path)
-        assert scenario.legs
-        assert all(isinstance(leg, Radar) for leg in scenario.legs)
+        assert scenario.bursts
+        assert all(isinstance(burst, Radar) for burst in scenario.bursts)
 
     @pytest.mark.parametrize("toml_path", [S1_TOML, S2_TOML, S3_TOML], ids=["s1", "s2", "s3"])
     def test_the_trajectory_path_resolves_to_a_real_file(self, toml_path: Path) -> None:
@@ -55,8 +55,8 @@ class TestLoadScenario:
     @pytest.mark.parametrize("toml_path", [S1_TOML, S2_TOML, S3_TOML], ids=["s1", "s2", "s3"])
     def test_every_variant_shares_the_specified_range_resolution(self, toml_path: Path) -> None:
         """All three run at B = 2 MHz; only the ambiguities differ."""
-        for leg in load_scenario(toml_path).legs:
-            np.testing.assert_allclose(leg.range_resolution_m, RANGE_RESOLUTION_M, rtol=1e-8)
+        for burst in load_scenario(toml_path).bursts:
+            np.testing.assert_allclose(burst.range_resolution_m, RANGE_RESOLUTION_M, rtol=1e-8)
 
     def test_the_default_window_is_the_specified_two_minutes(self) -> None:
         """The full track is not guaranteed to be one aircraft; 120 s is safe."""
@@ -73,8 +73,8 @@ class TestLoadScenario:
         with pytest.raises(ValueError, match="unknown key"):
             load_scenario(broken)
 
-    def test_rejects_a_file_with_no_leg(self, tmp_path: Path) -> None:
-        bare = tmp_path / "no_leg.toml"
+    def test_rejects_a_file_with_no_burst(self, tmp_path: Path) -> None:
+        bare = tmp_path / "no_burst.toml"
         bare.write_text(
             '[scenario]\nname = "x"\nseed = 1\n'
             "[radar]\nlatitude_deg = 0.0\nlongitude_deg = 0.0\naltitude_m = 0.0\n"
@@ -106,51 +106,51 @@ class TestSpecifiedAmbiguities:
     """Spec S4's table, re-derived from the loaded Radar rather than trusted."""
 
     def test_s1_covers_the_track_in_range_and_folds_hard_in_doppler(self) -> None:
-        leg = load_scenario(S1_TOML).legs[0]
+        burst = load_scenario(S1_TOML).bursts[0]
         # 37.47 km, comfortably past the 17.9 km the track reaches.
-        np.testing.assert_allclose(leg.unambiguous_range_m, 37_474.057, rtol=1e-6)
-        np.testing.assert_allclose(leg.unambiguous_velocity_mps, 7.6478, rtol=1e-4)
+        np.testing.assert_allclose(burst.unambiguous_range_m, 37_474.057, rtol=1e-6)
+        np.testing.assert_allclose(burst.unambiguous_velocity_mps, 7.6478, rtol=1e-4)
         # The point of S1: an 80 m/s aircraft is five folds out.
-        assert 80.0 / (2.0 * leg.unambiguous_velocity_mps) > 5.0
+        assert 80.0 / (2.0 * burst.unambiguous_velocity_mps) > 5.0
 
     def test_s2_folds_in_range_and_covers_the_track_in_doppler(self) -> None:
-        leg = load_scenario(S2_TOML).legs[0]
+        burst = load_scenario(S2_TOML).bursts[0]
         # 5.996 km: the target at 8.4-17.9 km wraps once or twice.
-        np.testing.assert_allclose(leg.unambiguous_range_m, 5_995.849, rtol=1e-6)
-        np.testing.assert_allclose(leg.unambiguous_velocity_mps, 191.194, rtol=1e-5)
-        assert leg.unambiguous_range_m < 8_390.0
+        np.testing.assert_allclose(burst.unambiguous_range_m, 5_995.849, rtol=1e-6)
+        np.testing.assert_allclose(burst.unambiguous_velocity_mps, 191.194, rtol=1e-5)
+        assert burst.unambiguous_range_m < 8_390.0
 
     def test_s2_is_the_exact_mirror_of_s1(self) -> None:
         """The lesson: same target, same bandwidth, opposite ambiguity."""
-        s1 = load_scenario(S1_TOML).legs[0]
-        s2 = load_scenario(S2_TOML).legs[0]
+        s1 = load_scenario(S1_TOML).bursts[0]
+        s2 = load_scenario(S2_TOML).bursts[0]
         assert s1.unambiguous_range_m > s2.unambiguous_range_m
         assert s1.unambiguous_velocity_mps < s2.unambiguous_velocity_mps
 
-    def test_s3_legs_both_cover_the_track_in_range(self) -> None:
-        legs = load_scenario(S3_TOML).legs
-        assert len(legs) == 2
-        np.testing.assert_allclose(legs[0].unambiguous_range_m, 29_979.246, rtol=1e-6)
-        np.testing.assert_allclose(legs[1].unambiguous_range_m, 24_982.705, rtol=1e-6)
-        assert all(leg.unambiguous_range_m > 18_000.0 for leg in legs)
+    def test_s3_bursts_both_cover_the_track_in_range(self) -> None:
+        bursts = load_scenario(S3_TOML).bursts
+        assert len(bursts) == 2
+        np.testing.assert_allclose(bursts[0].unambiguous_range_m, 29_979.246, rtol=1e-6)
+        np.testing.assert_allclose(bursts[1].unambiguous_range_m, 24_982.705, rtol=1e-6)
+        assert all(burst.unambiguous_range_m > 18_000.0 for burst in bursts)
 
-    def test_s3_legs_are_in_the_coprime_five_to_six_ratio(self) -> None:
+    def test_s3_bursts_are_in_the_coprime_five_to_six_ratio(self) -> None:
         """Coprime is what makes the pair identify a unique velocity."""
-        legs = load_scenario(S3_TOML).legs
-        np.testing.assert_allclose(legs[0].unambiguous_velocity_mps, 38.2388, rtol=1e-5)
-        np.testing.assert_allclose(legs[1].unambiguous_velocity_mps, 45.8866, rtol=1e-5)
-        ratio = legs[1].unambiguous_velocity_mps / legs[0].unambiguous_velocity_mps
+        bursts = load_scenario(S3_TOML).bursts
+        np.testing.assert_allclose(bursts[0].unambiguous_velocity_mps, 38.2388, rtol=1e-5)
+        np.testing.assert_allclose(bursts[1].unambiguous_velocity_mps, 45.8866, rtol=1e-5)
+        ratio = bursts[1].unambiguous_velocity_mps / bursts[0].unambiguous_velocity_mps
         np.testing.assert_allclose(ratio, 6.0 / 5.0, rtol=1e-12)
 
-    def test_s3_leg_b_runs_at_exactly_one_over_six_thousand_seconds(self) -> None:
+    def test_s3_burst_b_runs_at_exactly_one_over_six_thousand_seconds(self) -> None:
         """The spec's rounded 166.7 us is a duty cycle of 1.0002 and is rejected.
 
         Pinned because the rounded figure looks harmless and the failure it
         causes -- Transmitter refusing the whole scenario -- is far from it.
         """
-        leg = load_scenario(S3_TOML).legs[1]
-        np.testing.assert_allclose(leg.transmitter.chirp_time_s, 1.0 / 6000.0, rtol=1e-15)
-        np.testing.assert_allclose(leg.transmitter.duty_cycle_linear, 1.0, rtol=1e-12)
+        burst = load_scenario(S3_TOML).bursts[1]
+        np.testing.assert_allclose(burst.transmitter.chirp_time_s, 1.0 / 6000.0, rtol=1e-15)
+        np.testing.assert_allclose(burst.transmitter.duty_cycle_linear, 1.0, rtol=1e-12)
 
     @pytest.mark.parametrize(
         ("toml_path", "expected_shapes"),
@@ -166,8 +166,8 @@ class TestSpecifiedAmbiguities:
     ) -> None:
         scenario = load_scenario(toml_path)
         shapes = [
-            (n_chirps, leg.n_samples_per_pri)
-            for leg, n_chirps in zip(scenario.legs, scenario.n_chirps, strict=True)
+            (n_pulses, burst.n_samples_per_pri)
+            for burst, n_pulses in zip(scenario.bursts, scenario.n_pulses, strict=True)
         ]
         assert shapes == expected_shapes
 
@@ -187,7 +187,7 @@ class TestIterateFrames:
             [frame.time_s for frame in frames], scenario.frame_times_s, rtol=1e-12
         )
 
-    def test_each_leg_gets_its_own_cube(self) -> None:
+    def test_each_burst_gets_its_own_cube(self) -> None:
         """Two sweep rates cannot be coherently integrated, so they stay apart."""
         scenario = _short_window(load_scenario(S3_TOML), 2)
         frame = next(iter(iterate_frames(scenario)))
@@ -211,11 +211,11 @@ class TestIterateFrames:
         label carries the unfolded number even when the map cannot.
         """
         scenario = _short_window(load_scenario(S1_TOML), 5)
-        leg = scenario.legs[0]
+        burst = scenario.bursts[0]
         velocities_mps = np.array([frame.radial_velocity_mps for frame in iterate_frames(scenario)])
         # Nothing clipped it to the interval; that it happens to sit near the
         # edge here is the track's doing, not the code's.
-        assert np.any(np.abs(velocities_mps) > 0.9 * leg.unambiguous_velocity_mps)
+        assert np.any(np.abs(velocities_mps) > 0.9 * burst.unambiguous_velocity_mps)
 
     def test_a_run_replays_bit_for_bit(self) -> None:
         scenario = _short_window(load_scenario(S2_TOML), 2)
@@ -245,18 +245,18 @@ class TestScenarioValidation:
         with pytest.raises(ValueError, match="duration_s"):
             replace(load_scenario(S1_TOML), duration_s=0.0)
 
-    def test_rejects_a_leg_count_mismatch(self) -> None:
+    def test_rejects_a_burst_count_mismatch(self) -> None:
         from dataclasses import replace
 
         with pytest.raises(ValueError, match="same length"):
-            replace(load_scenario(S3_TOML), n_chirps=(128,))
+            replace(load_scenario(S3_TOML), n_pulses=(128,))
 
 
-class TestLegRangeDoppler:
+class TestBurstRangeDoppler:
     def test_fmcw_axes_match_the_map(self) -> None:
         scenario = _short_window(load_scenario(S1_TOML), 1)
         frame = next(iter(iterate_frames(scenario)))
-        product = leg_range_doppler(frame.iq[0], scenario.legs[0])
+        product = burst_range_doppler(frame.iq[0], scenario.bursts[0])
         assert product.rd_map.shape == (
             product.velocity_axis_mps.size,
             product.range_axis_m.size,
@@ -265,7 +265,9 @@ class TestLegRangeDoppler:
     def test_the_range_axis_is_unshifted_and_the_velocity_axis_is_centred(self) -> None:
         """The dsp asymmetry the spec S7.1 insists on, carried through intact."""
         scenario = _short_window(load_scenario(S1_TOML), 1)
-        product = leg_range_doppler(next(iter(iterate_frames(scenario))).iq[0], scenario.legs[0])
+        product = burst_range_doppler(
+            next(iter(iterate_frames(scenario))).iq[0], scenario.bursts[0]
+        )
         np.testing.assert_allclose(product.range_axis_m[0], 0.0, atol=1e-12)
         assert product.range_axis_m[-1] > product.range_axis_m[0]
         centre = product.velocity_axis_mps.size // 2
@@ -274,13 +276,13 @@ class TestLegRangeDoppler:
     def test_the_pulsed_range_axis_spans_one_unambiguous_range(self) -> None:
         """The matched filter's group delay is trimmed off, not left as an offset."""
         scenario = _short_window(load_scenario(S2_TOML), 1)
-        leg = scenario.legs[0]
-        product = leg_range_doppler(next(iter(iterate_frames(scenario))).iq[0], leg)
+        burst = scenario.bursts[0]
+        product = burst_range_doppler(next(iter(iterate_frames(scenario))).iq[0], burst)
         np.testing.assert_allclose(product.range_axis_m[0], 0.0, atol=1e-12)
-        assert product.range_axis_m[-1] < leg.unambiguous_range_m
+        assert product.range_axis_m[-1] < burst.unambiguous_range_m
         np.testing.assert_allclose(
             product.range_axis_m[-1] + product.range_axis_m[1],
-            leg.unambiguous_range_m,
+            burst.unambiguous_range_m,
             rtol=1e-9,
         )
 
@@ -288,39 +290,39 @@ class TestLegRangeDoppler:
         """Closed-form ground truth, bypassing the trajectory entirely."""
         from radar_forge.core.signal import fmcw_deramp_baseband, line_of_sight_paths
 
-        leg = load_scenario(S1_TOML).legs[0]
+        burst = load_scenario(S1_TOML).bursts[0]
         true_range_m = 10_000.0
         true_velocity_mps = 3.0
-        paths = line_of_sight_paths(leg, true_range_m, true_velocity_mps, 10.0)
-        cube = fmcw_deramp_baseband(paths, leg, 256)
-        peak_range_m, peak_velocity_mps = peak_range_velocity(leg_range_doppler(cube, leg))
-        assert abs(peak_range_m - true_range_m) < leg.range_resolution_m
+        paths = line_of_sight_paths(burst, true_range_m, true_velocity_mps, 10.0)
+        cube = fmcw_deramp_baseband(paths, burst, 256)
+        peak_range_m, peak_velocity_mps = peak_range_velocity(burst_range_doppler(cube, burst))
+        assert abs(peak_range_m - true_range_m) < burst.range_resolution_m
         assert abs(peak_velocity_mps - true_velocity_mps) < 0.1
 
     def test_a_synthetic_pulsed_target_folds_into_the_unambiguous_range(self) -> None:
         """S2's defining behaviour, through the pipeline's own receive chain."""
         from radar_forge.core.signal import line_of_sight_paths, pulsed_baseband
 
-        leg = load_scenario(S2_TOML).legs[0]
+        burst = load_scenario(S2_TOML).bursts[0]
         true_range_m = 15_000.0
-        paths = line_of_sight_paths(leg, true_range_m, 0.0, 10.0)
-        cube = pulsed_baseband(paths, leg, 64)
-        peak_range_m, peak_velocity_mps = peak_range_velocity(leg_range_doppler(cube, leg))
-        expected_range_m = true_range_m % leg.unambiguous_range_m
-        assert abs(peak_range_m - expected_range_m) < leg.range_resolution_m
+        paths = line_of_sight_paths(burst, true_range_m, 0.0, 10.0)
+        cube = pulsed_baseband(paths, burst, 64)
+        peak_range_m, peak_velocity_mps = peak_range_velocity(burst_range_doppler(cube, burst))
+        expected_range_m = true_range_m % burst.unambiguous_range_m
+        assert abs(peak_range_m - expected_range_m) < burst.range_resolution_m
         np.testing.assert_allclose(peak_velocity_mps, 0.0, atol=1e-12)
 
     def test_a_pulsed_target_inside_the_unambiguous_range_does_not_fold(self) -> None:
         """Pins that the group-delay trim is right, not merely self-consistent."""
         from radar_forge.core.signal import line_of_sight_paths, pulsed_baseband
 
-        leg = load_scenario(S2_TOML).legs[0]
+        burst = load_scenario(S2_TOML).bursts[0]
         true_range_m = 3_000.0
-        paths = line_of_sight_paths(leg, true_range_m, 0.0, 10.0)
+        paths = line_of_sight_paths(burst, true_range_m, 0.0, 10.0)
         peak_range_m, _ = peak_range_velocity(
-            leg_range_doppler(pulsed_baseband(paths, leg, 64), leg)
+            burst_range_doppler(pulsed_baseband(paths, burst, 64), burst)
         )
-        assert abs(peak_range_m - true_range_m) < leg.range_resolution_m
+        assert abs(peak_range_m - true_range_m) < burst.range_resolution_m
 
 
 class TestVelocityIsIndependentOfTheWindow:

@@ -30,7 +30,7 @@ from radar_forge.core.signal import (
 from radar_forge.core.waveforms import lfm_chirp
 
 DSO_SITE = (1.29150, 103.78710, 60.0)
-N_CHIRPS = 256
+N_PULSES = 256
 
 S1_RADAR = Radar(
     Transmitter(9.8e9, 2.0e6, 100.0, 30.0, 1.0e-3, 1.0e3, waveform="fmcw"),
@@ -47,7 +47,7 @@ S2_RADAR = Radar(
 def _fmcw_peak(range_m: float, velocity_mps: float) -> tuple[float, float]:
     """Return the (range_m, velocity_mps) of the brightest S1 range-Doppler cell."""
     paths = line_of_sight_paths(S1_RADAR, range_m, velocity_mps, 10.0)
-    cube = fmcw_deramp_baseband(paths, S1_RADAR, N_CHIRPS)
+    cube = fmcw_deramp_baseband(paths, S1_RADAR, N_PULSES)
     rd_map = range_doppler_map(cube)
     peak = np.unravel_index(np.abs(rd_map).argmax(), rd_map.shape)
     range_axis_m = range_bin_centers_m(
@@ -149,10 +149,10 @@ class TestPropagationPathsValidation:
 
 class TestFmcwDerampBaseband:
     def test_cube_has_the_canonical_layout(self) -> None:
-        """(n_chirps, n_samples): slow time axis 0, per style.md S4."""
+        """(n_pulses, n_samples): slow time axis 0, per style.md S4."""
         paths = line_of_sight_paths(S1_RADAR, 10_000.0, 0.0, 10.0)
-        cube = fmcw_deramp_baseband(paths, S1_RADAR, N_CHIRPS)
-        assert cube.shape == (N_CHIRPS, 1000)
+        cube = fmcw_deramp_baseband(paths, S1_RADAR, N_PULSES)
+        assert cube.shape == (N_PULSES, 1000)
         assert cube.dtype == np.complex128
 
     @pytest.mark.parametrize("true_range_m", [5_000.0, 10_000.0, 17_500.0])
@@ -241,8 +241,8 @@ class TestPulsedBaseband:
     def test_cube_spans_the_full_repetition_interval(self) -> None:
         """100 samples per 40 us PRI, not the 25 the pulse itself occupies."""
         paths = line_of_sight_paths(S2_RADAR, 4_000.0, 0.0, 10.0)
-        cube = pulsed_baseband(paths, S2_RADAR, N_CHIRPS)
-        assert cube.shape == (N_CHIRPS, 100)
+        cube = pulsed_baseband(paths, S2_RADAR, N_PULSES)
+        assert cube.shape == (N_PULSES, 100)
 
     def test_an_unambiguous_target_lands_at_its_true_delay(self) -> None:
         """A target inside 5.996 km does not fold, so the delay is exact."""
@@ -287,7 +287,7 @@ class TestPulsedBaseband:
         """S2's compensating virtue: 80 m/s is well inside +/-191 m/s."""
         true_velocity_mps = 80.0
         paths = line_of_sight_paths(S2_RADAR, 4_000.0, true_velocity_mps, 10.0)
-        cube = pulsed_baseband(paths, S2_RADAR, N_CHIRPS)
+        cube = pulsed_baseband(paths, S2_RADAR, N_PULSES)
         rd_map = range_doppler_map(cube)
         peak = np.unravel_index(np.abs(rd_map).argmax(), rd_map.shape)
         velocity_axis_mps = doppler_bin_centers_mps(

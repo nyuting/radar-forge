@@ -3,16 +3,16 @@
 A scenario is a TOML file plus the code here that reads it and plays it back.
 The split matters: the radar, the target and the window are *data*, so that
 changing a waveform is an edit to a text file rather than to the library, and
-the three variants of scenario 001 differ only in their ``[[leg]]`` tables.
+the three variants of scenario 001 differ only in their ``[[burst]]`` tables.
 
-Legs
-----
-A scenario has one or more **legs**, each a fully specified
+Bursts
+------
+A scenario has one or more **bursts**, each a fully specified
 :class:`~radar_forge.core.radar.Radar` transmitting its own coherent
-processing interval within the frame. One leg is the ordinary case. Two legs
+processing interval within the frame. One burst is the ordinary case. Two bursts
 is how a dual-PRF radar resolves the ambiguity neither rate can resolve alone,
 and they stay separate all the way through: two different sweep rates cannot
-be coherently integrated together, so each leg gets its own cube, its own
+be coherently integrated together, so each burst gets its own cube, its own
 range-Doppler map at its own scales, and the pair meets only at the level of
 *measurements* in :func:`radar_forge.core.ambiguity.unfold_doppler_dual_prf`.
 That is also how the hardware does it, and it is why :attr:`Frame.iq` is a
@@ -73,8 +73,8 @@ __all__ = [
     "Frame",
     "RangeDopplerProduct",
     "Scenario",
+    "burst_range_doppler",
     "iterate_frames",
-    "leg_range_doppler",
     "load_scenario",
     "peak_range_velocity",
 ]
@@ -83,7 +83,7 @@ _RADAR_KEYS = frozenset({"latitude_deg", "longitude_deg", "altitude_m"})
 _RECEIVER_KEYS = frozenset({"gain_rx_dbi", "noise_figure_db"})
 _TARGET_KEYS = frozenset({"rcs_dbsm", "altitude_m", "name"})
 _TRAJECTORY_KEYS = frozenset({"path", "start_time_s", "duration_s", "frame_rate_hz"})
-_LEG_KEYS = frozenset(
+_BURST_KEYS = frozenset(
     {
         "f0_hz",
         "bandwidth_hz",
@@ -93,7 +93,7 @@ _LEG_KEYS = frozenset(
         "prf_hz",
         "waveform",
         "sample_rate_hz",
-        "n_chirps",
+        "n_pulses",
     }
 )
 _SCENARIO_KEYS = frozenset({"name", "description", "seed"})
@@ -109,12 +109,12 @@ class Scenario:
         Short identifier, used to label outputs.
     description : str
         One line of prose about what the scenario demonstrates.
-    legs : tuple of radar_forge.core.radar.Radar
-        One fully specified radar per leg, in transmission order. Length 1 for
+    bursts : tuple of radar_forge.core.radar.Radar
+        One fully specified radar per burst, in transmission order. Length 1 for
         an ordinary scenario, 2 for a dual-PRF one.
-    n_chirps : tuple of int
-        Chirps in each leg's coherent processing interval, same length and
-        order as ``legs``.
+    n_pulses : tuple of int
+        Slow-time pulses in each burst's coherent processing interval, same length
+        and order as ``bursts``.
     target : radar_forge.core.targets.PointTarget
         The illuminated target. Swerling 0, so its cross-section is constant.
     target_altitude_m : float
@@ -133,8 +133,8 @@ class Scenario:
 
     name: str
     description: str
-    legs: tuple[Radar, ...]
-    n_chirps: tuple[int, ...]
+    bursts: tuple[Radar, ...]
+    n_pulses: tuple[int, ...]
     target: PointTarget
     target_altitude_m: float
     trajectory_path: Path
@@ -145,17 +145,17 @@ class Scenario:
 
     def __post_init__(self) -> None:
         """Validate the scenario as a whole; see :func:`load_scenario`."""
-        if not self.legs:
-            msg = "a scenario needs at least one [[leg]]."
+        if not self.bursts:
+            msg = "a scenario needs at least one [[burst]]."
             raise ValueError(msg)
-        if len(self.legs) != len(self.n_chirps):
+        if len(self.bursts) != len(self.n_pulses):
             msg = (
-                f"legs and n_chirps must have the same length; got "
-                f"{len(self.legs)} and {len(self.n_chirps)}."
+                f"bursts and n_pulses must have the same length; got "
+                f"{len(self.bursts)} and {len(self.n_pulses)}."
             )
             raise ValueError(msg)
-        if any(count <= 0 for count in self.n_chirps):
-            msg = f"every leg needs a strictly positive n_chirps; got {self.n_chirps}."
+        if any(count <= 0 for count in self.n_pulses):
+            msg = f"every burst needs a strictly positive n_pulses; got {self.n_pulses}."
             raise ValueError(msg)
         if self.duration_s <= 0.0:
             msg = f"duration_s must be strictly positive; got {self.duration_s!r}."
@@ -190,13 +190,13 @@ class Frame:
     time_s : float
         Scenario time, seconds from the track's first fix.
     iq : tuple of numpy.ndarray
-        One complex128 cube per leg, each ``(n_chirps, n_samples)`` with slow
-        time on axis 0. Legs may differ in both dimensions.
+        One complex128 cube per burst, each ``(n_pulses, n_samples)`` with slow
+        time on axis 0. Bursts may differ in both dimensions.
     range_m : float
         True slant range, metres.
     radial_velocity_mps : float
         True radial velocity, metres/second, positive closing and **not**
-        folded into any leg's unambiguous interval.
+        folded into any burst's unambiguous interval.
     azimuth_deg, elevation_deg : float
         True look angles, degrees.
     """
@@ -243,7 +243,7 @@ def _resampled_track(trajectory: Trajectory, scenario: Scenario) -> tuple[Target
         )
         raise ValueError(msg)
 
-    track = to_radar_frame(resample(trajectory, grid_s), scenario.legs[0])
+    track = to_radar_frame(resample(trajectory, grid_s), scenario.bursts[0])
     return track, 1 if pad_before else 0
 
 
@@ -255,22 +255,22 @@ def _require_keys(table: dict[str, Any], allowed: frozenset[str], name: str) -> 
         raise ValueError(msg)
 
 
-def _leg_radar(leg: dict[str, Any], radar: dict[str, Any], receiver: dict[str, Any]) -> Radar:
-    """Build one leg's Radar, letting its own validation report bad physics."""
-    waveform: WaveformKind = leg.get("waveform", "fmcw")
+def _burst_radar(burst: dict[str, Any], radar: dict[str, Any], receiver: dict[str, Any]) -> Radar:
+    """Build one burst's Radar, letting its own validation report bad physics."""
+    waveform: WaveformKind = burst.get("waveform", "fmcw")
     transmitter = Transmitter(
-        f0_hz=float(leg["f0_hz"]),
-        bandwidth_hz=float(leg["bandwidth_hz"]),
-        transmit_power_w=float(leg["transmit_power_w"]),
-        gain_tx_dbi=float(leg["gain_tx_dbi"]),
-        chirp_time_s=float(leg["chirp_time_s"]),
-        prf_hz=float(leg["prf_hz"]),
+        f0_hz=float(burst["f0_hz"]),
+        bandwidth_hz=float(burst["bandwidth_hz"]),
+        transmit_power_w=float(burst["transmit_power_w"]),
+        gain_tx_dbi=float(burst["gain_tx_dbi"]),
+        chirp_time_s=float(burst["chirp_time_s"]),
+        prf_hz=float(burst["prf_hz"]),
         waveform=waveform,
     )
     return Radar(
         transmitter=transmitter,
         receiver=Receiver(
-            sample_rate_hz=float(leg["sample_rate_hz"]),
+            sample_rate_hz=float(burst["sample_rate_hz"]),
             gain_rx_dbi=float(receiver["gain_rx_dbi"]),
             noise_figure_db=float(receiver["noise_figure_db"]),
         ),
@@ -292,13 +292,13 @@ def load_scenario(path: Path | str) -> Scenario:
     Returns
     -------
     Scenario
-        With every leg built as a :class:`~radar_forge.core.radar.Radar`.
+        With every burst built as a :class:`~radar_forge.core.radar.Radar`.
 
     Raises
     ------
     ValueError
         If a required table or key is missing, if a table carries an unknown
-        key, or if no ``[[leg]]`` is defined. Bad *physics* -- a duty cycle
+        key, or if no ``[[burst]]`` is defined. Bad *physics* -- a duty cycle
         above one, a negative power -- is reported by ``Radar`` itself, so the
         message names the quantity rather than the file.
 
@@ -316,9 +316,9 @@ def load_scenario(path: Path | str) -> Scenario:
     >>> scenario = load_scenario("scenarios/scenario_001_fmcw_low_prf.toml")
     >>> scenario.name
     'scenario-001-fmcw-low-prf'
-    >>> len(scenario.legs)
+    >>> len(scenario.bursts)
     1
-    >>> round(scenario.legs[0].unambiguous_velocity_mps, 3)
+    >>> round(scenario.bursts[0].unambiguous_velocity_mps, 3)
     7.648
     """
     toml_path = Path(path)
@@ -329,8 +329,8 @@ def load_scenario(path: Path | str) -> Scenario:
         if table_name not in document:
             msg = f"{toml_path} is missing the required [{table_name}] table."
             raise ValueError(msg)
-    if "leg" not in document or not document["leg"]:
-        msg = f"{toml_path} defines no [[leg]]; a scenario needs at least one."
+    if "burst" not in document or not document["burst"]:
+        msg = f"{toml_path} defines no [[burst]]; a scenario needs at least one."
         raise ValueError(msg)
 
     scenario_table = document["scenario"]
@@ -344,17 +344,17 @@ def load_scenario(path: Path | str) -> Scenario:
     _require_keys(receiver_table, _RECEIVER_KEYS, "receiver")
     _require_keys(target_table, _TARGET_KEYS, "target")
     _require_keys(trajectory_table, _TRAJECTORY_KEYS, "trajectory")
-    for leg in document["leg"]:
-        _require_keys(leg, _LEG_KEYS, "leg")
+    for burst in document["burst"]:
+        _require_keys(burst, _BURST_KEYS, "burst")
 
-    legs = tuple(_leg_radar(leg, radar_table, receiver_table) for leg in document["leg"])
-    n_chirps = tuple(int(leg["n_chirps"]) for leg in document["leg"])
+    bursts = tuple(_burst_radar(burst, radar_table, receiver_table) for burst in document["burst"])
+    n_pulses = tuple(int(burst["n_pulses"]) for burst in document["burst"])
 
     return Scenario(
         name=str(scenario_table["name"]),
         description=str(scenario_table.get("description", "")),
-        legs=legs,
-        n_chirps=n_chirps,
+        bursts=bursts,
+        n_pulses=n_pulses,
         target=PointTarget.from_dbsm(
             float(target_table["rcs_dbsm"]), name=str(target_table.get("name", "target"))
         ),
@@ -378,7 +378,7 @@ def iterate_frames(scenario: Scenario) -> Iterator[Frame]:
     Yields
     ------
     Frame
-        One per frame time, in order, carrying a cube per leg and the true
+        One per frame time, in order, carrying a cube per burst and the true
         geometry that produced it.
 
     Raises
@@ -393,12 +393,12 @@ def iterate_frames(scenario: Scenario) -> Iterator[Frame]:
     and S1's cube is 4.1 MB, so the whole run would be 68 GB in memory.
 
     One :class:`numpy.random.Generator` is created from ``scenario.seed`` and
-    shared by every frame and leg, so a run replays bit for bit -- but only if
+    shared by every frame and burst, so a run replays bit for bit -- but only if
     it is consumed in order. Skipping frames changes the noise in the frames
     that follow.
 
     The truth carried on each frame is unfolded. Folding it to match a
-    particular leg's map is the *reader's* job, and the gap between the two is
+    particular burst's map is the *reader's* job, and the gap between the two is
     what the scenario exists to show.
 
     The trajectory is resampled one frame either side of the window wherever
@@ -423,9 +423,9 @@ def iterate_frames(scenario: Scenario) -> Iterator[Frame]:
         elevation_deg = float(track.elevation_deg[sample])
 
         cubes: list[NDArray[np.complex128]] = []
-        for leg_radar, leg_n_chirps in zip(scenario.legs, scenario.n_chirps, strict=True):
+        for burst_radar, burst_n_pulses in zip(scenario.bursts, scenario.n_pulses, strict=True):
             paths = line_of_sight_paths(
-                leg_radar,
+                burst_radar,
                 range_m,
                 radial_velocity_mps,
                 rcs_m2,
@@ -434,10 +434,10 @@ def iterate_frames(scenario: Scenario) -> Iterator[Frame]:
             )
             generate = (
                 pulsed_baseband
-                if leg_radar.transmitter.waveform == "pulsed"
+                if burst_radar.transmitter.waveform == "pulsed"
                 else fmcw_deramp_baseband
             )
-            cubes.append(generate(paths, leg_radar, leg_n_chirps, rng=rng))
+            cubes.append(generate(paths, burst_radar, burst_n_pulses, rng=rng))
 
         yield Frame(
             index=index,
@@ -452,7 +452,7 @@ def iterate_frames(scenario: Scenario) -> Iterator[Frame]:
 
 @dataclass(frozen=True)
 class RangeDopplerProduct:
-    """One leg's range-Doppler map and the axes that label it.
+    """One burst's range-Doppler map and the axes that label it.
 
     Attributes
     ----------
@@ -471,15 +471,15 @@ class RangeDopplerProduct:
     velocity_axis_mps: NDArray[np.float64]
 
 
-def leg_range_doppler(cube: NDArray[np.complex128], leg: Radar) -> RangeDopplerProduct:
-    """Process one leg's IQ cube into a range-Doppler map with labelled axes.
+def burst_range_doppler(cube: NDArray[np.complex128], burst: Radar) -> RangeDopplerProduct:
+    """Process one burst's IQ cube into a range-Doppler map with labelled axes.
 
     Parameters
     ----------
     cube : numpy.ndarray
-        Baseband IQ, shape ``(n_chirps, n_samples)``, slow time on axis 0.
-    leg : radar_forge.core.radar.Radar
-        The leg that produced it; its waveform selects the receive chain.
+        Baseband IQ, shape ``(n_pulses, n_samples)``, slow time on axis 0.
+    burst : radar_forge.core.radar.Radar
+        The burst that produced it; its waveform selects the receive chain.
 
     Returns
     -------
@@ -506,32 +506,32 @@ def leg_range_doppler(cube: NDArray[np.complex128], leg: Radar) -> RangeDopplerP
     axis, from the ``dsp`` helpers rather than re-derived -- see the scenario
     specification S7.1.
     """
-    if leg.transmitter.waveform == "pulsed":
+    if burst.transmitter.waveform == "pulsed":
         reference = lfm_chirp(
-            leg.transmitter.bandwidth_hz,
-            leg.transmitter.chirp_time_s,
-            leg.receiver.sample_rate_hz,
+            burst.transmitter.bandwidth_hz,
+            burst.transmitter.chirp_time_s,
+            burst.receiver.sample_rate_hz,
         )
         group_delay_samples = reference.size - 1
         compressed = matched_filter(cube, reference, axis=-1)
-        n_samples = leg.n_samples_per_pri
+        n_samples = burst.n_samples_per_pri
         window = compressed[:, group_delay_samples : group_delay_samples + n_samples]
         rd_map = doppler_fft(window, axis=0)
         sample_index = np.arange(window.shape[1], dtype=np.float64)
-        range_axis_m = sample_index * SPEED_OF_LIGHT_MPS / (2.0 * leg.receiver.sample_rate_hz)
+        range_axis_m = sample_index * SPEED_OF_LIGHT_MPS / (2.0 * burst.receiver.sample_rate_hz)
     else:
         rd_map = range_doppler_map(cube)
         range_axis_m = range_bin_centers_m(
             rd_map.shape[1],
-            leg.transmitter.bandwidth_hz,
-            leg.transmitter.chirp_time_s,
-            leg.receiver.sample_rate_hz,
+            burst.transmitter.bandwidth_hz,
+            burst.transmitter.chirp_time_s,
+            burst.receiver.sample_rate_hz,
         )
 
     velocity_axis_mps = doppler_bin_centers_mps(
         rd_map.shape[0],
-        leg.transmitter.pulse_repetition_interval_s,
-        leg.wavelength_m,
+        burst.transmitter.pulse_repetition_interval_s,
+        burst.wavelength_m,
     )
     return RangeDopplerProduct(
         rd_map=rd_map,

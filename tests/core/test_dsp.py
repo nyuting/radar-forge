@@ -27,7 +27,7 @@ NOMINAL = {
 WAVELENGTH_M = 3.896e-3
 PULSE_REPETITION_INTERVAL_S = 50e-6
 N_SAMPLES = 64
-N_CHIRPS = 32
+N_PULSES = 32
 
 
 def deramped_cube(range_bin: int, doppler_bin: int) -> np.ndarray:
@@ -39,7 +39,7 @@ def deramped_cube(range_bin: int, doppler_bin: int) -> np.ndarray:
     that has to be located to within a tolerance.
     """
     range_m = range_bin_centers_m(N_SAMPLES, **NOMINAL)[range_bin]
-    velocity_mps = doppler_bin_centers_mps(N_CHIRPS, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)[
+    velocity_mps = doppler_bin_centers_mps(N_PULSES, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)[
         doppler_bin
     ]
 
@@ -47,7 +47,7 @@ def deramped_cube(range_bin: int, doppler_bin: int) -> np.ndarray:
     doppler_hz = 2.0 * velocity_mps / WAVELENGTH_M
 
     fast_time_s = np.arange(N_SAMPLES) / NOMINAL["sample_rate_hz"]
-    slow_time_s = np.arange(N_CHIRPS) * PULSE_REPETITION_INTERVAL_S
+    slow_time_s = np.arange(N_PULSES) * PULSE_REPETITION_INTERVAL_S
     fast_phase = np.exp(2j * np.pi * beat_hz * fast_time_s)
     slow_phase = np.exp(2j * np.pi * doppler_hz * slow_time_s)
     return slow_phase[:, None] * fast_phase[None, :]
@@ -216,11 +216,11 @@ class TestDopplerFft:
 
     def test_separates_closing_from_opening(self) -> None:
         """Closing targets sit above centre, opening targets below."""
-        n_chirps = 32
-        closing = np.exp(2j * np.pi * 3 * np.arange(n_chirps) / n_chirps)
-        opening = np.exp(-2j * np.pi * 3 * np.arange(n_chirps) / n_chirps)
-        assert int(np.argmax(np.abs(doppler_fft(closing, axis=0)))) > n_chirps // 2
-        assert int(np.argmax(np.abs(doppler_fft(opening, axis=0)))) < n_chirps // 2
+        n_pulses = 32
+        closing = np.exp(2j * np.pi * 3 * np.arange(n_pulses) / n_pulses)
+        opening = np.exp(-2j * np.pi * 3 * np.arange(n_pulses) / n_pulses)
+        assert int(np.argmax(np.abs(doppler_fft(closing, axis=0)))) > n_pulses // 2
+        assert int(np.argmax(np.abs(doppler_fft(opening, axis=0)))) < n_pulses // 2
 
     def test_conserves_energy(self) -> None:
         """Parseval survives the fftshift, which only permutes bins."""
@@ -301,10 +301,10 @@ class TestMtiFilter:
 
     def test_matches_the_analytic_frequency_response(self) -> None:
         r"""|H(f_d)| = 2|sin(pi f_d T_PRI)| for the single canceller."""
-        n_chirps = 64
+        n_pulses = 64
         for doppler_fraction in (0.1, 0.25, 0.4):
             doppler_hz = doppler_fraction / PULSE_REPETITION_INTERVAL_S
-            slow_time_s = np.arange(n_chirps) * PULSE_REPETITION_INTERVAL_S
+            slow_time_s = np.arange(n_pulses) * PULSE_REPETITION_INTERVAL_S
             tone = np.exp(2j * np.pi * doppler_hz * slow_time_s)
             gain = np.abs(mti_filter(tone, n_pulses=2)).mean()
             expected = 2.0 * np.abs(np.sin(np.pi * doppler_hz * PULSE_REPETITION_INTERVAL_S))
@@ -317,35 +317,35 @@ class TestMtiFilter:
         This is a property of the canceller, not a defect in it: staggering the
         PRI is the standard cure and is deliberately not implemented here.
         """
-        n_chirps = 32
+        n_pulses = 32
         blind_doppler_hz = 1.0 / PULSE_REPETITION_INTERVAL_S
-        slow_time_s = np.arange(n_chirps) * PULSE_REPETITION_INTERVAL_S
+        slow_time_s = np.arange(n_pulses) * PULSE_REPETITION_INTERVAL_S
         blind = np.exp(2j * np.pi * blind_doppler_hz * slow_time_s)
         np.testing.assert_allclose(mti_filter(blind), 0.0, atol=1e-12)
 
     def test_passes_the_optimum_doppler(self) -> None:
         """Half the PRF is the peak of the canceller's response, a gain of 2."""
-        n_chirps = 32
+        n_pulses = 32
         doppler_hz = 0.5 / PULSE_REPETITION_INTERVAL_S
-        slow_time_s = np.arange(n_chirps) * PULSE_REPETITION_INTERVAL_S
+        slow_time_s = np.arange(n_pulses) * PULSE_REPETITION_INTERVAL_S
         tone = np.exp(2j * np.pi * doppler_hz * slow_time_s)
         np.testing.assert_allclose(np.abs(mti_filter(tone)), 2.0, rtol=1e-10)
 
     def test_suppresses_clutter_under_a_moving_target(self) -> None:
         """The operational claim: strong clutter falls far below a weak target."""
-        clutter = deramped_cube(range_bin=10, doppler_bin=N_CHIRPS // 2) * 1000.0
-        target = deramped_cube(range_bin=10, doppler_bin=N_CHIRPS // 2 + 8)
+        clutter = deramped_cube(range_bin=10, doppler_bin=N_PULSES // 2) * 1000.0
+        target = deramped_cube(range_bin=10, doppler_bin=N_PULSES // 2 + 8)
         before = range_doppler_map(clutter + target, fast_time_axis=1, slow_time_axis=0)
         after = range_doppler_map(mti_filter(clutter + target), fast_time_axis=1, slow_time_axis=0)
         # Clutter dominates by 60 dB before the canceller and must not after.
-        assert np.abs(before).max() / np.abs(before[N_CHIRPS // 2 + 8]).max() > 10.0
+        assert np.abs(before).max() / np.abs(before[N_PULSES // 2 + 8]).max() > 10.0
         assert int(np.argmax(np.abs(after)) // after.shape[1]) != after.shape[0] // 2
 
     def test_double_canceller_nulls_harder(self) -> None:
         """Two cancellers stack, so the near-zero-Doppler notch deepens."""
-        n_chirps = 32
+        n_pulses = 32
         slow_doppler_hz = 0.01 / PULSE_REPETITION_INTERVAL_S
-        slow_time_s = np.arange(n_chirps) * PULSE_REPETITION_INTERVAL_S
+        slow_time_s = np.arange(n_pulses) * PULSE_REPETITION_INTERVAL_S
         creeping = np.exp(2j * np.pi * slow_doppler_hz * slow_time_s)
         assert (
             np.abs(mti_filter(creeping, n_pulses=3)).max()
@@ -390,16 +390,16 @@ class TestRangeDopplerMap:
             range_doppler_map(cube, fast_time_axis=1, slow_time_axis=0),
             expected,
             rtol=1e-10,
-            atol=float(N_CHIRPS * N_SAMPLES) * 1e-12,
+            atol=float(N_PULSES * N_SAMPLES) * 1e-12,
         )
 
     def test_transforms_commute(self) -> None:
         """They act on different axes, so the order is convention only."""
         cube = deramped_cube(range_bin=10, doppler_bin=20)
-        # The map peaks at n_chirps * n_samples; every other bin is an exact
+        # The map peaks at n_pulses * n_samples; every other bin is an exact
         # null, so compare against an atol pegged to that peak rather than a
         # relative tolerance on numbers whose true value is zero.
-        peak = float(N_CHIRPS * N_SAMPLES)
+        peak = float(N_PULSES * N_SAMPLES)
         np.testing.assert_allclose(
             doppler_fft(range_fft(cube, axis=1), axis=0),
             range_fft(doppler_fft(cube, axis=0), axis=1),
