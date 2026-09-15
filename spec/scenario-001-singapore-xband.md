@@ -1,6 +1,6 @@
 # Scenario 001 — X-band radar at DSO National Laboratories
 
-Status: **specification**, pre-implementation. The first end-to-end simulation in `radar-forge`.
+Status: **implemented**. The first end-to-end simulation in `radar-forge`.
 
 ## 1. Purpose
 
@@ -217,6 +217,8 @@ for kilobyte-scale regression fixtures with a regeneration script. A 51-row exce
 `tests/data/golden/flight_coordinates_head.csv` so the loader test does not depend on the full file.
 
 ## 8. Amendments to `spec/structure.md`
+
+> **Applied.** These amendments are folded into `spec/structure.md`; it is the authoritative tree and decision list. This section records what changed and why.
 
 1. **`core/geodesy.py` is new.** `spec/structure.md` gives WGS-84 ↔ ENU no home. It does not belong
    in `pipelines/trajectories.py`, because `raytracing/scene.py` will need it to place scene

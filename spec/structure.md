@@ -1,6 +1,9 @@
 # radar-forge — Module Structure
 
-**Status:** design document, pre-implementation.
+**Status:** design document, partially implemented. `core/` and `pipelines/` are built as far as
+scenarios 001 and 002 required; `array/`, `raytracing/`, `pipelines/exporters/` and most of
+`teaching/` are still design only. Part B marks the tree as intended, not as built — read it
+alongside the source.
 **Companion to:** [`starter.md`](starter.md) (project charter and ecosystem survey).
 
 This document does two things. **Part A** surveys each reference project named in the starter spec and
@@ -422,13 +425,16 @@ src/radar_forge/
 ├── config.py                    # units, constants, global dtype/backend settings
 ├── core/
 │   ├── __init__.py
-│   ├── radar.py                 # Transmitter, Receiver, Radar
-│   ├── radar_equation.py        # range equation, SNR, max range, link budget
+│   ├── radar.py                 # Transmitter, Receiver, Radar, BistaticRadar, RadarLike
+│   ├── radar_equation.py        # range equation (monostatic + bistatic), SNR, max range, link budget
+│   ├── geodesy.py               # WGS-84 geodetic ↔ ECEF ↔ ENU; ENU → range/az/el
 │   ├── waveforms.py             # FMCW/LFM chirp, pulse train, CW, PMCW; ambiguity function
 │   ├── targets.py               # PointTarget, ExtendedTarget, RCS + Swerling 0–4
-│   ├── propagation.py           # free-space loss, atmospheric absorption, rain attenuation
+│   ├── propagation.py           # free-space loss, atmospheric absorption, rain attenuation (deferred)
 │   ├── signal.py                # baseband synthesis, superposition, noise, phase noise
-│   ├── dsp.py                   # range FFT, Doppler FFT, windowing, matched filter, MTI
+│   ├── dsp.py                   # range FFT, Doppler FFT, matched filter, MTI (range axis is bistatic mean range when bistatic)
+│   ├── windows.py               # Taylor, Chebyshev, Hamming, Hann tapers; coherent gain, loss
+│   ├── ambiguity.py             # velocity folding; dual-PRF Doppler unfolding
 │   ├── detection.py             # CA/GO/SO/OS-CFAR, Pfa calibration, detection clustering
 │   ├── clutter.py               # land/sea clutter models; ECA / Wiener-SMI cancellation
 │   └── tracking.py              # KF, EKF, gating, assignment, simple track manager
@@ -448,13 +454,14 @@ src/radar_forge/
 │   ├── materials.py             # EM material properties, permittivity/conductivity tables
 │   └── backends/
 │       ├── __init__.py          # lazy registry; missing deps degrade to a clear error, never ImportError at import
-│       ├── analytic.py          # always-available fallback: point-target / specular approximation
+│       ├── analytic.py          # always-available fallback: point-target / specular approximation,
+│       │                        #   built on core.signal.line_of_sight_paths rather than duplicating it
 │       ├── radarsimpy.py        # RadarSimPy backend (extra: radarsimpy)
 │       ├── mitsuba.py           # Mitsuba/Dr.Jit backend, RF-Genesis-style (extra: mitsuba)
 │       └── ovrtx.py             # NVIDIA Omniverse RTX backend (extra: ovrtx)
 ├── pipelines/
 │   ├── __init__.py
-│   ├── scenarios.py             # YAML/JSON scenario schema + loader
+│   ├── scenarios.py             # TOML scenario schema + loader (stdlib tomllib); frame loop
 │   ├── trajectories.py          # target motion planning (traffic, pedestrian, bicyclist)
 │   ├── generate.py              # scene -> baseband -> cube orchestration, batching, seeding
 │   ├── datasets.py              # torch Dataset / DataLoader wrappers (extra: ml)
@@ -494,7 +501,7 @@ src/radar_forge/
 | `raytracing/backends/mitsuba.py` | RF-Genesis `genesis/` Mitsuba + Dr.Jit usage |
 | `raytracing/backends/ovrtx.py` | ovrtx sensor-simulation API |
 | `pipelines/exporters/*` | FMCW Radar Target Simulator `JSONCoco.py` and its label schema |
-| `pipelines/scenarios.py` | RadarSim YAML scenario files |
+| `pipelines/scenarios.py` | RadarSim YAML scenario files (radar-forge uses TOML: `CLAUDE.md` requires it) |
 | `pipelines/datasets.py` | AIRadarLib PyTorch dataset/training wrappers; torchcvnn `datasets`/`transforms` (complex SAR loader layout); Steinmetz Neural Networks (complex-valued I/Q feature convention) |
 | `teaching/scopes/*`, `teaching/app.py` | RadarSim PySide6 GUI (PPI, RHI, A-Scope) |
 | `teaching/notebooks/` | RadarBook `jupyter/`; RadarSimNb |
@@ -612,6 +619,39 @@ testing the physics. A second test runs a radar-forge-generated cube through a s
 **What is deliberately not tested:** agreement between radar-forge's baseband and MATLAB's for the same
 scenario. If a physics cross-check is ever wanted, the reference of choice is RadarSimPy or the RadarBook
 worked examples — both Python, both already in the dependency story — not MATLAB.
+
+### D6 — `PropagationPaths` covers bistatic geometry unchanged
+
+Settled by `spec/scenario-002-singapore-bistatic.md`, which was the first slice to put the
+transmitter and the receiver at different sites. D1's dataclass survives without an edit:
+
+| Field | Monostatic reading | Bistatic reading |
+| :--- | :--- | :--- |
+| `delay_s` | `2R/c` | `(R_t + R_r)/c` |
+| `range_m` property, `delay_s·c/2` | `R` | the **bistatic mean range** `(R_t + R_r)/2` |
+| `doppler_hz` | `2v/λ` | `(Ṙ_t + Ṙ_r)/λ` — the same expression over the bisector range rate |
+
+Both monostatic forms are the special case `R_t = R_r`. `range_tx_m` and `range_rx_m` are
+deliberately **not** fields: the two ranges are geometry, and geometry belongs to `BistaticRadar`.
+A path set records what a propagation model produced, not how the radar was arranged. This is the
+strongest evidence so far that D1 was drawn in the right place, because it was drawn before the
+bistatic case was considered.
+
+### D7 — One siting-agnostic pipeline, via `RadarLike`
+
+`RadarLike = Radar | BistaticRadar`. Consumers widen to the union rather than growing `bistatic_*`
+twins: the signal generators and the range-Doppler processing depend only on waveform and receiver
+attributes that both classes carry, so each needed a type widening and no new mathematics. In
+`pipelines/scenarios.py` the siting is selected by the presence of a `[transmitter_site]` table, so
+a monostatic scenario file is unchanged by the feature's existence.
+
+### D8 — Bistatic RCS is taken as given, and angle-independent
+
+`PointTarget` keeps a single `rcs_m2`, used as σ_b. The monostatic-equivalence theorem licenses
+that only for smooth bodies at small bistatic angles away from resonance, and scenario 002 runs to
+β = 100.5°, so **absolute** power in a bistatic scenario is an approximation. Its acceptance
+criteria test range, velocity and resolution — geometry — and deliberately assert nothing about
+absolute SNR. Forward scatter is not modelled at all.
 
 ---
 

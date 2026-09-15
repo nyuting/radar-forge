@@ -1,6 +1,6 @@
 # Scenario 002 — Bistatic radar, Changi illuminator to DSO receiver
 
-Status: **specification**, pre-implementation. The second vertical slice, and the first bistatic one.
+Status: **implemented**. The second vertical slice, and the first bistatic one.
 
 ## 1. Purpose
 
@@ -190,6 +190,8 @@ As scenario-001 §6, with `truth.csv` gaining three columns:
 superset of scenario-001's and the D5 COCO exporter can consume either unchanged.
 
 ## 9. Amendments to `spec/structure.md`
+
+> **Applied.** These amendments are folded into `spec/structure.md`; it is the authoritative tree and decision list. This section records what changed and why.
 
 1. **`BistaticRadar` joins `core/radar.py`.** Part B lists `Transmitter, Receiver, Radar`. Add
    `BistaticRadar` and the `RadarLike` alias. It is not a new module: it shares validation, waveform
