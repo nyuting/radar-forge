@@ -67,7 +67,7 @@ NOMINAL_N_TRAIN = 16
 NOMINAL_N_GUARD = 2
 
 # A 77 GHz-style range-Doppler geometry, used by the end-to-end test.
-NOMINAL_N_CHIRPS = 64
+NOMINAL_N_PULSES = 64
 NOMINAL_N_SAMPLES = 256
 NOMINAL_PRI_S = 50e-6
 NOMINAL_WAVELENGTH_M = 3.9e-3
@@ -630,7 +630,7 @@ def test_detects_a_point_target_in_a_range_doppler_map(rng):
     n_range_bin = 40
     n_doppler_cycles = 9
 
-    chirp_index = np.arange(NOMINAL_N_CHIRPS)[:, None]
+    pulse_index = np.arange(NOMINAL_N_PULSES)[:, None]
     sample_index = np.arange(NOMINAL_N_SAMPLES)[None, :]
     # A beat tone at bin n_range_bin in fast time, advancing by an exact
     # n_doppler_cycles over the chirp aperture in slow time.
@@ -639,7 +639,7 @@ def test_detects_a_point_target_in_a_range_doppler_map(rng):
         * np.pi
         * (
             n_range_bin * sample_index / NOMINAL_N_SAMPLES
-            + n_doppler_cycles * chirp_index / NOMINAL_N_CHIRPS
+            + n_doppler_cycles * pulse_index / NOMINAL_N_PULSES
         )
     )
     noise = rng.normal(size=target.shape) + 1j * rng.normal(size=target.shape)
@@ -653,17 +653,17 @@ def test_detects_a_point_target_in_a_range_doppler_map(rng):
     doppler_bin, range_bin = found[0].peak_index
     assert range_bin == n_range_bin
     # range_doppler_map fftshifts the Doppler axis, so bin 0 is the most
-    # negative velocity and the zero-Doppler bin sits at n_chirps // 2.
-    assert doppler_bin == NOMINAL_N_CHIRPS // 2 + n_doppler_cycles
+    # negative velocity and the zero-Doppler bin sits at n_pulses // 2.
+    assert doppler_bin == NOMINAL_N_PULSES // 2 + n_doppler_cycles
 
     # The detection lands at the velocity the Doppler bin centres predict.
     velocities_mps = doppler_bin_centers_mps(
-        NOMINAL_N_CHIRPS,
+        NOMINAL_N_PULSES,
         pulse_repetition_interval_s=NOMINAL_PRI_S,
         wavelength_m=NOMINAL_WAVELENGTH_M,
     )
     expected_mps = (
-        n_doppler_cycles / NOMINAL_N_CHIRPS * NOMINAL_WAVELENGTH_M / (2.0 * NOMINAL_PRI_S)
+        n_doppler_cycles / NOMINAL_N_PULSES * NOMINAL_WAVELENGTH_M / (2.0 * NOMINAL_PRI_S)
     )
     np.testing.assert_allclose(velocities_mps[doppler_bin], expected_mps, rtol=1e-12)
 

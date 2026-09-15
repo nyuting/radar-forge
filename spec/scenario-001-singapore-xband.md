@@ -114,11 +114,11 @@ apparent range, which is the lesson.
 | | |
 | :--- | :--- |
 | Waveform | FMCW, alternating blocks of 128 chirps at two chirp rates |
-| Leg A | `chirp_time_s` = 200.0 µs, α = 10.000 GHz/s, PRF 5.0 kHz, 800 samples |
-| Leg B | `chirp_time_s` = 166.7 µs, α = 12.000 GHz/s, PRF 6.0 kHz, 667 samples |
+| Burst A | `chirp_time_s` = 200.0 µs, α = 10.000 GHz/s, PRF 5.0 kHz, 800 samples |
+| Burst B | `chirp_time_s` = 166.7 µs, α = 12.000 GHz/s, PRF 6.0 kHz, 667 samples |
 | Receive | Deramp, `sample_rate_hz` = 4.0 MHz |
 | Unambiguous range | 29.98 km (A) / 24.98 km (B) — both cover the track |
-| Per-leg unambiguous velocity | ±38.24 m/s (A) / ±45.89 m/s (B) |
+| Per-burst unambiguous velocity | ±38.24 m/s (A) / ±45.89 m/s (B) |
 | **After unfolding** | **±191.2 m/s** — extension ×5 from the 5:6 PRF ratio |
 | CPI | 25.60 ms + 21.33 ms ≈ 47 ms |
 
@@ -154,7 +154,7 @@ Written under `--out <dir>` by `scripts/run_scenario.py`:
 
 | File | Content |
 | :--- | :--- |
-| `iq_{frame:05d}.npz` | Baseband IQ cube, complex128, `(n_chirps, n_samples)`; slow time on axis 0 |
+| `iq_{frame:05d}.npz` | Baseband IQ cube, complex128, `(n_pulses, n_samples)`; slow time on axis 0 |
 | `rd_{frame:05d}.png` | Rendered range-Doppler map, dB scale, with the truth marker overlaid |
 | `rd.mp4` | The PNG frames assembled at 1 fps (GIF fallback) |
 | `truth.csv` | Per frame: `frame, time_s, range_m, radial_velocity_mps, azimuth_deg, elevation_deg` |
@@ -193,8 +193,8 @@ begins.
 `core/signal.py` produces the IQ cube that `core/dsp.py` consumes. Three conventions must line up,
 and all three are the *existing* module's, not this scenario's:
 
-- **Cube layout** is `(n_chirps, n_samples)` — slow time on axis 0, fast time on axis 1 — matching
-  the canonical `(n_chirps, n_samples, n_rx)` in `docs/conventions/style.md` §4. Emitting that
+- **Cube layout** is `(n_pulses, n_samples)` — slow time on axis 0, fast time on axis 1 — matching
+  the canonical `(n_pulses, n_samples, n_rx)` in `docs/conventions/style.md` §4. Emitting that
   layout means `range_doppler_map`'s default axes just work. Every `dsp` function takes an explicit
   `axis`, so a different layout would cost a keyword argument, not a rework.
 - **Doppler sign: closing velocity is positive**, per `spec/structure.md` D5.

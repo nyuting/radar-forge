@@ -71,7 +71,7 @@ import radar_forge as rf
 
 # 1. Describe the sensor
 radar = rf.core.Radar(
-    waveform=rf.core.FMCW(f0=77e9, bandwidth=1e9, chirp_time=40e-6, n_chirps=128),
+    waveform=rf.core.FMCW(f0=77e9, bandwidth=1e9, chirp_time=40e-6, n_pulses=128),
     tx=rf.array.ULA(n=3, spacing=0.5),
     rx=rf.array.ULA(n=4, spacing=0.5),
 )

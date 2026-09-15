@@ -14,7 +14,7 @@ Marked slow: it synthesises and processes real IQ cubes. A five-frame window
 keeps `make check` quick while still running every frame of it.
 
 The window at 2646 s is chosen because the target is closing at about 50 m/s
-there, which is past *both* S3 legs' unambiguous velocities and about 6.6 folds
+there, which is past *both* S3 bursts' unambiguous velocities and about 6.6 folds
 of S1's, while the range of roughly 14 km is 2.3 unambiguous ranges of S2. One
 window therefore exercises all three foldings; the shipped default window at
 t = 0 does not fold S3 at all.
@@ -31,8 +31,8 @@ import pytest
 from radar_forge.core.ambiguity import fold_velocity_mps, unfold_doppler_dual_prf
 from radar_forge.pipelines.scenarios import (
     Scenario,
+    burst_range_doppler,
     iterate_frames,
-    leg_range_doppler,
     load_scenario,
     peak_range_velocity,
 )
@@ -58,9 +58,9 @@ def _windowed(toml_path: Path) -> Scenario:
     )
 
 
-def _velocity_bin_mps(leg, n_doppler_bins: int) -> float:
+def _velocity_bin_mps(burst, n_doppler_bins: int) -> float:
     """Width of one Doppler bin, m/s -- the resolution a peak can be located to."""
-    return 2.0 * leg.unambiguous_velocity_mps / n_doppler_bins
+    return 2.0 * burst.unambiguous_velocity_mps / n_doppler_bins
 
 
 def _circular_error(measured: float, expected: float, half_interval: float) -> float:
@@ -74,36 +74,36 @@ class TestS1DopplerFolds:
     def test_the_window_really_does_fold_the_doppler(self) -> None:
         """Guards the premise: a window that did not fold would prove nothing."""
         scenario = _windowed(S1_TOML)
-        leg = scenario.legs[0]
+        burst = scenario.bursts[0]
         for frame in iterate_frames(scenario):
-            assert abs(frame.radial_velocity_mps) > 4.0 * leg.unambiguous_velocity_mps
+            assert abs(frame.radial_velocity_mps) > 4.0 * burst.unambiguous_velocity_mps
 
     def test_the_peak_lands_at_the_true_range_and_the_folded_velocity(self) -> None:
         scenario = _windowed(S1_TOML)
-        leg = scenario.legs[0]
+        burst = scenario.bursts[0]
         for frame in iterate_frames(scenario):
-            product = leg_range_doppler(frame.iq[0], leg)
+            product = burst_range_doppler(frame.iq[0], burst)
             peak_range_m, peak_velocity_mps = peak_range_velocity(product)
 
             # Range does not fold here: within one bin of the true range.
-            assert abs(peak_range_m - frame.range_m) < leg.range_resolution_m
+            assert abs(peak_range_m - frame.range_m) < burst.range_resolution_m
 
             expected_mps = float(
-                fold_velocity_mps(frame.radial_velocity_mps, leg.unambiguous_velocity_mps)
+                fold_velocity_mps(frame.radial_velocity_mps, burst.unambiguous_velocity_mps)
             )
-            velocity_bin_mps = _velocity_bin_mps(leg, product.rd_map.shape[0])
+            velocity_bin_mps = _velocity_bin_mps(burst, product.rd_map.shape[0])
             error_mps = _circular_error(
-                peak_velocity_mps, expected_mps, leg.unambiguous_velocity_mps
+                peak_velocity_mps, expected_mps, burst.unambiguous_velocity_mps
             )
             assert error_mps <= velocity_bin_mps
 
     def test_the_peak_velocity_is_nothing_like_the_truth(self) -> None:
         """The lesson, asserted rather than assumed: the map is badly wrong."""
         scenario = _windowed(S1_TOML)
-        leg = scenario.legs[0]
+        burst = scenario.bursts[0]
         for frame in iterate_frames(scenario):
-            _, peak_velocity_mps = peak_range_velocity(leg_range_doppler(frame.iq[0], leg))
-            assert abs(peak_velocity_mps) <= leg.unambiguous_velocity_mps
+            _, peak_velocity_mps = peak_range_velocity(burst_range_doppler(frame.iq[0], burst))
+            assert abs(peak_velocity_mps) <= burst.unambiguous_velocity_mps
             assert abs(peak_velocity_mps - frame.radial_velocity_mps) > 30.0
 
 
@@ -112,92 +112,92 @@ class TestS2RangeFolds:
 
     def test_the_window_really_does_fold_the_range(self) -> None:
         scenario = _windowed(S2_TOML)
-        leg = scenario.legs[0]
+        burst = scenario.bursts[0]
         for frame in iterate_frames(scenario):
-            assert frame.range_m > 2.0 * leg.unambiguous_range_m
+            assert frame.range_m > 2.0 * burst.unambiguous_range_m
 
     def test_the_peak_lands_at_the_folded_range_and_the_true_velocity(self) -> None:
         scenario = _windowed(S2_TOML)
-        leg = scenario.legs[0]
+        burst = scenario.bursts[0]
         for frame in iterate_frames(scenario):
-            product = leg_range_doppler(frame.iq[0], leg)
+            product = burst_range_doppler(frame.iq[0], burst)
             peak_range_m, peak_velocity_mps = peak_range_velocity(product)
 
-            expected_range_m = frame.range_m % leg.unambiguous_range_m
+            expected_range_m = frame.range_m % burst.unambiguous_range_m
             # Compared on the folded axis: a target just inside the wrap and a
             # peak just outside it are neighbours, not opposites.
             range_error_m = _circular_error(
-                peak_range_m, expected_range_m, 0.5 * leg.unambiguous_range_m
+                peak_range_m, expected_range_m, 0.5 * burst.unambiguous_range_m
             )
-            assert range_error_m < leg.range_resolution_m
+            assert range_error_m < burst.range_resolution_m
 
             # Velocity does not fold here: it is the true one, to one bin.
-            velocity_bin_mps = _velocity_bin_mps(leg, product.rd_map.shape[0])
+            velocity_bin_mps = _velocity_bin_mps(burst, product.rd_map.shape[0])
             assert abs(peak_velocity_mps - frame.radial_velocity_mps) <= velocity_bin_mps
 
     def test_the_peak_range_is_nothing_like_the_truth(self) -> None:
         """S2 is the exact mirror of S1, and this is the half that goes wrong."""
         scenario = _windowed(S2_TOML)
-        leg = scenario.legs[0]
+        burst = scenario.bursts[0]
         for frame in iterate_frames(scenario):
-            peak_range_m, _ = peak_range_velocity(leg_range_doppler(frame.iq[0], leg))
-            assert peak_range_m < leg.unambiguous_range_m
+            peak_range_m, _ = peak_range_velocity(burst_range_doppler(frame.iq[0], burst))
+            assert peak_range_m < burst.unambiguous_range_m
             assert abs(peak_range_m - frame.range_m) > 5_000.0
 
 
 class TestS3TheAmbiguityIsResolved:
-    """Neither leg can measure the velocity; the coprime pair can."""
+    """Neither burst can measure the velocity; the coprime pair can."""
 
-    def test_both_legs_really_do_fold(self) -> None:
+    def test_both_bursts_really_do_fold(self) -> None:
         """Otherwise the unfolding below would be tested against nothing."""
         scenario = _windowed(S3_TOML)
         for frame in iterate_frames(scenario):
-            for leg in scenario.legs:
-                assert abs(frame.radial_velocity_mps) > leg.unambiguous_velocity_mps
+            for burst in scenario.bursts:
+                assert abs(frame.radial_velocity_mps) > burst.unambiguous_velocity_mps
 
-    def test_each_leg_alone_reports_the_wrong_velocity(self) -> None:
+    def test_each_burst_alone_reports_the_wrong_velocity(self) -> None:
         scenario = _windowed(S3_TOML)
         for frame in iterate_frames(scenario):
-            for cube, leg in zip(frame.iq, scenario.legs, strict=True):
-                _, peak_velocity_mps = peak_range_velocity(leg_range_doppler(cube, leg))
+            for cube, burst in zip(frame.iq, scenario.bursts, strict=True):
+                _, peak_velocity_mps = peak_range_velocity(burst_range_doppler(cube, burst))
                 assert abs(peak_velocity_mps - frame.radial_velocity_mps) > 10.0
 
     def test_the_pair_recovers_the_true_unfolded_velocity(self) -> None:
         """The scenario's whole justification, frame by frame."""
         scenario = _windowed(S3_TOML)
-        leg_a, leg_b = scenario.legs
+        burst_a, burst_b = scenario.bursts
         for frame in iterate_frames(scenario):
-            product_a = leg_range_doppler(frame.iq[0], leg_a)
-            product_b = leg_range_doppler(frame.iq[1], leg_b)
+            product_a = burst_range_doppler(frame.iq[0], burst_a)
+            product_b = burst_range_doppler(frame.iq[1], burst_b)
             _, folded_a_mps = peak_range_velocity(product_a)
             _, folded_b_mps = peak_range_velocity(product_b)
 
-            bin_a_mps = _velocity_bin_mps(leg_a, product_a.rd_map.shape[0])
-            bin_b_mps = _velocity_bin_mps(leg_b, product_b.rd_map.shape[0])
+            bin_a_mps = _velocity_bin_mps(burst_a, product_a.rd_map.shape[0])
+            bin_b_mps = _velocity_bin_mps(burst_b, product_b.rd_map.shape[0])
 
             velocity_mps, residual_mps = unfold_doppler_dual_prf(
                 folded_a_mps,
                 folded_b_mps,
-                leg_a.unambiguous_velocity_mps,
-                leg_b.unambiguous_velocity_mps,
+                burst_a.unambiguous_velocity_mps,
+                burst_b.unambiguous_velocity_mps,
                 max_velocity_mps=191.0,
                 tolerance_mps=2.0 * max(bin_a_mps, bin_b_mps),
             )
             assert not np.isnan(velocity_mps), f"frame {frame.index} did not resolve"
             assert float(residual_mps) <= 2.0 * max(bin_a_mps, bin_b_mps)
-            # Within one bin of the leg the candidate came from, which is leg A.
+            # Within one bin of the burst the candidate came from, which is burst A.
             assert abs(float(velocity_mps) - frame.radial_velocity_mps) <= bin_a_mps
 
-    def test_both_legs_agree_on_the_range(self) -> None:
-        """Range is unambiguous on both legs, so they must see the same target."""
+    def test_both_bursts_agree_on_the_range(self) -> None:
+        """Range is unambiguous on both bursts, so they must see the same target."""
         scenario = _windowed(S3_TOML)
         for frame in iterate_frames(scenario):
             ranges_m = [
-                peak_range_velocity(leg_range_doppler(cube, leg))[0]
-                for cube, leg in zip(frame.iq, scenario.legs, strict=True)
+                peak_range_velocity(burst_range_doppler(cube, burst))[0]
+                for cube, burst in zip(frame.iq, scenario.bursts, strict=True)
             ]
-            assert abs(ranges_m[0] - ranges_m[1]) < scenario.legs[0].range_resolution_m
-            assert abs(ranges_m[0] - frame.range_m) < scenario.legs[0].range_resolution_m
+            assert abs(ranges_m[0] - ranges_m[1]) < scenario.bursts[0].range_resolution_m
+            assert abs(ranges_m[0] - frame.range_m) < scenario.bursts[0].range_resolution_m
 
 
 class TestTheShippedDefaultWindowRuns:
@@ -208,11 +208,11 @@ class TestTheShippedDefaultWindowRuns:
         scenario = load_scenario(toml_path)
         short = replace(scenario, duration_s=2.0 / scenario.frame_rate_hz)
         for frame in iterate_frames(short):
-            for cube, leg in zip(frame.iq, scenario.legs, strict=True):
-                product = leg_range_doppler(cube, leg)
+            for cube, burst in zip(frame.iq, scenario.bursts, strict=True):
+                product = burst_range_doppler(cube, burst)
                 peak_range_m, _ = peak_range_velocity(product)
-                expected_range_m = frame.range_m % leg.unambiguous_range_m
+                expected_range_m = frame.range_m % burst.unambiguous_range_m
                 range_error_m = _circular_error(
-                    peak_range_m, expected_range_m, 0.5 * leg.unambiguous_range_m
+                    peak_range_m, expected_range_m, 0.5 * burst.unambiguous_range_m
                 )
-                assert range_error_m < leg.range_resolution_m
+                assert range_error_m < burst.range_resolution_m

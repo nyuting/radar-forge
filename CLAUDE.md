@@ -28,7 +28,7 @@ code that is plain, documented, and cites its source passes it.
   literal.
 - **NumPy-style docstrings on everything public**, including a `References` section citing
   the textbook or paper the block implements, and array shapes written out as
-  `(n_chirps, n_samples)`.
+  `(n_pulses, n_samples)`.
 - **Complete type annotations**; arrays as `numpy.typing.NDArray[np.float64]` /
   `ArrayLike` in, `NDArray` out. `mypy --strict` must pass.
 - **Conventional Commits**: `feat(array): add Taylor tapering`. The `commit-msg` hook enforces it.

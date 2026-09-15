@@ -324,7 +324,7 @@ def thermal_noise(
 def fmcw_deramp_baseband(
     paths: PropagationPaths,
     radar: Radar,
-    n_chirps: int,
+    n_pulses: int,
     *,
     rng: np.random.Generator | None = None,
 ) -> NDArray[np.complex128]:
@@ -350,7 +350,7 @@ def fmcw_deramp_baseband(
         Propagation paths, typically from :func:`line_of_sight_paths`.
     radar : Radar
         The observing radar. Must carry an FMCW transmitter.
-    n_chirps : int
+    n_pulses : int
         Number of chirps in the coherent processing interval — the slow-time
         length of the cube. Must be at least one.
     rng : numpy.random.Generator, optional
@@ -361,7 +361,7 @@ def fmcw_deramp_baseband(
     Returns
     -------
     numpy.ndarray
-        Complex baseband of shape ``(n_chirps, n_samples)``, slow time along
+        Complex baseband of shape ``(n_pulses, n_samples)``, slow time along
         axis 0 and fast time along axis 1 — the canonical layout of
         ``docs/conventions/style.md`` §4, so that
         :func:`radar_forge.core.dsp.range_doppler_map` needs no axis arguments.
@@ -369,7 +369,7 @@ def fmcw_deramp_baseband(
     Raises
     ------
     ValueError
-        If ``n_chirps`` is less than one, or the radar is not FMCW.
+        If ``n_pulses`` is less than one, or the radar is not FMCW.
 
     Warns
     -----
@@ -382,8 +382,8 @@ def fmcw_deramp_baseband(
     pulsed_baseband : The pulse-train equivalent.
     radar_forge.core.dsp.range_doppler_map : Consumes this cube directly.
     """
-    if n_chirps < 1:
-        msg = f"n_chirps must be at least one; got {n_chirps}."
+    if n_pulses < 1:
+        msg = f"n_pulses must be at least one; got {n_pulses}."
         raise ValueError(msg)
     if radar.transmitter.waveform != "fmcw":
         msg = (
@@ -396,9 +396,9 @@ def fmcw_deramp_baseband(
     closing_velocity_mps = paths.doppler_hz * radar.wavelength_m / 2.0
     _warn_if_stop_and_hop_is_strained(closing_velocity_mps, radar)
 
-    # (n_chirps, n_paths): range held constant within a chirp, advancing between
+    # (n_pulses, n_paths): range held constant within a chirp, advancing between
     # them. Broadcasting an outer difference, not tiling.
-    chirp_index = np.arange(n_chirps, dtype=np.float64)[:, None]
+    chirp_index = np.arange(n_pulses, dtype=np.float64)[:, None]
     range_m = (
         paths.range_m[None, :]
         - closing_velocity_mps[None, :] * chirp_index * pulse_repetition_interval_s
@@ -408,7 +408,7 @@ def fmcw_deramp_baseband(
     n_samples = radar.n_samples_per_pri
     fast_time_s = np.arange(n_samples, dtype=np.float64) / radar.receiver.sample_rate_hz
 
-    # (n_chirps, n_paths, 1) against (n_samples,) broadcasts to the full cube
+    # (n_pulses, n_paths, 1) against (n_samples,) broadcasts to the full cube
     # without materialising an intermediate of that size per path.
     residual_phase_rad = -2.0 * np.pi * radar.transmitter.f0_hz * delay_s
     beat_phase_rad = (

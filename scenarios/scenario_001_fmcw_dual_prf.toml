@@ -1,10 +1,10 @@
 # Scenario 001 -- X-band radar at DSO National Laboratories, Singapore.
 # See spec/scenario-001-singapore-xband.md. The three variants share every
-# block below except [[leg]]; that is the whole point of the comparison.
+# block below except [[burst]]; that is the whole point of the comparison.
 
 [scenario]
 name = "scenario-001-fmcw-dual-prf"
-description = "S3: two FMCW legs at 5 kHz and 6 kHz. Neither resolves the velocity alone, but the coprime 5:6 pair does, reaching +-191 m/s by a completely different mechanism from S2."
+description = "S3: two FMCW bursts at 5 kHz and 6 kHz. Neither resolves the velocity alone, but the coprime 5:6 pair does, reaching +-191 m/s by a completely different mechanism from S2."
 seed = 20260911
 
 [radar]
@@ -28,12 +28,12 @@ start_time_s = 0.0
 duration_s = 120.0     # the full track is ~16,500 frames; this window is opt-out
 frame_rate_hz = 1.0
 
-# Two legs, 128 chirps each, alternating. Both cover the track in range;
-# their per-leg unambiguous velocities of +-38.24 and +-45.89 m/s are
+# Two bursts, 128 pulses each, alternating. Both cover the track in range;
+# their per-burst unambiguous velocities of +-38.24 and +-45.89 m/s are
 # combined by core.ambiguity.unfold_doppler_dual_prf.
 #
-# Leg A: 200 us sweep at 10 GHz/s, 4 MHz -> 800 samples. PRF 5.0 kHz.
-[[leg]]
+# Burst A: 200 us sweep at 10 GHz/s, 4 MHz -> 800 samples. PRF 5.0 kHz.
+[[burst]]
 waveform = "fmcw"
 f0_hz = 9.8e9
 bandwidth_hz = 2.0e6
@@ -42,13 +42,13 @@ gain_tx_dbi = 30.0
 chirp_time_s = 200.0e-6
 prf_hz = 5.0e3
 sample_rate_hz = 4.0e6
-n_chirps = 128
+n_pulses = 128
 
-# Leg B: PRF 6.0 kHz at 100 % duty, so the chirp time is exactly 1/6000 s
+# Burst B: PRF 6.0 kHz at 100 % duty, so the chirp time is exactly 1/6000 s
 # = 166.667 us -> 667 samples. The specification's rounded 166.7 us is a duty
 # cycle of 1.0002 and Transmitter rejects it: the next chirp would start
 # before this one finished.
-[[leg]]
+[[burst]]
 waveform = "fmcw"
 f0_hz = 9.8e9
 bandwidth_hz = 2.0e6
@@ -57,4 +57,4 @@ gain_tx_dbi = 30.0
 chirp_time_s = 1.6666666666666667e-4
 prf_hz = 6.0e3
 sample_rate_hz = 4.0e6
-n_chirps = 128
+n_pulses = 128

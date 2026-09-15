@@ -315,7 +315,7 @@ class Radar:
     def n_samples_per_pri(self) -> int:
         """Fast-time samples in one full repetition interval — the IQ row length.
 
-        This is the fast-time dimension of the ``(n_chirps, n_samples)`` cube
+        This is the fast-time dimension of the ``(n_pulses, n_samples)`` cube
         that :mod:`radar_forge.core.signal` produces. It equals
         :attr:`n_samples_per_chirp` only at 100% duty.
         """

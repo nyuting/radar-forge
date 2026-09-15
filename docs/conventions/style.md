@@ -155,8 +155,8 @@ catches it in anything committed, which is the case that matters.
 ## 3. Naming
 
 - `snake_case` functions and variables, `PascalCase` classes, `UPPER_SNAKE` module constants. **[ruff]**
-- Array-dimension counts are `n_`-prefixed **[review]**: `n_chirps`, `n_samples`, `n_elements`, `n_targets`.
-  Use the same names in shape annotations so `(n_chirps, n_samples)` is unambiguous everywhere.
+- Array-dimension counts are `n_`-prefixed **[review]**: `n_pulses`, `n_samples`, `n_elements`, `n_targets`.
+  Use the same names in shape annotations so `(n_pulses, n_samples)` is unambiguous everywhere.
 - Single letters are allowed **only** where they are the standard symbol in the cited
   reference, and only inside a function whose docstring maps them: `R`, `sigma`, `lambda_`
   (trailing underscore — `lambda` is a keyword). Never as a parameter of a public function.
@@ -206,7 +206,7 @@ References
 Parameters
 ----------
 baseband : numpy.ndarray
-    Complex baseband cube of shape ``(n_chirps, n_samples, n_rx)``; fast time
+    Complex baseband cube of shape ``(n_pulses, n_samples, n_rx)``; fast time
     along axis 1, slow time along axis 0.
 ```
 
@@ -264,7 +264,7 @@ change in any release.
 
   ```python
   # broadcast-exempt: the FFT plan below requires a contiguous replicated axis.
-  steering = np.tile(np.arange(n_chirps), 2)
+  steering = np.tile(np.arange(n_pulses), 2)
   ```
 
   The escape hatch is deliberate — these functions have legitimate uses. The rule is not

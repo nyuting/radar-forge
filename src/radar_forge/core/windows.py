@@ -202,7 +202,7 @@ def apply_taper(
     ----------
     samples : array_like
         Data of any shape — typically a complex baseband cube of shape
-        ``(n_chirps, n_samples, n_rx)``, slow time on axis 0 and fast time on
+        ``(n_pulses, n_samples, n_rx)``, slow time on axis 0 and fast time on
         axis 1.
     window : array_like
         Real weights of shape ``(n,)``, where ``n`` is the length of

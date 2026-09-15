@@ -10,7 +10,7 @@ folded at both rates produces a *pair* of false velocities, and if the two rates
 are coprime multiples of a common base, only one true velocity is consistent
 with both. This is the radar form of the Chinese remainder theorem, and it is
 what scenario 001 S3 uses to recover an aircraft's real velocity from two FMCW
-legs neither of which could measure it alone.
+bursts neither of which could measure it alone.
 
 The extension is not free. It costs dwell time, it fails when two targets are
 present at the same range (the pairs become ambiguous between targets, the
@@ -112,7 +112,7 @@ def unfold_doppler_dual_prf(
     Parameters
     ----------
     folded_velocity_a_mps, folded_velocity_b_mps : array_like
-        The apparent velocities reported by the two legs, metres/second. Must
+        The apparent velocities reported by the two bursts, metres/second. Must
         broadcast against one another.
     unambiguous_velocity_a_mps, unambiguous_velocity_b_mps : float
         The two half-intervals, metres/second. Both strictly positive, and they
@@ -123,7 +123,7 @@ def unfold_doppler_dual_prf(
         infinitely many solutions. Must exceed the smaller half-interval.
     tolerance_mps : float
         How closely the second measurement must agree, metres/second. A sensible
-        value is about half a Doppler bin of the coarser leg. Must be positive.
+        value is about half a Doppler bin of the coarser burst. Must be positive.
 
     Returns
     -------
@@ -134,7 +134,7 @@ def unfold_doppler_dual_prf(
     residual_mps : numpy.ndarray
         How far the chosen candidate missed the second measurement. Small values
         mean a confident match; this is the number to threshold on when the two
-        legs may be seeing different targets.
+        bursts may be seeing different targets.
 
     Raises
     ------
@@ -153,7 +153,7 @@ def unfold_doppler_dual_prf(
     common multiple of the two folding spans. For half-intervals in the ratio
     :math:`p:q` in lowest terms the pair of readings repeats after
     :math:`q \cdot 2 v_{ua,a}`, so velocities up to :math:`q\, v_{ua,a}` are
-    recoverable. Scenario 001 S3's 5:6 legs give
+    recoverable. Scenario 001 S3's 5:6 bursts give
     :math:`6 \times 38.24 \approx 229` m/s, comfortably outside the ±191.2 m/s
     the scenario asks for — the scenario's figure is a design target chosen to
     match S2, not this function's limit.
@@ -161,7 +161,7 @@ def unfold_doppler_dual_prf(
     Beyond the repeat the ambiguity returns, and a target outside
     ``max_velocity_mps`` is *not* simply missed: it can alias onto a candidate
     that is inside the bound and be returned with a near-zero residual. A
-    target at 300 m/s on the S3 legs comes back as -158.88 m/s and looks
+    target at 300 m/s on the S3 bursts comes back as -158.88 m/s and looks
     confident. That is why the bound is a required argument and not a generous
     default — it is a claim about the target, and a wrong claim produces a
     wrong answer rather than a missing one.
@@ -206,7 +206,7 @@ def unfold_doppler_dual_prf(
     velocity_b = np.asarray(folded_velocity_b_mps, dtype=np.float64)
     velocity_a, velocity_b = np.broadcast_arrays(velocity_a, velocity_b)
 
-    # Candidate folds of leg A that stay inside the physical speed bound.
+    # Candidate folds of burst A that stay inside the physical speed bound.
     span_a = 2.0 * unambiguous_velocity_a_mps
     n_folds = int(np.ceil((max_velocity_mps + unambiguous_velocity_a_mps) / span_a))
     fold_index = np.arange(-n_folds, n_folds + 1, dtype=np.float64)

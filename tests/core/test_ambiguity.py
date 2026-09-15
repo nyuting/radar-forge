@@ -15,13 +15,13 @@ import pytest
 
 from radar_forge.core.ambiguity import fold_velocity_mps, unfold_doppler_dual_prf
 
-# Scenario 001 S3: FMCW legs at 5.0 kHz and 6.0 kHz, per spec S4.
+# Scenario 001 S3: FMCW bursts at 5.0 kHz and 6.0 kHz, per spec S4.
 V_UA_A = 38.24
 V_UA_B = 45.89
 MAX_VELOCITY_MPS = 191.0
 TOLERANCE_MPS = 1.0
 
-# Scenario 001 S1: the heavily folded low-PRF FMCW leg.
+# Scenario 001 S1: the heavily folded low-PRF FMCW burst.
 S1_V_UA = 7.65
 
 
@@ -66,7 +66,7 @@ class TestUnfoldDopplerDualPrf:
     def test_recovers_every_velocity_the_prf_pair_can_reach(self) -> None:
         """The closed-form round trip, swept across the whole reachable span.
 
-        Five folds of leg A is 5 * 38.24 = 191.2 m/s, so a sweep stopping just
+        Five folds of burst A is 5 * 38.24 = 191.2 m/s, so a sweep stopping just
         inside that is exactly the set the 5:6 ratio is supposed to cover.
         """
         true_mps = np.linspace(-190.0, 190.0, 761)
@@ -97,7 +97,7 @@ class TestUnfoldDopplerDualPrf:
     def test_reaches_the_full_span_the_lcm_of_the_two_spans_allows(self) -> None:
         """The limit is the least common multiple of the folding spans.
 
-        For the 5:6 legs that is 6 * 2 * 38.24 = 458.88 m/s, so a half-span of
+        For the 5:6 bursts that is 6 * 2 * 38.24 = 458.88 m/s, so a half-span of
         about 229 m/s is recoverable — more than the +/-191.2 m/s the scenario
         asks for, which is a design target chosen to match S2 rather than this
         function's ceiling.
@@ -173,11 +173,11 @@ class TestUnfoldDopplerDualPrf:
             max_velocity_mps=MAX_VELOCITY_MPS,
             tolerance_mps=TOLERANCE_MPS,
         )
-        # The chosen candidate still comes from leg A, so it is exact; the
+        # The chosen candidate still comes from burst A, so it is exact; the
         # jitter only has to stay inside the tolerance to pick the right one.
         np.testing.assert_allclose(velocity_mps, true_mps, atol=1e-9)
 
-    def test_broadcasts_the_two_legs_against_each_other(self) -> None:
+    def test_broadcasts_the_two_bursts_against_each_other(self) -> None:
         true_mps = np.array([[10.0, 80.0, -120.0]])
         velocity_mps, residual_mps = unfold_doppler_dual_prf(
             fold_velocity_mps(true_mps, V_UA_A),

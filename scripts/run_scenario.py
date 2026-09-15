@@ -30,8 +30,8 @@ from radar_forge.pipelines.scenarios import (
     Frame,
     RangeDopplerProduct,
     Scenario,
+    burst_range_doppler,
     iterate_frames,
-    leg_range_doppler,
     load_scenario,
     peak_range_velocity,
 )
@@ -85,28 +85,28 @@ def git_commit() -> str | None:
     return result.stdout.strip()
 
 
-def leg_metadata(scenario: Scenario) -> list[dict[str, Any]]:
-    """Everything about each leg a reader needs to interpret the cubes."""
-    legs: list[dict[str, Any]] = []
-    for index, (leg, n_chirps) in enumerate(zip(scenario.legs, scenario.n_chirps, strict=True)):
-        legs.append(
+def burst_metadata(scenario: Scenario) -> list[dict[str, Any]]:
+    """Everything about each burst a reader needs to interpret the cubes."""
+    bursts: list[dict[str, Any]] = []
+    for index, (burst, n_pulses) in enumerate(zip(scenario.bursts, scenario.n_pulses, strict=True)):
+        bursts.append(
             {
                 "index": index,
-                "waveform": leg.transmitter.waveform,
-                "f0_hz": leg.transmitter.f0_hz,
-                "bandwidth_hz": leg.transmitter.bandwidth_hz,
-                "chirp_time_s": leg.transmitter.chirp_time_s,
-                "prf_hz": leg.transmitter.prf_hz,
-                "sample_rate_hz": leg.receiver.sample_rate_hz,
-                "n_chirps": n_chirps,
-                "n_samples": leg.n_samples_per_pri,
-                "range_resolution_m": leg.range_resolution_m,
-                "unambiguous_range_m": leg.unambiguous_range_m,
-                "unambiguous_velocity_mps": leg.unambiguous_velocity_mps,
-                "noise_power_w": leg.noise_power_w,
+                "waveform": burst.transmitter.waveform,
+                "f0_hz": burst.transmitter.f0_hz,
+                "bandwidth_hz": burst.transmitter.bandwidth_hz,
+                "chirp_time_s": burst.transmitter.chirp_time_s,
+                "prf_hz": burst.transmitter.prf_hz,
+                "sample_rate_hz": burst.receiver.sample_rate_hz,
+                "n_pulses": n_pulses,
+                "n_samples": burst.n_samples_per_pri,
+                "range_resolution_m": burst.range_resolution_m,
+                "unambiguous_range_m": burst.unambiguous_range_m,
+                "unambiguous_velocity_mps": burst.unambiguous_velocity_mps,
+                "noise_power_w": burst.noise_power_w,
             }
         )
-    return legs
+    return bursts
 
 
 def write_metadata(scenario: Scenario, out_dir: Path, n_frames: int) -> None:
@@ -123,12 +123,12 @@ def write_metadata(scenario: Scenario, out_dir: Path, n_frames: int) -> None:
             "target_altitude_m": scenario.target_altitude_m,
         },
         "radar_site": {
-            "latitude_deg": scenario.legs[0].latitude_deg,
-            "longitude_deg": scenario.legs[0].longitude_deg,
-            "altitude_m": scenario.legs[0].altitude_m,
+            "latitude_deg": scenario.bursts[0].latitude_deg,
+            "longitude_deg": scenario.bursts[0].longitude_deg,
+            "altitude_m": scenario.bursts[0].altitude_m,
         },
         "target": asdict(scenario.target),
-        "legs": leg_metadata(scenario),
+        "bursts": burst_metadata(scenario),
         "provenance": {"radar_forge_version": __version__, "git_commit": git_commit()},
     }
     (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
@@ -141,7 +141,7 @@ def render_frame(
     out_dir: Path,
     dynamic_range_db: float,
 ) -> None:
-    """Draw one range-Doppler panel per leg and save it.
+    """Draw one range-Doppler panel per burst and save it.
 
     Takes the already-processed ``products`` rather than processing the cubes
     itself, so the receive chain runs once per frame however many consumers a
@@ -150,15 +150,15 @@ def render_frame(
     from radar_forge.teaching.plotting import save_figure
     from radar_forge.teaching.scopes.rd_map import render_range_doppler
 
-    for index, (product, leg) in enumerate(zip(products, scenario.legs, strict=True)):
-        suffix = "" if len(scenario.legs) == 1 else f"_leg{index}"
-        # Where this leg's ambiguities oblige the target to appear: Doppler
+    for index, (product, burst) in enumerate(zip(products, scenario.bursts, strict=True)):
+        suffix = "" if len(scenario.bursts) == 1 else f"_burst{index}"
+        # Where this burst's ambiguities oblige the target to appear: Doppler
         # wraps into the unambiguous interval, range modulo the unambiguous
-        # range. For a leg that folds in neither, both are the truth itself.
+        # range. For a burst that folds in neither, both are the truth itself.
         folded_velocity_mps = float(
-            fold_velocity_mps(frame.radial_velocity_mps, leg.unambiguous_velocity_mps)
+            fold_velocity_mps(frame.radial_velocity_mps, burst.unambiguous_velocity_mps)
         )
-        folded_range_m = frame.range_m % leg.unambiguous_range_m
+        folded_range_m = frame.range_m % burst.unambiguous_range_m
         title = (
             f"{scenario.name}{suffix}  t = {frame.time_s:.0f} s   "
             f"truth {frame.range_m / 1e3:.2f} km, {frame.radial_velocity_mps:+.1f} m/s"
@@ -198,9 +198,9 @@ def clear_previous_frames(out_dir: Path) -> int:
 
 def assemble_movie(out_dir: Path, pattern: str, stem: str, frame_rate_hz: float) -> str | None:
     """Assemble the PNG frames into an MP4, falling back to an animated GIF."""
-    # Match the five digits the pattern formats, so a single-leg run's
-    # ``rd_%05d.png`` does not also sweep up a previous multi-leg run's
-    # ``rd_leg0_00000.png``.
+    # Match the five digits the pattern formats, so a single-burst run's
+    # ``rd_%05d.png`` does not also sweep up a previous multi-burst run's
+    # ``rd_burst0_00000.png``.
     frames = sorted(out_dir.glob(pattern.replace("%05d", "[0-9][0-9][0-9][0-9][0-9]")))
     if not frames:
         return None
@@ -257,7 +257,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     n_frames = scenario.n_frames if args.frames is None else min(args.frames, scenario.n_frames)
-    print(f"{scenario.name}: {n_frames} frames, {len(scenario.legs)} leg(s) -> {out_dir}")
+    print(f"{scenario.name}: {n_frames} frames, {len(scenario.bursts)} burst(s) -> {out_dir}")
 
     removed = clear_previous_frames(out_dir)
     if removed:
@@ -286,8 +286,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
 
             if not args.no_iq:
-                arrays = {f"leg{index}": cube for index, cube in enumerate(frame.iq)}
-                # One named array per leg. The ignore is a stub limitation:
+                arrays = {f"burst{index}": cube for index, cube in enumerate(frame.iq)}
+                # One named array per burst. The ignore is a stub limitation:
                 # savez_compressed takes **kwds of arrays, but the stub's
                 # `allow_pickle` keyword makes mypy read the unpacked dict as
                 # a candidate for it.
@@ -305,8 +305,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             products: list[RangeDopplerProduct] = []
             if not args.no_plots or show_progress:
                 products = [
-                    leg_range_doppler(cube, leg)
-                    for cube, leg in zip(frame.iq, scenario.legs, strict=True)
+                    burst_range_doppler(cube, burst)
+                    for cube, burst in zip(frame.iq, scenario.bursts, strict=True)
                 ]
 
             if not args.no_plots:
@@ -320,8 +320,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"  wrote {truth_path}")
 
     if not args.no_plots and not args.no_movie:
-        for index in range(len(scenario.legs)):
-            suffix = "" if len(scenario.legs) == 1 else f"_leg{index}"
+        for index in range(len(scenario.bursts)):
+            suffix = "" if len(scenario.bursts) == 1 else f"_burst{index}"
             movie = assemble_movie(
                 out_dir, f"rd{suffix}_%05d.png", f"rd{suffix}", scenario.frame_rate_hz
             )
