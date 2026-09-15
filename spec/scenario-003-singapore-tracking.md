@@ -423,9 +423,19 @@ tests/pipelines/test_scenario_003.py           tests/teaching/test_track_plot.py
 ```
 
 `scripts/run_scenario.py`, `src/radar_forge/pipelines/scenarios.py` and
-`src/radar_forge/teaching/scopes/rd_map.py` are **shared** with scenario 001: this slice makes
-only the additive edits in steps 2, 3 and 5, and every existing call site and TOML must keep
-working unchanged.
+`src/radar_forge/teaching/scopes/rd_map.py` are **shared with both scenario 001 and scenario 002**
+— `spec/scenario-002-singapore-bistatic.md` §10 claims the same three files. This slice makes only
+the additive edits in steps 2, 3 and 5, and every existing call site and TOML must keep working
+unchanged. Coordinate before touching them: scenario 002 is in flight at the time of writing, and
+its `Radar | BistaticRadar` union already reaches `scripts/run_scenario.py`.
+
+That union is the one place where scenario 002 could reach this one. It does not: this scenario
+consumes `RangeDopplerProduct` and the axis helpers, not the radar object, so a tracker written
+against §5.1 works unchanged for a bistatic geometry — with the caveat that for a bistatic radar
+"range" is bistatic range and "range rate" its derivative, so the §6 state models measure the
+**sum** of the two path lengths and an ENU state would need the transmitter position as well.
+Tracking a bistatic scenario is therefore a real extension, not a free one, and it is not claimed
+here.
 
 ## 11. Amendments to `spec/structure.md`
 
