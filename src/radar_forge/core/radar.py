@@ -24,7 +24,7 @@ which is why :class:`Transmitter` carries an explicit ``waveform`` tag:
 
 Two sitings are supported. :class:`Radar` is **monostatic**: one site, and the
 transmitter and receiver share it. :class:`BistaticRadar` puts them at two
-different sites, which is what a passive or multistatic scenario needs.
+different sites, which is what a bistatic or multistatic scenario needs.
 
 Naming of the two ranges, used by this module, by
 :mod:`radar_forge.core.radar_equation` and by :mod:`radar_forge.core.signal`:

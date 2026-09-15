@@ -1,4 +1,4 @@
-# Scenario 002 -- passive bistatic radar over Singapore.
+# Scenario 002 -- bistatic radar over Singapore.
 # The Changi Airport ATC illuminator, received at DSO National Laboratories.
 # See spec/scenario-002-singapore-bistatic.md. The two variants share every
 # block below except [[burst]].f0_hz; the carrier is the whole comparison.
@@ -8,8 +8,8 @@ name = "scenario-002-bistatic-sband"
 description = "B2: 2.8 GHz, the realistic S-band ATC illuminator. The same geometry and processing as B1, but 3.5x more unambiguous velocity: Doppler folds at +-26.77 m/s."
 seed = 20260915
 
-# The receiving site. Unchanged from scenario 001, and receive-only here:
-# nothing at DSO transmits in a passive bistatic configuration.
+# The receiving site. Unchanged from scenario 001; here it receives echoes
+# of a transmitter 23.7 km away rather than of one standing beside it.
 [radar]
 latitude_deg = 1.29150
 longitude_deg = 103.78710

@@ -1,4 +1,4 @@
-# Scenario 002 — Passive bistatic radar, Changi illuminator to DSO receiver
+# Scenario 002 — Bistatic radar, Changi illuminator to DSO receiver
 
 Status: **specification**, pre-implementation. The second vertical slice, and the first bistatic one.
 
@@ -15,18 +15,18 @@ Three reasons to make bistatic the second slice rather than breadth:
    thing every propagation model produces. Until a second model exists, that is an assertion. §3
    records what survived: the dataclass is unchanged, which is the strongest evidence so far that
    D1 was drawn in the right place.
-2. **It is the geometry `pyAPRiL` exists for.** `spec/starter.md` §2.1 names passive bistatic
-   processing as something `radar-forge` borrows, but Part B of `spec/structure.md` has no home for
-   a two-site radar. This closes that gap.
+2. **It is the geometry `pyAPRiL` exists for.** `spec/starter.md` §2.1 names bistatic processing
+   as something `radar-forge` borrows, but Part B of `spec/structure.md` has no home for a two-site
+   radar. This closes that gap.
 3. **It teaches a real thing badly taught.** Bistatic range resolution depends on where the target
    *is*, not only on bandwidth. Over this track the resolution degrades by up to 1.56×, which is
    visible on the map rather than merely stated.
 
 ## 2. Scenario
 
-A receive-only site at DSO National Laboratories listens to the Changi Airport air-traffic-control
-illuminator and detects a light aircraft flying a circuit over Singapore. Nothing at DSO transmits;
-this is a **passive bistatic** configuration.
+A receiver at DSO National Laboratories listens to the Changi Airport air-traffic-control
+illuminator and detects a light aircraft flying a circuit over Singapore. The transmitter and the
+receiver stand 23.7 km apart, so the two propagation ranges are independent.
 
 | Parameter | Value | Source |
 | :--- | :--- | :--- |
