@@ -51,7 +51,7 @@ code that is plain, documented, and cites its source passes it.
 | Path | What |
 | :--- | :--- |
 | `src/radar_forge/core/radar_equation.py` | The style exemplar — copy its shape |
-| `docs/conventions/style.md` | Naming, units, docstrings, typing, API surface |
+| `docs/conventions/style.md` | Naming, units, data layout, docstrings, typing, API surface |
 | `docs/conventions/commits.md` | Commit and branch conventions |
 | `docs/conventions/testing.md` | Test layout, tolerances, golden data, markers |
 | `src/radar_forge/core/constants.py` | Every physical constant, defined once |

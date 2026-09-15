@@ -164,6 +164,43 @@ catches it in anything committed, which is the case that matters.
   noun names for quantities returned (`received_power_w`, `beam_pattern_db`).
 - `_leading_underscore` for everything not in the public API (§6).
 
+### 3.1 Data layout and array names **[review]**
+
+**The cube is `(n_pulses, n_samples)`.** Slow time is axis 0, fast time is axis 1.
+Extra receive channels go on the end: `(n_pulses, n_samples, n_rx)`.
+
+| Axis | Index | What it is | What it becomes |
+| :--- | :---- | :--------- | :-------------- |
+| 0 | `n_pulses` | **Slow time** — one sample per pulse, spaced by the PRI | **Doppler**, via an FFT along axis 0 |
+| 1 | `n_samples` | **Fast time** — samples within one chirp or pulse | **Range**, via a deramp FFT or a matched filter |
+
+A *pulse* is one slow-time sample on both paths: one chirp of an FMCW dwell, one
+pulse of a pulsed one. That is why the count is `n_pulses` and not `n_chirps` —
+it names the axis, not the waveform. `chirp_time_s`, `lfm_chirp` and
+`n_samples_per_chirp` describe the waveform occupying the *fast* axis and are
+correct as they stand.
+
+**Name an array for the domain each axis is in**, as a `_<fast><slow>` suffix
+reading fast axis first, then slow — the order the axes are processed in, not
+the order they are stored in:
+
+| Name | Shape | Both axes | Typical source |
+| :--- | :---- | :-------- | :------------- |
+| `data_ftst` | `(n_pulses, n_samples)` | **f**ast **t**ime × **s**low **t**ime | raw baseband, straight out of `signal` |
+| `data_rfst` | `(n_pulses, n_range_bins)` | **r**ange × **s**low **t**ime | after `range_fft` or `matched_filter` |
+| `data_rv` | `(n_doppler_bins, n_range_bins)` | **r**ange × **v**elocity | after `doppler_fft`; the range-Doppler map |
+
+The point is that the suffix tells the reader which transforms have already been
+applied, so a function that needs a range-Doppler map cannot silently be handed
+raw baseband. Use the suffixed name for any array that crosses a function
+boundary; a short-lived local inside one function may be named for what it is.
+
+**`img` and `img_db` are what you plot**, not what you compute on. An `img` is a
+real-valued 2-D array prepared for display — magnitudes, already reduced over any
+channel axis — and `img_db` is that in decibels (§2: decibels at the boundary
+only, and the boundary here is the screen). Never feed an `img_db` back into a
+detector or an estimator; take it from the `data_*` array it came from.
+
 ---
 
 ## 4. Docstrings
