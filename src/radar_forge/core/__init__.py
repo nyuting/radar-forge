@@ -51,10 +51,19 @@ from radar_forge.core.geodesy import (
     geodetic_to_ecef_m,
     geodetic_to_enu_m,
 )
-from radar_forge.core.radar import Radar, Receiver, Transmitter, WaveformKind
-from radar_forge.core.radar_equation import received_power_w
+from radar_forge.core.radar import (
+    BistaticRadar,
+    Radar,
+    RadarLike,
+    Receiver,
+    Transmitter,
+    WaveformKind,
+)
+from radar_forge.core.radar_equation import bistatic_received_power_w, received_power_w
 from radar_forge.core.signal import (
     PropagationPaths,
+    bistatic_doppler_hz,
+    bistatic_line_of_sight_paths,
     fmcw_deramp_baseband,
     line_of_sight_paths,
     pulsed_baseband,
@@ -86,17 +95,22 @@ __all__ = [
     "TAPER_NAMES",
     "WGS84_FLATTENING",
     "WGS84_SEMI_MAJOR_AXIS_M",
+    "BistaticRadar",
     "CfarVariant",
     "Detection",
     "PointTarget",
     "PropagationPaths",
     "Radar",
+    "RadarLike",
     "Receiver",
     "Transmitter",
     "WaveformKind",
     "ambiguity",
     "apply_taper",
     "beat_frequency_hz",
+    "bistatic_doppler_hz",
+    "bistatic_line_of_sight_paths",
+    "bistatic_received_power_w",
     "cfar_detect",
     "cfar_noise_estimate_w",
     "cfar_probability_of_false_alarm",
@@ -127,6 +141,7 @@ __all__ = [
     "processing_loss_db",
     "pulsed_baseband",
     "radar",
+    "radar_equation",
     "range_bin_centers_m",
     "range_doppler_map",
     "range_fft",

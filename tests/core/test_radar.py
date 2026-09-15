@@ -8,11 +8,14 @@ test is the one that decides.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
 
 from radar_forge.core.constants import SPEED_OF_LIGHT_MPS
-from radar_forge.core.radar import Radar, Receiver, Transmitter
+from radar_forge.core.geodesy import geodetic_to_enu_m
+from radar_forge.core.radar import BistaticRadar, Radar, Receiver, Transmitter
 
 # Scenario 001 S1: FMCW, low PRF, Doppler folds.
 S1_TRANSMITTER = Transmitter(
@@ -231,3 +234,175 @@ class TestRadarValidation:
         """Value objects, so a scenario cannot be mutated halfway through a run."""
         with pytest.raises(AttributeError):
             _radar(S1_TRANSMITTER, S1_RECEIVER).latitude_deg = 0.0  # type: ignore[misc]  # frozen
+
+
+# A second site due east of DSO_SITE, giving a baseline of roughly 22 km.
+CHANGI_SITE = (1.29150, 103.98710, 60.0)
+
+
+def _bistatic(transmitter: Transmitter, receiver: Receiver) -> BistaticRadar:
+    return BistaticRadar(transmitter, receiver, *DSO_SITE, *CHANGI_SITE)
+
+
+class TestBistaticGeometry:
+    """The baseline and the bistatic angle, against closed-form triangles."""
+
+    def test_baseline_matches_an_independent_geodetic_distance(self) -> None:
+        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
+        expected_m = float(
+            np.linalg.norm(geodetic_to_enu_m(*CHANGI_SITE, *DSO_SITE)),
+        )
+        # Re-derived through the same geodesy primitives but composed here, so
+        # this pins the wiring rather than the WGS-84 maths: exact to float64.
+        np.testing.assert_allclose(pair.baseline_m, expected_m, rtol=1e-12)
+
+    def test_baseline_is_about_twenty_two_kilometres(self) -> None:
+        """A sanity magnitude, so a frame or unit slip cannot pass the test above."""
+        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
+        assert 22.0e3 < pair.baseline_m < 22.5e3
+
+    def test_bistatic_angle_is_pi_on_the_baseline(self) -> None:
+        """A target between the sites subtends a straight line.
+
+        This is the case that requires clipping the cosine before arccos: the
+        exact value is -1, rounding lands just past it, and an unclipped
+        arccos returns NaN for precisely the geometry most worth asking about.
+        """
+        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
+        half_baseline_m = pair.baseline_m / 2.0
+        angle_rad = pair.bistatic_angle_rad(half_baseline_m, half_baseline_m)
+        assert not np.isnan(angle_rad)
+        # A null of a smooth function, so an absolute bound, not a relative one.
+        np.testing.assert_allclose(angle_rad, np.pi, atol=1e-9)
+
+    def test_bistatic_angle_is_a_right_angle_for_the_isoceles_case(self) -> None:
+        """R_t = R_r = L / sqrt(2) is half a square: beta = pi / 2 exactly."""
+        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
+        range_m = pair.baseline_m / np.sqrt(2.0)
+        # Three float64 operations on exact inputs; 1e-12 is ample.
+        np.testing.assert_allclose(
+            pair.bistatic_angle_rad(range_m, range_m), np.pi / 2.0, rtol=1e-12
+        )
+
+    def test_bistatic_angle_vanishes_for_a_distant_target(self) -> None:
+        """Seen from far enough away the two sites merge and the pair goes monostatic."""
+        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
+        far_m = 1.0e7
+        angle_rad = pair.bistatic_angle_rad(far_m, far_m)
+        # Subtended angle is about L / R = 2.2e-3 rad; assert it is small and positive.
+        assert 0.0 < angle_rad < 1.0e-2
+
+    def test_bistatic_angle_broadcasts_over_targets(self) -> None:
+        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
+        ranges_m = np.array([20.0e3, 50.0e3, 100.0e3])
+        angles_rad = pair.bistatic_angle_rad(ranges_m, ranges_m)
+        assert angles_rad.shape == (3,)
+        # Further away is more nearly monostatic, so the angle must decrease.
+        assert np.all(np.diff(angles_rad) < 0.0)
+
+    def test_impossible_triangle_is_rejected(self) -> None:
+        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
+        too_near_m = pair.baseline_m / 4.0
+        with pytest.raises(ValueError, match="not a triangle"):
+            pair.bistatic_angle_rad(too_near_m, too_near_m)
+
+    @pytest.mark.parametrize(("range_tx_m", "range_rx_m"), [(0.0, 1.0e3), (1.0e3, -1.0)])
+    def test_bistatic_angle_rejects_non_positive_range(
+        self, range_tx_m: float, range_rx_m: float
+    ) -> None:
+        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
+        with pytest.raises(ValueError, match="strictly positive"):
+            pair.bistatic_angle_rad(range_tx_m, range_rx_m)
+
+    def test_target_ranges_are_zero_at_the_sites(self) -> None:
+        """A target standing on a site is at zero range from it and at L from the other."""
+        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
+        range_tx_m, range_rx_m = pair.target_ranges_m(*[np.array([v]) for v in DSO_SITE])
+        np.testing.assert_allclose(range_tx_m[0], 0.0, atol=1e-6)
+        np.testing.assert_allclose(range_rx_m[0], pair.baseline_m, rtol=1e-9)
+
+
+class TestBistaticResolution:
+    """Range resolution stops being a function of bandwidth alone."""
+
+    def test_resolution_at_zero_angle_is_the_monostatic_value(self) -> None:
+        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
+        np.testing.assert_allclose(
+            pair.range_resolution_at_bistatic_angle_m(0.0), pair.range_resolution_m, rtol=1e-12
+        )
+
+    def test_resolution_degrades_as_secant_of_half_the_angle(self) -> None:
+        """At beta = 120 deg, cos(beta / 2) = 1 / 2, so the bin is exactly twice as coarse."""
+        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
+        np.testing.assert_allclose(
+            pair.range_resolution_at_bistatic_angle_m(np.radians(120.0)),
+            2.0 * pair.range_resolution_m,
+            rtol=1e-12,
+        )
+
+    def test_resolution_is_infinite_in_forward_scatter(self) -> None:
+        """On the baseline every route has the same length, so range carries no information."""
+        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
+        assert np.isinf(pair.range_resolution_at_bistatic_angle_m(np.pi))
+
+    def test_forward_scatter_does_not_warn(self) -> None:
+        """The singularity is a real limit, returned as inf, not a numerical accident."""
+        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert np.isinf(pair.range_resolution_at_bistatic_angle_m(np.pi))
+
+    @pytest.mark.parametrize("bistatic_angle_rad", [-1.0e-9, np.pi + 1.0e-9])
+    def test_resolution_rejects_angles_outside_the_half_turn(
+        self, bistatic_angle_rad: float
+    ) -> None:
+        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
+        with pytest.raises(ValueError, match=r"\[0, pi\]"):
+            pair.range_resolution_at_bistatic_angle_m(bistatic_angle_rad)
+
+
+class TestBistaticAmbiguity:
+    """What folds is the range sum, not a range."""
+
+    def test_pulsed_unambiguous_sum_range_is_c_over_prf(self) -> None:
+        pair = _bistatic(S2_TRANSMITTER, S2_RECEIVER)
+        # Re-derived: a bistatic echo is delayed by (R_t + R_r) / c, so one PRI
+        # of delay buys c / PRF of range sum, not c / 2 PRF of range.
+        expected_m = SPEED_OF_LIGHT_MPS / S2_TRANSMITTER.prf_hz
+        np.testing.assert_allclose(pair.unambiguous_range_m, expected_m, rtol=1e-12)
+
+    def test_unambiguous_sum_range_is_twice_the_monostatic_range(self) -> None:
+        pair = _bistatic(S2_TRANSMITTER, S2_RECEIVER)
+        monostatic = _radar(S2_TRANSMITTER, S2_RECEIVER)
+        np.testing.assert_allclose(
+            pair.unambiguous_range_m, 2.0 * monostatic.unambiguous_range_m, rtol=1e-12
+        )
+
+    def test_waveform_independent_properties_match_the_monostatic_radar(self) -> None:
+        """Wavelength, noise and cube shape belong to the chains, not to the siting."""
+        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
+        monostatic = _radar(S1_TRANSMITTER, S1_RECEIVER)
+        assert pair.wavelength_m == monostatic.wavelength_m
+        assert pair.noise_power_w == monostatic.noise_power_w
+        assert pair.n_samples_per_pri == monostatic.n_samples_per_pri
+        assert pair.n_samples_per_chirp == monostatic.n_samples_per_chirp
+        assert pair.unambiguous_velocity_mps == monostatic.unambiguous_velocity_mps
+
+
+class TestBistaticValidation:
+    def test_coincident_sites_are_rejected(self) -> None:
+        """A zero baseline is a monostatic radar described the hard way."""
+        with pytest.raises(ValueError, match="use Radar instead"):
+            BistaticRadar(S1_TRANSMITTER, S1_RECEIVER, *DSO_SITE, *DSO_SITE)
+
+    @pytest.mark.parametrize("site_index", [0, 1])
+    def test_latitude_outside_the_poles_is_rejected(self, site_index: int) -> None:
+        sites = [list(DSO_SITE), list(CHANGI_SITE)]
+        sites[site_index][0] = 91.0
+        with pytest.raises(ValueError, match=r"must lie in \[-90, 90\]"):
+            BistaticRadar(S1_TRANSMITTER, S1_RECEIVER, *sites[0], *sites[1])
+
+    def test_pulsed_receiver_below_the_bandwidth_is_rejected(self) -> None:
+        slow_receiver = Receiver(sample_rate_hz=1.0e6, gain_rx_dbi=30.0, noise_figure_db=3.0)
+        with pytest.raises(ValueError, match="would alias"):
+            BistaticRadar(S2_TRANSMITTER, slow_receiver, *DSO_SITE, *CHANGI_SITE)
