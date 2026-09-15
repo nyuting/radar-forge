@@ -161,9 +161,18 @@ Encoded as `tests/pipelines/test_scenario_002.py`, marked `slow`, over a 5-frame
    from `truth.csv` via `BistaticRadar.target_ranges_m`, in every frame, for both variants.
 3. **Velocity.** The peak velocity matches the true bisector range rate **wrapped** into ±7.65 m/s
    (B1) and ±26.77 m/s (B2). `truth.csv` carries the unwrapped rate; the discrepancy is the point.
-4. **Resolution.** The measured range-peak width exceeds the β = 0 width by the factor
-   `1/cos(β/2)` predicted at that frame's bistatic angle, within tolerance. This is the one
-   criterion with no monostatic counterpart.
+4. **Resolution.** Two targets separated by `d` metres along the bisector direction are separated
+   in **bistatic mean range** by `d·cos(β/2)`, so resolving them needs `1/cos(β/2)` times the
+   spatial separation a monostatic radar would need. This is the one criterion with no monostatic
+   counterpart.
+
+   > This criterion is **not** a statement about peak width, and an earlier draft of this spec had
+   > it wrong. A point target has exactly one delay, so the width of its range peak is set by the
+   > window and the transform length and does not change with β at all. What degrades is the
+   > *mapping from space to range*: the iso-range surfaces are ellipsoids with the two sites at the
+   > foci, and they crowd together near the sites and spread out near the baseline. Asserting a
+   > widened peak would have tested a thing this simulation cannot produce, and would have been
+   > made to pass by loosening a tolerance.
 
 Absolute received power is **not** an acceptance criterion, per D8.
 

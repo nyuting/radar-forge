@@ -52,6 +52,7 @@ def render_range_doppler(
     folded_velocity_mps: float | None = None,
     title: str | None = None,
     dynamic_range_db: float = _DEFAULT_DYNAMIC_RANGE_DB,
+    bistatic: bool = False,
 ) -> Any:
     """Draw a range-Doppler map, optionally with the true target marked.
 
@@ -79,6 +80,11 @@ def render_range_doppler(
         the unfolded values, which is right when nothing folds.
     title : str, optional
         Figure title.
+    bistatic : bool, optional
+        Label the axes for a bistatic pair: the range axis carries the bistatic
+        mean range :math:`(R_t + R_r)/2` rather than a slant range, and the
+        velocity axis the bisector range rate. Default ``False``. Only the
+        labels change; the data is computed identically either way.
     dynamic_range_db : float, optional
         Decibels shown below the peak, default 60. Everything dimmer is
         clamped to the bottom of the colour scale.
@@ -140,8 +146,16 @@ def render_range_doppler(
     )
     figure.colorbar(mesh, ax=axes, label="Magnitude relative to peak (dB)")
 
-    axes.set_xlabel("Range (km)")
-    axes.set_ylabel("Radial velocity (m/s, positive closing)")
+    # The only thing a bistatic map changes. The numbers on both axes are
+    # produced by the same code either way -- see decision D6 of
+    # spec/scenario-002-singapore-bistatic.md -- but they mean different
+    # things, and a plot that did not say so would be read as a slant range.
+    if bistatic:
+        axes.set_xlabel("Bistatic mean range (km)")
+        axes.set_ylabel("Bisector range rate (m/s, positive closing)")
+    else:
+        axes.set_xlabel("Range (km)")
+        axes.set_ylabel("Radial velocity (m/s, positive closing)")
     range_limits_km = (range_m[0] * 1.0e-3, range_m[-1] * 1.0e-3)
     velocity_limits_mps = (velocity_mps[0], velocity_mps[-1])
     axes.set_xlim(*range_limits_km)

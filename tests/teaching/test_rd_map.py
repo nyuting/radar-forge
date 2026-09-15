@@ -189,3 +189,35 @@ class TestRenderRangeDoppler:
                 velocity_axis_mps,
                 dynamic_range_db=bad_dynamic_range_db,
             )
+
+
+class TestBistaticLabelling:
+    """The one thing a bistatic map changes: what the axes are called."""
+
+    @staticmethod
+    def _figure(*, bistatic: bool) -> object:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        range_axis_m, velocity_axis_mps = _axes()
+        return render_range_doppler(
+            _map_with_peak_at(16, 20), range_axis_m, velocity_axis_mps, bistatic=bistatic
+        )
+
+    def test_the_default_labels_are_monostatic(self) -> None:
+        axes = self._figure(bistatic=False).axes[0]
+        assert axes.get_xlabel() == "Range (km)"
+        assert "Radial velocity" in axes.get_ylabel()
+
+    def test_the_bistatic_flag_renames_both_axes(self) -> None:
+        """A bistatic range axis read as a slant range is read wrong."""
+        axes = self._figure(bistatic=True).axes[0]
+        assert axes.get_xlabel() == "Bistatic mean range (km)"
+        assert "Bisector range rate" in axes.get_ylabel()
+
+    def test_the_flag_changes_nothing_but_the_labels(self) -> None:
+        """The data is identical either way; only its description differs. D6."""
+        monostatic = self._figure(bistatic=False).axes[0]
+        bistatic = self._figure(bistatic=True).axes[0]
+        assert monostatic.get_xlim() == bistatic.get_xlim()
+        assert monostatic.get_ylim() == bistatic.get_ylim()

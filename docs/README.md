@@ -26,6 +26,10 @@ These are the rules the git hooks and CI enforce. Read them before your first co
 
 - [`spec/starter.md`](../spec/starter.md) — project charter and ecosystem survey.
 - [`spec/structure.md`](../spec/structure.md) — file-level module design.
+- [`spec/scenario-001-singapore-xband.md`](../spec/scenario-001-singapore-xband.md) — the first
+  vertical slice: trajectory → IQ → range-Doppler map, in three ambiguity variants.
+- [`spec/scenario-003-singapore-tracking.md`](../spec/scenario-003-singapore-tracking.md) — CFAR
+  detection, data association and Kalman tracking stacked on scenario 001's S1 variant.
 
 ## Library guides
 

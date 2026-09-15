@@ -26,6 +26,7 @@ import numpy as np
 
 from radar_forge import __version__
 from radar_forge.core.ambiguity import fold_velocity_mps
+from radar_forge.core.radar import BistaticRadar
 from radar_forge.pipelines.scenarios import (
     Frame,
     RangeDopplerProduct,
@@ -36,6 +37,11 @@ from radar_forge.pipelines.scenarios import (
     peak_range_velocity,
 )
 
+# A monostatic run writes the first six. A bistatic run appends the last three,
+# so the bistatic column set is a superset of the monostatic one and the D5 COCO
+# exporter can consume either unchanged -- see
+# spec/scenario-002-singapore-bistatic.md S8. In a bistatic run `range_m` is the
+# bistatic mean range and `radial_velocity_mps` the bisector rate.
 TRUTH_COLUMNS = [
     "frame",
     "time_s",
@@ -44,6 +50,7 @@ TRUTH_COLUMNS = [
     "azimuth_deg",
     "elevation_deg",
 ]
+BISTATIC_TRUTH_COLUMNS = ["range_tx_m", "range_rx_m", "bistatic_angle_deg"]
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -109,6 +116,34 @@ def burst_metadata(scenario: Scenario) -> list[dict[str, Any]]:
     return bursts
 
 
+def site_metadata(scenario: Scenario) -> dict[str, object]:
+    """Describe where the radar stands, in whichever siting the scenario uses."""
+    burst = scenario.bursts[0]
+    if isinstance(burst, BistaticRadar):
+        return {
+            "siting": "bistatic",
+            "transmitter_site": {
+                "latitude_deg": burst.transmitter_latitude_deg,
+                "longitude_deg": burst.transmitter_longitude_deg,
+                "altitude_m": burst.transmitter_altitude_m,
+            },
+            "receiver_site": {
+                "latitude_deg": burst.receiver_latitude_deg,
+                "longitude_deg": burst.receiver_longitude_deg,
+                "altitude_m": burst.receiver_altitude_m,
+            },
+            "baseline_m": burst.baseline_m,
+        }
+    return {
+        "siting": "monostatic",
+        "radar_site": {
+            "latitude_deg": burst.latitude_deg,
+            "longitude_deg": burst.longitude_deg,
+            "altitude_m": burst.altitude_m,
+        },
+    }
+
+
 def write_metadata(scenario: Scenario, out_dir: Path, n_frames: int) -> None:
     metadata = {
         "scenario": {
@@ -122,11 +157,7 @@ def write_metadata(scenario: Scenario, out_dir: Path, n_frames: int) -> None:
             "trajectory_path": str(scenario.trajectory_path),
             "target_altitude_m": scenario.target_altitude_m,
         },
-        "radar_site": {
-            "latitude_deg": scenario.bursts[0].latitude_deg,
-            "longitude_deg": scenario.bursts[0].longitude_deg,
-            "altitude_m": scenario.bursts[0].altitude_m,
-        },
+        "sites": site_metadata(scenario),
         "target": asdict(scenario.target),
         "bursts": burst_metadata(scenario),
         "provenance": {"radar_forge_version": __version__, "git_commit": git_commit()},
@@ -173,6 +204,7 @@ def render_frame(
             folded_velocity_mps=folded_velocity_mps,
             title=title,
             dynamic_range_db=dynamic_range_db,
+            bistatic=scenario.is_bistatic,
         )
         save_figure(figure, out_dir / f"rd{suffix}_{frame.index:05d}.png")
 
@@ -238,8 +270,11 @@ def assemble_movie(out_dir: Path, pattern: str, stem: str, frame_rate_hz: float)
     # only the frame being appended is decoded. Materialising them all is what
     # makes the fallback path -- the one taken by whoever lacks ffmpeg -- run
     # out of memory on a long scenario.
-    first = Image.open(frames[0]).convert("P", palette=Image.ADAPTIVE)
-    rest = (Image.open(path).convert("P", palette=Image.ADAPTIVE) for path in frames[1:])
+    # Image.Palette.ADAPTIVE, not the bare Image.ADAPTIVE: the latter is a
+    # legacy alias that still works at runtime but is absent from Pillow's type
+    # stubs, so it only fails the type gate once the teaching extra is present.
+    first = Image.open(frames[0]).convert("P", palette=Image.Palette.ADAPTIVE)
+    rest = (Image.open(path).convert("P", palette=Image.Palette.ADAPTIVE) for path in frames[1:])
     first.save(
         target,
         save_all=True,
@@ -267,23 +302,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     written = 0
     with truth_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(TRUTH_COLUMNS)
+        columns = list(TRUTH_COLUMNS)
+        if scenario.is_bistatic:
+            columns += BISTATIC_TRUTH_COLUMNS
+        writer.writerow(columns)
 
         for frame in iterate_frames(scenario):
             if frame.index >= n_frames:
                 break
             # Truth is the true, unfolded geometry in every variant; the gap
             # between it and the map is what the scenario is for.
-            writer.writerow(
-                [
-                    frame.index,
-                    f"{frame.time_s:.3f}",
-                    f"{frame.range_m:.3f}",
-                    f"{frame.radial_velocity_mps:.6f}",
-                    f"{frame.azimuth_deg:.6f}",
-                    f"{frame.elevation_deg:.6f}",
+            row = [
+                frame.index,
+                f"{frame.time_s:.3f}",
+                f"{frame.range_m:.3f}",
+                f"{frame.radial_velocity_mps:.6f}",
+                f"{frame.azimuth_deg:.6f}",
+                f"{frame.elevation_deg:.6f}",
+            ]
+            if (
+                frame.range_tx_m is not None
+                and frame.range_rx_m is not None
+                and frame.bistatic_angle_deg is not None
+            ):
+                row += [
+                    f"{frame.range_tx_m:.3f}",
+                    f"{frame.range_rx_m:.3f}",
+                    f"{frame.bistatic_angle_deg:.6f}",
                 ]
-            )
+            writer.writerow(row)
 
             if not args.no_iq:
                 arrays = {f"burst{index}": cube for index, cube in enumerate(frame.iq)}

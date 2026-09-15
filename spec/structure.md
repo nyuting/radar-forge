@@ -267,11 +267,137 @@ contract `pipelines/datasets.py` exports against. Its `RASPNet.ipynb` is the bri
 the two together are the dataset-plus-model benchmark for the `pipelines/` exporters. Licence
 undeclared ⇒ no code enters the tree and it is never a runtime dependency.
 
-### A.13 Licence summary
+### A.13 Tracking and data fusion
+
+`core/tracking.py` is the one module in Part B with no upstream in §A.1–A.12 beyond two textbook
+companions. These five projects are its comparative map. None is vendored and none is a runtime
+dependency; `scipy.optimize.linear_sum_assignment` covers the only algorithm
+`spec/scenario-003-singapore-tracking.md` actually needs, and `scipy` is already in core.
+
+**A.13a Stone Soup**
+
+- **Link:** https://github.com/dstl/Stone-Soup
+- **Language / licence:** Python (NumPy/SciPy) · MIT (Dstl)
+- **Paper:** P. A. Thomas, J. Barr, B. Balaji and K. White, *An open source framework for tracking
+  and state estimation ("Stone Soup")*, Proc. SPIE 10200, 2017.
+
+| Module | Responsibility |
+| :--- | :--- |
+| `types/` | The data model: `State`, `Detection`, `Track`, `Hypothesis`, `GaussianState` |
+| `predictor/`, `updater/` | Kalman, extended, unscented, particle and information filters, split predict/update |
+| `hypothesiser/`, `gater/` | Distance and probability hypothesisers; distance, elliptical and filtered gating |
+| `dataassociator/` | Nearest neighbour, global nearest neighbour, PDA, JPDA, multi-hypothesis |
+| `initiator/`, `deleter/` | M-of-N and single-point track initiation; time-based and covariance-based deletion |
+| `models/` | Transition (constant velocity/acceleration, singer) and measurement models, incl. IMM |
+| `metricgenerator/` | OSPA, GOSPA, SIAP — the standard tracking performance metrics |
+
+**What radar-forge borrows:** the *vocabulary and the seams*, not the code. The
+detection → hypothesiser → gater → associator → updater → initiator/deleter decomposition is the
+one this repository's `core/tracking.py` follows, at a fraction of the surface area: Stone Soup is
+a framework for comparing trackers, and radar-forge needs one tracker an intern can read end to
+end. Its metric generators are the reference for any future acceptance criterion beyond
+`spec/scenario-003-singapore-tracking.md` §12, and its JPDA and IMM implementations are the
+reference for the extensions that would fire D2's promotion trigger. MIT, so code could be
+borrowed with attribution; the reason not to is size, not licence.
+
+**A.13b FilterPy**
+
+- **Link:** https://github.com/rlabbe/filterpy
+- **Language / licence:** Python (NumPy/SciPy) · MIT
+- **Companion text:** R. R. Labbe, *Kalman and Bayesian Filters in Python* — a worked,
+  executable derivation of every filter in the library.
+
+| Module | Responsibility |
+| :--- | :--- |
+| `kalman/` | `KalmanFilter`, `ExtendedKalmanFilter`, `UnscentedKalmanFilter`, IMM, fixed-lag smoothers |
+| `common/` | `Q_discrete_white_noise`, `Q_continuous_white_noise`, `Saver`, van Loan discretisation |
+| `gh/`, `hinfinity/`, `monte_carlo/` | g-h filters, H-infinity filters, particle-filter resampling |
+| `stats/` | NEES/NIS consistency statistics, covariance ellipses, plotting helpers |
+
+**What radar-forge borrows:** the *formulation*. `Q_discrete_white_noise` is the exact
+discrete-white-noise-acceleration construction `core/tracking.py` reimplements from reference [2]
+of the scenario spec, and FilterPy's `log_likelihood`/NIS bookkeeping is the model for the
+consistency statistic that scenario 003 §12 asserts on. It is a reference to reimplement rather
+than a dependency: the two-state constant-velocity case is about forty vectorised lines, and
+carrying a filter library to get them would fail `CLAUDE.md`'s test for adding a dependency.
+
+**A.13c motpy**
+
+- **Link:** https://github.com/wmuron/motpy
+- **Language / licence:** Python · MIT
+
+| Module | Responsibility |
+| :--- | :--- |
+| `tracker.py` | `MultiObjectTracker`: the whole predict → match → update → prune loop in one file |
+| `core.py` | `Box`, `Detection`, `Track` value types |
+| `metrics.py` | IoU and Euclidean cost matrices for the assignment step |
+| `model.py` | Constant-velocity and constant-acceleration motion models with a single order knob |
+
+**What radar-forge borrows:** the *proof of scale*. motpy is tracking-by-detection with Hungarian
+matching and a staleness-based track manager, complete, in roughly one module — which is the
+evidence behind `spec/structure.md` D2's decision to keep `core/tracking.py` unsplit until a
+second association strategy arrives. Its `MultiObjectTracker.step(detections) -> tracks` signature
+is the shape `TrackManager` follows. It is a computer-vision tracker, so nothing about its cost
+metrics or box model transfers; the loop structure is the whole borrowing.
+
+**A.13d Tracktable**
+
+- **Link:** https://github.com/sandialabs/tracktable
+- **Language / licence:** C++ core with Python bindings · BSD-3-Clause (Sandia National
+  Laboratories, DOE contract DE-NA0003525)
+
+| Module | Responsibility |
+| :--- | :--- |
+| `domain/` | Terrestrial, Cartesian-2D and Cartesian-3D coordinate domains with unit-aware points |
+| `core/` | `Trajectory` and `TrajectoryPoint` containers, timestamped and property-annotated |
+| `analysis/` | Assembly of points into trajectories, DBSCAN clustering, R-tree spatial indexing, distance geometry |
+| `render/` | Cartopy/matplotlib map rendering of trajectories and heatmaps |
+| `applications/` | Trajectory assembly, filtering and rendering as command-line tools |
+
+**What radar-forge borrows:** the *trajectory data model*, as prior art for
+`pipelines/trajectories.py` and for `teaching/scopes/track_plot.py` — in particular the separation
+of a coordinate domain from the trajectory container, which is what lets the same analysis run in
+geodetic and Cartesian frames. It is explicitly **not** a dependency: radar-forge needs one
+plan-view plot, matplotlib already draws it, and a C++/Boost build to draw it would fail
+`CLAUDE.md`'s dependency test. If large-scale trajectory analytics ever become a goal of
+`pipelines/`, the BSD licence makes it the first thing to reach for.
+
+**A.13e labeledRFS and VisualRFS**
+
+- **Link:** https://github.com/linh-gist/labeledRFS and https://github.com/linh-gist/VisualRFS
+- **Language / licence:** Python (labeledRFS, ported from Ba-Tuong Vo's MATLAB) and C++/Python
+  (VisualRFS) · both MIT. **The original MATLAB sources on Prof. Vo's site carry their own terms;
+  the papers, not the ports, are the reference of record.**
+- **Papers:** B.-T. Vo and B.-N. Vo, *Labeled random finite sets and multi-object conjugate
+  priors*, IEEE TSP 61(13), 2013; B.-N. Vo, B.-T. Vo and H. G. Hoang, *An efficient
+  implementation of the generalized labeled multi-Bernoulli filter*, IEEE TSP 65(8), 2017.
+
+| Module | Responsibility |
+| :--- | :--- |
+| `GLMB`, `LMB` | Generalized labeled multi-Bernoulli and labeled multi-Bernoulli filters with joint prediction and update |
+| `gms`, `jointpredictupdate` | Gaussian-mixture components; the joint step that removes the separate gating stage |
+| `assignment/` | Murty's k-best and Gibbs-sampled ranked assignment |
+| `ospa`, `run_filter` | OSPA/OSPA(2) error metrics and the scenario drivers |
+
+**What radar-forge borrows:** nothing yet, by design — it is the **target state** for high-clutter
+multi-target tracking, recorded here so that the extension has a reference rather than an
+improvisation. The relevant idea is that a random-finite-set filter propagates a distribution over
+*sets* of targets and so needs no heuristic gate, no M-of-N initiator and no deleter: exactly the
+three components `spec/scenario-003-singapore-tracking.md` §7 has to size by hand and defend in
+§3. That contrast is worth teaching even before the filter is implemented. Implementation is
+gated on a multi-target, high-clutter scenario existing to justify it, and would be written from
+the papers.
+
+### A.14 Licence summary
 
 | Project | Licence | Usable as dependency? | Usable as code source? |
 | :--- | :--- | :--- | :--- |
 | Phased-Array-Antenna-Model | MIT | yes | yes, with attribution |
+| Stone Soup | MIT | yes | yes, with attribution — not taken, size not licence |
+| FilterPy | MIT | yes | yes, with attribution — reimplemented instead, ~40 lines |
+| motpy | MIT | no (computer-vision domain) | loop structure only |
+| Tracktable | BSD-3-Clause | yes, if trajectory analytics is ever a goal | yes, with attribution |
+| labeledRFS / VisualRFS | MIT (ports); original MATLAB terms differ | no | **no** — write from the papers |
 | pyroomacoustics | MIT | yes | yes, with attribution |
 | RF-Genesis | MIT | optional extra | yes, with attribution |
 | RadarSim (GUI) | MIT | reference | yes, with attribution |
@@ -361,7 +487,7 @@ src/radar_forge/
 | `core/signal.py` | FMCW Target Simulator `modelBasebandSignal.m`; RadarSimPy simulator semantics |
 | `core/dsp.py`, `core/detection.py` | RadarBook; RadarSimPy `processing.py`; RadarSim CFAR variants; pyAPRiL `detector`/`hitProcessor` (structure only) |
 | `core/clutter.py` | pyAPRiL `clutterCancellation` (reimplemented from papers); RadarSim land/sea clutter |
-| `core/tracking.py` | RadarSim tracking and fusion; RadarBook tracking-filter chapters |
+| `core/tracking.py` | Stone Soup data model and predictor/updater/associator seams; FilterPy filter and `Q_discrete_white_noise` formulation; motpy's single-module tracking loop; RadarSim tracking and fusion; RadarBook tracking-filter chapters |
 | `array/*` | Phased-Array-Antenna-Model (near one-to-one module split) |
 | `array/doa.py` | pyroomacoustics `doa` base-class pattern; RadarSimPy and pyroomacoustics estimators as benchmarks |
 | `raytracing/base.py`, `scene.py` | RF-Genesis pipeline staging; RadarSimPy scene/mesh API |
@@ -383,7 +509,7 @@ src/radar_forge/
 3. **One scene, many backends.** `raytracing.Scene` is backend-neutral; swapping `analytic` for
    `mitsuba` changes fidelity and runtime, not user code.
 4. **Licence hygiene is a design constraint.** GPL and unlicensed references are reimplemented from
-   published equations, with the source cited in the module docstring. See §A.13.
+   published equations, with the source cited in the module docstring. See §A.14.
 5. **Every core algorithm is teachable.** Each `core/` and `array/` module pairs with a notebook in
    `teaching/notebooks/` and a numerical test against a textbook-published value.
 

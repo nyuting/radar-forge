@@ -10,12 +10,13 @@ test is a guarantee.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from radar_forge.core.radar import Radar
+from radar_forge.core.radar import BistaticRadar, Radar
 from radar_forge.pipelines.scenarios import (
     Scenario,
     burst_range_doppler,
@@ -28,6 +29,8 @@ SCENARIOS_DIR = Path(__file__).parent.parent.parent / "scenarios"
 S1_TOML = SCENARIOS_DIR / "scenario_001_fmcw_low_prf.toml"
 S2_TOML = SCENARIOS_DIR / "scenario_001_pulsed_medium_prf.toml"
 S3_TOML = SCENARIOS_DIR / "scenario_001_fmcw_dual_prf.toml"
+B1_TOML = SCENARIOS_DIR / "scenario_002_bistatic_xband.toml"
+B2_TOML = SCENARIOS_DIR / "scenario_002_bistatic_sband.toml"
 
 # Range resolution c/2B at B = 2 MHz, shared by all three variants.
 RANGE_RESOLUTION_M = 74.9481145
@@ -357,3 +360,73 @@ class TestVelocityIsIndependentOfTheWindow:
         (frame,) = list(iterate_frames(scenario))
         assert frame.radial_velocity_mps != 0.0
         assert np.isfinite(frame.radial_velocity_mps)
+
+
+class TestBistaticScenarios:
+    """The [transmitter_site] table, and that its absence changes nothing."""
+
+    @pytest.mark.parametrize("toml_path", [B1_TOML, B2_TOML], ids=["b1-xband", "b2-sband"])
+    def test_every_shipped_bistatic_scenario_loads(self, toml_path: Path) -> None:
+        scenario = load_scenario(toml_path)
+        assert scenario.is_bistatic
+        assert len(scenario.bursts) == 1
+        assert isinstance(scenario.bursts[0], BistaticRadar)
+
+    @pytest.mark.parametrize("toml_path", [S1_TOML, S2_TOML, S3_TOML], ids=["s1", "s2", "s3"])
+    def test_a_scenario_without_the_table_is_still_monostatic(self, toml_path: Path) -> None:
+        """The regression guard: scenario 001 must not have become bistatic."""
+        scenario = load_scenario(toml_path)
+        assert not scenario.is_bistatic
+        assert all(isinstance(burst, Radar) for burst in scenario.bursts)
+
+    def test_the_baseline_is_the_specified_changi_to_dso_distance(self) -> None:
+        """Checked against spec/scenario-002-singapore-bistatic.md S2."""
+        pair = load_scenario(B1_TOML).bursts[0]
+        assert isinstance(pair, BistaticRadar)
+        np.testing.assert_allclose(pair.baseline_m, 23_726.0, atol=5.0)
+
+    def test_the_two_variants_differ_only_in_the_carrier(self) -> None:
+        """The comparison the pair exists to make, asserted rather than trusted."""
+        x_band = load_scenario(B1_TOML).bursts[0]
+        s_band = load_scenario(B2_TOML).bursts[0]
+        assert x_band.transmitter.f0_hz != s_band.transmitter.f0_hz
+        for field in ("bandwidth_hz", "transmit_power_w", "chirp_time_s", "prf_hz", "waveform"):
+            assert getattr(x_band.transmitter, field) == getattr(s_band.transmitter, field)
+        assert x_band.receiver == s_band.receiver
+
+    def test_deleting_the_table_makes_the_same_file_monostatic(self, tmp_path: Path) -> None:
+        """The table's presence is the whole switch; nothing else selects siting."""
+        text = B1_TOML.read_text()
+        start = text.index("[transmitter_site]")
+        end = text.index("[receiver]")
+        monostatic = tmp_path / "monostatic.toml"
+        monostatic.write_text(text[:start] + text[end:])
+        # The trajectory path is resolved relative to the TOML, so it moves too.
+        scenario = replace(
+            load_scenario(monostatic), trajectory_path=load_scenario(B1_TOML).trajectory_path
+        )
+        assert not scenario.is_bistatic
+
+    def test_rejects_an_unknown_key_in_the_transmitter_site(self, tmp_path: Path) -> None:
+        """The new table gets the same loud failure as every other one."""
+        broken = tmp_path / "broken.toml"
+        broken.write_text(B1_TOML.read_text().replace("latitude_deg = 1.3592", "lat_deg = 1.3592"))
+        with pytest.raises(ValueError, match="unknown key"):
+            load_scenario(broken)
+
+    def test_frames_carry_the_bistatic_geometry(self) -> None:
+        scenario = _short_window(load_scenario(B1_TOML), 2)
+        for frame in iterate_frames(scenario):
+            assert frame.range_tx_m is not None
+            assert frame.range_rx_m is not None
+            assert frame.bistatic_angle_deg is not None
+            assert frame.transmit_azimuth_deg is not None
+            assert 0.0 < frame.bistatic_angle_deg < 180.0
+
+    def test_monostatic_frames_leave_the_bistatic_fields_empty(self) -> None:
+        """None rather than a plausible-looking zero, which would be a lie."""
+        scenario = _short_window(load_scenario(S1_TOML), 2)
+        for frame in iterate_frames(scenario):
+            assert frame.range_tx_m is None
+            assert frame.range_rx_m is None
+            assert frame.bistatic_angle_deg is None
