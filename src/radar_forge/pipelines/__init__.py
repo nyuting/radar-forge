@@ -13,14 +13,17 @@ from radar_forge.pipelines.scenarios import (
     peak_range_velocity,
 )
 from radar_forge.pipelines.trajectories import (
+    BistaticTargetTrack,
     TargetTrack,
     Trajectory,
     load_flight_csv,
     resample,
+    to_bistatic_radar_frame,
     to_radar_frame,
 )
 
 __all__ = [
+    "BistaticTargetTrack",
     "Frame",
     "RangeDopplerProduct",
     "Scenario",
@@ -33,6 +36,7 @@ __all__ = [
     "peak_range_velocity",
     "resample",
     "scenarios",
+    "to_bistatic_radar_frame",
     "to_radar_frame",
     "trajectories",
 ]

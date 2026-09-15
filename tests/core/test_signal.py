@@ -13,15 +13,18 @@ import numpy as np
 import pytest
 
 from radar_forge.core.ambiguity import fold_velocity_mps
+from radar_forge.core.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.core.dsp import (
     doppler_bin_centers_mps,
     matched_filter,
     range_bin_centers_m,
     range_doppler_map,
 )
-from radar_forge.core.radar import Radar, Receiver, Transmitter
+from radar_forge.core.radar import BistaticRadar, Radar, Receiver, Transmitter
 from radar_forge.core.signal import (
     PropagationPaths,
+    bistatic_doppler_hz,
+    bistatic_line_of_sight_paths,
     fmcw_deramp_baseband,
     line_of_sight_paths,
     pulsed_baseband,
@@ -348,3 +351,258 @@ class TestThermalNoise:
         assert not np.array_equal(clean, noisy)
         residual_power_w = float(np.mean(np.abs(noisy - clean) ** 2))
         np.testing.assert_allclose(residual_power_w, S1_RADAR.noise_power_w, rtol=0.05)
+
+
+# A receiver site due east of DSO_SITE; baseline about 22 km.
+CHANGI_SITE = (1.29150, 103.98710, 60.0)
+
+S1_PAIR = BistaticRadar(
+    Transmitter(9.8e9, 2.0e6, 100.0, 30.0, 1.0e-3, 1.0e3, waveform="fmcw"),
+    Receiver(1.0e6, 30.0, 3.0),
+    *DSO_SITE,
+    *CHANGI_SITE,
+)
+S2_PAIR = BistaticRadar(
+    Transmitter(9.8e9, 2.0e6, 1.0e3, 30.0, 10.0e-6, 25.0e3, waveform="pulsed"),
+    Receiver(2.5e6, 30.0, 3.0),
+    *DSO_SITE,
+    *CHANGI_SITE,
+)
+
+
+class TestBistaticLineOfSightPaths:
+    """Bistatic paths, and the half-sum convention the generators depend on."""
+
+    def test_reduces_to_monostatic_when_the_sites_all_but_coincide(self) -> None:
+        """The headline equivalence: collapse the baseline and the two agree.
+
+        The sites cannot be made identical — BistaticRadar rejects a zero
+        baseline — so they are put one metre apart, which is 1e-4 of a range bin
+        and far below every tolerance asserted here.
+        """
+        near_site = (DSO_SITE[0], DSO_SITE[1], DSO_SITE[2] + 1.0)
+        pair = BistaticRadar(S1_RADAR.transmitter, S1_RADAR.receiver, *DSO_SITE, *near_site)
+        range_m, velocity_mps, rcs_m2 = 12.0e3, 80.0, 10.0
+
+        monostatic = line_of_sight_paths(S1_RADAR, range_m, velocity_mps, rcs_m2)
+        bistatic = bistatic_line_of_sight_paths(pair, range_m, range_m, velocity_mps, rcs_m2)
+
+        # Identical arithmetic in a different grouping, so float64 exactness.
+        np.testing.assert_allclose(bistatic.delay_s, monostatic.delay_s, rtol=1e-12)
+        np.testing.assert_allclose(bistatic.doppler_hz, monostatic.doppler_hz, rtol=1e-12)
+        np.testing.assert_allclose(
+            bistatic.amplitude_linear, monostatic.amplitude_linear, rtol=1e-12
+        )
+
+    def test_equivalent_range_is_half_the_path_sum(self) -> None:
+        """Pins the convention every generator silently depends on.
+
+        ``range_m`` is (R_t + R_r) / 2, not a distance to anything. A later
+        "correction" of it to the full path sum, or to either range, would leave
+        every cube in this module wrong by a factor of two with no other test
+        necessarily noticing, so this one states it outright.
+        """
+        paths = bistatic_line_of_sight_paths(S1_PAIR, 12.0e3, 15.0e3, 0.0, 10.0)
+        np.testing.assert_allclose(paths.range_m, 13.5e3, rtol=1e-12)
+
+    def test_delay_is_the_whole_route_over_the_speed_of_light(self) -> None:
+        range_tx_m, range_rx_m = 12.0e3, 15.0e3
+        paths = bistatic_line_of_sight_paths(S1_PAIR, range_tx_m, range_rx_m, 0.0, 10.0)
+        np.testing.assert_allclose(
+            paths.delay_s, (range_tx_m + range_rx_m) / SPEED_OF_LIGHT_MPS, rtol=1e-12
+        )
+
+    def test_arrival_and_departure_angles_are_kept_separate(self) -> None:
+        """Departure happens at one site and arrival at another, so they differ."""
+        paths = bistatic_line_of_sight_paths(
+            S1_PAIR,
+            12.0e3,
+            15.0e3,
+            0.0,
+            10.0,
+            transmit_azimuth_deg=30.0,
+            receive_azimuth_deg=210.0,
+        )
+        np.testing.assert_allclose(paths.aod_rad[0, 0], np.radians(30.0), rtol=1e-12)
+        np.testing.assert_allclose(paths.aoa_rad[0, 0], np.radians(210.0), rtol=1e-12)
+
+    def test_broadcasts_over_targets(self) -> None:
+        """Every range, rate and cross-section is genuinely per-target."""
+        ranges_tx_m = np.array([10.0e3, 12.0e3, 14.0e3])
+        ranges_rx_m = np.array([15.0e3, 11.0e3, 20.0e3])
+        paths = bistatic_line_of_sight_paths(
+            S1_PAIR, ranges_tx_m, ranges_rx_m, np.array([10.0, -20.0, 30.0]), 10.0
+        )
+        assert paths.n_paths == 3
+        np.testing.assert_allclose(paths.range_m, (ranges_tx_m + ranges_rx_m) / 2.0, rtol=1e-12)
+
+    def test_zero_cross_section_gives_a_null_path(self) -> None:
+        paths = bistatic_line_of_sight_paths(S1_PAIR, 12.0e3, 15.0e3, 0.0, 0.0)
+        assert paths.amplitude_linear[0] == 0.0
+
+    @pytest.mark.parametrize(("range_tx_m", "range_rx_m"), [(0.0, 1.0e3), (1.0e3, -1.0)])
+    def test_rejects_non_positive_range(self, range_tx_m: float, range_rx_m: float) -> None:
+        with pytest.raises(ValueError, match="strictly positive"):
+            bistatic_line_of_sight_paths(S1_PAIR, range_tx_m, range_rx_m, 0.0, 10.0)
+
+    def test_rejects_negative_cross_section(self) -> None:
+        with pytest.raises(ValueError, match="non-negative"):
+            bistatic_line_of_sight_paths(S1_PAIR, 12.0e3, 15.0e3, 0.0, -1.0)
+
+
+class TestBistaticDoppler:
+    """The bisector projection, and the two geometries that null it."""
+
+    def test_matches_the_bisector_projection(self) -> None:
+        """Isoceles geometry: f_d = (2 v / lambda) cos(beta / 2) along the bisector.
+
+        The target sits on the perpendicular bisector of the baseline and closes
+        along it, so delta = 0 and the textbook form reduces to the cosine of
+        half the bistatic angle (Willis §3.2).
+        """
+        half_baseline_m, offset_m = 11.0e3, 20.0e3
+        # Sites at (-L/2, 0, 0) and (+L/2, 0, 0); target on the north bisector.
+        to_tx = np.array([-half_baseline_m, -offset_m, 0.0])
+        to_rx = np.array([half_baseline_m, -offset_m, 0.0])
+        unit_to_tx = to_tx / np.linalg.norm(to_tx)
+        unit_to_rx = to_rx / np.linalg.norm(to_rx)
+
+        speed_mps = 80.0
+        velocity = np.array([0.0, -speed_mps, 0.0])  # straight down the bisector
+        wavelength_m = S1_PAIR.wavelength_m
+
+        half_angle_rad = np.arctan2(half_baseline_m, offset_m)
+        expected_hz = 2.0 * speed_mps * np.cos(half_angle_rad) / wavelength_m
+        np.testing.assert_allclose(
+            bistatic_doppler_hz(wavelength_m, velocity, unit_to_tx, unit_to_rx),
+            expected_hz,
+            rtol=1e-12,
+        )
+
+    def test_is_zero_crossing_the_bisector(self) -> None:
+        """Motion perpendicular to the bisector changes no total path length."""
+        to_tx = np.array([-1.0, -2.0, 0.0])
+        to_rx = np.array([1.0, -2.0, 0.0])
+        unit_to_tx = to_tx / np.linalg.norm(to_tx)
+        unit_to_rx = to_rx / np.linalg.norm(to_rx)
+        velocity = np.array([80.0, 0.0, 0.0])  # across the bisector
+        # A cancellation to a true null, so an absolute bound against a kHz scale.
+        np.testing.assert_allclose(
+            bistatic_doppler_hz(S1_PAIR.wavelength_m, velocity, unit_to_tx, unit_to_rx),
+            0.0,
+            atol=1e-9,
+        )
+
+    def test_is_zero_moving_along_the_baseline(self) -> None:
+        """The bistatic-only null: one range shortens as fast as the other lengthens.
+
+        A target on the baseline between the sites is closing on one at exactly
+        the rate it opens on the other, so the pair is blind to motion that is
+        purely radial to each site taken alone. A monostatic radar has no
+        equivalent of this.
+        """
+        unit_to_tx = np.array([-1.0, 0.0, 0.0])
+        unit_to_rx = np.array([1.0, 0.0, 0.0])
+        velocity = np.array([80.0, 0.0, 0.0])
+        np.testing.assert_allclose(
+            bistatic_doppler_hz(S1_PAIR.wavelength_m, velocity, unit_to_tx, unit_to_rx),
+            0.0,
+            atol=1e-9,
+        )
+
+    def test_closing_on_both_sites_is_positive(self) -> None:
+        unit_to_tx = np.array([-1.0, 0.0, 0.0])
+        unit_to_rx = np.array([0.0, -1.0, 0.0])
+        velocity = np.array([-40.0, -40.0, 0.0])  # towards both
+        assert bistatic_doppler_hz(S1_PAIR.wavelength_m, velocity, unit_to_tx, unit_to_rx) > 0.0
+
+    def test_rejects_vectors_that_are_not_three_dimensional(self) -> None:
+        with pytest.raises(ValueError, match="three components"):
+            bistatic_doppler_hz(
+                S1_PAIR.wavelength_m, np.zeros((1, 2)), np.zeros((1, 3)), np.zeros((1, 3))
+            )
+
+
+class TestBistaticGenerators:
+    """The generators are reused unmodified; these say so in cube terms."""
+
+    def test_fmcw_puts_a_bistatic_target_in_the_half_sum_range_bin(self) -> None:
+        """The proof that no generator body needed changing.
+
+        The range sum is chosen so its half lands on a bin centre exactly, and
+        the assertion is on the integer bin index, so there is no tolerance to
+        get wrong.
+        """
+        range_axis_m = range_bin_centers_m(
+            S1_PAIR.n_samples_per_pri, 2.0e6, 1.0e-3, S1_PAIR.receiver.sample_rate_hz
+        )
+        target_bin = 40
+        half_sum_m = float(range_axis_m[target_bin])
+        # Split the sum unevenly, so a generator reading either range alone,
+        # or the full sum rather than its half, lands in a different bin.
+        range_tx_m = 0.25 * (2.0 * half_sum_m)
+        range_rx_m = 0.75 * (2.0 * half_sum_m)
+
+        paths = bistatic_line_of_sight_paths(S1_PAIR, range_tx_m, range_rx_m, 0.0, 10.0)
+        rd_map = range_doppler_map(fmcw_deramp_baseband(paths, S1_PAIR, N_PULSES))
+        peak = np.unravel_index(np.abs(rd_map).argmax(), rd_map.shape)
+        assert int(peak[1]) == target_bin
+
+    def test_pulsed_bistatic_target_folds_on_the_range_sum(self) -> None:
+        """Folding happens on (R_t + R_r), so it is the sum that wraps, not a range."""
+        unambiguous_sum_m = S2_PAIR.unambiguous_range_m
+        range_sum_m = unambiguous_sum_m * 1.5  # beyond one repetition interval
+        folded_sum_m = range_sum_m % unambiguous_sum_m
+
+        reference = lfm_chirp(2.0e6, 10.0e-6, 2.5e6)
+        folded_peak = np.abs(
+            matched_filter(
+                pulsed_baseband(
+                    bistatic_line_of_sight_paths(
+                        S2_PAIR, range_sum_m / 3.0, 2.0 * range_sum_m / 3.0, 0.0, 10.0
+                    ),
+                    S2_PAIR,
+                    16,
+                ),
+                reference,
+                axis=-1,
+            )[0]
+        ).argmax()
+        # The same range sum, split differently and inside one interval: it must
+        # compress to the same sample, because only the sum sets the delay.
+        unfolded_peak = np.abs(
+            matched_filter(
+                pulsed_baseband(
+                    bistatic_line_of_sight_paths(
+                        S2_PAIR, folded_sum_m / 4.0, 3.0 * folded_sum_m / 4.0, 0.0, 10.0
+                    ),
+                    S2_PAIR,
+                    16,
+                ),
+                reference,
+                axis=-1,
+            )[0]
+        ).argmax()
+        assert int(folded_peak) == int(unfolded_peak)
+        assert folded_sum_m < range_sum_m
+
+    def test_doppler_bin_follows_the_bisector_rate(self) -> None:
+        """Closing-positive survives the bistatic path: the peak is at +v, not -v."""
+        velocity_axis_mps = doppler_bin_centers_mps(
+            N_PULSES,
+            S1_PAIR.transmitter.pulse_repetition_interval_s,
+            S1_PAIR.wavelength_m,
+        )
+        target_bin = N_PULSES // 2 + 3
+        bisector_velocity_mps = float(velocity_axis_mps[target_bin])
+
+        paths = bistatic_line_of_sight_paths(S1_PAIR, 12.0e3, 15.0e3, bisector_velocity_mps, 10.0)
+        cube = fmcw_deramp_baseband(paths, S1_PAIR, N_PULSES)
+        rd_map = range_doppler_map(cube)
+        peak = np.unravel_index(np.abs(rd_map).argmax(), rd_map.shape)
+        assert int(peak[0]) == target_bin
+
+    def test_generators_accept_a_bistatic_radar(self) -> None:
+        paths = bistatic_line_of_sight_paths(S1_PAIR, 12.0e3, 15.0e3, 40.0, 10.0)
+        cube = fmcw_deramp_baseband(paths, S1_PAIR, 8)
+        assert cube.shape == (8, S1_PAIR.n_samples_per_pri)

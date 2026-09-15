@@ -16,6 +16,10 @@ wrong lesson:
 :func:`to_radar_frame`
     WGS-84 geometry against the radar site, plus a central difference for
     radial velocity.
+:func:`to_bistatic_radar_frame`
+    The same, for a transmitter and receiver at two different sites. There are
+    then two ranges instead of one, and the rate that matters is the bisector
+    rate of the *sum* of them.
 
 The velocity is the weakest number in the chain and the one most worth
 distrusting. It is a difference of an interpolated range, so it is smoothed
@@ -44,9 +48,17 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from radar_forge.core.geodesy import enu_to_range_azimuth_elevation, geodetic_to_enu_m
-from radar_forge.core.radar import Radar
+from radar_forge.core.radar import BistaticRadar, Radar
 
-__all__ = ["TargetTrack", "Trajectory", "load_flight_csv", "resample", "to_radar_frame"]
+__all__ = [
+    "BistaticTargetTrack",
+    "TargetTrack",
+    "Trajectory",
+    "load_flight_csv",
+    "resample",
+    "to_bistatic_radar_frame",
+    "to_radar_frame",
+]
 
 _CSV_COLUMNS = ("timestamp", "lat", "lon")
 
@@ -318,4 +330,165 @@ def to_radar_frame(trajectory: Trajectory, radar: Radar) -> TargetTrack:
         azimuth_deg=azimuth_deg,
         elevation_deg=elevation_deg,
         radial_velocity_mps=np.asarray(radial_velocity_mps, dtype=np.float64),
+    )
+
+
+@dataclass(frozen=True)
+class BistaticTargetTrack:
+    """What a two-site radar pair measures of a trajectory.
+
+    The bistatic counterpart of :class:`TargetTrack`. Where a monostatic track
+    carries one range and one radial velocity, this carries the two ranges of
+    ``spec/scenario-002-singapore-bistatic.md`` §4 and the single bisector rate
+    that follows from them.
+
+    Attributes
+    ----------
+    time_s : numpy.ndarray
+        Seconds since the trajectory's first fix, shape ``(n_frames,)``.
+    range_tx_m, range_rx_m : numpy.ndarray
+        Transmit and receive ranges, metres, shape ``(n_frames,)``. Named for
+        the site each is measured to, not for a property of the target.
+    bistatic_angle_rad : numpy.ndarray
+        The angle subtended at the target by the two sites, radians, shape
+        ``(n_frames,)``.
+    transmit_azimuth_deg, transmit_elevation_deg : numpy.ndarray
+        Look angles from the **transmitter** site, degrees -- the angle of
+        departure. Azimuth is zero at true north and increases clockwise.
+    receive_azimuth_deg, receive_elevation_deg : numpy.ndarray
+        Look angles from the **receiver** site, degrees -- the angle of arrival.
+        These genuinely differ from the transmit angles; that is what makes the
+        geometry bistatic.
+    bisector_velocity_mps : numpy.ndarray
+        Half the rate of closure of the total path, metres/second, shape
+        ``(n_frames,)``. **Positive closing**, and smoothed in exactly the way
+        :func:`to_radar_frame`'s radial velocity is.
+
+    Notes
+    -----
+    There is no ``radial_velocity_mps`` here, and the omission is deliberate.
+    A bistatic target has two radial velocities, one towards each site, and
+    neither of them is what the Doppler shift measures. Offering a field by
+    that name would invite a caller to use the wrong one.
+    """
+
+    time_s: NDArray[np.float64]
+    range_tx_m: NDArray[np.float64]
+    range_rx_m: NDArray[np.float64]
+    bistatic_angle_rad: NDArray[np.float64]
+    transmit_azimuth_deg: NDArray[np.float64]
+    transmit_elevation_deg: NDArray[np.float64]
+    receive_azimuth_deg: NDArray[np.float64]
+    receive_elevation_deg: NDArray[np.float64]
+    bisector_velocity_mps: NDArray[np.float64]
+
+    @property
+    def n_frames(self) -> int:
+        """Number of frames in the track."""
+        return int(self.time_s.size)
+
+    @property
+    def range_m(self) -> NDArray[np.float64]:
+        """Bistatic mean range :math:`(R_t + R_r)/2`, metres.
+
+        The quantity a range-Doppler map's range axis actually carries in the
+        bistatic case, per ``spec/scenario-002-singapore-bistatic.md`` D6, and
+        the one that matches :attr:`TargetTrack.range_m` when the baseline
+        shrinks to nothing.
+        """
+        result: NDArray[np.float64] = (self.range_tx_m + self.range_rx_m) / 2.0
+        return result
+
+
+def to_bistatic_radar_frame(trajectory: Trajectory, radar: BistaticRadar) -> BistaticTargetTrack:
+    r"""Express a trajectory as the two ranges and the bisector rate a pair sees.
+
+    The bistatic counterpart of :func:`to_radar_frame`.
+
+    Parameters
+    ----------
+    trajectory : Trajectory
+        The target's positions, already on the frame grid.
+    radar : radar_forge.core.radar.BistaticRadar
+        The sited pair; each site is the origin of its own local tangent plane.
+
+    Returns
+    -------
+    BistaticTargetTrack
+        Both ranges, both sets of look angles, the bistatic angle and the
+        bisector rate, shape ``(n_frames,)`` each.
+
+    Notes
+    -----
+    The bisector velocity is minus **half** the central difference of the total
+    path length,
+
+    .. math:: v_b = -rac{1}{2}rac{\mathrm{d}(R_t + R_r)}{\mathrm{d}t},
+
+    the half being what makes it reduce to :func:`to_radar_frame`'s radial
+    velocity when the two ranges coincide, so that the same
+    :math:`f_d = 2v/\lambda` holds for both sitings [2]_.
+
+    Every caveat on :func:`to_radar_frame`'s velocity applies here unchanged and
+    for the same reason: this differences an *interpolated* range, so it is the
+    mean rate across several seconds rather than the instantaneous one.
+
+    See Also
+    --------
+    to_radar_frame : The monostatic form.
+    radar_forge.core.signal.bistatic_line_of_sight_paths : Consumes
+        ``bisector_velocity_mps`` directly.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from radar_forge.core.radar import BistaticRadar, Receiver, Transmitter
+    >>> tx = Transmitter(9.8e9, 2.0e6, 100.0, 30.0, 1.0e-3, 1.0e3)
+    >>> pair = BistaticRadar(
+    ...     tx, Receiver(1.0e6, 30.0, 3.0), 1.2915, 103.7871, 60.0, 1.2915, 103.9871, 60.0
+    ... )
+    >>> track = to_bistatic_radar_frame(
+    ...     Trajectory(
+    ...         time_s=np.array([0.0, 1.0, 2.0]),
+    ...         latitude_deg=np.array([1.40, 1.40, 1.40]),
+    ...         longitude_deg=np.array([103.88, 103.88, 103.88]),
+    ...         altitude_m=np.array([1500.0, 1500.0, 1500.0]),
+    ...     ),
+    ...     pair,
+    ... )
+    >>> bool(np.all(track.bisector_velocity_mps == 0.0))  # a stationary target
+    True
+    """
+    range_tx_m, transmit_azimuth_deg, transmit_elevation_deg = enu_to_range_azimuth_elevation(
+        geodetic_to_enu_m(
+            trajectory.latitude_deg,
+            trajectory.longitude_deg,
+            trajectory.altitude_m,
+            radar.transmitter_latitude_deg,
+            radar.transmitter_longitude_deg,
+            radar.transmitter_altitude_m,
+        )
+    )
+    range_rx_m, receive_azimuth_deg, receive_elevation_deg = enu_to_range_azimuth_elevation(
+        geodetic_to_enu_m(
+            trajectory.latitude_deg,
+            trajectory.longitude_deg,
+            trajectory.altitude_m,
+            radar.receiver_latitude_deg,
+            radar.receiver_longitude_deg,
+            radar.receiver_altitude_m,
+        )
+    )
+    bisector_velocity_mps = -np.gradient(range_tx_m + range_rx_m, trajectory.time_s) / 2.0
+
+    return BistaticTargetTrack(
+        time_s=trajectory.time_s,
+        range_tx_m=range_tx_m,
+        range_rx_m=range_rx_m,
+        bistatic_angle_rad=radar.bistatic_angle_rad(range_tx_m, range_rx_m),
+        transmit_azimuth_deg=transmit_azimuth_deg,
+        transmit_elevation_deg=transmit_elevation_deg,
+        receive_azimuth_deg=receive_azimuth_deg,
+        receive_elevation_deg=receive_elevation_deg,
+        bisector_velocity_mps=np.asarray(bisector_velocity_mps, dtype=np.float64),
     )

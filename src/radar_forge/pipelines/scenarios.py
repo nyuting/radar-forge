@@ -44,7 +44,7 @@ import tomllib
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -57,15 +57,29 @@ from radar_forge.core.dsp import (
     range_bin_centers_m,
     range_doppler_map,
 )
-from radar_forge.core.radar import Radar, Receiver, Transmitter, WaveformKind
-from radar_forge.core.signal import fmcw_deramp_baseband, line_of_sight_paths, pulsed_baseband
+from radar_forge.core.radar import (
+    BistaticRadar,
+    Radar,
+    RadarLike,
+    Receiver,
+    Transmitter,
+    WaveformKind,
+)
+from radar_forge.core.signal import (
+    bistatic_line_of_sight_paths,
+    fmcw_deramp_baseband,
+    line_of_sight_paths,
+    pulsed_baseband,
+)
 from radar_forge.core.targets import PointTarget
 from radar_forge.core.waveforms import lfm_chirp
 from radar_forge.pipelines.trajectories import (
+    BistaticTargetTrack,
     TargetTrack,
     Trajectory,
     load_flight_csv,
     resample,
+    to_bistatic_radar_frame,
     to_radar_frame,
 )
 
@@ -79,7 +93,10 @@ __all__ = [
     "peak_range_velocity",
 ]
 
-_RADAR_KEYS = frozenset({"latitude_deg", "longitude_deg", "altitude_m"})
+_SITE_KEYS = frozenset({"latitude_deg", "longitude_deg", "altitude_m"})
+# [radar] is the site that *receives*. A monostatic scenario transmits from
+# there too; a bistatic one adds [transmitter_site] and moves the illuminator.
+_RADAR_KEYS = _SITE_KEYS
 _RECEIVER_KEYS = frozenset({"gain_rx_dbi", "noise_figure_db"})
 _TARGET_KEYS = frozenset({"rcs_dbsm", "altitude_m", "name"})
 _TRAJECTORY_KEYS = frozenset({"path", "start_time_s", "duration_s", "frame_rate_hz"})
@@ -109,9 +126,11 @@ class Scenario:
         Short identifier, used to label outputs.
     description : str
         One line of prose about what the scenario demonstrates.
-    bursts : tuple of radar_forge.core.radar.Radar
+    bursts : tuple of Radar or BistaticRadar
         One fully specified radar per burst, in transmission order. Length 1 for
-        an ordinary scenario, 2 for a dual-PRF one.
+        an ordinary scenario, 2 for a dual-PRF one. Every burst has the same
+        siting, because the sites are scenario-level tables and only the
+        ``[[burst]]`` waveform varies.
     n_pulses : tuple of int
         Slow-time pulses in each burst's coherent processing interval, same length
         and order as ``bursts``.
@@ -133,7 +152,7 @@ class Scenario:
 
     name: str
     description: str
-    bursts: tuple[Radar, ...]
+    bursts: tuple[RadarLike, ...]
     n_pulses: tuple[int, ...]
     target: PointTarget
     target_altitude_m: float
@@ -165,6 +184,11 @@ class Scenario:
             raise ValueError(msg)
 
     @property
+    def is_bistatic(self) -> bool:
+        """Whether the transmitter and receiver stand at different sites."""
+        return isinstance(self.bursts[0], BistaticRadar)
+
+    @property
     def n_frames(self) -> int:
         """Number of frames the window produces."""
         return round(self.duration_s * self.frame_rate_hz)
@@ -193,12 +217,28 @@ class Frame:
         One complex128 cube per burst, each ``(n_pulses, n_samples)`` with slow
         time on axis 0. Bursts may differ in both dimensions.
     range_m : float
-        True slant range, metres.
+        True slant range, metres -- and in a bistatic scenario the **bistatic
+        mean range** :math:`(R_t + R_r)/2`, which is what the map's range axis
+        carries. See ``spec/scenario-002-singapore-bistatic.md`` D6.
     radial_velocity_mps : float
         True radial velocity, metres/second, positive closing and **not**
-        folded into any burst's unambiguous interval.
+        folded into any burst's unambiguous interval. In a bistatic scenario
+        this is the **bisector** rate, the only rate the Doppler shift
+        measures; a bistatic target's velocity towards either individual site
+        is not recorded, because nothing observes it.
     azimuth_deg, elevation_deg : float
-        True look angles, degrees.
+        True look angles, degrees, from the **receiving** site.
+    range_tx_m, range_rx_m : float or None
+        The two ranges, metres, in a bistatic scenario; ``None`` in a
+        monostatic one, where they would both equal ``range_m``.
+    bistatic_angle_deg : float or None
+        The angle subtended at the target by the two sites, degrees, in a
+        bistatic scenario; ``None`` in a monostatic one, where it is zero by
+        construction rather than measured.
+    transmit_azimuth_deg, transmit_elevation_deg : float or None
+        Look angles from the transmitter site, degrees, in a bistatic
+        scenario; ``None`` in a monostatic one, where they equal the receive
+        angles.
     """
 
     index: int
@@ -208,9 +248,16 @@ class Frame:
     radial_velocity_mps: float
     azimuth_deg: float
     elevation_deg: float
+    range_tx_m: float | None = None
+    range_rx_m: float | None = None
+    bistatic_angle_deg: float | None = None
+    transmit_azimuth_deg: float | None = None
+    transmit_elevation_deg: float | None = None
 
 
-def _resampled_track(trajectory: Trajectory, scenario: Scenario) -> tuple[TargetTrack, int]:
+def _resampled_track(
+    trajectory: Trajectory, scenario: Scenario
+) -> tuple[TargetTrack | BistaticTargetTrack, int]:
     """Resample onto the frame grid, padded by a frame each side where possible.
 
     Returns the track and the index of the window's first frame within it.
@@ -243,7 +290,15 @@ def _resampled_track(trajectory: Trajectory, scenario: Scenario) -> tuple[Target
         )
         raise ValueError(msg)
 
-    track = to_radar_frame(resample(trajectory, grid_s), scenario.bursts[0])
+    # Every burst shares a siting, so the geometry is computed once against
+    # the first of them and reused for the rest.
+    sited = resample(trajectory, grid_s)
+    first_burst = scenario.bursts[0]
+    track: TargetTrack | BistaticTargetTrack = (
+        to_bistatic_radar_frame(sited, first_burst)
+        if isinstance(first_burst, BistaticRadar)
+        else to_radar_frame(sited, first_burst)
+    )
     return track, 1 if pad_before else 0
 
 
@@ -255,8 +310,19 @@ def _require_keys(table: dict[str, Any], allowed: frozenset[str], name: str) -> 
         raise ValueError(msg)
 
 
-def _burst_radar(burst: dict[str, Any], radar: dict[str, Any], receiver: dict[str, Any]) -> Radar:
-    """Build one burst's Radar, letting its own validation report bad physics."""
+def _burst_radar(
+    burst: dict[str, Any],
+    radar: dict[str, Any],
+    receiver: dict[str, Any],
+    transmitter_site: dict[str, Any] | None,
+) -> RadarLike:
+    """Build one burst's radar, letting its own validation report bad physics.
+
+    ``radar`` is the **receiving** site. When ``transmitter_site`` is given the
+    illuminator stands elsewhere and the result is a
+    :class:`~radar_forge.core.radar.BistaticRadar`; otherwise one site does both
+    jobs and the result is a :class:`~radar_forge.core.radar.Radar`.
+    """
     waveform: WaveformKind = burst.get("waveform", "fmcw")
     transmitter = Transmitter(
         f0_hz=float(burst["f0_hz"]),
@@ -267,16 +333,28 @@ def _burst_radar(burst: dict[str, Any], radar: dict[str, Any], receiver: dict[st
         prf_hz=float(burst["prf_hz"]),
         waveform=waveform,
     )
-    return Radar(
+    receive_chain = Receiver(
+        sample_rate_hz=float(burst["sample_rate_hz"]),
+        gain_rx_dbi=float(receiver["gain_rx_dbi"]),
+        noise_figure_db=float(receiver["noise_figure_db"]),
+    )
+    if transmitter_site is None:
+        return Radar(
+            transmitter=transmitter,
+            receiver=receive_chain,
+            latitude_deg=float(radar["latitude_deg"]),
+            longitude_deg=float(radar["longitude_deg"]),
+            altitude_m=float(radar["altitude_m"]),
+        )
+    return BistaticRadar(
         transmitter=transmitter,
-        receiver=Receiver(
-            sample_rate_hz=float(burst["sample_rate_hz"]),
-            gain_rx_dbi=float(receiver["gain_rx_dbi"]),
-            noise_figure_db=float(receiver["noise_figure_db"]),
-        ),
-        latitude_deg=float(radar["latitude_deg"]),
-        longitude_deg=float(radar["longitude_deg"]),
-        altitude_m=float(radar["altitude_m"]),
+        receiver=receive_chain,
+        transmitter_latitude_deg=float(transmitter_site["latitude_deg"]),
+        transmitter_longitude_deg=float(transmitter_site["longitude_deg"]),
+        transmitter_altitude_m=float(transmitter_site["altitude_m"]),
+        receiver_latitude_deg=float(radar["latitude_deg"]),
+        receiver_longitude_deg=float(radar["longitude_deg"]),
+        receiver_altitude_m=float(radar["altitude_m"]),
     )
 
 
@@ -344,10 +422,16 @@ def load_scenario(path: Path | str) -> Scenario:
     _require_keys(receiver_table, _RECEIVER_KEYS, "receiver")
     _require_keys(target_table, _TARGET_KEYS, "target")
     _require_keys(trajectory_table, _TRAJECTORY_KEYS, "trajectory")
+    transmitter_site_table = document.get("transmitter_site")
+    if transmitter_site_table is not None:
+        _require_keys(transmitter_site_table, _SITE_KEYS, "transmitter_site")
     for burst in document["burst"]:
         _require_keys(burst, _BURST_KEYS, "burst")
 
-    bursts = tuple(_burst_radar(burst, radar_table, receiver_table) for burst in document["burst"])
+    bursts = tuple(
+        _burst_radar(burst, radar_table, receiver_table, transmitter_site_table)
+        for burst in document["burst"]
+    )
     n_pulses = tuple(int(burst["n_pulses"]) for burst in document["burst"])
 
     return Scenario(
@@ -413,25 +497,54 @@ def iterate_frames(scenario: Scenario) -> Iterator[Frame]:
     rng = np.random.default_rng(scenario.seed)
     rcs_m2 = scenario.target.rcs_m2
 
+    # Flatten the two track shapes into one set of per-frame arrays up front, so
+    # that the frame loop below reads the same either way. The bistatic angles
+    # are the receiver's, because that is where the echo is measured.
+    bistatic_track = track if isinstance(track, BistaticTargetTrack) else None
+    if bistatic_track is not None:
+        range_m_all = bistatic_track.range_m
+        velocity_mps_all = bistatic_track.bisector_velocity_mps
+        azimuth_deg_all = bistatic_track.receive_azimuth_deg
+        elevation_deg_all = bistatic_track.receive_elevation_deg
+    else:
+        monostatic_track = cast(TargetTrack, track)
+        range_m_all = monostatic_track.range_m
+        velocity_mps_all = monostatic_track.radial_velocity_mps
+        azimuth_deg_all = monostatic_track.azimuth_deg
+        elevation_deg_all = monostatic_track.elevation_deg
+
     # A Python loop over frames is the point: this is a generator, and each
     # frame's cube is built and handed out before the next one is allocated.
     for index in range(scenario.n_frames):
         sample = first_frame + index
-        range_m = float(track.range_m[sample])
-        radial_velocity_mps = float(track.radial_velocity_mps[sample])
-        azimuth_deg = float(track.azimuth_deg[sample])
-        elevation_deg = float(track.elevation_deg[sample])
+        range_m = float(range_m_all[sample])
+        radial_velocity_mps = float(velocity_mps_all[sample])
+        azimuth_deg = float(azimuth_deg_all[sample])
+        elevation_deg = float(elevation_deg_all[sample])
 
         cubes: list[NDArray[np.complex128]] = []
         for burst_radar, burst_n_pulses in zip(scenario.bursts, scenario.n_pulses, strict=True):
-            paths = line_of_sight_paths(
-                burst_radar,
-                range_m,
-                radial_velocity_mps,
-                rcs_m2,
-                azimuth_deg=azimuth_deg,
-                elevation_deg=elevation_deg,
-            )
+            if isinstance(burst_radar, BistaticRadar) and bistatic_track is not None:
+                paths = bistatic_line_of_sight_paths(
+                    burst_radar,
+                    float(bistatic_track.range_tx_m[sample]),
+                    float(bistatic_track.range_rx_m[sample]),
+                    radial_velocity_mps,
+                    rcs_m2,
+                    transmit_azimuth_deg=float(bistatic_track.transmit_azimuth_deg[sample]),
+                    transmit_elevation_deg=float(bistatic_track.transmit_elevation_deg[sample]),
+                    receive_azimuth_deg=azimuth_deg,
+                    receive_elevation_deg=elevation_deg,
+                )
+            else:
+                paths = line_of_sight_paths(
+                    cast(Radar, burst_radar),
+                    range_m,
+                    radial_velocity_mps,
+                    rcs_m2,
+                    azimuth_deg=azimuth_deg,
+                    elevation_deg=elevation_deg,
+                )
             generate = (
                 pulsed_baseband
                 if burst_radar.transmitter.waveform == "pulsed"
@@ -447,6 +560,27 @@ def iterate_frames(scenario: Scenario) -> Iterator[Frame]:
             radial_velocity_mps=radial_velocity_mps,
             azimuth_deg=azimuth_deg,
             elevation_deg=elevation_deg,
+            range_tx_m=(
+                None if bistatic_track is None else float(bistatic_track.range_tx_m[sample])
+            ),
+            range_rx_m=(
+                None if bistatic_track is None else float(bistatic_track.range_rx_m[sample])
+            ),
+            bistatic_angle_deg=(
+                None
+                if bistatic_track is None
+                else float(np.degrees(bistatic_track.bistatic_angle_rad[sample]))
+            ),
+            transmit_azimuth_deg=(
+                None
+                if bistatic_track is None
+                else float(bistatic_track.transmit_azimuth_deg[sample])
+            ),
+            transmit_elevation_deg=(
+                None
+                if bistatic_track is None
+                else float(bistatic_track.transmit_elevation_deg[sample])
+            ),
         )
 
 
@@ -471,15 +605,16 @@ class RangeDopplerProduct:
     velocity_axis_mps: NDArray[np.float64]
 
 
-def burst_range_doppler(cube: NDArray[np.complex128], burst: Radar) -> RangeDopplerProduct:
+def burst_range_doppler(cube: NDArray[np.complex128], burst: RadarLike) -> RangeDopplerProduct:
     """Process one burst's IQ cube into a range-Doppler map with labelled axes.
 
     Parameters
     ----------
     cube : numpy.ndarray
         Baseband IQ, shape ``(n_pulses, n_samples)``, slow time on axis 0.
-    burst : radar_forge.core.radar.Radar
-        The burst that produced it; its waveform selects the receive chain.
+    burst : Radar or BistaticRadar
+        The burst that produced it; its waveform selects the receive chain. The
+        siting does not: processing depends on the waveform alone.
 
     Returns
     -------
@@ -505,6 +640,13 @@ def burst_range_doppler(cube: NDArray[np.complex128], burst: Radar) -> RangeDopp
     Both paths return an unshifted range axis and an ``fftshift``-ed velocity
     axis, from the ``dsp`` helpers rather than re-derived -- see the scenario
     specification S7.1.
+
+    For a bistatic burst the range axis carries the **bistatic mean range**
+    :math:`(R_t + R_r)/2` rather than a distance to either site, and the
+    velocity axis the bisector rate. Neither needs a different calculation:
+    both fall out of the same delay-to-range and Doppler-to-velocity factors,
+    which is decision D6 of ``spec/scenario-002-singapore-bistatic.md``. Only
+    the axis *label* differs, and that belongs to the plotting layer.
     """
     if burst.transmitter.waveform == "pulsed":
         reference = lfm_chirp(

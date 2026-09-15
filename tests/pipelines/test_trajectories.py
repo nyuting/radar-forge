@@ -17,11 +17,12 @@ import numpy as np
 import pytest
 
 from radar_forge.core.constants import WGS84_FLATTENING, WGS84_SEMI_MAJOR_AXIS_M
-from radar_forge.core.radar import Radar, Receiver, Transmitter
+from radar_forge.core.radar import BistaticRadar, Radar, Receiver, Transmitter
 from radar_forge.pipelines.trajectories import (
     Trajectory,
     load_flight_csv,
     resample,
+    to_bistatic_radar_frame,
     to_radar_frame,
 )
 
@@ -35,6 +36,16 @@ S1_RADAR = Radar(
 )
 
 TARGET_ALTITUDE_M = 1500.0
+
+# Scenario 002: the Changi illuminator, received at DSO. A 23.7 km baseline, so
+# the two ranges differ by kilometres rather than by rounding.
+CHANGI_SITE = (1.3592, 103.9894, 25.0)
+_BISTATIC_PAIR = BistaticRadar(
+    S1_RADAR.transmitter,
+    S1_RADAR.receiver,
+    *CHANGI_SITE,
+    *DSO_SITE,
+)
 
 
 def _curvature_radii_m(latitude_deg: float) -> tuple[float, float]:
@@ -294,3 +305,78 @@ class TestTrajectoryValidation:
                 longitude_deg=np.zeros(3),
                 altitude_m=np.zeros(3),
             )
+
+
+class TestToBistaticRadarFrame:
+    """The two-site transform, against the one-site transform it generalises."""
+
+    @staticmethod
+    def _collapsed_pair(offset_m: float = 1.0) -> BistaticRadar:
+        """S1's radar re-sited as a pair a metre across.
+
+        A zero baseline is rejected -- the bistatic angle is undefined there --
+        so the smallest honest test of the degenerate case is a metre.
+        """
+        return BistaticRadar(
+            transmitter=S1_RADAR.transmitter,
+            receiver=S1_RADAR.receiver,
+            transmitter_latitude_deg=S1_RADAR.latitude_deg,
+            transmitter_longitude_deg=S1_RADAR.longitude_deg,
+            transmitter_altitude_m=S1_RADAR.altitude_m,
+            receiver_latitude_deg=S1_RADAR.latitude_deg,
+            receiver_longitude_deg=S1_RADAR.longitude_deg,
+            receiver_altitude_m=S1_RADAR.altitude_m + offset_m,
+        )
+
+    def test_a_collapsed_baseline_reproduces_the_monostatic_track(self) -> None:
+        """The headline equivalence, at the trajectory layer."""
+        trajectory = _straight_north_track(speed_mps=80.0, duration_s=60.0, n_fixes=61)
+        monostatic = to_radar_frame(trajectory, S1_RADAR)
+        bistatic = to_bistatic_radar_frame(trajectory, self._collapsed_pair())
+
+        # Half a metre of baseline against ranges of kilometres.
+        np.testing.assert_allclose(bistatic.range_m, monostatic.range_m, atol=1.0)
+        np.testing.assert_allclose(
+            bistatic.bisector_velocity_mps, monostatic.radial_velocity_mps, atol=1e-6
+        )
+        # Compared on the circle: a due-north track sits on the 0/360 seam, so
+        # the two transforms straddle it and a direct difference reads 360.
+        azimuth_error_deg = (bistatic.receive_azimuth_deg - monostatic.azimuth_deg + 180.0) % 360.0
+        np.testing.assert_allclose(azimuth_error_deg, 180.0, atol=1e-6)
+
+    def test_the_mean_range_is_the_half_sum_of_the_two_ranges(self) -> None:
+        """Pins the convention the whole bistatic pipeline rests on."""
+        trajectory = _straight_north_track(speed_mps=80.0, duration_s=60.0, n_fixes=61)
+        track = to_bistatic_radar_frame(trajectory, _BISTATIC_PAIR)
+        np.testing.assert_allclose(
+            track.range_m, (track.range_tx_m + track.range_rx_m) / 2.0, rtol=1e-12
+        )
+
+    def test_the_two_ranges_genuinely_differ(self) -> None:
+        """Otherwise every half-sum assertion would pass on a monostatic bug."""
+        trajectory = _straight_north_track(speed_mps=80.0, duration_s=60.0, n_fixes=61)
+        track = to_bistatic_radar_frame(trajectory, _BISTATIC_PAIR)
+        assert np.all(np.abs(track.range_tx_m - track.range_rx_m) > 1.0e3)
+
+    def test_the_departure_and_arrival_angles_differ(self) -> None:
+        """Two sites, two look directions; that is what makes it bistatic."""
+        trajectory = _straight_north_track(speed_mps=80.0, duration_s=60.0, n_fixes=61)
+        track = to_bistatic_radar_frame(trajectory, _BISTATIC_PAIR)
+        assert np.all(np.abs(track.transmit_azimuth_deg - track.receive_azimuth_deg) > 1.0)
+
+    def test_a_stationary_target_has_no_bisector_rate(self) -> None:
+        trajectory = _straight_north_track(speed_mps=0.0, duration_s=60.0, n_fixes=61)
+        track = to_bistatic_radar_frame(trajectory, _BISTATIC_PAIR)
+        np.testing.assert_allclose(track.bisector_velocity_mps, 0.0, atol=1e-9)
+
+    def test_the_bisector_rate_is_positive_when_the_path_shortens(self) -> None:
+        """Closing-positive, per spec/structure.md D5, on the *total* path."""
+        trajectory = _straight_north_track(speed_mps=80.0, duration_s=60.0, n_fixes=61)
+        track = to_bistatic_radar_frame(trajectory, _BISTATIC_PAIR)
+        path_length_m = track.range_tx_m + track.range_rx_m
+        shortening = np.diff(path_length_m) < 0.0
+        assert np.all(track.bisector_velocity_mps[1:-1][shortening[1:]] > 0.0)
+
+    def test_n_frames_counts_the_grid(self) -> None:
+        trajectory = _straight_north_track(speed_mps=80.0, duration_s=60.0, n_fixes=61)
+        assert to_bistatic_radar_frame(trajectory, _BISTATIC_PAIR).n_frames == 61

@@ -1,0 +1,53 @@
+# Scenario 002 -- bistatic radar over Singapore.
+# The Changi Airport ATC illuminator, received at DSO National Laboratories.
+# See spec/scenario-002-singapore-bistatic.md. The two variants share every
+# block below except [[burst]].f0_hz; the carrier is the whole comparison.
+
+[scenario]
+name = "scenario-002-bistatic-xband"
+description = "B1: 9.8 GHz over a 23.73 km baseline. Waveform identical to scenario-001 S1, so geometry is the only variable. Doppler folds at +-7.65 m/s."
+seed = 20260915
+
+# The receiving site. Unchanged from scenario 001; here it receives echoes
+# of a transmitter 23.7 km away rather than of one standing beside it.
+[radar]
+latitude_deg = 1.29150
+longitude_deg = 103.78710
+altitude_m = 60.0
+
+# The illuminator. Its presence is what makes this scenario bistatic; delete
+# this table and the same file is a monostatic scenario at DSO.
+[transmitter_site]
+latitude_deg = 1.3592     # Singapore Changi Airport reference point
+longitude_deg = 103.9894
+altitude_m = 25.0         # assumed ATC antenna height; configurable
+
+[receiver]
+gain_rx_dbi = 30.0
+noise_figure_db = 3.0
+
+[target]
+name = "light-aircraft"
+rcs_dbsm = 10.0        # bistatic RCS, held constant and angle-independent; see D8
+altitude_m = 1500.0    # the CSV has no altitude column; held constant
+
+# The 120 s window that maximises the mean bistatic angle over the track:
+# beta runs 91.7-100.5 deg, so the geometry is strongly bistatic throughout.
+# Scenario 001's window would give 34-38 deg, where little is exercised.
+[trajectory]
+path = "../data/flight_coordinates.csv"
+start_time_s = 13360.0
+duration_s = 120.0
+frame_rate_hz = 1.0
+
+# Identical in every parameter to scenario_001_fmcw_low_prf.toml.
+[[burst]]
+waveform = "fmcw"
+f0_hz = 9.8e9
+bandwidth_hz = 2.0e6
+transmit_power_w = 100.0
+gain_tx_dbi = 30.0
+chirp_time_s = 1.0e-3
+prf_hz = 1.0e3
+sample_rate_hz = 1.0e6
+n_pulses = 256
