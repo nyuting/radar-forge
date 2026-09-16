@@ -42,9 +42,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yutingng/radar-forge"
-Documentation = "https://github.com/yutingng/radar-forge/tree/main/docs"
-Issues = "https://github.com/yutingng/radar-forge/issues"
+Homepage = "https://github.com/nyuting/radar-forge"
+Documentation = "https://github.com/nyuting/radar-forge/tree/main/docs"
+Issues = "https://github.com/nyuting/radar-forge/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/radar_forge"]

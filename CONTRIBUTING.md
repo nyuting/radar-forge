@@ -14,7 +14,7 @@ hooks will tell you, and they will tell you how to fix it.
 You need [`uv`](https://docs.astral.sh/uv/). Then:
 
 ```bash
-git clone https://github.com/yutingng/radar-forge.git
+git clone https://github.com/nyuting/radar-forge.git
 cd radar-forge
 ./scripts/setup-dev.sh
 ```
