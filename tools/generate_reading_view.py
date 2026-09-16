@@ -48,6 +48,10 @@ import shutil
 import sys
 from pathlib import Path, PurePosixPath
 
+from pygments import highlight
+from pygments.formatters import HtmlFormatter
+from pygments.lexers import PythonLexer
+
 __all__ = [
     "ReadingViewTransformer",
     "generate",
@@ -248,10 +252,21 @@ _STYLE = """<style>
   code { padding: 0.1rem 0.3rem; }
   pre { padding: 1rem; overflow-x: auto; line-height: 1.45; border-radius: 6px; }
   .muted { color: var(--muted); }
+  .highlight pre { background: var(--code-bg); }
 </style>"""
 
+# Syntax colours for module pages, matched to the dark and light palettes above.
+# types-Pygments leaves get_style_defs unannotated, hence the targeted ignores.
+_HIGHLIGHT_STYLE = (
+    "<style>\n"
+    + HtmlFormatter(style="github-dark").get_style_defs(".highlight")  # type: ignore[no-untyped-call]
+    + "\n@media (prefers-color-scheme: light) {\n"
+    + HtmlFormatter(style="default").get_style_defs(".highlight")  # type: ignore[no-untyped-call]
+    + "\n}\n</style>"
+)
 
-def _page(title: str, body: str) -> str:
+
+def _page(title: str, body: str, extra_head: str = "") -> str:
     """Wrap ``body`` in the shared HTML skeleton and stylesheet."""
     return f"""<!doctype html>
 <html lang="en">
@@ -260,6 +275,7 @@ def _page(title: str, body: str) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}</title>
 {_STYLE}
+{extra_head}
 </head>
 <body>
 {body}
@@ -272,7 +288,8 @@ def render_module(relative_path: str, source: str) -> str:
     """Return an HTML page displaying one minimised module.
 
     Browsers download or show ``.py`` files as bare text, so each module also
-    gets a page of its own that renders the code in place.
+    gets a page of its own that renders the code in place, coloured by
+    Pygments.
 
     Parameters
     ----------
@@ -292,8 +309,8 @@ def render_module(relative_path: str, source: str) -> str:
     body = f"""<p><a href="{index_href}">&larr; index</a>
   <span class="muted">· <a href="{html.escape(name)}">raw</a></span></p>
 <h1>{html.escape(relative_path)}</h1>
-<pre><code>{html.escape(source)}</code></pre>"""
-    return _page(f"{relative_path} · radar-forge reading view", body)
+{highlight(source, PythonLexer(), HtmlFormatter())}"""
+    return _page(f"{relative_path} · radar-forge reading view", body, _HIGHLIGHT_STYLE)
 
 
 def render_index(relative_paths: list[str]) -> str:

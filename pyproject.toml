@@ -39,6 +39,9 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "hypothesis>=6.100",
+    # Syntax colouring for the published reading view (tools/generate_reading_view.py).
+    "pygments>=2.17",
+    "types-Pygments",
 ]
 
 [project.urls]

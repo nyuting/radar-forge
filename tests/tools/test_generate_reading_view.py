@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import html
 import importlib.util
+import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -137,9 +138,15 @@ def test_emptied_body_gets_a_pass() -> None:
     assert "pass" in tool.minimise_source('def f(x):\n    """Only a docstring."""\n')
 
 
-def test_generate_runs_clean_over_the_package(tmp_path: Path) -> None:
-    out = tmp_path / "radar_forge_reading"
-    written = tool.generate(PACKAGE_ROOT, out)
+@pytest.fixture(scope="module")
+def generated(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, list[Path]]:
+    """Generate the reading view once; the tests below only read it."""
+    out = tmp_path_factory.mktemp("reading") / "radar_forge_reading"
+    return out, tool.generate(PACKAGE_ROOT, out)
+
+
+def test_generate_runs_clean_over_the_package(generated: tuple[Path, list[Path]]) -> None:
+    out, written = generated
 
     sources = sorted(p.relative_to(PACKAGE_ROOT) for p in PACKAGE_ROOT.rglob("*.py"))
     generated = sorted(p.relative_to(out) for p in out.rglob("*.py"))
@@ -147,9 +154,8 @@ def test_generate_runs_clean_over_the_package(tmp_path: Path) -> None:
     assert (out / "index.html") in written
 
 
-def test_generated_package_is_valid_stripped_python(tmp_path: Path) -> None:
-    out = tmp_path / "radar_forge_reading"
-    tool.generate(PACKAGE_ROOT, out)
+def test_generated_package_is_valid_stripped_python(generated: tuple[Path, list[Path]]) -> None:
+    out, _ = generated
 
     for path in sorted(out.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -165,9 +171,8 @@ def test_generated_package_is_valid_stripped_python(tmp_path: Path) -> None:
                 assert not isinstance(node.body[-1], ast.Raise), f"guard survived in {path}"
 
 
-def test_generated_package_keeps_imports_and_returns(tmp_path: Path) -> None:
-    out = tmp_path / "radar_forge_reading"
-    tool.generate(PACKAGE_ROOT, out)
+def test_generated_package_keeps_imports_and_returns(generated: tuple[Path, list[Path]]) -> None:
+    out, _ = generated
 
     def counts(root: Path) -> tuple[int, int]:
         imports = returns = 0
@@ -185,28 +190,29 @@ def test_generated_package_keeps_imports_and_returns(tmp_path: Path) -> None:
     assert reading_returns == source_returns
 
 
-def test_index_links_every_generated_file(tmp_path: Path) -> None:
-    out = tmp_path / "radar_forge_reading"
-    tool.generate(PACKAGE_ROOT, out)
+def test_index_links_every_generated_file(generated: tuple[Path, list[Path]]) -> None:
+    out, _ = generated
 
     index = (out / "index.html").read_text(encoding="utf-8")
     for path in sorted(out.rglob("*.py")):
         assert f'href="{path.relative_to(out).as_posix()}.html"' in index
 
 
-def test_every_module_has_a_page_showing_its_code(tmp_path: Path) -> None:
-    out = tmp_path / "radar_forge_reading"
-    tool.generate(PACKAGE_ROOT, out)
+def test_every_module_has_a_page_showing_its_code(generated: tuple[Path, list[Path]]) -> None:
+    out, _ = generated
 
     for path in sorted(out.rglob("*.py")):
         page = path.with_name(path.name + ".html").read_text(encoding="utf-8")
         body = path.read_text(encoding="utf-8").removeprefix(tool._HEADER)
-        assert html.escape(body) in page, path
+        # Pygments wraps tokens in spans; the text underneath must be unchanged.
+        assert body in html.unescape(re.sub(r"<[^>]+>", "", page)), path
+        assert 'class="highlight"' in page, path
 
 
 def test_module_page_escapes_html_and_links_home() -> None:
     page = tool.render_module("core/signal.py", "x = a < b\n")
-    assert "x = a &lt; b" in page
+    assert "&lt;" in page
+    assert "a < b" not in page
     assert 'href="../index.html"' in page
 
 
