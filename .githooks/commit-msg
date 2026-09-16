@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Enforce Conventional Commits. Full spec: docs/conventions/commits.md
+
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=_lib.sh
+. "${HOOK_DIR}/_lib.sh"
+
+MSG_FILE="$1"
+SUBJECT="$(grep -vE '^\s*#' "$MSG_FILE" | grep -vE '^\s*$' | head -n 1 || true)"
+
+# git generates these itself; they are not ours to validate.
+case "$SUBJECT" in
+    "Merge "*|"Revert "*|"fixup!"*|"squash!"*|"Initial commit") exit 0 ;;
+    "") fail "Empty commit message." ;;
+esac
+
+TYPES='feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert'
+PATTERN="^(${TYPES})(\([a-z0-9][a-z0-9-]*\))?!?: [^ ].{0,71}$"
+
+if ! printf '%s' "$SUBJECT" | grep -qE "$PATTERN"; then
+    fail "Commit subject does not follow Conventional Commits." \
+         "" \
+         "  got:  $SUBJECT" \
+         "" \
+         "  form: <type>(<scope>)?: <summary>     (summary ≤ 72 chars, no trailing period)" \
+         "  type: ${TYPES//|/, }" \
+         "  scope: core, array, raytracing, pipelines, teaching, docs, ci, deps, hooks" \
+         "" \
+         "  good: feat(array): add Taylor tapering for planar arrays" \
+         "  good: fix(core): correct 1/R^4 term in the range equation" \
+         "  good: docs: document the SI unit suffix convention" \
+         "" \
+         "  Full rules: docs/conventions/commits.md"
+fi
+
+# A trailing period on the subject is the single most common slip.
+case "$SUBJECT" in
+    *.) fail "Commit subject ends with a period." "  got:  $SUBJECT" ;;
+esac
+
+ok "commit message"

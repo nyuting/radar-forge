@@ -1,0 +1,60 @@
+# Scenario 001 -- X-band radar at the Duke Receiver, Durham NC.
+# See spec/scenario-001-xband.md. The three variants share every
+# block below except [[burst]]; that is the whole point of the comparison.
+
+[scenario]
+name = "scenario-001-fmcw-dual-prf"
+description = "S3: two FMCW bursts at 5 kHz and 6 kHz. Neither resolves the velocity alone, but the coprime 5:6 pair does, reaching +-191 m/s by a completely different mechanism from S2."
+seed = 20260911
+
+[radar]
+# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna.
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
+
+[receiver]
+gain_rx_dbi = 30.0
+noise_figure_db = 3.0
+
+[target]
+name = "light-aircraft"
+rcs_dbsm = 10.0        # 10 m^2, Swerling 0 (non-fluctuating)
+altitude_m = 1500.0    # the CSV has no altitude column; held constant
+
+[trajectory]
+path = "../data/flight_coordinates.csv"
+start_time_s = 0.0
+duration_s = 120.0     # the full track is ~16,500 frames; this window is opt-out
+frame_rate_hz = 1.0
+
+# Two bursts, 128 pulses each, alternating. Both cover the track in range;
+# their per-burst unambiguous velocities of +-38.24 and +-45.89 m/s are
+# combined by core.ambiguity.unfold_doppler_dual_prf.
+#
+# Burst A: 200 us sweep at 10 GHz/s, 4 MHz -> 800 samples. PRF 5.0 kHz.
+[[burst]]
+waveform = "fmcw"
+f0_hz = 9.8e9
+bandwidth_hz = 2.0e6
+transmit_power_w = 100.0
+gain_tx_dbi = 30.0
+chirp_duration_s = 200.0e-6
+prf_hz = 5.0e3
+sample_rate_hz = 4.0e6
+n_pulses = 128
+
+# Burst B: PRF 6.0 kHz at 100 % duty, so the chirp time is exactly 1/6000 s
+# = 166.667 us -> 667 samples. The specification's rounded 166.7 us is a duty
+# cycle of 1.0002 and Transmitter rejects it: the next chirp would start
+# before this one finished.
+[[burst]]
+waveform = "fmcw"
+f0_hz = 9.8e9
+bandwidth_hz = 2.0e6
+transmit_power_w = 100.0
+gain_tx_dbi = 30.0
+chirp_duration_s = 1.6666666666666667e-4
+prf_hz = 6.0e3
+sample_rate_hz = 4.0e6
+n_pulses = 128

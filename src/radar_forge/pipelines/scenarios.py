@@ -1,0 +1,781 @@
+"""Scenario configuration and the frame loop that turns it into IQ.
+
+A scenario is a TOML file plus the code here that reads it and plays it back.
+The split matters: the radar, the target and the window are *data*, so that
+changing a waveform is an edit to a text file rather than to the library, and
+the three variants of scenario 001 differ only in their ``[[burst]]`` tables.
+
+Bursts
+------
+A scenario has one or more **bursts**, each a fully specified
+:class:`~radar_forge.core.radar.Radar` transmitting its own coherent
+processing interval within the frame. One burst is the ordinary case. Two bursts
+is how a dual-PRF radar resolves the ambiguity neither rate can resolve alone,
+and they stay separate all the way through: two different sweep rates cannot
+be coherently integrated together, so each burst gets its own cube, its own
+range-Doppler map at its own scales, and the pair meets only at the level of
+*measurements* in :func:`radar_forge.core.ambiguity.unfold_doppler_dual_prf`.
+That is also how the hardware does it, and it is why :attr:`Frame.iq` is a
+tuple rather than an array.
+
+Frames
+------
+:func:`iterate_frames` is a generator, deliberately. Scenario 001's full track
+is about 16,500 frames and S1's cube is 4.1 MB, so materialising the run would
+cost 68 GB. Streaming it costs one frame.
+
+Within each frame the radar transmits a short CPI -- 256 ms for S1 -- and is
+idle for the rest of the second. That is not only a compute saving: over a
+contiguous 1 s CPI an 80 m/s target would migrate 80 m, more than a full
+74.95 m range bin, and the peak would smear. See the scenario specification
+S4.2.
+
+References
+----------
+.. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
+       McGraw-Hill, 2014, S5.3 (pulse-Doppler ambiguity), S8.2.
+.. [2] ``spec/scenario-001-xband.md``, S4.1 (the three variants) and
+       S4.2 (the frame/CPI structure).
+"""
+
+from __future__ import annotations
+
+import tomllib
+from collections.abc import Iterator
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, cast
+
+import numpy as np
+from numpy.typing import NDArray
+
+from radar_forge.core.constants import SPEED_OF_LIGHT_MPS
+from radar_forge.core.dsp import (
+    doppler_bin_centers_mps,
+    doppler_fft,
+    matched_filter,
+    range_bin_centers_m,
+    range_doppler_map,
+)
+from radar_forge.core.radar import (
+    BistaticRadar,
+    Radar,
+    RadarLike,
+    Receiver,
+    Transmitter,
+    WaveformKind,
+)
+from radar_forge.core.signal import (
+    bistatic_line_of_sight_paths,
+    fmcw_deramp_baseband,
+    line_of_sight_paths,
+    pulsed_baseband,
+)
+from radar_forge.core.targets import PointTarget
+from radar_forge.core.waveforms import lfm_chirp
+from radar_forge.pipelines.trajectories import (
+    BistaticTargetTrack,
+    TargetTrack,
+    Trajectory,
+    load_flight_csv,
+    resample,
+    to_bistatic_radar_frame,
+    to_radar_frame,
+)
+
+__all__ = [
+    "Frame",
+    "RangeDopplerProduct",
+    "Scenario",
+    "form_range_doppler_map",
+    "iterate_frames",
+    "load_scenario",
+    "peak_range_velocity",
+]
+
+_SITE_KEYS = frozenset({"latitude_deg", "longitude_deg", "altitude_m"})
+# [radar] is the site that *receives*. A monostatic scenario transmits from
+# there too; a bistatic one adds [transmitter_site] and moves the illuminator.
+_RADAR_KEYS = _SITE_KEYS
+_RECEIVER_KEYS = frozenset({"gain_rx_dbi", "noise_figure_db"})
+_TARGET_KEYS = frozenset({"rcs_dbsm", "altitude_m", "name"})
+_TRAJECTORY_KEYS = frozenset({"path", "start_time_s", "duration_s", "frame_rate_hz"})
+_BURST_KEYS = frozenset(
+    {
+        "f0_hz",
+        "bandwidth_hz",
+        "transmit_power_w",
+        "gain_tx_dbi",
+        "chirp_duration_s",
+        "prf_hz",
+        "waveform",
+        "sample_rate_hz",
+        "n_pulses",
+    }
+)
+_SCENARIO_KEYS = frozenset({"name", "description", "seed"})
+# Both optional, and both added by spec/scenario-003-tracking.md §10
+# step 2. A scenario without them loads exactly as before, which is what keeps
+# the scenario-001 and scenario-002 TOMLs working byte for byte.
+_DETECTION_KEYS = frozenset({"pfa", "n_train", "n_guard", "variant", "merge_range_bins"})
+_TRACKING_KEYS = frozenset(
+    {
+        "sigma_range_m",
+        "sigma_velocity_mps",
+        "sigma_accel_mps2",
+        "sigma_azimuth_deg",
+        "sigma_elevation_deg",
+        "gate_probability",
+        "n_confirm_hits",
+        "n_confirm_frames",
+        "n_delete_misses",
+        "n_reacquire_frames",
+        "v_max_mps",
+        "velocity_unfolding",
+        "unfold_sigma_gate",
+        "n_slope_frames",
+        "state_model",
+        "simulated_angles",
+    }
+)
+
+
+@dataclass(frozen=True)
+class Scenario:
+    """Everything needed to play a scenario back, resolved from its TOML.
+
+    Attributes
+    ----------
+    name : str
+        Short identifier, used to label outputs.
+    description : str
+        One line of prose about what the scenario demonstrates.
+    bursts : tuple of Radar or BistaticRadar
+        One fully specified radar per burst, in transmission order. Length 1 for
+        an ordinary scenario, 2 for a dual-PRF one. Every burst has the same
+        siting, because the sites are scenario-level tables and only the
+        ``[[burst]]`` waveform varies.
+    n_pulses : tuple of int
+        Slow-time pulses in each burst's coherent processing interval, same length
+        and order as ``bursts``.
+    target : radar_forge.core.targets.PointTarget
+        The illuminated target. Swerling 0, so its cross-section is constant.
+    target_altitude_m : float
+        Height above the ellipsoid assigned to the whole track, metres. The
+        recorded track has no altitude column.
+    trajectory_path : pathlib.Path
+        The track CSV, resolved relative to the TOML file's directory.
+    start_time_s, duration_s : float
+        The window, in seconds from the track's first fix.
+    frame_rate_hz : float
+        Frames per second of scenario time.
+    seed : int
+        Seeds the one generator used for the whole run, so a scenario replays
+        bit for bit.
+    detection_table, tracking_table : dict or None
+        The raw ``[detection]`` and ``[tracking]`` tables, exactly as
+        :mod:`tomllib` read them, or ``None`` when the TOML carries neither.
+        Named for what they are: the parsed settings objects are
+        :class:`~radar_forge.pipelines.tracking.DetectionConfig` and
+        :class:`~radar_forge.pipelines.tracking.TrackingConfig`, which
+        :func:`~radar_forge.pipelines.tracking.configs_from_scenario` builds
+        from these. A scenario with a ``[tracking]`` table is one
+        ``scripts/run_scenario.py`` will track; everything else ignores them.
+        Kept as plain dictionaries rather than parsed here, because the classes
+        that consume them live in :mod:`radar_forge.pipelines.tracking` and
+        importing that from this module would be circular.
+    """
+
+    name: str
+    description: str
+    bursts: tuple[RadarLike, ...]
+    n_pulses: tuple[int, ...]
+    target: PointTarget
+    target_altitude_m: float
+    trajectory_path: Path
+    start_time_s: float
+    duration_s: float
+    frame_rate_hz: float
+    seed: int
+    detection_table: dict[str, Any] | None = None
+    tracking_table: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        """Validate the scenario as a whole; see :func:`load_scenario`."""
+        if not self.bursts:
+            msg = "a scenario needs at least one [[burst]]."
+            raise ValueError(msg)
+        if len(self.bursts) != len(self.n_pulses):
+            msg = (
+                f"bursts and n_pulses must have the same length; got "
+                f"{len(self.bursts)} and {len(self.n_pulses)}."
+            )
+            raise ValueError(msg)
+        if any(count <= 0 for count in self.n_pulses):
+            msg = f"every burst needs a strictly positive n_pulses; got {self.n_pulses}."
+            raise ValueError(msg)
+        if self.duration_s <= 0.0:
+            msg = f"duration_s must be strictly positive; got {self.duration_s!r}."
+            raise ValueError(msg)
+        if self.frame_rate_hz <= 0.0:
+            msg = f"frame_rate_hz must be strictly positive; got {self.frame_rate_hz!r}."
+            raise ValueError(msg)
+
+    @property
+    def is_bistatic(self) -> bool:
+        """Whether the transmitter and receiver stand at different sites."""
+        return isinstance(self.bursts[0], BistaticRadar)
+
+    @property
+    def n_frames(self) -> int:
+        """Number of frames the window produces."""
+        return round(self.duration_s * self.frame_rate_hz)
+
+    @property
+    def frame_times_s(self) -> NDArray[np.float64]:
+        """Frame times, seconds from the track's first fix, shape ``(n_frames,)``."""
+        return self.start_time_s + np.arange(self.n_frames, dtype=np.float64) / self.frame_rate_hz
+
+
+@dataclass(frozen=True)
+class Frame:
+    """One frame: the IQ the radar collected, and the truth that produced it.
+
+    The truth fields are the **true, unfolded** quantities in every variant.
+    The whole point of scenario 001 is the discrepancy between them and what
+    the range-Doppler map shows, so they are never folded to match it.
+
+    Attributes
+    ----------
+    index : int
+        Frame number from zero.
+    time_s : float
+        Scenario time, seconds from the track's first fix.
+    iq : tuple of numpy.ndarray
+        One complex128 cube per burst, each ``(n_pulses, n_samples)`` with slow
+        time on axis 0. Bursts may differ in both dimensions.
+    range_m : float
+        True slant range, metres -- and in a bistatic scenario the **bistatic
+        mean range** :math:`(R_t + R_r)/2`, which is what the map's range axis
+        carries. See ``spec/scenario-002-bistatic.md`` D6.
+    radial_velocity_mps : float
+        True radial velocity, metres/second, positive closing and **not**
+        folded into any burst's unambiguous interval. In a bistatic scenario
+        this is the **bisector** rate, the only rate the Doppler shift
+        measures; a bistatic target's velocity towards either individual site
+        is not recorded, because nothing observes it.
+    azimuth_deg, elevation_deg : float
+        True look angles, degrees, from the **receiving** site.
+    range_tx_m, range_rx_m : float or None
+        The two ranges, metres, in a bistatic scenario; ``None`` in a
+        monostatic one, where they would both equal ``range_m``.
+    bistatic_angle_deg : float or None
+        The angle subtended at the target by the two sites, degrees, in a
+        bistatic scenario; ``None`` in a monostatic one, where it is zero by
+        construction rather than measured.
+    transmit_azimuth_deg, transmit_elevation_deg : float or None
+        Look angles from the transmitter site, degrees, in a bistatic
+        scenario; ``None`` in a monostatic one, where they equal the receive
+        angles.
+    """
+
+    index: int
+    time_s: float
+    iq: tuple[NDArray[np.complex128], ...]
+    range_m: float
+    radial_velocity_mps: float
+    azimuth_deg: float
+    elevation_deg: float
+    range_tx_m: float | None = None
+    range_rx_m: float | None = None
+    bistatic_angle_deg: float | None = None
+    transmit_azimuth_deg: float | None = None
+    transmit_elevation_deg: float | None = None
+
+
+def _resampled_track(
+    trajectory: Trajectory, scenario: Scenario
+) -> tuple[TargetTrack | BistaticTargetTrack, int]:
+    """Resample onto the frame grid, padded by a frame each side where possible.
+
+    Returns the track and the index of the window's first frame within it.
+    """
+    frame_times_s = scenario.frame_times_s
+    frame_interval_s = 1.0 / scenario.frame_rate_hz
+    track_first_s = float(trajectory.time_s[0])
+    track_last_s = float(trajectory.time_s[-1])
+
+    if frame_times_s[0] < track_first_s or frame_times_s[-1] > track_last_s:
+        msg = (
+            f"the scenario window [{frame_times_s[0]}, {frame_times_s[-1]}] s lies outside "
+            f"the track's [{track_first_s}, {track_last_s}] s."
+        )
+        raise ValueError(msg)
+
+    pad_before = frame_times_s[0] - frame_interval_s >= track_first_s
+    pad_after = frame_times_s[-1] + frame_interval_s <= track_last_s
+    grid_s = np.concatenate(
+        [
+            [frame_times_s[0] - frame_interval_s] if pad_before else [],
+            frame_times_s,
+            [frame_times_s[-1] + frame_interval_s] if pad_after else [],
+        ]
+    )
+    if grid_s.size < 2:
+        msg = (
+            "a one-frame window at the very end of the track leaves nothing to "
+            "difference; radial velocity needs at least two samples."
+        )
+        raise ValueError(msg)
+
+    # Every burst shares a siting, so the geometry is computed once against
+    # the first of them and reused for the rest.
+    sited = resample(trajectory, grid_s)
+    first_burst = scenario.bursts[0]
+    track: TargetTrack | BistaticTargetTrack = (
+        to_bistatic_radar_frame(sited, first_burst)
+        if isinstance(first_burst, BistaticRadar)
+        else to_radar_frame(sited, first_burst)
+    )
+    return track, 1 if pad_before else 0
+
+
+def _require_keys(table: dict[str, Any], allowed: frozenset[str], name: str) -> None:
+    """Reject keys a table does not define, so a typo is not silently ignored."""
+    unknown = sorted(set(table) - allowed)
+    if unknown:
+        msg = f"[{name}] has unknown key(s) {unknown}; allowed keys are {sorted(allowed)}."
+        raise ValueError(msg)
+
+
+def _burst_radar(
+    burst: dict[str, Any],
+    radar: dict[str, Any],
+    receiver: dict[str, Any],
+    transmitter_site: dict[str, Any] | None,
+) -> RadarLike:
+    """Build one burst's radar, letting its own validation report bad physics.
+
+    ``radar`` is the **receiving** site. When ``transmitter_site`` is given the
+    illuminator stands elsewhere and the result is a
+    :class:`~radar_forge.core.radar.BistaticRadar`; otherwise one site does both
+    jobs and the result is a :class:`~radar_forge.core.radar.Radar`.
+    """
+    waveform: WaveformKind = burst.get("waveform", "fmcw")
+    transmitter = Transmitter(
+        f0_hz=float(burst["f0_hz"]),
+        bandwidth_hz=float(burst["bandwidth_hz"]),
+        transmit_power_w=float(burst["transmit_power_w"]),
+        gain_tx_dbi=float(burst["gain_tx_dbi"]),
+        chirp_duration_s=float(burst["chirp_duration_s"]),
+        prf_hz=float(burst["prf_hz"]),
+        waveform=waveform,
+    )
+    receive_chain = Receiver(
+        sample_rate_hz=float(burst["sample_rate_hz"]),
+        gain_rx_dbi=float(receiver["gain_rx_dbi"]),
+        noise_figure_db=float(receiver["noise_figure_db"]),
+    )
+    if transmitter_site is None:
+        return Radar(
+            transmitter=transmitter,
+            receiver=receive_chain,
+            latitude_deg=float(radar["latitude_deg"]),
+            longitude_deg=float(radar["longitude_deg"]),
+            altitude_m=float(radar["altitude_m"]),
+        )
+    return BistaticRadar(
+        transmitter=transmitter,
+        receiver=receive_chain,
+        transmitter_latitude_deg=float(transmitter_site["latitude_deg"]),
+        transmitter_longitude_deg=float(transmitter_site["longitude_deg"]),
+        transmitter_altitude_m=float(transmitter_site["altitude_m"]),
+        receiver_latitude_deg=float(radar["latitude_deg"]),
+        receiver_longitude_deg=float(radar["longitude_deg"]),
+        receiver_altitude_m=float(radar["altitude_m"]),
+    )
+
+
+def load_scenario(path: Path | str) -> Scenario:
+    """Read a scenario TOML into a :class:`Scenario`.
+
+    Parameters
+    ----------
+    path : pathlib.Path or str
+        The TOML file. ``[trajectory].path`` is resolved relative to its
+        directory, so a scenario is relocatable.
+
+    Returns
+    -------
+    Scenario
+        With every burst built as a :class:`~radar_forge.core.radar.Radar`.
+
+    Raises
+    ------
+    ValueError
+        If a required table or key is missing, if a table carries an unknown
+        key, or if no ``[[burst]]`` is defined. Bad *physics* -- a duty cycle
+        above one, a negative power -- is reported by ``Radar`` itself, so the
+        message names the quantity rather than the file.
+
+    Notes
+    -----
+    Parsing is :mod:`tomllib` from the standard library; scenario
+    configuration adds no dependency.
+
+    Unknown keys are an error rather than a warning. A misspelled
+    ``sample_rate_hz`` that is silently ignored produces a scenario that runs,
+    looks plausible, and is not the one that was asked for.
+
+    Examples
+    --------
+    >>> scenario = load_scenario("scenarios/scenario_001_fmcw_low_prf.toml")
+    >>> scenario.name
+    'scenario-001-fmcw-low-prf'
+    >>> len(scenario.bursts)
+    1
+    >>> round(scenario.bursts[0].unambiguous_velocity_mps, 3)
+    7.648
+    """
+    toml_path = Path(path)
+    with toml_path.open("rb") as handle:
+        document = tomllib.load(handle)
+
+    for table_name in ("scenario", "radar", "target", "trajectory"):
+        if table_name not in document:
+            msg = f"{toml_path} is missing the required [{table_name}] table."
+            raise ValueError(msg)
+    # The receive chain is [receiver_site] -- the spelling scenario 002 uses, so
+    # that it sits beside [transmitter_site] and the two ends of the bistatic
+    # pair read as a pair. [receiver] is the older spelling and is still read.
+    receiver_table_name = "receiver_site" if "receiver_site" in document else "receiver"
+    if receiver_table_name not in document:
+        msg = f"{toml_path} is missing the required [receiver_site] table."
+        raise ValueError(msg)
+    if "receiver_site" in document and "receiver" in document:
+        msg = f"{toml_path} defines both [receiver_site] and [receiver]; keep one."
+        raise ValueError(msg)
+    if "burst" not in document or not document["burst"]:
+        msg = f"{toml_path} defines no [[burst]]; a scenario needs at least one."
+        raise ValueError(msg)
+
+    scenario_table = document["scenario"]
+    radar_table = document["radar"]
+    receiver_table = document[receiver_table_name]
+    target_table = document["target"]
+    trajectory_table = document["trajectory"]
+
+    _require_keys(scenario_table, _SCENARIO_KEYS, "scenario")
+    _require_keys(radar_table, _RADAR_KEYS, "radar")
+    _require_keys(receiver_table, _RECEIVER_KEYS, receiver_table_name)
+    _require_keys(target_table, _TARGET_KEYS, "target")
+    _require_keys(trajectory_table, _TRAJECTORY_KEYS, "trajectory")
+    transmitter_site_table = document.get("transmitter_site")
+    if transmitter_site_table is not None:
+        _require_keys(transmitter_site_table, _SITE_KEYS, "transmitter_site")
+    for burst in document["burst"]:
+        _require_keys(burst, _BURST_KEYS, "burst")
+
+    detection_table = document.get("detection")
+    tracking_table = document.get("tracking")
+    if detection_table is not None:
+        _require_keys(detection_table, _DETECTION_KEYS, "detection")
+    if tracking_table is not None:
+        _require_keys(tracking_table, _TRACKING_KEYS, "tracking")
+
+    bursts = tuple(
+        _burst_radar(burst, radar_table, receiver_table, transmitter_site_table)
+        for burst in document["burst"]
+    )
+    n_pulses = tuple(int(burst["n_pulses"]) for burst in document["burst"])
+
+    return Scenario(
+        name=str(scenario_table["name"]),
+        description=str(scenario_table.get("description", "")),
+        bursts=bursts,
+        n_pulses=n_pulses,
+        target=PointTarget.from_dbsm(
+            float(target_table["rcs_dbsm"]), name=str(target_table.get("name", "target"))
+        ),
+        target_altitude_m=float(target_table["altitude_m"]),
+        trajectory_path=(toml_path.parent / str(trajectory_table["path"])).resolve(),
+        start_time_s=float(trajectory_table["start_time_s"]),
+        duration_s=float(trajectory_table["duration_s"]),
+        frame_rate_hz=float(trajectory_table["frame_rate_hz"]),
+        seed=int(scenario_table["seed"]),
+        detection_table=detection_table,
+        tracking_table=tracking_table,
+    )
+
+
+def iterate_frames(scenario: Scenario) -> Iterator[Frame]:
+    """Play a scenario back one frame at a time.
+
+    Parameters
+    ----------
+    scenario : Scenario
+        The resolved scenario.
+
+    Yields
+    ------
+    Frame
+        One per frame time, in order, carrying a cube per burst and the true
+        geometry that produced it.
+
+    Raises
+    ------
+    ValueError
+        If the requested window falls outside the track's span. Raised on the
+        first call rather than part-way through the run.
+
+    Notes
+    -----
+    A generator, not a list: scenario 001's full track is about 16,500 frames
+    and S1's cube is 4.1 MB, so the whole run would be 68 GB in memory.
+
+    One :class:`numpy.random.Generator` is created from ``scenario.seed`` and
+    shared by every frame and burst, so a run replays bit for bit -- but only if
+    it is consumed in order. Skipping frames changes the noise in the frames
+    that follow.
+
+    The truth carried on each frame is unfolded. Folding it to match a
+    particular burst's map is the *reader's* job, and the gap between the two is
+    what the scenario exists to show.
+
+    The trajectory is resampled one frame either side of the window wherever
+    the track allows it, and those two samples are used for the velocity
+    difference and then discarded. Without the padding the first and last
+    reported frames would carry a one-sided difference -- a different, noisier
+    estimator than every frame between them -- and a one-frame window would
+    have no velocity at all.
+    """
+    trajectory = load_flight_csv(scenario.trajectory_path, altitude_m=scenario.target_altitude_m)
+    track, first_frame = _resampled_track(trajectory, scenario)
+    rng = np.random.default_rng(scenario.seed)
+    rcs_m2 = scenario.target.rcs_m2
+
+    # Flatten the two track shapes into one set of per-frame arrays up front, so
+    # that the frame loop below reads the same either way. The bistatic angles
+    # are the receiver's, because that is where the echo is measured.
+    bistatic_track = track if isinstance(track, BistaticTargetTrack) else None
+    if bistatic_track is not None:
+        track_range_m = bistatic_track.range_m
+        track_velocity_mps = bistatic_track.bisector_velocity_mps
+        track_azimuth_deg = bistatic_track.receive_azimuth_deg
+        track_elevation_deg = bistatic_track.receive_elevation_deg
+    else:
+        monostatic_track = cast(TargetTrack, track)
+        track_range_m = monostatic_track.range_m
+        track_velocity_mps = monostatic_track.radial_velocity_mps
+        track_azimuth_deg = monostatic_track.azimuth_deg
+        track_elevation_deg = monostatic_track.elevation_deg
+
+    # A Python loop over frames is the point: this is a generator, and each
+    # frame's cube is built and handed out before the next one is allocated.
+    for index in range(scenario.n_frames):
+        sample = first_frame + index
+        range_m = float(track_range_m[sample])
+        radial_velocity_mps = float(track_velocity_mps[sample])
+        azimuth_deg = float(track_azimuth_deg[sample])
+        elevation_deg = float(track_elevation_deg[sample])
+
+        cubes: list[NDArray[np.complex128]] = []
+        for burst_radar, burst_n_pulses in zip(scenario.bursts, scenario.n_pulses, strict=True):
+            if isinstance(burst_radar, BistaticRadar) and bistatic_track is not None:
+                paths = bistatic_line_of_sight_paths(
+                    burst_radar,
+                    float(bistatic_track.range_tx_m[sample]),
+                    float(bistatic_track.range_rx_m[sample]),
+                    radial_velocity_mps,
+                    rcs_m2,
+                    transmit_azimuth_deg=float(bistatic_track.transmit_azimuth_deg[sample]),
+                    transmit_elevation_deg=float(bistatic_track.transmit_elevation_deg[sample]),
+                    receive_azimuth_deg=azimuth_deg,
+                    receive_elevation_deg=elevation_deg,
+                )
+            else:
+                paths = line_of_sight_paths(
+                    cast(Radar, burst_radar),
+                    range_m,
+                    radial_velocity_mps,
+                    rcs_m2,
+                    azimuth_deg=azimuth_deg,
+                    elevation_deg=elevation_deg,
+                )
+            generate = (
+                pulsed_baseband
+                if burst_radar.transmitter.waveform == "pulsed"
+                else fmcw_deramp_baseband
+            )
+            cubes.append(generate(paths, burst_radar, burst_n_pulses, rng=rng))
+
+        yield Frame(
+            index=index,
+            time_s=float(track.time_s[sample]),
+            iq=tuple(cubes),
+            range_m=range_m,
+            radial_velocity_mps=radial_velocity_mps,
+            azimuth_deg=azimuth_deg,
+            elevation_deg=elevation_deg,
+            range_tx_m=(
+                None if bistatic_track is None else float(bistatic_track.range_tx_m[sample])
+            ),
+            range_rx_m=(
+                None if bistatic_track is None else float(bistatic_track.range_rx_m[sample])
+            ),
+            bistatic_angle_deg=(
+                None
+                if bistatic_track is None
+                else float(np.degrees(bistatic_track.bistatic_angle_rad[sample]))
+            ),
+            transmit_azimuth_deg=(
+                None
+                if bistatic_track is None
+                else float(bistatic_track.transmit_azimuth_deg[sample])
+            ),
+            transmit_elevation_deg=(
+                None
+                if bistatic_track is None
+                else float(bistatic_track.transmit_elevation_deg[sample])
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class RangeDopplerProduct:
+    """One burst's range-Doppler map and the axes that label it.
+
+    Attributes
+    ----------
+    rd_map : numpy.ndarray
+        Complex map, shape ``(n_doppler_bins, n_range_bins)``.
+    range_axis_m : numpy.ndarray
+        Range bin centres, metres, shape ``(n_range_bins,)``. Unshifted: zero
+        range is bin 0.
+    velocity_axis_mps : numpy.ndarray
+        Velocity bin centres, metres/second, shape ``(n_doppler_bins,)``.
+        ``fftshift``-ed, zero in the middle, positive closing.
+    """
+
+    rd_map: NDArray[np.complex128]
+    range_axis_m: NDArray[np.float64]
+    velocity_axis_mps: NDArray[np.float64]
+
+
+def form_range_doppler_map(
+    baseband: NDArray[np.complex128], burst: RadarLike
+) -> RangeDopplerProduct:
+    """Form one burst's range-Doppler map, with labelled axes, from its IQ.
+
+    Parameters
+    ----------
+    baseband : numpy.ndarray
+        Complex baseband cube, shape ``(n_pulses, n_samples)``; slow time along
+        axis 0, fast time along axis 1. One burst's coherent processing
+        interval, as :mod:`radar_forge.core.signal` produced it.
+    burst : Radar or BistaticRadar
+        The burst that produced it; its waveform selects the receive chain. The
+        siting does not: processing depends on the waveform alone.
+
+    Returns
+    -------
+    RangeDopplerProduct
+        The map and its two axes.
+
+    Notes
+    -----
+    The two waveform families need different receive chains, and this is the
+    one place that knows which:
+
+    **FMCW** deramps to a beat frequency, so range *is* a spectrum and
+    :func:`~radar_forge.core.dsp.range_doppler_map` applies directly.
+
+    **Pulsed** needs pulse compression first. Matched filtering runs in
+    ``full`` mode, so the output is longer than a repetition interval and a
+    target at delay :math:`d` peaks at ``d + n_reference - 1``: the reference's
+    own group delay. The repetition-interval window is trimmed by exactly that
+    offset, which is what puts a target back at its true range rather than one
+    pulse length beyond it. The trim also discards the convolution tail, whose energy
+    belongs to the previous interval.
+
+    Both paths return an unshifted range axis and an ``fftshift``-ed velocity
+    axis, the asymmetry the scenario specification S4.3 fixes. The velocity
+    axis and the FMCW range axis come from the ``dsp`` bin-centre helpers. The
+    pulsed range axis does not, because there is no helper for it:
+    :func:`~radar_forge.core.dsp.range_bin_centers_m` maps a *beat frequency*
+    to range and says nothing about a compressed pulse's delay. It is derived
+    here as :math:`n c / 2 f_s`, one fast-time sample being one round-trip
+    delay step -- and :math:`c/2` is right for a bistatic burst too, where it
+    yields the bistatic mean range, which is decision D6 again. A
+    ``delay_bin_centers_m`` helper in ``core/dsp.py`` would close the seam
+    properly; it belongs to that module's workstream.
+
+    For a bistatic burst the range axis carries the **bistatic mean range**
+    :math:`(R_t + R_r)/2` rather than a distance to either site, and the
+    velocity axis the bisector rate. Neither needs a different calculation:
+    both fall out of the same delay-to-range and Doppler-to-velocity factors,
+    which is decision D6 of ``spec/scenario-002-bistatic.md``. Only
+    the axis *label* differs, and that belongs to the plotting layer.
+    """
+    if burst.transmitter.waveform == "pulsed":
+        reference = lfm_chirp(
+            burst.transmitter.bandwidth_hz,
+            burst.transmitter.chirp_duration_s,
+            burst.receiver.sample_rate_hz,
+        )
+        group_delay_samples = reference.size - 1
+        compressed = matched_filter(baseband, reference, axis=-1)
+        n_samples = burst.n_samples_per_pri
+        pri_window = compressed[:, group_delay_samples : group_delay_samples + n_samples]
+        rd_map = doppler_fft(pri_window, axis=0)
+        sample_index = np.arange(pri_window.shape[1], dtype=np.float64)
+        range_axis_m = sample_index * SPEED_OF_LIGHT_MPS / (2.0 * burst.receiver.sample_rate_hz)
+    else:
+        rd_map = range_doppler_map(baseband)
+        range_axis_m = range_bin_centers_m(
+            rd_map.shape[1],
+            burst.transmitter.bandwidth_hz,
+            burst.transmitter.chirp_duration_s,
+            burst.receiver.sample_rate_hz,
+        )
+
+    velocity_axis_mps = doppler_bin_centers_mps(
+        rd_map.shape[0],
+        burst.transmitter.pulse_repetition_interval_s,
+        burst.wavelength_m,
+    )
+    return RangeDopplerProduct(
+        rd_map=rd_map,
+        range_axis_m=np.asarray(range_axis_m, dtype=np.float64),
+        velocity_axis_mps=np.asarray(velocity_axis_mps, dtype=np.float64),
+    )
+
+
+def peak_range_velocity(product: RangeDopplerProduct) -> tuple[float, float]:
+    """Locate the brightest cell of a range-Doppler map.
+
+    Parameters
+    ----------
+    product : RangeDopplerProduct
+        The map and its axes.
+
+    Returns
+    -------
+    range_m : float
+        Range of the peak cell, metres. **As the map shows it** -- folded, if
+        the waveform folds in range.
+    velocity_mps : float
+        Velocity of the peak cell, metres/second, positive closing. Likewise
+        folded if the waveform folds in Doppler.
+
+    Notes
+    -----
+    A single-target scenario, so the brightest cell is the target. With
+    clutter or a second target this would need a detector; that is
+    ``core/detection.py``'s job and it is not part of this slice.
+    """
+    doppler_bin, range_bin = np.unravel_index(np.abs(product.rd_map).argmax(), product.rd_map.shape)
+    return (
+        float(product.range_axis_m[range_bin]),
+        float(product.velocity_axis_mps[doppler_bin]),
+    )

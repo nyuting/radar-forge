@@ -1,0 +1,42 @@
+# Scenario 001 -- X-band radar at the Duke Receiver, Durham NC.
+# See spec/scenario-001-xband.md. The three variants share every
+# block below except [[burst]]; that is the whole point of the comparison.
+
+[scenario]
+name = "scenario-001-fmcw-low-prf"
+description = "S1: FMCW at 1 kHz PRF. Range is unambiguous to 37.5 km; Doppler folds at +-7.65 m/s, so an 80 m/s aircraft aliases about five times."
+seed = 20260911
+
+[radar]
+# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna.
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
+
+[receiver]
+gain_rx_dbi = 30.0
+noise_figure_db = 3.0
+
+[target]
+name = "light-aircraft"
+rcs_dbsm = 10.0        # 10 m^2, Swerling 0 (non-fluctuating)
+altitude_m = 1500.0    # the CSV has no altitude column; held constant
+
+[trajectory]
+path = "../data/flight_coordinates.csv"
+start_time_s = 0.0
+duration_s = 120.0     # the full track is ~16,500 frames; this window is opt-out
+frame_rate_hz = 1.0
+
+# One burst. 1 ms sweep at 2 GHz/s, deramped at 1 MHz -> 1000 samples/chirp.
+# 256 chirps = 256 ms of CPI inside each 1 s frame.
+[[burst]]
+waveform = "fmcw"
+f0_hz = 9.8e9
+bandwidth_hz = 2.0e6
+transmit_power_w = 100.0
+gain_tx_dbi = 30.0
+chirp_duration_s = 1.0e-3
+prf_hz = 1.0e3
+sample_rate_hz = 1.0e6
+n_pulses = 256

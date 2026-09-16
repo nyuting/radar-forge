@@ -1,0 +1,78 @@
+# Mirrors the .githooks/pre-push gate. The hooks can be bypassed with
+# --no-verify; this cannot. Both call the same Makefile targets so that
+# "it passed locally" means exactly one thing.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: lint · types · tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --extra dev --python ${{ matrix.python-version }}
+
+      - name: Lint
+        run: make lint
+
+      - name: Types
+        run: make type
+
+      - name: Conventions
+        run: make conventions
+
+      - name: Tests
+        run: uv run pytest --cov --cov-report=term-missing
+
+  commit-messages:
+    name: commit messages
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate each commit subject against .githooks/commit-msg
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          status=0
+          while read -r sha; do
+            [ -z "$sha" ] && continue
+            msg_file="$(mktemp)"
+            git log -1 --format=%B "$sha" > "$msg_file"
+            if ! .githooks/commit-msg "$msg_file"; then
+              echo "::error::commit $(git log -1 --format=%h "$sha") has an invalid subject"
+              status=1
+            fi
+          done < <(git rev-list "$base".."$head")
+          exit $status
+
+      - name: Validate the PR title (it becomes the squash commit subject)
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          msg_file="$(mktemp)"
+          printf '%s\n' "$PR_TITLE" > "$msg_file"
+          .githooks/commit-msg "$msg_file" \
+            || { echo "::error::PR title must be a valid Conventional Commit"; exit 1; }

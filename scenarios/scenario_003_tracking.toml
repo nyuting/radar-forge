@@ -1,0 +1,112 @@
+# Scenario 003 -- CFAR detection, association and Kalman tracking, over
+# scenario 001's S1 variant. See spec/scenario-003-tracking.md.
+#
+# Everything above [detection] is scenario_001_fmcw_low_prf.toml verbatim but
+# for the window: the same site, waveform and target. What is new is everything
+# downstream of the range-Doppler map.
+#
+# The window starts at 663 s rather than 0 s. Radial velocity is a property of
+# the site-to-track geometry, and refactor-001 §3.3 moved the site: from 0 s
+# the target's range rate now swings 22 m/s inside the ten frames the unfolding
+# bootstrap needs, which no fold selector can survive. 663 s is the earliest
+# window that still crosses a fold boundary -- the thing this scenario exists to
+# show -- while holding the rate steady enough either side of the crossing for
+# the range-slope estimator to resolve it.
+#
+# S1 folds Doppler at +-7.65 m/s, so this is the hard case for velocity
+# unfolding and is meant to be. For the variant where the waveform resolves the
+# ambiguity instead, see scenario_003_tracking_dual_prf.toml.
+
+[scenario]
+name = "scenario-003-tracking"
+description = "CFAR detection, GNN association and Kalman tracking over the S1 X-band scenario, where Doppler folds five times and the tracker must unfold it."
+seed = 20260911
+
+[radar]
+# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna.
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
+
+[receiver]
+gain_rx_dbi = 30.0
+noise_figure_db = 3.0
+
+[target]
+name = "light-aircraft"
+rcs_dbsm = 10.0        # 10 m^2, Swerling 0 (non-fluctuating)
+altitude_m = 1500.0    # the CSV has no altitude column; held constant
+
+[trajectory]
+path = "../data/flight_coordinates.csv"
+start_time_s = 663.0
+duration_s = 120.0
+frame_rate_hz = 1.0
+
+[[burst]]
+waveform = "fmcw"
+f0_hz = 9.8e9
+bandwidth_hz = 2.0e6
+transmit_power_w = 100.0
+gain_tx_dbi = 30.0
+chirp_duration_s = 1.0e-3
+prf_hz = 1.0e3
+sample_rate_hz = 1.0e6
+n_pulses = 256
+
+# Cell-averaging CFAR along range. 245,760 of the 256,000 cells carry a
+# complete reference window, so pfa = 1e-5 puts about 2.46 false alarms in
+# front of the associator every frame -- enough to exercise gating and
+# assignment continuously, while leaving a spurious *confirmed* track a
+# once-in-four-hundred-runs event. See the specification's §3.
+[detection]
+pfa = 1e-5
+n_train = 16
+n_guard = 4
+variant = "ca"
+# Scenario 001 applies no Doppler taper, so at this target's 51-65 dB SNR its
+# own sidelobes cross the threshold and appear as extra detections at its
+# range. One point target cannot give two returns at one range, so only the
+# strongest per range cell is kept.
+merge_range_bins = 1.0
+
+[tracking]
+state_model = "range_1d"
+# Measurement sigmas. state_model selects which of them the filter reads:
+# range_1d uses the first two, enu_2d adds the third.
+#
+# Range and range rate are quantisation-limited, not SNR-limited -- at this
+# target's 51-65 dB SNR the CRLB is 0.14 m and negligible respectively, so the
+# floor is one bin over sqrt(12): 74.9481 / sqrt(12) = 21.6357 m and
+# 0.059748 / sqrt(12) = 0.0172478 m/s. Their five orders of magnitude of
+# separation is what a range-Doppler radar looks like -- a coarse ranging
+# measurement and an exquisite velocity one.
+#
+# Azimuth cannot be derived that way, because this radar has no angle bin to
+# quantise into. enu_2d's angle is synthesised from truth by the pipeline
+# (specification §6.3) and 0.5 deg is the monopulse accuracy quoted there for
+# the 5.1 deg beam implied by 30 dBi -- far worse than the 0.008 deg the SNR
+# alone would give, because the real error budget is boresight calibration
+# rather than thermal noise. For scale, quantising to a whole beamwidth would
+# give 5.1 / sqrt(12) = 1.47 deg, so 0.5 deg is the finer of the two and the
+# ENU models are angle-limited rather than range-limited, as intended.
+sigma_range_m = 21.635652855125496
+sigma_velocity_mps = 0.017247813329811023
+sigma_azimuth_deg = 0.5
+# Not the 2.0 the specification's §6.2 picks by judgement. The target is
+# synthesised from a CSV whose fixes are 2-3 s apart and carry ADS-B position
+# noise, so the *simulated* target's range rate moves 3.4 m/s between frames
+# and by as much as 11 m/s. The 98%-against-93% margin once quoted here no
+# longer reproduces: over this window both settings hold a confirmed track in
+# 117 of 120 frames. See §14.6 and TrackingConfig's docstring.
+sigma_accel_mps2 = 5.0
+gate_probability = 0.99
+n_confirm_hits = 4
+n_confirm_frames = 5
+n_delete_misses = 3
+n_reacquire_frames = 5
+v_max_mps = 200.0
+velocity_unfolding = "track_aided"
+unfold_sigma_gate = 6.0
+n_slope_frames = 5
+simulated_angles = false

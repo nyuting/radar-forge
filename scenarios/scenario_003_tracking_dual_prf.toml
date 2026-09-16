@@ -1,0 +1,124 @@
+# Scenario 003, dual-PRF variant -- the same tracker over scenario 001's S3.
+# See spec/scenario-003-tracking.md §13.4.
+#
+# Everything above [detection] is scenario_001_fmcw_dual_prf.toml verbatim but
+# for the window, which is scenario_003_tracking.toml's 663 s so that the pair
+# is compared over the same frames.
+# The point of the pair is the contrast. On S1 one Doppler fold spans
+# 15.3 m/s, and the simulated target's range rate moves by up to 11 m/s
+# between frames, so track-aided unfolding mis-selects in a few per cent of
+# frames no matter how good the tracker is. Here the coprime 5:6 kHz pair
+# resolves velocity in the *waveform*, to +-191 m/s, and the whole of §5.3
+# disappears: the measurement arrives already unfolded.
+#
+# So this is the variant that meets §12 criteria 3 and 4 as written, and S1 is
+# the variant that shows why they are hard.
+
+[scenario]
+name = "scenario-003-tracking-dual-prf"
+description = "The scenario 003 tracker over the S3 dual-PRF waveform, where the coprime 5:6 kHz pair resolves velocity to +-191 m/s and no track-aided unfolding is needed."
+seed = 20260911
+
+[radar]
+# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna.
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
+
+[receiver]
+gain_rx_dbi = 30.0
+noise_figure_db = 3.0
+
+[target]
+name = "light-aircraft"
+rcs_dbsm = 10.0
+altitude_m = 1500.0
+
+[trajectory]
+path = "../data/flight_coordinates.csv"
+start_time_s = 663.0
+duration_s = 120.0
+frame_rate_hz = 1.0
+
+# Burst A: 200 us sweep at 10 GHz/s, 4 MHz -> 800 samples. PRF 5.0 kHz.
+[[burst]]
+waveform = "fmcw"
+f0_hz = 9.8e9
+bandwidth_hz = 2.0e6
+transmit_power_w = 100.0
+gain_tx_dbi = 30.0
+chirp_duration_s = 200.0e-6
+prf_hz = 5.0e3
+sample_rate_hz = 4.0e6
+n_pulses = 128
+
+# Burst B: PRF 6.0 kHz at 100 % duty, so the chirp time is exactly 1/6000 s
+# = 166.667 us -> 667 samples. The specification's rounded 166.7 us is a duty
+# cycle of 1.0002 and Transmitter rejects it: the next chirp would start
+# before this one finished.
+[[burst]]
+waveform = "fmcw"
+f0_hz = 9.8e9
+bandwidth_hz = 2.0e6
+transmit_power_w = 100.0
+gain_tx_dbi = 30.0
+chirp_duration_s = 1.6666666666666667e-4
+prf_hz = 6.0e3
+sample_rate_hz = 4.0e6
+n_pulses = 128
+
+# Cell-averaging CFAR along range. 245,760 of the 256,000 cells carry a
+# complete reference window, so pfa = 1e-5 puts about 2.46 false alarms in
+# front of the associator every frame -- enough to exercise gating and
+# assignment continuously, while leaving a spurious *confirmed* track a
+# once-in-four-hundred-runs event. See the specification's §3.
+[detection]
+pfa = 1e-5
+n_train = 16
+n_guard = 4
+variant = "ca"
+# Scenario 001 applies no Doppler taper, so at this target's 51-65 dB SNR its
+# own sidelobes cross the threshold and appear as extra detections at its
+# range. One point target cannot give two returns at one range, so only the
+# strongest per range cell is kept.
+merge_range_bins = 1.0
+
+[tracking]
+state_model = "range_1d"
+# Measurement sigmas. state_model selects which of them the filter reads:
+# range_1d uses the first two, enu_2d adds the third.
+#
+# Range and range rate are quantisation-limited, not SNR-limited -- at this
+# target's 51-65 dB SNR the CRLB is 0.14 m and negligible respectively, so the
+# floor is one bin over sqrt(12): 74.9481 / sqrt(12) = 21.6357 m and
+# 0.059748 / sqrt(12) = 0.0172478 m/s. Their five orders of magnitude of
+# separation is what a range-Doppler radar looks like -- a coarse ranging
+# measurement and an exquisite velocity one.
+#
+# Azimuth cannot be derived that way, because this radar has no angle bin to
+# quantise into. enu_2d's angle is synthesised from truth by the pipeline
+# (specification §6.3) and 0.5 deg is the monopulse accuracy quoted there for
+# the 5.1 deg beam implied by 30 dBi -- far worse than the 0.008 deg the SNR
+# alone would give, because the real error budget is boresight calibration
+# rather than thermal noise. For scale, quantising to a whole beamwidth would
+# give 5.1 / sqrt(12) = 1.47 deg, so 0.5 deg is the finer of the two and the
+# ENU models are angle-limited rather than range-limited, as intended.
+sigma_range_m = 21.635652855125496
+sigma_velocity_mps = 0.017247813329811023
+sigma_azimuth_deg = 0.5
+# As for S1: the simulated target's range rate moves 3.4 m/s between frames,
+# because the trajectory CSV's fixes are 2-3 s apart and carry ADS-B position
+# noise. That is a property of the target, not of the waveform.
+sigma_accel_mps2 = 5.0
+gate_probability = 0.99
+n_confirm_hits = 4
+n_confirm_frames = 5
+n_delete_misses = 3
+n_reacquire_frames = 5
+v_max_mps = 200.0
+velocity_unfolding = "none"
+# Both unused when velocity_unfolding = "none", and kept only so the two
+# scenario 003 TOMLs differ in as few lines as possible.
+unfold_sigma_gate = 6.0
+n_slope_frames = 5
+simulated_angles = false

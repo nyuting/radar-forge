@@ -1,0 +1,25 @@
+# Environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Generated arrays: commit the script, not the output (golden data is the exception)
+*.npy
+*.npz
+*.h5
+*.mat
+!tests/data/golden/**
+
+# Notebooks and OS/editor noise
+.ipynb_checkpoints/
+.DS_Store
+.vscode/
+.idea/

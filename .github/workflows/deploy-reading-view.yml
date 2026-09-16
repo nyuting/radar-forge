@@ -1,0 +1,58 @@
+# Publishes the minimised reading view to GitHub Pages on every push to main.
+#
+# The view is a derived artifact: tools/generate_reading_view.py regenerates it
+# here so that radar_forge_reading/ never enters the repository tree (it is
+# git-ignored). Nothing is built that a developer cannot reproduce locally with
+#     uv run python tools/generate_reading_view.py
+name: Deploy reading view
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# The minimum Pages needs: read the tree, publish a Pages artifact, and mint the
+# OIDC token deploy-pages authenticates with.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; never cancel one mid-flight.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: generate · deploy
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --extra dev
+
+      - name: Generate the reading view
+        run: uv run python tools/generate_reading_view.py
+
+      # enablement turns Pages on for the repository if it is not already
+      # configured, so a fresh clone deploys without a manual visit to
+      # Settings -> Pages. It is a no-op once Pages is on.
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: radar_forge_reading
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
