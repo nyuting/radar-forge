@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import html
 import importlib.util
 import sys
 from pathlib import Path
@@ -190,7 +191,23 @@ def test_index_links_every_generated_file(tmp_path: Path) -> None:
 
     index = (out / "index.html").read_text(encoding="utf-8")
     for path in sorted(out.rglob("*.py")):
-        assert f'href="{path.relative_to(out).as_posix()}"' in index
+        assert f'href="{path.relative_to(out).as_posix()}.html"' in index
+
+
+def test_every_module_has_a_page_showing_its_code(tmp_path: Path) -> None:
+    out = tmp_path / "radar_forge_reading"
+    tool.generate(PACKAGE_ROOT, out)
+
+    for path in sorted(out.rglob("*.py")):
+        page = path.with_name(path.name + ".html").read_text(encoding="utf-8")
+        body = path.read_text(encoding="utf-8").removeprefix(tool._HEADER)
+        assert html.escape(body) in page, path
+
+
+def test_module_page_escapes_html_and_links_home() -> None:
+    page = tool.render_module("core/signal.py", "x = a < b\n")
+    assert "x = a &lt; b" in page
+    assert 'href="../index.html"' in page
 
 
 def test_main_writes_the_tree(tmp_path: Path) -> None:

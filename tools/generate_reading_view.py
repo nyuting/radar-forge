@@ -46,7 +46,7 @@ import ast
 import html
 import shutil
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 __all__ = [
     "ReadingViewTransformer",
@@ -54,6 +54,7 @@ __all__ = [
     "main",
     "minimise_source",
     "render_index",
+    "render_module",
 ]
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -227,8 +228,76 @@ def minimise_source(source: str, filename: str = "<unknown>") -> str:
     return ast.unparse(minimised) + "\n"
 
 
+# One stylesheet for every page. Dark by default — the view is mostly read on a
+# phone, often at night — with a light palette for readers who ask for one.
+_STYLE = """<style>
+  :root {
+    color-scheme: dark light;
+    --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --link: #58a6ff; --code-bg: #161b22;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --link: #0969da; --code-bg: #f6f8fa; }
+  }
+  body {
+    background: var(--bg); color: var(--fg);
+    font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 56rem; padding: 0 1rem;
+  }
+  a { color: var(--link); }
+  li { margin: 0.25rem 0; }
+  code, pre { background: var(--code-bg); font-family: ui-monospace, Menlo, Consolas, monospace; }
+  code { padding: 0.1rem 0.3rem; }
+  pre { padding: 1rem; overflow-x: auto; line-height: 1.45; border-radius: 6px; }
+  .muted { color: var(--muted); }
+</style>"""
+
+
+def _page(title: str, body: str) -> str:
+    """Wrap ``body`` in the shared HTML skeleton and stylesheet."""
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{html.escape(title)}</title>
+{_STYLE}
+</head>
+<body>
+{body}
+</body>
+</html>
+"""
+
+
+def render_module(relative_path: str, source: str) -> str:
+    """Return an HTML page displaying one minimised module.
+
+    Browsers download or show ``.py`` files as bare text, so each module also
+    gets a page of its own that renders the code in place.
+
+    Parameters
+    ----------
+    relative_path : str
+        Output-relative POSIX path of the module, e.g. ``core/signal.py``.
+    source : str
+        The minimised source to display.
+
+    Returns
+    -------
+    str
+        A single self-contained HTML page.
+    """
+    depth = relative_path.count("/")
+    index_href = "../" * depth + "index.html"
+    name = PurePosixPath(relative_path).name
+    body = f"""<p><a href="{index_href}">&larr; index</a>
+  <span class="muted">· <a href="{html.escape(name)}">raw</a></span></p>
+<h1>{html.escape(relative_path)}</h1>
+<pre><code>{html.escape(source)}</code></pre>"""
+    return _page(f"{relative_path} · radar-forge reading view", body)
+
+
 def render_index(relative_paths: list[str]) -> str:
-    """Return a minimal HTML index linking every generated file.
+    """Return a minimal HTML index linking every generated module page.
 
     Parameters
     ----------
@@ -243,24 +312,10 @@ def render_index(relative_paths: list[str]) -> str:
         build step of its own.
     """
     items = "\n".join(
-        f'    <li><a href="{html.escape(path)}">{html.escape(path)}</a></li>'
+        f'    <li><a href="{html.escape(path)}.html">{html.escape(path)}</a></li>'
         for path in sorted(relative_paths)
     )
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>radar-forge reading view</title>
-<style>
-  body {{ font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 48rem; }}
-  body {{ padding: 0 1rem; }}
-  li {{ margin: 0.25rem 0; }}
-  code {{ background: #f4f4f4; padding: 0.1rem 0.3rem; }}
-</style>
-</head>
-<body>
-<h1>radar-forge reading view</h1>
+    body = f"""<h1>radar-forge reading view</h1>
 <p>
   Minimised sources generated from <code>src/radar_forge/</code> by
   <code>tools/generate_reading_view.py</code>: the maths, with the docstrings,
@@ -269,10 +324,8 @@ def render_index(relative_paths: list[str]) -> str:
 </p>
 <ul>
 {items}
-</ul>
-</body>
-</html>
-"""
+</ul>"""
+    return _page("radar-forge reading view", body)
 
 
 def generate(src: Path, out: Path) -> list[Path]:
@@ -291,7 +344,7 @@ def generate(src: Path, out: Path) -> list[Path]:
     Returns
     -------
     list of pathlib.Path
-        Every file written, including ``index.html``.
+        Every file written: each ``.py``, its ``.py.html`` page, and ``index.html``.
     """
     if out.exists():
         shutil.rmtree(out)
@@ -307,7 +360,9 @@ def generate(src: Path, out: Path) -> list[Path]:
             source_path.read_text(encoding="utf-8"), filename=str(source_path)
         )
         target.write_text(_HEADER + minimised, encoding="utf-8")
-        written.append(target)
+        page = target.with_name(target.name + ".html")
+        page.write_text(render_module(relative.as_posix(), minimised), encoding="utf-8")
+        written.extend([target, page])
         relative_paths.append(relative.as_posix())
 
     index = out / "index.html"
