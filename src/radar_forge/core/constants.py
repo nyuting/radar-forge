@@ -74,7 +74,7 @@ temperature unless you are computing system noise temperature rather than
 noise figure.
 """
 
-EARTH_RADIUS_M: Final[float] = 6_371_000.0
+EARTH_RADIUS_M: Final[float] = 6_371_008.771_4
 """Mean Earth radius, m (IUGG mean radius :math:`R_1`)."""
 
 FOUR_THIRDS_EARTH_RADIUS_M: Final[float] = 4.0 / 3.0 * EARTH_RADIUS_M
