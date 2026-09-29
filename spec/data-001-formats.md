@@ -221,9 +221,10 @@ One row per fix, per target.
 
 \* Exactly one of `time_utc` and `time_s`.
 
-The loader keeps accepting the legacy header `timestamp,lat,lon` of `data/flight_coordinates.csv`
-and `tests/data/golden/flight_coordinates_head.csv`, mapping it onto the columns above. New files
-use the new names.
+`data/flight_coordinates.csv` and its excerpt `tests/data/golden/flight_coordinates_head.csv` use
+these names. `load_flight_csv` (`pipelines/trajectories.py`) reads exactly this table. It rejects
+the old `timestamp,lat,lon` header with a message naming the new columns, and it rejects a file
+whose `target_id` names more than one target until multi-target scenarios exist.
 
 ### 6.4 `truth.csv`
 
@@ -620,23 +621,36 @@ round-trip representation costs a few bytes per cell.
 | `%.3f` / `%.6f` / `%.6e` float formatting | shortest round-trip | precision change (DF9) |
 | `rd_*.png`, `track_*.png`, `*.mp4` in the run root | `figures/` | move; `clear_previous_frames` globs must follow |
 | — | `inputs/scenario.toml`, `inputs/trajectory.csv` | new |
+| Trajectory header `timestamp,lat,lon` | `time_utc,latitude_deg,longitude_deg` (§6.3) | rename, **done** |
 
-Every existing column keeps its name, unit and sign, so a reader of today's files keeps working on
-the new ones.
+Every existing output column keeps its name, unit and sign, so a reader of today's output files
+keeps working on the new ones. The one rename is to an input, the trajectory header, and it has
+already landed: the data files, the loader and `scripts/translate_flight_coordinates.py` all use
+the §6.3 names.
 
-**Follow-ups, in build order.** Each is its own PR; none is part of adopting this document.
+**Follow-ups, in build order.** Each is its own PR; none is part of adopting this document. None of
+the §9 enforcers exists yet: the registry is item 4, and the validator and round-trip test are
+item 5. Only rule R7, which AC8 cites, is in place.
 
-1. Add the `io` extra (`h5py`) to `pyproject.toml`, with the dependency note from §3 in the PR.
-2. `src/radar_forge/pipelines/io/`: the schema registry, CSV/JSON writers and readers
+1. Bring the scenario specs and their companions onto the §6.3 column names wherever they describe
+   the trajectory CSV: `spec/scenario-001-xband.md` §2.2 ("The CSV carries `timestamp,lat,lon`
+   only") and the §2 pipeline diagram, and the matching diagram in
+   `docs/scenarios/scenario-001-xband.md`. No dependencies.
+2. `scripts/regen_golden_flight_coordinates_head.py`, the generator `docs/conventions/testing.md`
+   §6 requires and the 51-row excerpt still lacks. No dependencies.
+3. Add the `io` extra (`h5py`) to `pyproject.toml`, with the dependency note from §3 in the PR.
+4. `src/radar_forge/pipelines/io/`: the schema registry, CSV/JSON writers and readers
    (stdlib-only), and HDF5 writers and readers (lazy `h5py` import).
-3. `scripts/check_run_output.py`, the §9 validator, plus a golden mini-run in `tests/data/golden/`
-   with its `scripts/regen_golden_*.py` generator, per `docs/conventions/testing.md`.
-4. Move `scripts/run_scenario.py` onto the io module, and add `scripts/convert_npz_to_h5.py` for
-   old runs.
-5. `scripts/convert_sigmf.py` (§7.5).
-6. A JSON Schema for `metadata.json` at `spec/schemas/metadata.schema.json`.
+5. `scripts/check_run_output.py`, the §9 validator, and `tests/pipelines/test_io_roundtrip.py`,
+   plus a golden mini-run in `tests/data/golden/` with its `scripts/regen_golden_*.py` generator,
+   per `docs/conventions/testing.md`.
+6. Move `scripts/run_scenario.py` onto the io module, including writing `inputs/scenario.toml` and
+   `inputs/trajectory.csv`, and add `scripts/convert_npz_to_h5.py` for old runs.
 7. A one-line note in scenario specs 001 §3.6, 002 §3.6 and 003 §9 pointing here as superseding
-   their output schemas.
+   their output schemas. It comes after item 6 because until then those sections still describe
+   what is written.
+8. `scripts/convert_sigmf.py` (§7.5).
+9. A JSON Schema for `metadata.json` at `spec/schemas/metadata.schema.json`.
 
 **Change log.**
 
