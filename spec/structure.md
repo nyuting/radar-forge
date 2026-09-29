@@ -14,6 +14,8 @@ scenarios 001, 002 and 003 required; `array/`, `raytracing/`, `pipelines/exporte
 `teaching/` are still design only. Part B marks the tree as intended, not as built — read it
 alongside the source.
 **Companion to:** [`starter.md`](starter.md) (project charter and ecosystem survey).
+**File formats:** [`data-001-formats.md`](data-001-formats.md) fixes the on-disk form of every
+input, output and product the tree below reads or writes.
 
 This document does two things, in the order a reader needs them. **Part B** is the file-level design
 of the `radar_forge` package: the tree as intended, the module-to-upstream mapping, the design rules
@@ -83,7 +85,7 @@ src/radar_forge/
 │   └── exporters/
 │       ├── __init__.py
 │       ├── coco.py              # range-Doppler(-azimuth) cube -> COCO annotations
-│       ├── range_doppler.py     # cube serialization: .npz / .mat / dB scaling
+│       ├── range_doppler.py     # cube serialization per spec/data-001-formats.md (HDF5); dB scaling
 │       └── labels.py            # shared label schema: range, velocity, azimuth, x, y, w, h, heading, obstruction
 └── teaching/
     ├── __init__.py

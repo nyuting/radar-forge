@@ -59,3 +59,4 @@ code that is plain, documented, and cites its source passes it.
 | `scripts/check_conventions.py` | Rules R1–R6: TOML config, layout, docstrings, constants, units, broadcasting |
 | `Makefile` | The single definition of every gate |
 | `spec/` | Design specification; the intended end state |
+| `spec/data-001-formats.md` | File formats, columns, units and conventions for every input, output and product |
