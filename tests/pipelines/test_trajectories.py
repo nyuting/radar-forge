@@ -37,6 +37,9 @@ S1_RADAR = Radar(
 
 TARGET_ALTITUDE_M = 1500.0
 
+# The spec/data-001-formats.md §6.3 header of a recorded track.
+HEADER = "time_utc,latitude_deg,longitude_deg"
+
 # Scenario 002: the Raleigh-Durham illuminator, received at the Duke Receiver.
 # A 19.6 km baseline, so the two ranges differ by kilometres, not by rounding.
 RDU_SITE = (35.87750, -78.78750, 25.0)
@@ -110,20 +113,20 @@ class TestLoadFlightCsv:
 
     def test_rejects_a_file_missing_a_column(self, tmp_path: Path) -> None:
         bad = tmp_path / "no_lon.csv"
-        bad.write_text("timestamp,lat\n2026-09-03T00:17:56Z,1.4\n")
+        bad.write_text("time_utc,latitude_deg\n2026-09-03T00:17:56Z,1.4\n")
         with pytest.raises(ValueError, match="missing required column"):
             load_flight_csv(bad, altitude_m=TARGET_ALTITUDE_M)
 
     def test_rejects_a_file_with_a_single_fix(self, tmp_path: Path) -> None:
         bad = tmp_path / "one_row.csv"
-        bad.write_text("timestamp,lat,lon\n2026-09-03T00:17:56Z,35.9,-78.9\n")
+        bad.write_text(f"{HEADER}\n2026-09-03T00:17:56Z,35.9,-78.9\n")
         with pytest.raises(ValueError, match="at least two"):
             load_flight_csv(bad, altitude_m=TARGET_ALTITUDE_M)
 
     def test_rejects_out_of_order_timestamps(self, tmp_path: Path) -> None:
         bad = tmp_path / "backwards.csv"
         bad.write_text(
-            "timestamp,lat,lon\n2026-09-03T00:17:56Z,35.9,-78.9\n2026-09-03T00:17:50Z,35.9,-78.9\n"
+            f"{HEADER}\n2026-09-03T00:17:56Z,35.9,-78.9\n2026-09-03T00:17:50Z,35.9,-78.9\n"
         )
         with pytest.raises(ValueError, match="strictly increasing"):
             load_flight_csv(bad, altitude_m=TARGET_ALTITUDE_M)
@@ -132,13 +135,76 @@ class TestLoadFlightCsv:
         """The shipped track has CRLF endings; csv with newline='' handles them."""
         crlf = tmp_path / "crlf.csv"
         crlf.write_bytes(
-            b"timestamp,lat,lon\r\n"
+            b"time_utc,latitude_deg,longitude_deg\r\n"
             b"2026-09-03T00:17:56Z,1.38778,103.6824\r\n"
             b"2026-09-03T00:18:04Z,1.38649,103.68047\r\n"
         )
         trajectory = load_flight_csv(crlf, altitude_m=TARGET_ALTITUDE_M)
         assert trajectory.n_fixes == 2
         np.testing.assert_allclose(trajectory.longitude_deg[1], 103.68047, rtol=1e-15)
+
+    def test_rejects_the_legacy_header_naming_the_new_one(self, tmp_path: Path) -> None:
+        legacy = tmp_path / "legacy.csv"
+        legacy.write_text(
+            "timestamp,lat,lon\n2026-09-03T00:17:56Z,35.9,-78.9\n2026-09-03T00:18:04Z,35.9,-78.9\n"
+        )
+        with pytest.raises(ValueError, match="time_utc,latitude_deg,longitude_deg"):
+            load_flight_csv(legacy, altitude_m=TARGET_ALTITUDE_M)
+
+    def test_a_time_s_file_has_no_epoch(self, tmp_path: Path) -> None:
+        """Synthetic tracks carry relative seconds, measured here from the first fix."""
+        synthetic = tmp_path / "synthetic.csv"
+        synthetic.write_text(
+            "time_s,latitude_deg,longitude_deg\n10.0,35.9,-78.9\n12.5,35.9,-78.9\n"
+        )
+        trajectory = load_flight_csv(synthetic, altitude_m=TARGET_ALTITUDE_M)
+        assert trajectory.epoch is None
+        np.testing.assert_array_equal(trajectory.time_s, [0.0, 2.5])
+
+    def test_rejects_both_time_columns(self, tmp_path: Path) -> None:
+        bad = tmp_path / "two_clocks.csv"
+        bad.write_text(
+            "time_utc,time_s,latitude_deg,longitude_deg\n"
+            "2026-09-03T00:17:56Z,0.0,35.9,-78.9\n2026-09-03T00:18:04Z,8.0,35.9,-78.9\n"
+        )
+        with pytest.raises(ValueError, match="exactly one of"):
+            load_flight_csv(bad, altitude_m=TARGET_ALTITUDE_M)
+
+    def test_rejects_a_file_with_no_time_column(self, tmp_path: Path) -> None:
+        bad = tmp_path / "no_clock.csv"
+        bad.write_text("latitude_deg,longitude_deg\n35.9,-78.9\n35.9,-78.9\n")
+        with pytest.raises(ValueError, match="exactly one of"):
+            load_flight_csv(bad, altitude_m=TARGET_ALTITUDE_M)
+
+    def test_an_altitude_column_overrides_the_argument(self, tmp_path: Path) -> None:
+        with_altitude = tmp_path / "with_altitude.csv"
+        with_altitude.write_text(
+            f"{HEADER},altitude_m\n"
+            "2026-09-03T00:17:56Z,35.9,-78.9,900.0\n2026-09-03T00:18:04Z,35.9,-78.9,950.0\n"
+        )
+        trajectory = load_flight_csv(with_altitude, altitude_m=TARGET_ALTITUDE_M)
+        np.testing.assert_array_equal(trajectory.altitude_m, [900.0, 950.0])
+
+    def test_rejects_a_file_with_no_altitude_from_either_source(self) -> None:
+        with pytest.raises(ValueError, match="altitude_m argument is required"):
+            load_flight_csv(GOLDEN_CSV)
+
+    def test_accepts_a_single_target_id(self, tmp_path: Path) -> None:
+        one_target = tmp_path / "one_target.csv"
+        one_target.write_text(
+            f"{HEADER},target_id\n"
+            "2026-09-03T00:17:56Z,35.9,-78.9,a\n2026-09-03T00:18:04Z,35.9,-78.9,a\n"
+        )
+        assert load_flight_csv(one_target, altitude_m=TARGET_ALTITUDE_M).n_fixes == 2
+
+    def test_rejects_two_target_ids(self, tmp_path: Path) -> None:
+        two_targets = tmp_path / "two_targets.csv"
+        two_targets.write_text(
+            f"{HEADER},target_id\n"
+            "2026-09-03T00:17:56Z,35.9,-78.9,a\n2026-09-03T00:18:04Z,35.9,-78.9,b\n"
+        )
+        with pytest.raises(ValueError, match="only one"):
+            load_flight_csv(two_targets, altitude_m=TARGET_ALTITUDE_M)
 
 
 class TestResample:

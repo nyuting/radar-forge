@@ -7,8 +7,9 @@ because each step loses something different and hiding that would teach the
 wrong lesson:
 
 :func:`load_flight_csv`
-    Reads ``timestamp,lat,lon``. The recorded track carries no altitude, so one
-    is supplied as a scenario parameter and held constant.
+    Reads a trajectory CSV with the ``spec/data-001-formats.md`` §6.3 columns.
+    The recorded track carries no altitude, so one is supplied as a scenario
+    parameter and held constant.
 :func:`resample`
     Linear interpolation onto the frame grid. The fixes arrive every 2-8
     seconds; the frames are wanted at 1 Hz, so most frames are interpolated
@@ -60,7 +61,10 @@ __all__ = [
     "to_radar_frame",
 ]
 
-_CSV_COLUMNS = ("timestamp", "lat", "lon")
+# Column names from spec/data-001-formats.md §6.3.
+_TIME_COLUMNS = ("time_utc", "time_s")
+_POSITION_COLUMNS = ("latitude_deg", "longitude_deg")
+_LEGACY_COLUMNS = ("timestamp", "lat", "lon")
 
 
 @dataclass(frozen=True)
@@ -153,30 +157,41 @@ class TargetTrack:
         return int(self.time_s.size)
 
 
-def load_flight_csv(path: Path | str, *, altitude_m: float) -> Trajectory:
-    """Read a ``timestamp,lat,lon`` track into a :class:`Trajectory`.
+def load_flight_csv(path: Path | str, *, altitude_m: float | None = None) -> Trajectory:
+    """Read a trajectory CSV into a :class:`Trajectory`.
+
+    The columns are those of ``spec/data-001-formats.md`` §6.3: exactly one of
+    ``time_utc`` and ``time_s``, then ``latitude_deg`` and ``longitude_deg``,
+    and optionally ``target_id`` and ``altitude_m``.
 
     Parameters
     ----------
     path : pathlib.Path or str
-        The CSV file. Must have a header row naming ``timestamp``, ``lat`` and
-        ``lon``; timestamps are ISO 8601, and a trailing ``Z`` is accepted.
-    altitude_m : float
-        Height above the ellipsoid to assign to every fix, metres. The recorded
-        track has no altitude column, so this is a scenario parameter rather
-        than a measurement -- see the ``Notes``.
+        The CSV file, with a header row. ``time_utc`` is ISO 8601, and a
+        trailing ``Z`` is accepted. ``time_s`` is seconds, for a synthetic track
+        with no absolute epoch.
+    altitude_m : float, optional
+        Height above the ellipsoid to assign to every fix, metres. Used only
+        when the file has no ``altitude_m`` column. The recorded track has
+        none, so this is a scenario parameter rather than a measurement -- see
+        the ``Notes``.
 
     Returns
     -------
     Trajectory
         Positions in fix order, with ``time_s`` measured from the first fix.
+        ``epoch`` is the first fix's ``time_utc``, or ``None`` for a ``time_s``
+        file.
 
     Raises
     ------
     ValueError
-        If the header does not name all three required columns, if the file
-        holds fewer than two fixes, or if the timestamps are not strictly
-        increasing.
+        If the header does not name exactly one time column and both position
+        columns, if ``target_id`` names more than one target, if no altitude is
+        given by either the file or ``altitude_m``, if the file holds fewer
+        than two fixes, or if the times are not strictly increasing. A file
+        with the old ``timestamp,lat,lon`` header is rejected with a message
+        naming the new columns.
 
     Notes
     -----
@@ -185,41 +200,92 @@ def load_flight_csv(path: Path | str, *, altitude_m: float) -> Trajectory:
     scenario 001 the correction is 1.6 % at the closest approach (8.26 km
     ground, 8.39 km slant) and shrinks with range.
 
+    One file holds one target. ``target_id`` is accepted so that a file written
+    for a later multi-target scenario still reads, but only while it names a
+    single target.
+
     The file is opened with ``newline=""`` so that the :mod:`csv` module handles
     the line endings, which is what lets it read a CRLF file unchanged.
+
+    References
+    ----------
+    .. [1] ``spec/data-001-formats.md`` §5 (time) and §6.3 (trajectory columns).
     """
     csv_path = Path(path)
-    timestamps: list[datetime] = []
+    times: list[str] = []
     latitude_deg: list[float] = []
     longitude_deg: list[float] = []
+    altitudes_m: list[float] = []
+    target_ids: set[str] = set()
 
     with csv_path.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
-        missing = [name for name in _CSV_COLUMNS if name not in (reader.fieldnames or ())]
+        columns = tuple(reader.fieldnames or ())
+        if columns == _LEGACY_COLUMNS:
+            msg = (
+                f"{csv_path} has the old header {','.join(_LEGACY_COLUMNS)}; rename it to "
+                "time_utc,latitude_deg,longitude_deg (spec/data-001-formats.md §6.3)."
+            )
+            raise ValueError(msg)
+        missing = [name for name in _POSITION_COLUMNS if name not in columns]
         if missing:
             msg = (
                 f"{csv_path} is missing required column(s) {missing}; "
-                f"expected a header naming {list(_CSV_COLUMNS)}."
+                f"expected a header naming {list(_POSITION_COLUMNS)}."
             )
             raise ValueError(msg)
+        time_columns = [name for name in _TIME_COLUMNS if name in columns]
+        if len(time_columns) != 1:
+            msg = (
+                f"{csv_path} must name exactly one of {list(_TIME_COLUMNS)}; found {time_columns}."
+            )
+            raise ValueError(msg)
+        time_column = time_columns[0]
+        has_altitude = "altitude_m" in columns
+        has_target_id = "target_id" in columns
         # A Python loop: csv.DictReader is a row-at-a-time stream, and the whole
         # point of streaming it is not to hold the text of 5422 rows at once.
         for row in reader:
-            timestamps.append(datetime.fromisoformat(row["timestamp"]))
-            latitude_deg.append(float(row["lat"]))
-            longitude_deg.append(float(row["lon"]))
+            times.append(row[time_column])
+            latitude_deg.append(float(row["latitude_deg"]))
+            longitude_deg.append(float(row["longitude_deg"]))
+            if has_altitude:
+                altitudes_m.append(float(row["altitude_m"]))
+            if has_target_id:
+                target_ids.add(row["target_id"])
 
-    if len(timestamps) < 2:
-        msg = f"{csv_path} holds {len(timestamps)} fix(es); a trajectory needs at least two."
+    if len(target_ids) > 1:
+        msg = (
+            f"{csv_path} names {len(target_ids)} targets {sorted(target_ids)}; "
+            "a trajectory file may hold only one."
+        )
+        raise ValueError(msg)
+    if len(times) < 2:
+        msg = f"{csv_path} holds {len(times)} fix(es); a trajectory needs at least two."
         raise ValueError(msg)
 
-    epoch = timestamps[0]
-    time_s = np.array([(stamp - epoch).total_seconds() for stamp in timestamps], dtype=np.float64)
+    epoch: datetime | None
+    if time_column == "time_utc":
+        stamps = [datetime.fromisoformat(text) for text in times]
+        epoch = stamps[0]
+        time_s = np.array([(stamp - epoch).total_seconds() for stamp in stamps], dtype=np.float64)
+    else:
+        epoch = None
+        seconds = np.asarray([float(text) for text in times], dtype=np.float64)
+        time_s = seconds - seconds[0]
+
+    if has_altitude:
+        altitude_per_fix_m = np.asarray(altitudes_m, dtype=np.float64)
+    elif altitude_m is None:
+        msg = f"{csv_path} has no altitude_m column, so an altitude_m argument is required."
+        raise ValueError(msg)
+    else:
+        altitude_per_fix_m = np.full(time_s.shape, float(altitude_m), dtype=np.float64)
     return Trajectory(
         time_s=time_s,
         latitude_deg=np.asarray(latitude_deg, dtype=np.float64),
         longitude_deg=np.asarray(longitude_deg, dtype=np.float64),
-        altitude_m=np.full(time_s.shape, float(altitude_m), dtype=np.float64),
+        altitude_m=altitude_per_fix_m,
         epoch=epoch,
     )
 
