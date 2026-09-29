@@ -711,3 +711,46 @@ absolute SNR. Forward scatter is not modelled at all.
    CI exercises any of them, or backend tests stay mock-only with hardware validation left manual, is a
    question for when the first real backend lands. Until then `raytracing/backends/analytic.py` is the only
    backend under test, and it runs anywhere. Revisit before merging the first GPU backend.
+
+## General tracking package
+
+`tracking/` now has separate state/model, estimator, association and lifecycle
+responsibilities. Configurable coordinates and NN/GNN already justify promotion; do not
+force these into a single file. Public contracts are re-exported from
+`tracking/__init__.py`. See [Tracker 001](tracker-001-integration.md).
+
+
+The current `core/tracking.py` and Scenario 003 pipeline remain available. The general
+pipeline is `pipelines/general_tracking.py`, with configuration and output helpers in
+`pipelines/tracking_config.py` and `pipelines/tracking_output.py`. Its imported detector is
+`core/detection_2d.py`; the existing detector keeps its API. See the
+[port inventory](tracker-001-port.md) for the full source mapping.
+
+The general package retains 15 Python files. Observation records belong to `sensors.py`;
+`measurements.py` owns the mathematical models that predict those observations. Existing
+imports of `Measurement` and `MeasurementBatch` from `tracking` or `tracking.measurements`
+remain aliases of the classes in `tracking.sensors`.
+
+| Module | Responsibility |
+| :--- | :--- |
+| `__init__.py` | Stable public imports. |
+| `_numerics.py` | Shared numerical validation and factorization. |
+| `spaces.py` | Named coordinates, units, frames, periodic operations, and estimates. |
+| `sensors.py` | Sensor registration, coverage, observation records, and scan batches. |
+| `measurements.py` | State-to-observation models, sensor poses, and shared measurement geometry. |
+| `motion.py` | State evolution and process noise. |
+| `estimation.py` | Estimator contract and shared innovation statistics. |
+| `ukf.py` | Single-model nonlinear Gaussian filtering. |
+| `imm.py` | Multiple-model estimation and mixture probabilities. |
+| `association.py` | Gating and observation assignment. |
+| `initiation.py` | Initial estimates for new tracks. |
+| `tracks.py` | Track identity, estimator ownership, history, and snapshots. |
+| `management.py` | Track lifecycle rules. |
+| `engine.py` | Sensor-event orchestration. |
+| `derived.py` | Interpretable quantities derived from estimates. |
+
+The input path is `Sensor.batch(...)` → `MeasurementBatch` → `TrackerEngine.process(...)`;
+the result is a tuple of `TrackSnapshot` objects. Sensor annotations refer to snapshots
+only under `TYPE_CHECKING`, so observation records do not import the estimator or engine
+at runtime. Detection, configuration/builders, scenario adaptation, exports/evaluation,
+and plotting keep their existing boundaries outside this package.

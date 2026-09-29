@@ -497,3 +497,12 @@ Encoded as `tests/pipelines/test_scenario_001.py`, marked `slow`, over a 5-frame
        House, 2020, ch. 2, ch. 4.
 .. [4] National Imagery and Mapping Agency, *Department of Defense World Geodetic System 1984*,
        NIMA TR8350.2, 3rd ed., 2000.
+
+## General tracking extension
+
+The original slice above ends at range–Doppler products. The
+[Tracker 001 extension](tracker-001-integration.md) adds a separate
+`scripts/run_general_tracking.py` runner for all three variants: CFAR detections,
+native radial tracking, streaming exports, and explicit ambiguity interpretation.
+S2 absolute range remains unresolved. The current Scenario 003 tracker and its
+runner remain available independently.

@@ -210,3 +210,42 @@ Design feedback on the documents in [`spec/`](spec/) is equally welcome.
 ## Licence
 
 MIT — see [LICENSE](LICENSE).
+
+## General tracking
+
+
+Use the repository's uv workflow (`./scripts/setup-dev.sh`). The tracker supports named
+ENU CV/CA coordinates, UKF/IMM, NN/GNN association and explicit measurement models.
+The Duke runs estimate range/closing velocity; the IQ has no measured angles.
+
+```bash
+uv run python scripts/run_general_tracking.py scenarios/scenario_001_fmcw_dual_prf.toml \
+  --track --out out/tracker-s3 --no-iq --no-plots --no-movie
+uv run python scripts/run_tracking_example.py --axes xyz --acceleration --out out/enu.jsonl
+```
+
+The other two scenario TOMLs also accept `--track`. S2 exports modulo range with absolute
+range explicitly unresolved. `detections.csv`, `tracks.csv`, `tracking_metrics.json` and
+`metadata.json` preserve units and ambiguity interpretation. Omit `--no-plots` with the
+teaching extra installed to include a track-history plot.
+
+```python
+from radar_forge.tracking import CartesianMotion
+
+motion = CartesianMotion(
+    {"x": "CA", "y": "CA", "z": "CV"},
+    origin_lla_deg_m=(36.00250, -78.94100, 60.0),
+)
+print(motion.state_space.names)
+```
+
+See [Tracker 001](spec/tracker-001-integration.md) for configuration, attribution,
+validation, and measured limitations. Defaults demonstrate the full pipeline, but the
+source trajectory produced track fragmentation; the historical table remains labelled as such.
+See [the port audit](spec/tracker-001-port.md) for current Duke validation.
+
+The current Scenario 003 tracker and `scripts/run_scenario.py` retain their existing APIs.
+The general runner tracks by default and accepts optional `--tracker-config settings.toml`
+with its own `[detection]` and `[tracking]` tables; it does not reuse the original tracker
+settings embedded in scenario files. Its radial IQ adapter supports monostatic scenarios;
+bistatic measurement models are available through `radar_forge.tracking`.

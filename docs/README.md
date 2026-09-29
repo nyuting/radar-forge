@@ -35,6 +35,11 @@ These are the rules the git hooks and CI enforce. Read them before your first co
   detection, data association and Kalman tracking stacked on scenario 001's S1 variant, in two
   waveform variants. §14 records the seven things building it changed.
 
+- [`spec/tracker-001-integration.md`](../spec/tracker-001-integration.md) — general tracker,
+  configuration, examples, attribution, and limitations.
+- [`spec/tracker-001-port.md`](../spec/tracker-001-port.md) — port inventory, annotation audit,
+  and validation alongside the current tracker.
+
 ## Scenario companions
 
 Visual, orienting walk-throughs for running a scenario for the first time — the geometry, the

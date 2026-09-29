@@ -59,6 +59,8 @@ packages = ["src/radar_forge"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
+# Honor annotation-preserving format exclusions for explicit pre-commit paths too.
+force-exclude = true
 
 [tool.ruff.lint]
 select = [
@@ -89,6 +91,43 @@ convention = "numpy"
 # Tests document themselves through their names; notebooks and scripts are tools.
 "tests/**" = ["D", "ANN"]
 "scripts/**" = ["D", "ANN", "T201"]
+# Preserve the imported author's annotations verbatim, including whitespace and
+# docstring layout. These exceptions apply only to preserved annotation issues;
+# numerical code, imports and all other lint rules remain checked.
+"src/radar_forge/tracking/_numerics.py" = ["E501", "W291"]
+"src/radar_forge/tracking/association.py" = ["D205", "E501", "W291", "W293"]
+"src/radar_forge/tracking/derived.py" = ["E501", "W291"]
+"src/radar_forge/tracking/engine.py" = ["E501", "W291", "W293"]
+"src/radar_forge/tracking/estimation.py" = ["D205", "E501", "W291"]
+"src/radar_forge/tracking/imm.py" = ["D200", "D202", "D205", "D210", "D400", "E501", "W291", "W293"]
+"src/radar_forge/tracking/initiation.py" = ["D202", "D204", "D205", "D210", "E501", "W291", "W292", "W293"]
+"src/radar_forge/tracking/management.py" = ["D204", "E501", "W291", "W292"]
+"src/radar_forge/tracking/measurements.py" = ["D202", "D204", "D205", "D210", "E501", "W291", "W292", "W293"]
+"src/radar_forge/tracking/motion.py" = ["D202", "D204", "E501", "W291", "W292", "W293"]
+"src/radar_forge/tracking/sensors.py" = ["D202", "E501", "W291", "W292", "W293"]
+"src/radar_forge/tracking/spaces.py" = ["D202", "E501", "W291", "W293"]
+"src/radar_forge/tracking/tracks.py" = ["D202", "E501", "RUF002", "W291", "W292", "W293"]
+"src/radar_forge/tracking/ukf.py" = ["E501", "W291", "W293"]
+
+[tool.ruff.format]
+# Formatting these annotated source files would rewrite preserved comments
+# or docstrings. See spec/tracker-001-port.md for the source comparison audit.
+exclude = [
+    "src/radar_forge/tracking/_numerics.py",
+    "src/radar_forge/tracking/association.py",
+    "src/radar_forge/tracking/derived.py",
+    "src/radar_forge/tracking/engine.py",
+    "src/radar_forge/tracking/estimation.py",
+    "src/radar_forge/tracking/imm.py",
+    "src/radar_forge/tracking/initiation.py",
+    "src/radar_forge/tracking/management.py",
+    "src/radar_forge/tracking/measurements.py",
+    "src/radar_forge/tracking/motion.py",
+    "src/radar_forge/tracking/sensors.py",
+    "src/radar_forge/tracking/spaces.py",
+    "src/radar_forge/tracking/tracks.py",
+    "src/radar_forge/tracking/ukf.py",
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["radar_forge"]

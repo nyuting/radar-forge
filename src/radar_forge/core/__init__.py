@@ -6,6 +6,7 @@ from radar_forge.core import (
     ambiguity,
     constants,
     detection,
+    detection_2d,
     dsp,
     geodesy,
     radar,
@@ -39,6 +40,7 @@ from radar_forge.core.detection import (
     cluster_detections,
     default_os_rank,
 )
+from radar_forge.core.detection_2d import CfarResult, DetectionConfig, cfar_2d
 from radar_forge.core.dsp import (
     doppler_bin_centers_mps,
     doppler_fft,
@@ -122,8 +124,10 @@ __all__ = [
     "WGS84_FLATTENING",
     "WGS84_SEMI_MAJOR_AXIS_M",
     "BistaticRadar",
+    "CfarResult",
     "CfarVariant",
     "Detection",
+    "DetectionConfig",
     "FrameResult",
     "KalmanState",
     "PointTarget",
@@ -147,6 +151,7 @@ __all__ = [
     "bistatic_doppler_hz",
     "bistatic_line_of_sight_paths",
     "bistatic_received_power_w",
+    "cfar_2d",
     "cfar_detect",
     "cfar_noise_estimate_w",
     "cfar_probability_of_false_alarm",
@@ -159,6 +164,7 @@ __all__ = [
     "dbsm_to_m2",
     "default_os_rank",
     "detection",
+    "detection_2d",
     "doppler_bin_centers_mps",
     "doppler_fft",
     "dsp",
