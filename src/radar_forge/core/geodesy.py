@@ -244,7 +244,8 @@ def geodetic_to_enu_m(
 
     A convenience composition of :func:`geodetic_to_ecef_m` and
     :func:`ecef_to_enu_m`; this is the call a scenario actually makes, turning a
-    row of ``(timestamp, lat, lon)`` into a position relative to the radar.
+    trajectory row's ``latitude_deg``, ``longitude_deg`` and ``altitude_m`` into a
+    position relative to the radar.
 
     Parameters
     ----------
