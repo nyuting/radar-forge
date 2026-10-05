@@ -49,9 +49,17 @@ def _module_names() -> list[str]:
 MODULE_NAMES = _module_names()
 
 
-@pytest.mark.parametrize("module_name", MODULE_NAMES)
+PUBLIC_MODULE_NAMES = [name for name in MODULE_NAMES if not name.rsplit(".", 1)[-1].startswith("_")]
+
+
+@pytest.mark.parametrize("module_name", PUBLIC_MODULE_NAMES)
 def test_every_module_declares_its_public_surface(module_name: str) -> None:
-    """A module without ``__all__`` exports its imports and its helpers alike."""
+    """A module without ``__all__`` exports its imports and its helpers alike.
+
+    A wholly private module (``_validation``) is exempt: its leading underscore
+    already says that nothing in it is public, and an ``__all__`` of
+    public-looking names would contradict that.
+    """
     module = importlib.import_module(module_name)
     assert hasattr(module, "__all__"), f"{module_name} declares no __all__"
     assert module.__all__, f"{module_name}.__all__ is empty"
