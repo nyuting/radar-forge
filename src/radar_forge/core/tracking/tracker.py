@@ -550,9 +550,9 @@ def build_tracker(
     policy: LifecyclePolicy | None = None,
     gate_probability: float = 0.997,
     association: Literal["GNN", "NN"] = "GNN",
-    alpha: float = 0.5,
+    alpha: float = 1.0,
     beta: float = 2.0,
-    kappa: float = 1.0,
+    kappa: float = 0.0,
     initiator: TrackInitiator | None = None,
     sensor_id: str = "sensor",
     model_id: str = "measurement",
@@ -579,8 +579,8 @@ def build_tracker(
     alpha, beta, kappa : float, optional
         The scaled sigma-point parameters of the UKF: the spread :math:`\alpha`,
         the prior-distribution correction :math:`\beta` (2 suits a Gaussian) and
-        the secondary scaling :math:`\kappa`. The defaults match :class:`UKF`'s,
-        whose Notes explain why ``kappa`` is 1.
+        the secondary scaling :math:`\kappa`. The defaults, 1, 2 and 0, match
+        :class:`UKF`'s, whose Notes explain the choice.
     initiator : TrackInitiator or None, optional
         Track-birth rule; None uses :class:`DirectStateInitiator` with ``prior``.
     sensor_id, model_id : str, optional
@@ -643,9 +643,9 @@ def build_tracker_enu(
     policy: LifecyclePolicy | None = None,
     gate_probability: float = 0.997,
     association: Literal["GNN", "NN"] = "GNN",
-    alpha: float = 0.5,
+    alpha: float = 1.0,
     beta: float = 2.0,
-    kappa: float = 1.0,
+    kappa: float = 0.0,
 ) -> Tracker:
     """Build a tracker that measures x/y/z position and estimates the motion.
 

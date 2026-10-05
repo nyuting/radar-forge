@@ -62,15 +62,15 @@ class UKF:
         Its layout must be the motion model's.
     motion_model : MotionModel
         Moves states forward in time and gives the process noise Q.
-    alpha : float, default 0.5
+    alpha : float, default 1.0
         :math:`\alpha`, the standard sigma-point symbol for how far the points spread from the
-        mean. Must be positive.
+        mean. Must be positive. See Notes for why the default is 1.
     beta : float, default 2.0
         :math:`\beta`, the standard sigma-point symbol for prior knowledge of the distribution.
         2 is the best choice for a Gaussian. Must not be negative.
-    kappa : float, default 1.0
+    kappa : float, default 0.0
         :math:`\kappa`, the standard sigma-point symbol for a second spread adjustment.
-        ``n_state + kappa`` must be positive. See Notes for why the default is 1.
+        ``n_state + kappa`` must be positive. See Notes for why the default is 0.
 
     Attributes
     ----------
@@ -99,19 +99,25 @@ class UKF:
         W^{(c)}_0 = W^{(m)}_0 + 1 - \alpha^2 + \beta, \quad
         W^{(m)}_i = W^{(c)}_i = \frac{1}{2 (n + \lambda)}, \; i = 1 \ldots 2n.
 
-    **Why kappa = 1.** The covariances the filter computes are weighted sums of outer products,
-    one per sigma point. If every covariance weight is zero or positive, each of those sums is
-    positive semidefinite by construction, and so is the updated covariance (see
-    :meth:`update`). All the weights after the first are positive. The first, :math:`W^{(c)}_0`,
-    is not positive for every choice:
+    **Why alpha = 1 and kappa = 0.** These are the conservative settings. With
+    :math:`\alpha = 1` the transform is the plain, unscaled one: the sigma points sit at
+    :math:`\pm\sqrt{n + \kappa}` along each column of L. A small :math:`\alpha` pulls the
+    points in towards the mean, which helps when :math:`n` is large enough that
+    :math:`\sqrt{n}` standard deviations reaches far into a nonlinear model. Here
+    :math:`n \le 9` (3-D CA), so the points are at most 3 standard deviations out, and a small
+    :math:`\alpha` only costs a large, negative centre weight. :math:`\kappa = 0` then gives
+    :math:`\lambda = 0`, the simplest weights: :math:`W^{(m)}_0 = 0`, :math:`W^{(c)}_0 =
+    \beta = 2` and :math:`W_i = 1/(2n)`. It is also the :math:`\kappa` of Wan and van der
+    Merwe [1]_.
 
-    - ``kappa = 0``, the value in Wan and van der Merwe [1]_, gives :math:`W^{(m)}_0 = 1 -
-      1/\alpha^2 = -3` and :math:`W^{(c)}_0 = -0.25` for every :math:`n`.
-    - ``kappa = 3 - n`` is Julier's choice for a Gaussian, and Stone Soup's default. It keeps
-      :math:`n + \kappa = 3`, but gives :math:`W^{(c)}_0 = 3.75 - 4n/3`. That is negative for
-      :math:`n \ge 3`: -1.58 for a 2-D CV state, -4.25 for a 3-D one.
-    - ``kappa = 1`` gives :math:`W^{(c)}_0 = 3.75 - 4n/(n + 1)`, zero or positive for every
-      :math:`n` up to 15. The largest state here, 3-D CA, has :math:`n = 9`.
+    A consequence, not the reason: with :math:`\alpha = 1`, :math:`W^{(c)}_0 = \kappa /
+    (n + \kappa) + \beta`, so every weight is zero or positive for every :math:`n` and every
+    :math:`\kappa \ge 0` (``kappa = 1`` works as well). The covariances the filter computes
+    are then weighted sums of outer products with no negative term, so they are positive
+    semidefinite by construction (see :meth:`update`). Other common settings do not have this:
+    ``alpha = 0.5, kappa = 0`` gives :math:`W^{(c)}_0 = -0.25`, and ``kappa = 3 - n``, Julier's
+    choice for a Gaussian and Stone Soup's default, gives a negative :math:`W^{(c)}_0` for
+    :math:`n \ge 3` at ``alpha = 0.5``.
 
     With a linear model the first sigma point lands exactly on the mean, so its weight does not
     matter. It matters with a nonlinear model such as the bistatic range and Doppler model.
@@ -140,9 +146,9 @@ class UKF:
         self,
         state: StateEstimate,
         motion_model: MotionModel,
-        alpha: float = 0.5,
+        alpha: float = 1.0,
         beta: float = 2.0,
-        kappa: float = 1.0,
+        kappa: float = 0.0,
     ) -> None:
         n_state = state.state_layout.dimension
         if not np.all(np.isfinite([alpha, beta, kappa])):
@@ -403,17 +409,27 @@ class UKF:
           complement* of S in it is :math:`P^- - P_{xz} S^{-1} P_{xz}^T`: the state's
           covariance once the part the measurement explains is taken out. The joint
           covariance is a sum of outer products with weights :math:`W^{(c)}_i`, plus R. With
-          every weight non-negative (the default ``kappa``) it is positive semidefinite, and
-          so is any Schur complement of it.
+          every weight non-negative, as ``alpha = 1`` with ``kappa >= 0`` guarantees for every
+          state size (class Notes), it is positive semidefinite, and so is any Schur
+          complement of it.
         - In floating point the result is then off by roundoff only, about :math:`n` times
           float64 epsilon of the largest element. Taking the symmetric part removes the
           asymmetric part of that error. What is left is five orders of magnitude below the
           tolerance ``StateEstimate`` allows, so roundoff cannot stop a long run.
 
+        So the filter needs no further safeguards. It takes the symmetric part of each
+        covariance. It never forms :math:`S^{-1}`: K comes from a linear solve, and the NIS from
+        a triangular solve with S's Cholesky factor. It adds no diagonal jitter to P, which
+        would bias every estimate and hide a real loss of definiteness. Only the Cholesky
+        factorisation that places the sigma points retries with a roundoff-sized jitter when it
+        fails, and that jitter is not stored. A square-root UKF, which carries L instead of P,
+        would guarantee definiteness, but its QR and Cholesky-update steps are much harder to
+        read, and nothing here needs it.
+
         ``tests/core/tracking/test_ukf.py`` runs 200 steps at a range variance of 468 m² and a
         range-rate variance of 3e-4 m²/s², and checks the covariance stays positive definite.
-        It also runs the nonlinear bistatic model on a CV state for many steps, with the
-        default ``kappa``, and checks the same.
+        It also runs the nonlinear bistatic model on a CV state for 200 steps, with the
+        default ``alpha`` and ``kappa``, and checks the same.
 
         References
         ----------

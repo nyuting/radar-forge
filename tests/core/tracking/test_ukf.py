@@ -160,9 +160,8 @@ def test_the_mean_weights_sum_to_one() -> None:
     assert _six_state_filter().wm.sum() == pytest.approx(1.0, rel=1e-12)
 
 
-@pytest.mark.parametrize("n_state", range(1, 10))
-def test_the_default_covariance_weights_are_never_negative(n_state: int) -> None:
-    """The reason for kappa = 1: every state size up to 3-D CA (n = 9)."""
+def _still_filter(n_state: int, **kwargs: float) -> UKF:
+    """A UKF on an n-state layout with a motion model that never moves."""
     layout = StateLayout(tuple(Coordinate(f"s{i}_m", "m") for i in range(n_state)))
 
     class Still:
@@ -174,8 +173,26 @@ def test_the_default_covariance_weights_are_never_negative(n_state: int) -> None
         def process_noise(self, state: NDArray[np.float64], dt_s: float) -> NDArray[np.float64]:
             return np.zeros((n_state, n_state))
 
-    ukf = UKF(StateEstimate(np.zeros(n_state), np.eye(n_state), 0, layout), Still())
-    assert ukf.wc.min() >= 0.0
+    return UKF(StateEstimate(np.zeros(n_state), np.eye(n_state), 0, layout), Still(), **kwargs)
+
+
+@pytest.mark.parametrize("kappa", [0.0, 1.0])
+@pytest.mark.parametrize("n_state", range(1, 10))
+def test_with_alpha_one_no_covariance_weight_is_negative(n_state: int, kappa: float) -> None:
+    """UKF Notes: alpha = 1 with kappa >= 0 gives non-negative weights for every n up to 3-D CA."""
+    assert _still_filter(n_state, alpha=1.0, kappa=kappa).wc.min() >= 0.0
+
+
+@pytest.mark.parametrize("n_state", [2, 6, 9])
+def test_the_default_weights_are_the_unscaled_transform(n_state: int) -> None:
+    """alpha = 1, beta = 2, kappa = 0: W0m = 0, W0c = beta and Wi = 1/(2n) (UKF Notes)."""
+    ukf = _still_filter(n_state)
+    expected = np.full(2 * n_state + 1, 1 / (2 * n_state))
+    expected[0] = 0.0
+    # rtol 1e-12: each weight is one or two float64 operations on exact inputs.
+    np.testing.assert_allclose(ukf.wm, expected, rtol=1e-12, atol=1e-15)
+    expected[0] = 2.0
+    np.testing.assert_allclose(ukf.wc, expected, rtol=1e-12, atol=1e-15)
 
 
 # --------------------------------------------------------------------------- #
@@ -238,7 +255,7 @@ def test_the_covariance_stays_positive_definite_over_200_steps(rng: np.random.Ge
 
 # A bistatic pair 20 km apart, with a target 3 km up flying across the baseline. The path
 # range and path rate are nonlinear in the state, so here the centre sigma point's weight
-# matters (UKF Notes, "Why kappa = 1").
+# matters (UKF Notes, "Why alpha = 1 and kappa = 0").
 BISTATIC_TRANSMITTER_M = (0.0, 0.0, 0.0)
 BISTATIC_RECEIVER_M = (20_000.0, 0.0, 0.0)
 BISTATIC_ALTITUDE_M = 3_000.0
@@ -249,8 +266,8 @@ SIGMA_PATH_RATE_MPS = 1.0
 def _bistatic_long_run(rng: np.random.Generator) -> list[NDArray[np.float64]]:
     """Run 200 noisy bistatic updates on a 2-D CV state, and return every posterior covariance.
 
-    The UKF uses its default kappa = 1. With n = 4 that makes every covariance weight
-    non-negative, which is what the update's positive-definiteness argument needs.
+    The UKF uses its defaults, alpha = 1 and kappa = 0, which make every covariance weight
+    non-negative: what the update's positive-definiteness argument needs.
     """
     motion = CartesianMotion({"x": "CV", "y": "CV"}, origin_lla_deg_m=ORIGIN)
     layout = motion.state_layout
@@ -283,7 +300,7 @@ def _bistatic_long_run(rng: np.random.Generator) -> list[NDArray[np.float64]]:
 def test_with_the_bistatic_model_the_covariance_stays_symmetric_over_200_steps(
     rng: np.random.Generator,
 ) -> None:
-    """A nonlinear model, where the centre weight matters, with the default kappa."""
+    """A nonlinear model, where the centre weight matters, with the default alpha and kappa."""
     for covariance in _bistatic_long_run(rng):
         # rtol 1e-12: the update takes the symmetric part, so any asymmetry is roundoff.
         np.testing.assert_allclose(covariance, covariance.T, rtol=1e-12)
@@ -292,7 +309,7 @@ def test_with_the_bistatic_model_the_covariance_stays_symmetric_over_200_steps(
 def test_with_the_bistatic_model_the_covariance_stays_positive_definite_over_200_steps(
     rng: np.random.Generator,
 ) -> None:
-    """The kappa = 1 argument of the UKF Notes, checked on a nonlinear model."""
+    """The non-negative-weight argument of the UKF Notes, checked on a nonlinear model."""
     smallest = [np.linalg.eigvalsh(covariance).min() for covariance in _bistatic_long_run(rng)]
     assert min(smallest) > 0.0
 
