@@ -5,9 +5,9 @@ this scan's measurements. It has two parts, and this module holds both:
 
 - **The gate.** :class:`ChiSquareGate` throws out pairs that are too far apart
   to be the same target. "Too far" is measured by the NIS (normalised
-  innovation squared), :math:`d^2 = \nu^\top S^{-1} \nu`. Here :math:`\nu`,
-  the innovation, is the difference between the measurement and what the
-  filter expected to see, and :math:`S`, the innovation covariance, is how
+  innovation squared), :math:`d^2 = \nu^\top S^{-1} \nu`. Here :math:`\nu`
+  is the innovation: the difference between the measurement and what the
+  filter expected to see. :math:`S` is the innovation covariance: how
   uncertain that difference is expected to be.
 - **The assignment.** An :class:`Associator` takes a cost matrix of shape
   ``(n_tracks, n_measurements)`` and picks pairs so that no track and no
@@ -122,11 +122,12 @@ class NearestNeighbour:
     """Greedy nearest neighbour (NN): take the cheapest pair, then repeat.
 
     Each step takes the smallest finite cost whose track and measurement are
-    both still free. Equal costs are taken in row-major order, so the result
-    does not depend on how the sort breaks ties. NN is simpler than GNN but can
-    miss the best overall assignment: on ``[[2, 1], [8, 2]]`` it takes
-    ``(0, 1)`` first and is then left with the cost-8 pair, for a total of 9,
-    where GNN finds 2 + 2 = 4.
+    both still free. Equal costs are taken in row-major order: row by row,
+    and left to right within a row. So the result does not depend on how the
+    sort breaks ties. NN is simpler than GNN but can miss the best overall
+    assignment. On ``[[2, 1], [8, 2]]`` it takes ``(0, 1)`` first, at cost 1.
+    It is then left with the cost-8 pair, for a total of 9. GNN finds
+    2 + 2 = 4.
     """
 
     def associate(self, costs: NDArray[np.float64]) -> AssociationResult:
@@ -184,13 +185,19 @@ class GlobalNearestNeighbour:
     -----
     The problem is solved with ``scipy.optimize.linear_sum_assignment`` on an
     augmented matrix. Each track gets one extra "no measurement" column of its
-    own. The finite costs are shifted and scaled into ``[0, 1]``, and every
-    "no measurement" entry costs ``n_tracks + 1``. Each extra real pair then
-    saves at least ``(n_tracks + 1) - n_tracks = 1``, which is more than the
-    scaled costs of all the pairs together could add. So the solver always
-    prefers more pairs. Scaling keeps the order of the costs, so among the
-    assignments with the most pairs the cheapest one still wins. Negative
-    costs, such as a negative log-likelihood, are allowed for the same reason.
+    own, a *dummy*. The finite costs are shifted and scaled into ``[0, 1]``,
+    and every dummy entry costs ``n_tracks + 1``. The solver gives every track
+    exactly one column, real or dummy. So an assignment with k real pairs pays
+    for ``n_tracks - k`` dummies.
+
+    Why the solver always prefers more pairs: each extra real pair removes one
+    dummy, which saves ``n_tracks + 1``. All the real pairs together cost at
+    most ``n_tracks``, because there are at most ``n_tracks`` of them and each
+    costs at most 1. So an assignment with more real pairs always costs less,
+    by at least 1, whatever its real costs are. Scaling keeps the order of the
+    costs, so among the assignments with the most pairs the cheapest one still
+    wins. Negative costs, such as a negative log-likelihood, are allowed for
+    the same reason.
 
     The alternative is a finite non-assignment cost: leaving a track unpaired
     costs a fixed amount, often worked out from the detection probability and

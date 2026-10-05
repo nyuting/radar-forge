@@ -23,15 +23,15 @@ is called *white noise*). The *noise density* q, also called the power spectral 
 how strong that random acceleration is. On a CV axis it is in m²/s³.
 
 Over one step of :math:`T` seconds the noise adds a velocity variance of :math:`q T` (in m²/s²),
-so :math:`\sqrt{q T}` is the typical change of velocity in one step. A rule of thumb [1]_ is to
-make that about the largest change of velocity the target can make in one step,
-:math:`a_{max} T`, where :math:`a_{max}` is the largest acceleration expected. That gives
+so :math:`\sqrt{q T}` is the typical change of velocity in one step. A rule of thumb [1]_ sets
+that equal to the largest change of velocity in one step, :math:`a_{max} T`. Here
+:math:`a_{max}` is the largest acceleration expected. That gives
 :math:`q \approx a_{max}^2 T`. A target that pulls 4 m/s², tracked every second, needs
 q ≈ 16 m²/s³. The default, 1 m²/s³, suits about 1 m/s² at one update a second.
 
 A CA model instead pretends that the *jerk*, the rate of change of acceleration, is white
 noise. Its density is in m²/s⁵. :math:`\sqrt{q T}` is then the typical change of acceleration
-in one step, so :math:`q \approx \Delta a_{max}^2 / T`, where :math:`\Delta a_{max}` is the
+in one step. So :math:`q \approx \Delta a_{max}^2 / T`, where :math:`\Delta a_{max}` is the
 largest change of acceleration expected in one step.
 
 The older tracker's :func:`radar_forge.core.tracking.kalman.process_noise_dwna` uses a
@@ -50,7 +50,7 @@ References
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Protocol
+from typing import Literal, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
@@ -60,9 +60,13 @@ from radar_forge.core.tracking.coordinates import Coordinate, StateLayout
 
 __all__ = [
     "CartesianMotion",
+    "MotionKind",
     "MotionModel",
     "RadialMotion",
 ]
+
+# The motion model of one Cartesian axis: constant velocity (CV) or constant acceleration (CA).
+MotionKind = Literal["CV", "CA"]
 
 
 class MotionModel(Protocol):
@@ -135,18 +139,19 @@ def _check_state_shape(state: NDArray[np.float64], n_state: int) -> None:
 
 
 def _check_density_mappings(
-    axes: Mapping[str, str], given: Mapping[str, float | Mapping[str, float]]
+    axes: Mapping[str, MotionKind], given: Mapping[MotionKind, float | Mapping[str, float]]
 ) -> None:
     """Raise unless each density given as a mapping names exactly the axes of its model."""
-    for kind, density in given.items():
-        # A loop over the two models, CV and CA, not over data.
-        wanted = {axis for axis, axis_kind in axes.items() if axis_kind == kind}
-        if isinstance(density, Mapping) and set(density) != wanted:
-            msg = (
-                f"the {kind} noise density mapping must name exactly the {kind} axes "
-                f"{sorted(wanted)}; got {sorted(density)}"
-            )
-            raise ValueError(msg)
+    if any(
+        isinstance(density, Mapping)
+        and set(density) != {axis for axis, axis_kind in axes.items() if axis_kind == kind}
+        for kind, density in given.items()
+    ):
+        msg = (
+            "a noise density mapping must name exactly the axes of its model (CV or CA); "
+            f"got axes {dict(axes)} and densities {dict(given)}"
+        )
+        raise ValueError(msg)
 
 
 def _density_of(axis: str, density: float | Mapping[str, float]) -> float:
@@ -154,7 +159,7 @@ def _density_of(axis: str, density: float | Mapping[str, float]) -> float:
     return float(density[axis] if isinstance(density, Mapping) else density)
 
 
-def _axis_names(axis: str, kind: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+def _axis_names(axis: str, kind: MotionKind) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Return the coordinate names and units of one axis, position first."""
     names: tuple[str, ...] = (f"{axis}_m", f"{axis}dot_mps")
     units: tuple[str, ...] = ("m", "m/s")
@@ -172,16 +177,19 @@ class CartesianMotion:
 
     Parameters
     ----------
-    axes : mapping of str to str
-        The axes to track, each mapped to its model, ``"CV"`` or ``"CA"``. The keys are a
-        nonempty subset of x (east), y (north) and z (up): ``{"x": "CV", "y": "CA"}``.
+    axes : mapping of str to {"CV", "CA"}
+        The axes to track, each mapped to its model, ``"CV"`` or ``"CA"`` (see
+        :data:`MotionKind`). The keys are a nonempty subset of x (east), y (north) and z (up):
+        ``{"x": "CV", "y": "CA"}``.
     origin_lla_deg_m : tuple of float
         The ENU origin: latitude in degrees, longitude in degrees, height in metres.
     acceleration_noise_density_m2ps3 : float or mapping of str to float, default 1.0
         The noise density q of each CV axis, in m²/s³: the strength of the random acceleration
         the model allows for. Choose :math:`q \approx a_{max}^2 T` (module Notes). One value
-        for every CV axis, or a mapping that names exactly the CV axes. Must be finite and not
-        negative.
+        for every CV axis, or a mapping that names exactly the CV axes. A mapping is for motion
+        that is less predictable in one direction than another. For example, an aircraft
+        usually turns more freely than it climbs, so z can take a smaller q than x and y. Must
+        be finite and not negative.
     jerk_noise_density_m2ps5 : float or mapping of str to float, default 1.0
         The noise density q of each CA axis, in m²/s⁵: the strength of the random jerk the
         model allows for. Choose :math:`q \approx \Delta a_{max}^2 / T` (module Notes). One
@@ -203,9 +211,9 @@ class CartesianMotion:
     Raises
     ------
     ValueError
-        If ``axes`` is empty, names an axis other than x, y or z, or a model other than CV or
-        CA; if a density mapping does not name exactly the right axes; if a density is negative
-        or not finite; or if ``order`` is not an exact reordering of the element names.
+        If ``axes`` is empty, or names an axis other than x, y or z, or a model other than CV
+        or CA. If a density mapping does not name exactly the right axes, or a density is
+        negative or not finite. If ``order`` is not an exact reordering of the element names.
 
     Notes
     -----
@@ -246,7 +254,7 @@ class CartesianMotion:
 
     def __init__(
         self,
-        axes: Mapping[str, str],
+        axes: Mapping[str, MotionKind],
         *,
         origin_lla_deg_m: tuple[float, float, float],
         acceleration_noise_density_m2ps3: float | Mapping[str, float] = 1.0,
@@ -259,7 +267,10 @@ class CartesianMotion:
             raise ValueError(msg)
         # The CV and CA densities have different units (m²/s³ and m²/s⁵), so each kind of axis
         # takes its own argument.
-        given = {"CV": acceleration_noise_density_m2ps3, "CA": jerk_noise_density_m2ps5}
+        given: dict[MotionKind, float | Mapping[str, float]] = {
+            "CV": acceleration_noise_density_m2ps3,
+            "CA": jerk_noise_density_m2ps5,
+        }
         _check_density_mappings(axes, given)
         density = {axis: _density_of(axis, given[kind]) for axis, kind in sorted(axes.items())}
         if not all(np.isfinite(q) and q >= 0 for q in density.values()):

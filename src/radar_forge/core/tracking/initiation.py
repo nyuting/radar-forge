@@ -54,9 +54,9 @@ def _check_independent_blocks(covariance: NDArray[np.float64], indices: tuple[in
         If any entry linking a measured coordinate to an unmeasured one is
         nonzero.
     """
-    measured = np.zeros(len(covariance), dtype=bool)
-    measured[list(indices)] = True
-    if np.any(covariance[np.ix_(measured, ~measured)] != 0):
+    # Take the rows of the measured coordinates, then delete their columns. What is left is
+    # the block that links each measured coordinate to every unmeasured one.
+    if np.any(np.delete(covariance[list(indices)], list(indices), axis=1) != 0):
         msg = (
             "direct initiation requires independent observed/unobserved prior blocks: "
             f"the prior covariance links coordinates {indices} to the others"
@@ -111,16 +111,27 @@ class DirectStateInitiator:
     measured_names : tuple of str or None, optional
         Keyword-only. The coordinates the measurements will report, such as
         ``("x_m", "y_m")``. If given, the independence of the prior is checked
-        here, when the initiator is built, and a model reporting other
-        coordinates gets None from :meth:`initiate`. If None (the default), the
-        check runs at the first measurement of each model, during a scan, so a
-        bad prior is found only then.
+        once, here, when the initiator is built. A model reporting other
+        coordinates then gets None from :meth:`initiate`. If None (the
+        default), the check runs on every call to :meth:`initiate`, during a
+        scan. A bad prior is then found only when the first measurement tries
+        to start a track.
 
     Raises
     ------
     ValueError
         If ``measured_names`` names a coordinate not in the prior's layout, or
         the prior links those coordinates to the others.
+
+    Notes
+    -----
+    There is no initiator for
+    :class:`~radar_forge.core.tracking.measurement_models.BistaticRangeDopplerModel`.
+    One bistatic measurement gives a path length and a path rate. That pins
+    the target to a surface, not to a point, so it cannot be copied into a
+    state. This initiator returns None for it. So a tracker whose only model
+    is bistatic never starts a track by itself. Its tracks must be added with
+    :meth:`~radar_forge.core.tracking.tracker.Tracker.seed`.
 
     References
     ----------

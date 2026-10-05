@@ -284,7 +284,10 @@ def process_noise_dwna(
     reference here states, and because a single acceleration standard deviation
     in m/s^2 is a quantity a reader can reason about physically. The matrix is
     singular by construction: one scalar noise per axis drives two states, so
-    each block has rank 1.
+    each block has rank 1. The continuous white-noise model of
+    :class:`radar_forge.core.tracking.motion.CartesianMotion` adds the same
+    velocity variance per step when its density is :math:`q = \sigma_a^2 T`
+    (see "Process noise" in :mod:`radar_forge.core.tracking.motion`).
 
     Examples
     --------

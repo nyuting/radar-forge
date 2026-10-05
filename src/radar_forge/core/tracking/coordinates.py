@@ -80,9 +80,10 @@ def _check_points(array: NDArray[np.float64], dimension: int, name: str) -> None
 def _check_covariance(covariance: ArrayLike, dimension: int) -> NDArray[np.float64]:
     """Return a checked, symmetric copy of a state covariance.
 
-    This is the one place :class:`StateEstimate` checks its covariance. The check is
-    one Cholesky factorisation; an eigendecomposition is used only for exactly
-    singular matrices. If it becomes too slow, change this function only.
+    This is the one place :class:`StateEstimate` checks its covariance. The quick
+    test is one Cholesky factorisation. An eigendecomposition is used only when
+    that quick test fails: for a valid matrix that is exactly singular, and for
+    every invalid one. If the check becomes too slow, change this function only.
 
     Parameters
     ----------
@@ -117,10 +118,10 @@ class Coordinate:
     unit : str
         Physical unit, such as ``"m"`` or ``"m/s"``.
     period : float or None, optional
-        For a value that repeats, the length of one repeat, in ``unit``: 2π for
-        an angle in radians such as ``azimuth_rad``, or the unambiguous range in
-        metres for a folded ``range_m``. None (the default) means the value does
-        not repeat.
+        For a value that repeats, the length of one repeat, in ``unit``. It is
+        2π for an angle in radians such as ``azimuth_rad``. For a folded
+        ``range_m`` it is the unambiguous range in metres. None (the default)
+        means the value does not repeat.
 
     Raises
     ------
@@ -193,8 +194,12 @@ class StateLayout:
     def __post_init__(self) -> None:
         """Check the coordinates and origin, and store both as tuples."""
         coordinates = tuple(self.coordinates)
-        names = [c.name for c in coordinates]
-        if not coordinates or not self.frame or len(set(names)) != len(names):
+        if (
+            not coordinates
+            or not self.frame
+            or len({c.name for c in coordinates}) != len(coordinates)
+        ):
+            names = [c.name for c in coordinates]
             msg = (
                 "state layout requires unique coordinates and a nonempty frame; "
                 f"got names {names} and frame {self.frame!r}"
@@ -213,7 +218,9 @@ class StateLayout:
             )
             raise ValueError(msg)
 
-        # The dataclass is frozen, so the checked tuples are stored through object.
+        # The coordinates are stored as a tuple, not the list a caller may pass, so that
+        # they cannot change after construction. The dataclass is frozen, so the checked
+        # tuples are stored through object.
         object.__setattr__(self, "coordinates", coordinates)
         object.__setattr__(self, "origin_lla_deg_m", origin)
 
@@ -245,8 +252,8 @@ class StateLayout:
         ValueError
             If a name is not in this layout.
         """
-        unknown = [name for name in names if name not in self.names]
-        if unknown:
+        if not set(names) <= set(self.names):
+            unknown = [name for name in names if name not in self.names]
             msg = f"coordinates {unknown} are not in the layout {self.names}"
             raise ValueError(msg)
         return tuple(self.names.index(name) for name in names)
@@ -464,8 +471,9 @@ class StateEstimate:
         The state, shape ``(n_state,)``, in the layout's order and units.
     covariance : numpy.ndarray
         Its covariance, shape ``(n_state, n_state)``. It must be symmetric and
-        positive semidefinite. Each entry has the product of its two
-        coordinates' units.
+        positive semidefinite: no combination of the coordinates may have a
+        negative variance. Each entry has the product of its two coordinates'
+        units.
     timestamp_s : float
         Time of the estimate, in seconds.
     state_layout : StateLayout

@@ -63,7 +63,7 @@ from radar_forge.core.tracking.measurement_models import (
     MeasurementModel,
     SensorRoute,
 )
-from radar_forge.core.tracking.motion import CartesianMotion, MotionModel
+from radar_forge.core.tracking.motion import CartesianMotion, MotionKind, MotionModel
 from radar_forge.core.tracking.tracks import Track, TrackSnapshot, TrackStatus
 from radar_forge.core.tracking.ukf import UKF
 
@@ -123,11 +123,12 @@ class Tracker:
         :math:`d^2 = 144 / 10^4 \approx 0.01`. So NIS gives the detection to
         the tentative track. The :math:`\ln|S|` term charges a track for
         being uncertain: :math:`4.5 + \ln 2 \approx 5.2` against
-        :math:`0.01 + \ln 10^4 \approx 9.2`, so the generalised distance
+        :math:`0.01 + \ln 10^4 \approx 9.2`. So the generalised distance
         gives it to the confirmed track. The two-stage assignment in
-        :meth:`process` already stops a tentative track winning here, but the
-        same effect can still favour an uncertain confirmed track, for
-        example one that has coasted for several scans, over a well-placed one.
+        :meth:`process` already stops a tentative track winning here. But the
+        same effect can still favour an uncertain confirmed track over a
+        well-placed one. An example is a track that has coasted for several
+        scans.
 
     Attributes
     ----------
@@ -141,8 +142,9 @@ class Tracker:
     Raises
     ------
     ValueError
-        If ``cost`` is not one of the two names, or a sensor route is invalid
-        (see :meth:`add_sensor`).
+        If ``cost`` is not one of the two names, a key of ``sensors`` is not
+        its route's ``route_id``, or a sensor route is invalid (see
+        :meth:`add_sensor`).
 
     Notes
     -----
@@ -196,14 +198,17 @@ class Tracker:
         if cost not in ("nis", "negative_log_likelihood"):
             msg = f"cost must be 'nis' or 'negative_log_likelihood'; got {cost!r}."
             raise ValueError(msg)
+        if any(key != route.route_id for key, route in sensors.items()):
+            mismatched = {
+                key: route.route_id for key, route in sensors.items() if key != route.route_id
+            }
+            msg = f"each sensor key must be its route's route_id; got key: route_id {mismatched}."
+            raise ValueError(msg)
         self._measurement_models = dict(measurement_models)
         self._sensors: dict[str, SensorRoute] = {}
         # Routes are few and each is checked against the model registry on its
         # own, so a plain loop is the clearest form.
-        for key, route in sensors.items():
-            if key != route.route_id:
-                msg = f"sensor key {key!r} does not match its route_id {route.route_id!r}."
-                raise ValueError(msg)
+        for route in sensors.values():
             self.add_sensor(route)
         self.gate = gate
         self.associator = associator
@@ -242,10 +247,12 @@ class Tracker:
         if route.route_id in self._sensors:
             msg = f"sensor {route.route_id!r} is already registered."
             raise ValueError(msg)
-        unknown = [
-            mid for mid in route.measurement_model_ids if mid not in self._measurement_models
-        ]
-        if not route.measurement_model_ids or unknown:
+        if not route.measurement_model_ids or not set(route.measurement_model_ids) <= set(
+            self._measurement_models
+        ):
+            unknown = [
+                mid for mid in route.measurement_model_ids if mid not in self._measurement_models
+            ]
             msg = (
                 f"sensor {route.route_id!r} must list at least one registered measurement "
                 f"model; got {route.measurement_model_ids}, unregistered {unknown}."
@@ -280,20 +287,23 @@ class Tracker:
             If another track already uses ``estimator``, or its time does not
             match, within one microsecond, the tracker's or the other tracks'.
         """
-        time_s = estimator.state.timestamp_s
         if any(track.estimator is estimator for track in self.tracks):
             msg = "each track must own an independent estimator; this one is already in use."
             raise ValueError(msg)
-        if self.last_timestamp_s is not None and not self._same_time(time_s, self.last_timestamp_s):
+        if self.last_timestamp_s is not None and not self._same_time(
+            estimator.state.timestamp_s, self.last_timestamp_s
+        ):
             msg = (
                 f"seed timestamp_s must equal the tracker's current time "
-                f"{self.last_timestamp_s}; got {time_s}."
+                f"{self.last_timestamp_s}; got {estimator.state.timestamp_s}."
             )
             raise ValueError(msg)
-        if self.tracks and not self._same_time(time_s, self.tracks[0].estimator.state.timestamp_s):
+        if self.tracks and not self._same_time(
+            estimator.state.timestamp_s, self.tracks[0].estimator.state.timestamp_s
+        ):
             msg = (
                 f"seed tracks must share one timestamp_s "
-                f"{self.tracks[0].estimator.state.timestamp_s}; got {time_s}."
+                f"{self.tracks[0].estimator.state.timestamp_s}; got {estimator.state.timestamp_s}."
             )
             raise ValueError(msg)
         track = self.manager.seed(estimator, sensor_id)
@@ -330,10 +340,10 @@ class Tracker:
         ------
         ValueError
             If the batch is older than the last one by more than one
-            microsecond ("out-of-sequence"), older than a seeded track, from an
-            unknown sensor, or holds a measurement whose model is not
-            registered for that sensor or whose length does not match its
-            model's dimension. These checks run before any track changes.
+            microsecond ("out-of-sequence"), older than a seeded track, or from
+            an unknown sensor. Also if a measurement's model is not registered
+            for that sensor, or its length does not match its model's
+            dimension. These checks run before any track changes.
 
         Notes
         -----
@@ -352,8 +362,9 @@ class Tracker:
           measurements close in time and space would give a better first
           velocity and fewer false tracks.
         """
-        models = self._check_batch(batch)
+        self._check_batch(batch)
         route = self._sensors[batch.sensor_id]
+        models = [self._measurement_models[m.measurement_model_id] for m in batch.measurements]
         time_s = batch.timestamp_s
         # Snap a time within the tolerance of the last scan onto it, so that no
         # filter is asked to predict backwards by a round-off error.
@@ -411,8 +422,8 @@ class Tracker:
         self.last_timestamp_s = time_s
         return tuple(reported)
 
-    def _check_batch(self, batch: MeasurementBatch) -> list[MeasurementModel]:
-        """Validate a batch before any track changes; return each measurement's model."""
+    def _check_batch(self, batch: MeasurementBatch) -> None:
+        """Raise unless the batch can be processed; called before any track changes."""
         if self.last_timestamp_s is not None and (
             batch.timestamp_s < self.last_timestamp_s - TIMESTAMP_TOLERANCE_S
         ):
@@ -431,23 +442,35 @@ class Tracker:
         if batch.sensor_id not in self._sensors:
             msg = f"unknown sensor {batch.sensor_id!r}; register it with add_sensor."
             raise ValueError(msg)
-        route = self._sensors[batch.sensor_id]
-        models: list[MeasurementModel] = []
-        # Each measurement names its own model, so each is looked up on its own.
-        for measurement in batch.measurements:
-            model_id = measurement.measurement_model_id
-            if model_id not in route.measurement_model_ids:
-                msg = f"unregistered model {model_id!r} for sensor {route.route_id!r}."
-                raise ValueError(msg)
-            model = self._measurement_models[model_id]
-            if len(measurement.value) != model.measurement_layout.dimension:
-                msg = (
-                    f"measurement dimension {len(measurement.value)} does not match model "
-                    f"{model_id!r}, which has {model.measurement_layout.dimension}."
-                )
-                raise ValueError(msg)
-            models.append(model)
-        return models
+        if any(
+            m.measurement_model_id not in self._sensors[batch.sensor_id].measurement_model_ids
+            for m in batch.measurements
+        ):
+            unregistered = [
+                m.measurement_model_id
+                for m in batch.measurements
+                if m.measurement_model_id
+                not in self._sensors[batch.sensor_id].measurement_model_ids
+            ]
+            msg = f"unregistered models {unregistered} for sensor {batch.sensor_id!r}."
+            raise ValueError(msg)
+        # The check above makes every model ID a registered one, so these lookups succeed.
+        if any(
+            len(m.value)
+            != self._measurement_models[m.measurement_model_id].measurement_layout.dimension
+            for m in batch.measurements
+        ):
+            mismatched = [
+                (m.measurement_model_id, len(m.value))
+                for m in batch.measurements
+                if len(m.value)
+                != self._measurement_models[m.measurement_model_id].measurement_layout.dimension
+            ]
+            msg = (
+                "measurement dimensions do not match their models; got (model, dimension) "
+                f"{mismatched}."
+            )
+            raise ValueError(msg)
 
     def _can_see(self, route: SensorRoute, track: Track) -> bool:
         """Return whether this scan's sensor could have detected the track."""
@@ -466,9 +489,10 @@ class Tracker:
     ) -> tuple[NDArray[np.float64], dict[tuple[int, int], InnovationStats]]:
         """Gate and score every track-measurement pair.
 
-        Returns the cost matrix, shape ``(n_tracks, n_measurements)`` with
-        ``+inf`` for a pair that is gated out or whose layouts differ, and the
-        innovation of each pair that passed, keyed by ``(track, measurement)``.
+        Returns two things. The first is the cost matrix, shape
+        ``(n_tracks, n_measurements)``, with ``+inf`` for a pair that is gated
+        out or whose layouts differ. The second is the innovation of each pair
+        that passed, keyed by ``(track, measurement)``.
         """
         costs = np.full((len(tracks), len(models)), np.inf)
         innovations: dict[tuple[int, int], InnovationStats] = {}
@@ -570,9 +594,9 @@ def build_tracker(
     Raises
     ------
     ValueError
-        If the three layouts differ, ``association`` is not GNN or NN, the UKF
-        or gate parameters are invalid, or (with the default initiator and a
-        :class:`CartesianPosition` observation) the prior correlates the
+        If the three layouts differ, ``association`` is not GNN or NN, or the
+        UKF or gate parameters are invalid. Also, with the default initiator and
+        a :class:`CartesianPosition` observation, if the prior correlates the
         measured coordinates with the unmeasured ones.
 
     References
@@ -609,7 +633,7 @@ def build_tracker(
 
 
 def build_tracker_enu(
-    axes: Mapping[str, Literal["CV", "CA"]],
+    axes: Mapping[str, MotionKind],
     *,
     origin_lla_deg_m: tuple[float, float, float],
     order: tuple[str, ...] | None = None,

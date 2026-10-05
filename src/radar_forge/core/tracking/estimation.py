@@ -6,15 +6,15 @@ is the one implementation. The tracks in :mod:`radar_forge.core.tracking.tracks`
 estimator each and call only these methods, so another filter can be swapped in without
 changing them.
 
-Before a track takes a measurement, the tracker asks how well the two agree. The answer is the
-*innovation*, the difference between the measurement and what the filter expected to see, and
-*S*, the innovation covariance, which says how large that difference should be. Two scores
-follow from them:
+Before a track takes a measurement, the tracker asks how well the two agree. The answer has two
+parts. The *innovation* :math:`\nu` is the difference between the measurement and what the
+filter expected to see. *S*, the innovation covariance, says how large that difference should
+be. Two scores follow from them:
 
 - NIS, the normalised innovation squared, :math:`d^2 = \nu^T S^{-1} \nu`. It is the squared
-  distance in units of standard deviations. If the filter is right about its own uncertainty, it
-  follows a chi-squared distribution with as many degrees of freedom as the measurement has
-  elements, and that is what the gate tests.
+  distance in units of standard deviations. Suppose the filter is right about its own
+  uncertainty. Then the NIS follows a chi-squared distribution, with as many degrees of freedom
+  as the measurement has elements. That is what the gate tests.
 - The Gaussian log-likelihood, :math:`-\tfrac12 (m \ln 2\pi + \ln|S| + d^2)`, for :math:`m`
   measured values.
 

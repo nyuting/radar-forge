@@ -1,15 +1,16 @@
 r"""The unscented Kalman filter (UKF), for any motion model and any measurement model.
 
-A Kalman filter keeps a Gaussian estimate of a target's state, a mean and a covariance, and
-repeats two steps: *predict* moves the estimate forward in time, and *update* corrects it with a
-measurement. The classic filter needs both models to be linear. The UKF lifts that limit without
-derivatives: it picks a small set of *sigma points*, states spread around the mean so that
-their weighted mean and covariance are exactly the estimate's. It pushes each point through the
-model, and reads the new mean and covariance off the moved points.
+A Kalman filter keeps a Gaussian estimate of a target's state: a mean and a covariance. It
+repeats two steps. *Predict* moves the estimate forward in time, and *update* corrects it with a
+measurement. The classic filter needs both models to be linear. The UKF lifts that limit, and
+needs no derivatives. It picks a small set of *sigma points*: states spread around the mean, so
+that their weighted mean and covariance are exactly the estimate's. It pushes each point through
+the model, and reads the new mean and covariance off the moved points.
 
-For :math:`n` state elements there are :math:`2n + 1` sigma points: the mean itself, and one
-point either side of it along each column of the covariance's Cholesky factor. All of them are
-handled together as one ``(n_points, n_state)`` array.
+For :math:`n` state elements there are :math:`2n + 1` sigma points. One is the mean itself. The
+others sit either side of it, along each column of the covariance's *Cholesky factor*. That is
+the lower-triangular matrix L with :math:`L L^T = P`, a kind of square root of the covariance P.
+All the points are handled together as one ``(n_points, n_state)`` array.
 
 This class follows FilterPy's ``UnscentedKalmanFilter``: one object holds the estimate and
 changes it in place. Stone Soup splits the same algorithm into a stateless
@@ -77,7 +78,8 @@ class UKF:
         The motion model.
     scale : float
         :math:`\alpha^2 (n + \kappa)`. The sigma points sit at :math:`\pm\sqrt{scale}` times
-        each column of the covariance's Cholesky factor.
+        each column of the covariance's Cholesky factor L, where :math:`L L^T = P` (see the
+        module docstring).
     wm, wc : numpy.ndarray
         The weights, shape ``(2 n_state + 1,)``, for the mean and for the covariance.
 
@@ -105,8 +107,8 @@ class UKF:
 
     - ``kappa = 0``, the value in Wan and van der Merwe [1]_, gives :math:`W^{(m)}_0 = 1 -
       1/\alpha^2 = -3` and :math:`W^{(c)}_0 = -0.25` for every :math:`n`.
-    - ``kappa = 3 - n``, Julier's choice for a Gaussian and Stone Soup's default, keeps
-      :math:`n + \kappa = 3`, but gives :math:`W^{(c)}_0 = 3.75 - 4n/3`, negative for
+    - ``kappa = 3 - n`` is Julier's choice for a Gaussian, and Stone Soup's default. It keeps
+      :math:`n + \kappa = 3`, but gives :math:`W^{(c)}_0 = 3.75 - 4n/3`. That is negative for
       :math:`n \ge 3`: -1.58 for a 2-D CV state, -4.25 for a 3-D one.
     - ``kappa = 1`` gives :math:`W^{(c)}_0 = 3.75 - 4n/(n + 1)`, zero or positive for every
       :math:`n` up to 15. The largest state here, 3-D CA, has :math:`n = 9`.
@@ -234,7 +236,7 @@ class UKF:
         ------
         ValueError
             If ``time_s`` is not finite, or is earlier than the current estimate
-            ("out-of-sequence"); or if the motion model returns arrays of the wrong shape, or a
+            ("out-of-sequence"). Also if the motion model returns arrays of the wrong shape, or a
             process noise that is not a covariance.
 
         Notes
@@ -336,7 +338,7 @@ class UKF:
         Raises
         ------
         ValueError
-            If the times differ by more than 1e-6 s, the layouts do not match, the
+            If the times differ by more than 1e-6 s, or the layouts do not match. Also if the
             measurement or the model's output has the wrong shape, or S is not positive
             definite.
         """
@@ -370,7 +372,7 @@ class UKF:
         Raises
         ------
         ValueError
-            If the times differ by more than 1e-6 s, the layouts do not match, the
+            If the times differ by more than 1e-6 s, or the layouts do not match. Also if the
             measurement or the model's output has the wrong shape, or S is not positive
             definite.
 
@@ -384,14 +386,22 @@ class UKF:
             K = P_{xz} S^{-1}, \qquad \hat{x} = \hat{x}^- + K \nu, \qquad
             P = P^- - K S K^T.
 
+        The Kalman gain K says how strongly the measurement corrects the state. Each column of K
+        turns one unit of innovation into a change of the state. A precise measurement (small S)
+        against an uncertain prediction (large :math:`P_{xz}`) gives a large gain, and the
+        estimate moves most of the way to the measurement. A noisy measurement gives a small
+        gain, and the estimate stays near the prediction.
+
         **Why not the Joseph form.** The linear Kalman filter is often written in the Joseph
-        form, :math:`(I - KH) P^- (I - KH)^T + K R K^T`, because it stays positive semidefinite
-        under roundoff and even with a gain that is not optimal. It needs the measurement
+        form, :math:`(I - KH) P^- (I - KH)^T + K R K^T`. That form stays positive semidefinite
+        under roundoff, and even with a gain that is not optimal. It needs the measurement
         matrix H, which the UKF does not have. The short form is safe here for two reasons:
 
-        - In exact arithmetic :math:`P^- - K S K^T = P^- - P_{xz} S^{-1} P_{xz}^T`. That is the
-          Schur complement of S in the joint covariance of the state and the measurement,
-          :math:`\begin{bmatrix} P^- & P_{xz} \\ P_{xz}^T & S \end{bmatrix}`. The joint
+        - In exact arithmetic :math:`P^- - K S K^T = P^- - P_{xz} S^{-1} P_{xz}^T`. Take the
+          joint covariance of the state and the measurement,
+          :math:`\begin{bmatrix} P^- & P_{xz} \\ P_{xz}^T & S \end{bmatrix}`. The *Schur
+          complement* of S in it is :math:`P^- - P_{xz} S^{-1} P_{xz}^T`: the state's
+          covariance once the part the measurement explains is taken out. The joint
           covariance is a sum of outer products with weights :math:`W^{(c)}_i`, plus R. With
           every weight non-negative (the default ``kappa``) it is positive semidefinite, and
           so is any Schur complement of it.
@@ -402,6 +412,8 @@ class UKF:
 
         ``tests/core/tracking/test_ukf.py`` runs 200 steps at a range variance of 468 m² and a
         range-rate variance of 3e-4 m²/s², and checks the covariance stays positive definite.
+        It also runs the nonlinear bistatic model on a CV state for many steps, with the
+        default ``kappa``, and checks the same.
 
         References
         ----------

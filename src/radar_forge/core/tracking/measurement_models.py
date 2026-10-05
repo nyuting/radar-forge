@@ -99,9 +99,9 @@ class Measurement:
     ------
     ValueError
         If ``sensor_id`` or ``measurement_model_id`` is empty, ``timestamp_s`` is
-        not finite, ``value`` is not a finite nonempty vector, or ``covariance``
-        is not finite, square, symmetric and positive semidefinite with the same
-        size as ``value``.
+        not finite, or ``value`` is not a finite nonempty vector. Also if
+        ``covariance`` is not finite, square, symmetric and positive
+        semidefinite, with the same size as ``value``.
 
     Examples
     --------
@@ -176,6 +176,11 @@ class MeasurementBatch:
     passed the target, so its detections have different times. To use them,
     either give each time its own batch, or stamp the whole scan with one time
     and accept the error that adds.
+
+    **One sensor per batch.** The route of the batch's ``sensor_id`` decides
+    which models may explain its measurements and which tracks can see them.
+    Measurements from two sensors in one batch would need two such decisions,
+    so association would be ambiguous.
     """
 
     timestamp_s: float
@@ -192,12 +197,12 @@ class MeasurementBatch:
         if not self.sensor_id:
             msg = "batch sensor_id must be nonempty"
             raise ValueError(msg)
-        strangers = [
-            (m.sensor_id, m.timestamp_s)
-            for m in measurements
-            if m.timestamp_s != timestamp_s or m.sensor_id != self.sensor_id
-        ]
-        if strangers:
+        if any(m.timestamp_s != timestamp_s or m.sensor_id != self.sensor_id for m in measurements):
+            strangers = [
+                (m.sensor_id, m.timestamp_s)
+                for m in measurements
+                if m.timestamp_s != timestamp_s or m.sensor_id != self.sensor_id
+            ]
             msg = (
                 "all observations require the batch sensor and timestamp "
                 f"({self.sensor_id!r}, {timestamp_s} s); got (sensor, time) {strangers}"
@@ -225,7 +230,10 @@ class SensorRoute:
     measurement_model_ids : tuple of str
         Names of the measurement models this sensor's measurements may use. They
         must be nonempty and unique. One sensor may report several kinds of
-        measurement, so each measurement names its own model.
+        measurement, so each measurement names its own model. The list is there
+        to stop a measurement reaching the wrong model. For example, an angle
+        measurement from this sensor cannot be sent to a range and Doppler
+        model, unless the route lists that model.
     observable : callable or None, optional
         Coverage test: given a :class:`~radar_forge.core.tracking.tracks.TrackSnapshot`,
         return True if the sensor can see that track on this scan. The tracker
@@ -298,8 +306,8 @@ class SensorRoute:
             :class:`Measurement` and :class:`MeasurementBatch`.
         """
         observations = list(observations)
-        unknown = [o[0] for o in observations if o[0] not in self.measurement_model_ids]
-        if unknown:
+        if not {o[0] for o in observations} <= set(self.measurement_model_ids):
+            unknown = [o[0] for o in observations if o[0] not in self.measurement_model_ids]
             msg = f"models {unknown} are not registered for sensor {self.route_id!r}"
             raise ValueError(msg)
 
@@ -570,6 +578,14 @@ class SensorPose:
         )
 
 
+# The Cartesian coordinates a sensor geometry needs, keyed by its include_velocity flag: the
+# positions always, and the velocities only when asked for.
+_REQUIRED_NAMES = {
+    False: ("x_m", "y_m", "z_m"),
+    True: ("x_m", "y_m", "z_m", "xdot_mps", "ydot_mps", "zdot_mps"),
+}
+
+
 class _Geometry:
     """Read a target's position (and velocity) from a state, for one sensor site.
 
@@ -608,9 +624,6 @@ class _Geometry:
         include_velocity: bool,
     ) -> None:
         fixed_values = dict(fixed or {})
-        required = tuple(f"{a}_m" for a in "xyz")
-        if include_velocity:
-            required += tuple(f"{a}dot_mps" for a in "xyz")
         if space.frame != pose.frame or space.origin_lla_deg_m != pose.origin_lla_deg_m:
             msg = (
                 "sensor and state must share ENU frame and origin; got state "
@@ -618,14 +631,19 @@ class _Geometry:
                 f"{pose.frame!r} {pose.origin_lla_deg_m}"
             )
             raise ValueError(msg)
-        if set(fixed_values) - set(required) or set(fixed_values) & set(space.names):
+        # A fixed value may stand in only for a required coordinate that the state lacks.
+        if not set(fixed_values) <= set(_REQUIRED_NAMES[include_velocity]) - set(space.names):
             msg = (
                 "fixed coordinates must be required, absent state coordinates; got "
                 f"{sorted(fixed_values)}"
             )
             raise ValueError(msg)
-        missing = [n for n in required if n not in space.names and n not in fixed_values]
-        if missing:
+        if not set(_REQUIRED_NAMES[include_velocity]) <= set(space.names) | set(fixed_values):
+            missing = [
+                n
+                for n in _REQUIRED_NAMES[include_velocity]
+                if n not in space.names and n not in fixed_values
+            ]
             msg = f"geometry requires missing coordinates to be explicitly fixed; got {missing}"
             raise ValueError(msg)
         if not np.all(np.isfinite(list(fixed_values.values()))):
@@ -693,9 +711,9 @@ class BistaticRangeDopplerModel:
     Raises
     ------
     ValueError
-        If a site's frame or origin differs from the state's, or as for the
-        fixed coordinates: one is named that is not needed or is already in the
-        state, a needed coordinate is missing from both, or a value is not finite.
+        If a site's frame or origin differs from the state's. Also if a fixed
+        coordinate is not needed or is already in the state, a needed coordinate
+        is missing from both, or a fixed value is not finite.
 
     Notes
     -----
@@ -714,6 +732,11 @@ class BistaticRangeDopplerModel:
 
     Use :meth:`SensorPose.from_bistatic_radar` to place the two sites from a
     :class:`~radar_forge.core.radar.BistaticRadar`.
+
+    No initiator here can start a track from this model (see
+    :class:`~radar_forge.core.tracking.initiation.DirectStateInitiator`). A
+    tracker whose only model is this one must be given its tracks with
+    :meth:`~radar_forge.core.tracking.tracker.Tracker.seed`.
 
     References
     ----------
@@ -770,8 +793,8 @@ class BistaticRangeDopplerModel:
         Raises
         ------
         ValueError
-            If ``state`` has the wrong shape or is not finite, or any target
-            position is exactly on the transmitter or the receiver, where the
+            If ``state`` has the wrong shape or is not finite. Also if any target
+            position is exactly on the transmitter or the receiver. There the
             direction to the target is undefined.
         """
         states = np.asarray(state, dtype=np.float64)

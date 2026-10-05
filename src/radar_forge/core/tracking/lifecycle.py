@@ -73,10 +73,10 @@ class LifecyclePolicy:
     Raises
     ------
     ValueError
-        If a count is not an ``int``; if ``n_confirm_hits`` is less than 1 or
+        If a count is not an ``int``. If ``n_confirm_hits`` is less than 1 or
         more than ``n_confirm_frames``, so that no track could ever be
-        confirmed; if ``n_delete_misses`` is less than 1; if ``n_history`` is
-        negative; or if ``max_coast_time_s`` is not finite and positive.
+        confirmed. If ``n_delete_misses`` is less than 1, ``n_history`` is
+        negative, or ``max_coast_time_s`` is not finite and positive.
     """
 
     n_confirm_hits: int = 3
@@ -87,14 +87,22 @@ class LifecyclePolicy:
 
     def __post_init__(self) -> None:
         """Reject a policy that could not work, naming the field at fault."""
-        counts = {
-            "n_confirm_hits": self.n_confirm_hits,
-            "n_confirm_frames": self.n_confirm_frames,
-            "n_delete_misses": self.n_delete_misses,
-            "n_history": self.n_history,
-        }
         # A bool is an int in Python, so test the exact type to keep True out.
-        if any(type(value) is not int for value in counts.values()):
+        if any(
+            type(value) is not int
+            for value in (
+                self.n_confirm_hits,
+                self.n_confirm_frames,
+                self.n_delete_misses,
+                self.n_history,
+            )
+        ):
+            counts = {
+                "n_confirm_hits": self.n_confirm_hits,
+                "n_confirm_frames": self.n_confirm_frames,
+                "n_delete_misses": self.n_delete_misses,
+                "n_history": self.n_history,
+            }
             msg = f"lifecycle counts must be int; got {counts}."
             raise ValueError(msg)
         if not 1 <= self.n_confirm_hits <= self.n_confirm_frames:

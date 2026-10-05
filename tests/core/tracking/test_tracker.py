@@ -385,6 +385,14 @@ def test_a_measurement_of_the_wrong_dimension_is_rejected() -> None:
         tracker.process(wrong)
 
 
+def test_a_measurement_whose_model_the_sensor_does_not_list_is_rejected() -> None:
+    """A batch built by hand can skip SensorRoute.batch; process() still checks the route."""
+    tracker = one_axis_tracker()
+    stray = Measurement(np.zeros(1), np.eye(1), 0.0, "sensor", "other")
+    with pytest.raises(ValueError, match="unregistered models"):
+        tracker.process(MeasurementBatch(0.0, "sensor", (stray,)))
+
+
 def test_a_batch_from_an_unknown_sensor_is_rejected() -> None:
     tracker = one_axis_tracker()
     with pytest.raises(ValueError, match="unknown sensor"):

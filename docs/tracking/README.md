@@ -134,15 +134,19 @@ tracker doesn't yet have these, and the change that switches it over adds them:
 - a report of which measurement went to which track, and track fields such as `last_nis`
   and `measurement_dim`;
 - range, azimuth and range-rate measurement models for a monostatic radar;
-- the interacting multiple model (IMM) filter and the coordinated-turn motion model.
+- the interacting multiple model (IMM) filter and the coordinated-turn motion model;
+- an initiator for the bistatic model. One bistatic measurement (a path length and a path
+  rate) cannot fix a target's position, and `DirectStateInitiator` returns None for it. So a
+  tracker whose only model is `BistaticRangeDopplerModel` never starts a track by itself.
+  Add its tracks with `Tracker.seed`.
 
 **Built-in assumptions.**
 
 - Every measurement in a batch carries exactly the batch's time. A scanning radar that stamps
   each detection separately must send one batch per time.
 - Batches must arrive in time order. Out-of-sequence batches are rejected, not buffered.
-- Association is GNN: each scan, each track takes at most one measurement and each measurement
-  goes to at most one track. In heavy clutter, probabilistic association (PDA, JPDA) or multiple
+- Association is GNN by default (NN is also available). Either way, each scan, each track takes
+  at most one measurement and each measurement goes to at most one track. In heavy clutter, probabilistic association (PDA, JPDA) or multiple
   hypotheses (MHT) do better. Neither is implemented.
 - One target that gives several detections in one scan starts several tracks
   (`test_several_detections_of_one_target_give_one_confirmed_track` is marked `xfail`). The fix belongs in detection: one

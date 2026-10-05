@@ -54,6 +54,15 @@ def test_a_layout_rejects_an_impossible_origin(origin: tuple[float, float, float
         StateLayout((Coordinate("x_m", "m"),), "ENU", origin)
 
 
+def test_a_layout_stores_its_coordinates_as_a_tuple_the_caller_cannot_change() -> None:
+    """A list passed in is copied to a tuple, so changing the list later changes nothing."""
+    coordinates = [Coordinate("x_m", "m")]
+    layout = StateLayout(coordinates)  # type: ignore[arg-type]  # a list, on purpose
+    coordinates.append(Coordinate("y_m", "m"))
+    assert isinstance(layout.coordinates, tuple)
+    assert layout.names == ("x_m",)
+
+
 def test_indices_follow_the_order_asked_for() -> None:
     assert FOLDED.indices(("range_rate_mps", "range_m")) == (1, 0)
 

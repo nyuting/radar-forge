@@ -16,7 +16,12 @@ from numpy.typing import NDArray
 from scipy.stats import chi2
 
 from radar_forge.core.tracking.coordinates import Coordinate, StateEstimate, StateLayout
-from radar_forge.core.tracking.measurement_models import CartesianPosition, Measurement
+from radar_forge.core.tracking.measurement_models import (
+    BistaticRangeDopplerModel,
+    CartesianPosition,
+    Measurement,
+    SensorPose,
+)
 from radar_forge.core.tracking.motion import CartesianMotion, RadialMotion
 from radar_forge.core.tracking.ukf import UKF
 
@@ -228,6 +233,67 @@ def test_the_covariance_stays_symmetric_over_200_steps(rng: np.random.Generator)
 def test_the_covariance_stays_positive_definite_over_200_steps(rng: np.random.Generator) -> None:
     """What the Joseph form is for in a linear filter; update's Notes say why it holds here."""
     smallest = [np.linalg.eigvalsh(covariance).min() for covariance in _long_run(rng)]
+    assert min(smallest) > 0.0
+
+
+# A bistatic pair 20 km apart, with a target 3 km up flying across the baseline. The path
+# range and path rate are nonlinear in the state, so here the centre sigma point's weight
+# matters (UKF Notes, "Why kappa = 1").
+BISTATIC_TRANSMITTER_M = (0.0, 0.0, 0.0)
+BISTATIC_RECEIVER_M = (20_000.0, 0.0, 0.0)
+BISTATIC_ALTITUDE_M = 3_000.0
+SIGMA_PATH_RANGE_M = 20.0
+SIGMA_PATH_RATE_MPS = 1.0
+
+
+def _bistatic_long_run(rng: np.random.Generator) -> list[NDArray[np.float64]]:
+    """Run 200 noisy bistatic updates on a 2-D CV state, and return every posterior covariance.
+
+    The UKF uses its default kappa = 1. With n = 4 that makes every covariance weight
+    non-negative, which is what the update's positive-definiteness argument needs.
+    """
+    motion = CartesianMotion({"x": "CV", "y": "CV"}, origin_lla_deg_m=ORIGIN)
+    layout = motion.state_layout
+    transmitter = SensorPose(np.array(BISTATIC_TRANSMITTER_M), "ENU", ORIGIN)
+    receiver = SensorPose(np.array(BISTATIC_RECEIVER_M), "ENU", ORIGIN)
+    # The state has no z, so the target's height and climb rate are fixed.
+    model = BistaticRangeDopplerModel(
+        layout,
+        transmitter,
+        receiver,
+        fixed_coordinates={"z_m": BISTATIC_ALTITUDE_M, "zdot_mps": 0.0},
+    )
+    noise = np.diag([SIGMA_PATH_RANGE_M**2, SIGMA_PATH_RATE_MPS**2])
+    # Default order is x_m, xdot_mps, y_m, ydot_mps.
+    truth = np.array([5_000.0, 50.0, 15_000.0, -100.0])
+    prior_covariance = np.diag([200.0**2, 30.0**2, 200.0**2, 30.0**2])
+    start = truth + rng.multivariate_normal(np.zeros(4), prior_covariance)
+    ukf = UKF(StateEstimate(start, prior_covariance, 0, layout), motion)
+    covariances = []
+    for step in range(1, 201):
+        # A loop over time: each step starts from the one before.
+        truth = motion.transition(truth, 1.0)
+        ukf.predict_to(step)
+        value = model.predict(truth) + rng.multivariate_normal(np.zeros(2), noise)
+        ukf.update(_measurement(value, noise, step), model)
+        covariances.append(np.array(ukf.state.covariance))
+    return covariances
+
+
+def test_with_the_bistatic_model_the_covariance_stays_symmetric_over_200_steps(
+    rng: np.random.Generator,
+) -> None:
+    """A nonlinear model, where the centre weight matters, with the default kappa."""
+    for covariance in _bistatic_long_run(rng):
+        # rtol 1e-12: the update takes the symmetric part, so any asymmetry is roundoff.
+        np.testing.assert_allclose(covariance, covariance.T, rtol=1e-12)
+
+
+def test_with_the_bistatic_model_the_covariance_stays_positive_definite_over_200_steps(
+    rng: np.random.Generator,
+) -> None:
+    """The kappa = 1 argument of the UKF Notes, checked on a nonlinear model."""
+    smallest = [np.linalg.eigvalsh(covariance).min() for covariance in _bistatic_long_run(rng)]
     assert min(smallest) > 0.0
 
 

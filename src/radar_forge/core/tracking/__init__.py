@@ -88,7 +88,12 @@ from radar_forge.core.tracking.measurement_models import (
     SensorPose,
     SensorRoute,
 )
-from radar_forge.core.tracking.motion import CartesianMotion, MotionModel, RadialMotion
+from radar_forge.core.tracking.motion import (
+    CartesianMotion,
+    MotionKind,
+    MotionModel,
+    RadialMotion,
+)
 from radar_forge.core.tracking.tracker import Tracker, build_tracker, build_tracker_enu
 from radar_forge.core.tracking.tracks import TrackSnapshot
 from radar_forge.core.tracking.ukf import UKF
@@ -114,6 +119,7 @@ __all__ = [
     "Measurement",
     "MeasurementBatch",
     "MeasurementModel",
+    "MotionKind",
     "MotionModel",
     "NearestNeighbour",
     "RadialMotion",

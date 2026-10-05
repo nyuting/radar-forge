@@ -47,8 +47,10 @@ class TrackStatus(StrEnum):
     Attributes
     ----------
     TENTATIVE
-        Newly started and not yet trusted. It becomes confirmed once it has
-        enough hits (the M of M-of-N), or is deleted.
+        Newly started and not yet trusted. It becomes confirmed by the M-of-N
+        rule: M hits (scans in which it got a measurement) within its first N
+        scans. If it cannot reach M hits in time, it is deleted. See
+        :mod:`~radar_forge.core.tracking.lifecycle`.
     CONFIRMED
         Has passed the M-of-N test. Callers usually display only these.
     DELETED
@@ -171,9 +173,9 @@ class Track:
             read-only and do not share memory with the filter.
         """
         state = self.estimator.state
-        # Build a new StateEstimate, which copies the arrays, so that a caller
-        # who changes the snapshot cannot reach the filter, and a later
-        # predict or update cannot change a snapshot already handed out.
+        # Build a new StateEstimate, which copies the arrays. Then a caller who
+        # changes the snapshot cannot reach the filter, and a later predict or
+        # update cannot change a snapshot already handed out.
         return TrackSnapshot(
             self.track_id,
             StateEstimate(state.mean, state.covariance, state.timestamp_s, state.state_layout),
