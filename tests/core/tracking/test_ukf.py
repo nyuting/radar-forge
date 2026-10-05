@@ -33,9 +33,10 @@ SEED = 20261005
 SIGMA_RANGE_M = 21.635652855125496
 SIGMA_VELOCITY_MPS = 0.017247813329811023
 V_MAX_MPS = 200.0
-# Continuous white-noise density matching the old tracker's sigma_accel = 2 m/s² at T = 1 s
-# (q = sigma² T; see the motion module's Notes).
-DENSITY_M2PS3 = 4.0
+# The old tracker's sigma_accel = 2 m/s² at T = 1 s. Its velocity variance per step matches
+# the white-noise model's when tau = T / 2 (motion module Notes), so q = 2 * 4 * 0.5 = 4 m²/s³.
+SIGMA_ACCELERATION_MPS2 = 2.0
+CORRELATION_TIME_S = 0.5
 
 
 @pytest.fixture
@@ -223,7 +224,7 @@ def test_a_noiseless_target_has_zero_innovation_at_every_step() -> None:
 
 def _long_run(rng: np.random.Generator) -> list[NDArray[np.float64]]:
     """Run 200 noisy updates at scenario 003's R, and return every posterior covariance."""
-    motion = RadialMotion(DENSITY_M2PS3)
+    motion = RadialMotion(SIGMA_ACCELERATION_MPS2, CORRELATION_TIME_S)
     model = CartesianPosition(motion.state_layout, ("range_m", "range_rate_mps"))
     noise = np.diag([SIGMA_RANGE_M**2, SIGMA_VELOCITY_MPS**2])
     ukf = UKF(
@@ -315,7 +316,7 @@ def test_with_the_bistatic_model_the_covariance_stays_positive_definite_over_200
 
 
 def _range_only_update() -> tuple[StateEstimate, StateEstimate]:
-    motion = RadialMotion(DENSITY_M2PS3)
+    motion = RadialMotion(SIGMA_ACCELERATION_MPS2, CORRELATION_TIME_S)
     model = CartesianPosition(motion.state_layout, ("range_m",))
     prior = StateEstimate(np.array([10_000.0, 0.0]), _initial_covariance(), 0, motion.state_layout)
     ukf = UKF(prior, motion)
@@ -370,7 +371,7 @@ class _CountingPosition(CartesianPosition):
 
 
 def _ready_filter() -> tuple[UKF, _CountingPosition, Measurement]:
-    motion = RadialMotion(DENSITY_M2PS3)
+    motion = RadialMotion(SIGMA_ACCELERATION_MPS2, CORRELATION_TIME_S)
     model = _CountingPosition(motion.state_layout, ("range_m",))
     prior = StateEstimate(np.array([10_000.0, 50.0]), _initial_covariance(), 0, motion.state_layout)
     ukf = UKF(prior, motion)
@@ -422,7 +423,11 @@ def consistency_runs() -> tuple[list[float], list[float]]:
     """
     rng = np.random.default_rng(SEED)
     motion = CartesianMotion(
-        {"x": "CV"}, origin_lla_deg_m=ORIGIN, acceleration_noise_density_m2ps3=1.0
+        {"x": "CV"},
+        origin_lla_deg_m=ORIGIN,
+        # q = 2 sigma² tau = 1 m²/s³.
+        sigma_acceleration_mps2=1.0,
+        acceleration_correlation_time_s=0.5,
     )
     model = CartesianPosition(motion.state_layout, ("x_m",))
     f, q = motion.matrices(1.0)

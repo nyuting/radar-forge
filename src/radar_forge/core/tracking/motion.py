@@ -17,34 +17,69 @@ east-north-up (ENU) frame about ``origin_lla_deg_m`` (see :mod:`radar_forge.core
 Process noise
 -------------
 A CV model says the velocity never changes. Real targets speed up, slow down and turn, so the
-filter must allow for motion its model leaves out. It does this by pretending that an unknown
-acceleration acts on the target: random, changing from instant to instant, with no memory (this
-is called *white noise*). The *noise density* q, also called the power spectral density, says
-how strong that random acceleration is. On a CV axis it is in m²/s³.
+filter must allow for motion its model leaves out. It does this by treating the target's
+acceleration as random. Two physical numbers describe that acceleration:
 
-Over one step of :math:`T` seconds the noise adds a velocity variance of :math:`q T` (in m²/s²),
-so :math:`\sqrt{q T}` is the typical change of velocity in one step. A rule of thumb [1]_ sets
-that equal to the largest change of velocity in one step, :math:`a_{max} T`. Here
-:math:`a_{max}` is the largest acceleration expected. That gives
-:math:`q \approx a_{max}^2 T`. A target that pulls 4 m/s², tracked every second, needs
-q ≈ 16 m²/s³. The default, 1 m²/s³, suits about 1 m/s² at one update a second.
+- ``sigma_acceleration_mps2``, :math:`\sigma_a`: its standard deviation, in m/s². If you know
+  the largest acceleration :math:`a_{max}` and read it as a 3-sigma bound,
+  :math:`\sigma_a = a_{max}/3`.
+- ``acceleration_correlation_time_s``, :math:`\tau`: roughly how long one acceleration lasts
+  before it changes, in seconds.
 
-A CA model instead pretends that the *jerk*, the rate of change of acceleration, is white
-noise. Its density is in m²/s⁵. :math:`\sqrt{q T}` is then the typical change of acceleration
-in one step. So :math:`q \approx \Delta a_{max}^2 / T`, where :math:`\Delta a_{max}` is the
-largest change of acceleration expected in one step.
+Singer [2]_ models such an acceleration as a random process with variance :math:`\sigma_a^2`
+whose correlation dies away as :math:`e^{-|t|/\tau}`. Over times longer than :math:`\tau` it
+acts like *white noise*: random, with no memory. The strength of white noise is its *noise
+density* q, also called the power spectral density, and for this process it is
 
-The older tracker's :func:`radar_forge.core.tracking.kalman.process_noise_dwna` uses a
-discrete model instead: one random acceleration, held constant through each step, with
-variance :math:`\sigma_a^2` in m²/s⁴. The two add the same velocity variance per step when
-:math:`q = \sigma_a^2 T`. Their position terms then differ a little: :math:`\sigma_a^2 T^4/3`
-here against :math:`\sigma_a^2 T^4/4` there.
+.. math::
+
+    q = 2 \sigma_a^2 \tau \quad \text{(m²/s³)}.
+
+Each model computes q once from :math:`\sigma_a` and :math:`\tau`, and then builds Q from the
+actual time step T at every prediction, with the continuous white-noise acceleration model of
+Bar-Shalom et al. [1]_ (the Notes of :class:`CartesianMotion` give the matrices). Two
+consequences follow:
+
+- **Q does not depend on how the time is cut up.** Two steps of T/2 add the same uncertainty
+  as one step of T. That matters when two sensors report at different rates.
+- **For steps shorter than** :math:`\tau` **it errs on the safe side.** A step then adds a
+  velocity variance of :math:`2 \sigma_a^2 \tau T`, more than the :math:`\sigma_a^2 T^2` of an
+  acceleration that really holds through the step. Too much noise widens the gate; too little
+  loses the target. Singer's full model, which carries the acceleration in the state, is exact
+  at every T. It is left for the first scenario that needs it.
+
+**Why not the usual rule of thumb.** Textbooks often choose q so that :math:`\sqrt{q T}`, the
+typical change of velocity in one step, is about :math:`a_{max}` [1]_, which gives
+:math:`q \approx a_{max}^2 T`. The sampling interval T is standing in for :math:`\tau` there,
+so that q only means what was intended at one update rate. With two sensors there is no one T.
+
+**The defaults** come from the truth of scenario 001's 120 s window. The acceleration has a
+standard deviation of 3.3 m/s² on the east and north axes, and 4.0 m/s² along the line of
+sight. Its correlation falls to between 0.44 and 0.51 after 1 s, and changes sign by 2 s. So
+:math:`\sigma_a = 4` m/s² and :math:`\tau = 1` s, and q = 32 m²/s³. Run through
+:class:`RadialMotion` and the UKF on that truth, with scenario 003's measurement noise (21.6 m in
+range, 0.017 m/s in range rate), 0.35 % of the true measurements fall outside a 99.7 % gate,
+close to the 0.3 % the gate is designed for. The old default, q = 1 m²/s³, left 31 % outside,
+which is how a track lags a manoeuvre until it loses the target.
+
+A CA model instead treats the *jerk*, the rate of change of acceleration, as random. It takes
+``sigma_jerk_mps3`` in m/s³ and the same :math:`\tau`, and its density
+:math:`q = 2 \sigma_j^2 \tau` is in m²/s⁵. No scenario uses CA yet, so its default,
+1 m/s³, is not derived from data.
+
+The older tracker's :func:`radar_forge.core.tracking.kalman.process_noise_dwna` also takes
+:math:`\sigma_a`, but holds one random acceleration constant through each step. That makes its
+Q depend on the step length: two steps of T/2 add less than one of T. Both models add the same
+velocity variance per step only when :math:`\tau = T/2`.
 
 References
 ----------
 .. [1] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications to Tracking
        and Navigation*, Wiley, 2001, §6.2 (the continuous white-noise acceleration and
-       Wiener-process acceleration models, and how to choose their noise density).
+       Wiener-process acceleration models).
+.. [2] R. A. Singer, "Estimating optimal tracking filter performance for manned maneuvering
+       targets," *IEEE Trans. Aerospace and Electronic Systems*, vol. AES-6, no. 4,
+       pp. 473-483, 1970 (the exponentially correlated acceleration model).
 """
 
 from __future__ import annotations
@@ -138,25 +173,40 @@ def _check_state_shape(state: NDArray[np.float64], n_state: int) -> None:
         raise ValueError(msg)
 
 
-def _check_density_mappings(
-    axes: Mapping[str, MotionKind], given: Mapping[MotionKind, float | Mapping[str, float]]
-) -> None:
-    """Raise unless each density given as a mapping names exactly the axes of its model."""
-    if any(
-        isinstance(density, Mapping)
-        and set(density) != {axis for axis, axis_kind in axes.items() if axis_kind == kind}
-        for kind, density in given.items()
-    ):
+def _white_noise_density(sigma: float, correlation_time_s: float) -> float:
+    """Return q = 2 sigma² tau, the noise density of a correlated random process (module Notes)."""
+    return 2.0 * sigma**2 * correlation_time_s
+
+
+def _check_correlation_time(correlation_time_s: float) -> None:
+    """Raise unless the correlation time is finite and positive."""
+    if not np.isfinite(correlation_time_s) or correlation_time_s <= 0:
         msg = (
-            "a noise density mapping must name exactly the axes of its model (CV or CA); "
-            f"got axes {dict(axes)} and densities {dict(given)}"
+            "acceleration_correlation_time_s must be finite and positive, in seconds; "
+            f"got {correlation_time_s}"
         )
         raise ValueError(msg)
 
 
-def _density_of(axis: str, density: float | Mapping[str, float]) -> float:
-    """Return one axis's noise density from a single value or a per-axis mapping."""
-    return float(density[axis] if isinstance(density, Mapping) else density)
+def _check_sigma_mappings(
+    axes: Mapping[str, MotionKind], given: Mapping[MotionKind, float | Mapping[str, float]]
+) -> None:
+    """Raise unless each standard deviation given as a mapping names exactly its model's axes."""
+    if any(
+        isinstance(sigma, Mapping)
+        and set(sigma) != {axis for axis, axis_kind in axes.items() if axis_kind == kind}
+        for kind, sigma in given.items()
+    ):
+        msg = (
+            "a sigma_acceleration_mps2 or sigma_jerk_mps3 mapping must name exactly the axes "
+            f"of its model (CV or CA); got axes {dict(axes)} and values {dict(given)}"
+        )
+        raise ValueError(msg)
+
+
+def _sigma_of(axis: str, sigma: float | Mapping[str, float]) -> float:
+    """Return one axis's standard deviation from a single value or a per-axis mapping."""
+    return float(sigma[axis] if isinstance(sigma, Mapping) else sigma)
 
 
 def _axis_names(axis: str, kind: MotionKind) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -183,18 +233,21 @@ class CartesianMotion:
         ``{"x": "CV", "y": "CA"}``.
     origin_lla_deg_m : tuple of float
         The ENU origin: latitude in degrees, longitude in degrees, height in metres.
-    acceleration_noise_density_m2ps3 : float or mapping of str to float, default 1.0
-        The noise density q of each CV axis, in m²/s³: the strength of the random acceleration
-        the model allows for. Choose :math:`q \approx a_{max}^2 T` (module Notes). One value
-        for every CV axis, or a mapping that names exactly the CV axes. A mapping is for motion
-        that is less predictable in one direction than another. For example, an aircraft
-        usually turns more freely than it climbs, so z can take a smaller q than x and y. Must
-        be finite and not negative.
-    jerk_noise_density_m2ps5 : float or mapping of str to float, default 1.0
-        The noise density q of each CA axis, in m²/s⁵: the strength of the random jerk the
-        model allows for. Choose :math:`q \approx \Delta a_{max}^2 / T` (module Notes). One
+    sigma_acceleration_mps2 : float or mapping of str to float, default 4.0
+        :math:`\sigma_a`, the standard deviation of the target's acceleration on each CV axis,
+        in m/s² (:math:`a_{max}/3` for a 3-sigma bound :math:`a_{max}`). One value for every
+        CV axis, or a mapping that names exactly the CV axes. A mapping is for motion that is
+        less predictable in one direction than another. For example, an aircraft usually turns
+        more freely than it climbs, so z can take a smaller value than x and y. The default is
+        derived from scenario 001 (module Notes). Must be finite and not negative.
+    sigma_jerk_mps3 : float or mapping of str to float, default 1.0
+        :math:`\sigma_j`, the standard deviation of the jerk on each CA axis, in m/s³. One
         value for every CA axis, or a mapping that names exactly the CA axes. Must be finite
         and not negative.
+    acceleration_correlation_time_s : float, default 1.0
+        :math:`\tau`, roughly how long one acceleration (or, on a CA axis, one jerk) lasts, in
+        seconds. The noise density of each axis is :math:`q = 2 \sigma^2 \tau` (module Notes).
+        Must be finite and positive.
     order : tuple of str, optional
         The order of the state's elements, by name, for example ``("x_m", "xdot_mps")``. It
         must name every element exactly once. The default keeps each axis together, in the
@@ -207,13 +260,16 @@ class CartesianMotion:
     state_layout : StateLayout
         Names ``{a}_m`` (m), ``{a}dot_mps`` (m/s) and, on a CA axis, ``{a}ddot_mps2``
         (m/s²), for each axis ``a``.
+    noise_density : dict of str to float
+        q for each axis, :math:`2 \sigma^2 \tau`: in m²/s³ on a CV axis, m²/s⁵ on a CA axis.
 
     Raises
     ------
     ValueError
         If ``axes`` is empty, or names an axis other than x, y or z, or a model other than CV
-        or CA. If a density mapping does not name exactly the right axes, or a density is
-        negative or not finite. If ``order`` is not an exact reordering of the element names.
+        or CA. If a sigma mapping does not name exactly the right axes, a sigma is negative or
+        not finite, or the correlation time is not finite and positive. If ``order`` is not an
+        exact reordering of the element names.
 
     Notes
     -----
@@ -257,25 +313,34 @@ class CartesianMotion:
         axes: Mapping[str, MotionKind],
         *,
         origin_lla_deg_m: tuple[float, float, float],
-        acceleration_noise_density_m2ps3: float | Mapping[str, float] = 1.0,
-        jerk_noise_density_m2ps5: float | Mapping[str, float] = 1.0,
+        sigma_acceleration_mps2: float | Mapping[str, float] = 4.0,
+        sigma_jerk_mps3: float | Mapping[str, float] = 1.0,
+        acceleration_correlation_time_s: float = 1.0,
         order: tuple[str, ...] | None = None,
         frame: str = "ENU",
     ) -> None:
         if not axes or set(axes) - set("xyz") or any(v not in ("CV", "CA") for v in axes.values()):
             msg = f"axes must map a nonempty subset of x/y/z to CV or CA; got {dict(axes)}"
             raise ValueError(msg)
-        # The CV and CA densities have different units (m²/s³ and m²/s⁵), so each kind of axis
-        # takes its own argument.
+        # The CV and CA standard deviations have different units (m/s² and m/s³), so each kind
+        # of axis takes its own argument.
         given: dict[MotionKind, float | Mapping[str, float]] = {
-            "CV": acceleration_noise_density_m2ps3,
-            "CA": jerk_noise_density_m2ps5,
+            "CV": sigma_acceleration_mps2,
+            "CA": sigma_jerk_mps3,
         }
-        _check_density_mappings(axes, given)
-        density = {axis: _density_of(axis, given[kind]) for axis, kind in sorted(axes.items())}
-        if not all(np.isfinite(q) and q >= 0 for q in density.values()):
-            msg = f"noise densities must be finite and nonnegative; got {density}"
+        _check_sigma_mappings(axes, given)
+        sigma = {axis: _sigma_of(axis, given[kind]) for axis, kind in sorted(axes.items())}
+        if not all(np.isfinite(value) and value >= 0 for value in sigma.values()):
+            msg = (
+                "sigma_acceleration_mps2 and sigma_jerk_mps3 must be finite and nonnegative; "
+                f"got {sigma}"
+            )
             raise ValueError(msg)
+        _check_correlation_time(acceleration_correlation_time_s)
+        self.noise_density = {
+            axis: _white_noise_density(value, acceleration_correlation_time_s)
+            for axis, value in sigma.items()
+        }
         names = {axis: _axis_names(axis, axes[axis]) for axis in sorted(axes)}
         default_order = [name for axis in sorted(axes) for name in names[axis][0]]
         if order is not None and sorted(order) != sorted(default_order):
@@ -313,7 +378,7 @@ class CartesianMotion:
             self._f_exponent[rows, cols] = power
             self._f_coefficient[rows, cols] = np.where(j >= i, 1.0 / factorial(power), 0.0)
             self._q_exponent[rows, cols] = a + b + 1
-            self._q_coefficient[rows, cols] = density[axis] / (
+            self._q_coefficient[rows, cols] = self.noise_density[axis] / (
                 (a + b + 1) * factorial(a) * factorial(b)
             )
 
@@ -409,22 +474,26 @@ class RadialMotion:
 
     Parameters
     ----------
-    acceleration_noise_density_m2ps3 : float, default 1.0
-        The noise density q, in m²/s³: the strength of the random radial acceleration the model
-        allows for. Choose :math:`q \approx a_{max}^2 T` (module Notes). Must be finite and not
-        negative.
+    sigma_acceleration_mps2 : float, default 4.0
+        :math:`\sigma_a`, the standard deviation of the target's radial acceleration, in m/s²
+        (:math:`a_{max}/3` for a 3-sigma bound :math:`a_{max}`). The default is derived from
+        scenario 001 (module Notes). Must be finite and not negative.
+    acceleration_correlation_time_s : float, default 1.0
+        :math:`\tau`, roughly how long one acceleration lasts, in seconds. Must be finite and
+        positive.
 
     Attributes
     ----------
-    density : float
-        The noise density q, in m²/s³.
+    noise_density_m2ps3 : float
+        The noise density :math:`q = 2 \sigma_a^2 \tau`, in m²/s³ (module Notes).
     state_layout : StateLayout
         ``range_m`` (m) then ``range_rate_mps`` (m/s), in the frame ``"radial"``.
 
     Raises
     ------
     ValueError
-        If the noise density is negative or not finite.
+        If ``sigma_acceleration_mps2`` is negative or not finite, or the correlation time is
+        not finite and positive.
 
     Notes
     -----
@@ -450,17 +519,21 @@ class RadialMotion:
     array([90.,  5.])
     """
 
-    def __init__(self, acceleration_noise_density_m2ps3: float = 1.0) -> None:
-        if (
-            not np.isfinite(acceleration_noise_density_m2ps3)
-            or acceleration_noise_density_m2ps3 < 0
-        ):
+    def __init__(
+        self,
+        sigma_acceleration_mps2: float = 4.0,
+        acceleration_correlation_time_s: float = 1.0,
+    ) -> None:
+        if not np.isfinite(sigma_acceleration_mps2) or sigma_acceleration_mps2 < 0:
             msg = (
-                "acceleration_noise_density_m2ps3 must be finite and nonnegative; "
-                f"got {acceleration_noise_density_m2ps3}"
+                "sigma_acceleration_mps2 must be finite and nonnegative; "
+                f"got {sigma_acceleration_mps2}"
             )
             raise ValueError(msg)
-        self.density = float(acceleration_noise_density_m2ps3)
+        _check_correlation_time(acceleration_correlation_time_s)
+        self.noise_density_m2ps3 = _white_noise_density(
+            float(sigma_acceleration_mps2), float(acceleration_correlation_time_s)
+        )
         self.state_layout = StateLayout(
             (Coordinate("range_m", "m"), Coordinate("range_rate_mps", "m/s")), "radial"
         )
@@ -515,6 +588,6 @@ class RadialMotion:
             If ``dt_s`` is negative or not finite.
         """
         _check_dt(dt_s)
-        return self.density * np.array(
+        return self.noise_density_m2ps3 * np.array(
             [[dt_s**3 / 3, -(dt_s**2) / 2], [-(dt_s**2) / 2, dt_s]], dtype=np.float64
         )

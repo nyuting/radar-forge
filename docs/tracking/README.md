@@ -108,19 +108,29 @@ hit:
 ## Choosing the process noise
 
 Real targets don't move at exactly constant velocity. The **process noise** says how far they
-may stray from it. For a CV axis it is a density `q`, in m²/s³. A useful starting point is to
-choose `q` so that the velocity can change by about the largest expected acceleration
-`a_max` in one scan of length `T`:
+may stray from it. You give it as two physical numbers:
+
+- `sigma_acceleration_mps2`, σ_a: the standard deviation of the target's acceleration. If you
+  know a largest acceleration `a_max` and treat it as a 3σ bound, σ_a = a_max / 3.
+- `acceleration_correlation_time_s`, τ: roughly how long one acceleration lasts.
+
+The motion model turns them into a noise density, and builds Q from the actual time step at
+every prediction:
 
 ```text
-q ≈ a_max² · T
+q = 2 · σ_a² · τ        (m²/s³)
+Q(T) = q · [[T³/3, T²/2], [T²/2, T]]
 ```
 
-For example, a target that may accelerate at 4 m/s², scanned once a second, gives
-q ≈ 16 m²/s³. If `q` is too small, the track lags a manoeuvring target until its measurements
-fall outside the gate. If `q` is too large, the track follows the noise. `motion.py`'s module
-docstring gives the CA case (m²/s⁵), and shows how `q` relates to `kalman.py`'s discrete
-noise model.
+The defaults, σ_a = 4 m/s² and τ = 1 s (q = 32 m²/s³), are measured from scenario 001's truth.
+If σ_a is too small, the track lags a manoeuvring target until its measurements fall outside
+the gate. If it is too large, the track follows the noise.
+
+A common rule of thumb is q ≈ a_max² · T for a scan of length T. This repo doesn't use it,
+because the scan length stands in for τ there: the same q then means a different target at a
+different update rate, and with two sensors there is no single T. `motion.py`'s module
+docstring explains this, gives the CA case (`sigma_jerk_mps3`), and compares the model with
+`kalman.py`'s discrete noise model.
 
 ## Limitations
 
@@ -135,6 +145,8 @@ tracker doesn't yet have these, and the change that switches it over adds them:
   and `measurement_dim`;
 - range, azimuth and range-rate measurement models for a monostatic radar;
 - the interacting multiple model (IMM) filter and the coordinated-turn motion model;
+- Singer's motion model, which carries the acceleration in the state and is exact for steps
+  shorter than the correlation time. Its white-noise limit sets the process noise now;
 - an initiator for the bistatic model. One bistatic measurement (a path length and a path
   rate) cannot fix a target's position, and `DirectStateInitiator` returns None for it. So a
   tracker whose only model is `BistaticRangeDopplerModel` never starts a track by itself.

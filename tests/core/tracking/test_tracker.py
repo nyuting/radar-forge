@@ -173,8 +173,13 @@ def test_history_keeps_only_the_last_n_history_snapshots() -> None:
 
 
 def stationary_confirmed_tracker() -> Tracker:
-    """A confirmed track on a target sitting still at x = 1000 m, R = 1 m^2."""
-    tracker = one_axis_tracker()
+    """A confirmed track on a target sitting still at x = 1000 m, R = 1 m^2.
+
+    The process noise is pinned at q = 2 sigma² tau = 1 m²/s³, so the track's gate stays
+    narrow: at the default q = 32 m²/s³ a detection 15 m away is inside it, and no
+    tentative track could start there for the tests below to use.
+    """
+    tracker = one_axis_tracker(sigma_acceleration_mps2=1.0, acceleration_correlation_time_s=0.5)
     # Scans are processed in time order; each depends on the one before.
     for time_s in range(6):
         tracker.process(batch(tracker, time_s, [1000.0], variance_m2=1.0))
@@ -253,7 +258,8 @@ def test_the_update_reuses_the_innovation_computed_for_gating(
 
 def run_crossing_targets() -> tuple[list[list[str]], tuple[TrackSnapshot, ...]]:
     """Two targets crossing, seen by two sensors in turn; return IDs per scan."""
-    tracker = one_axis_tracker(acceleration_noise_density_m2ps3=0.01)
+    # q = 2 sigma² tau = 0.01 m²/s³: the targets move almost exactly at constant velocity.
+    tracker = one_axis_tracker(sigma_acceleration_mps2=0.1, acceleration_correlation_time_s=0.5)
     tracker.add_sensor(SensorRoute("second", ("measurement",)))
     identifiers: list[list[str]] = []
     snapshots: tuple[TrackSnapshot, ...] = ()

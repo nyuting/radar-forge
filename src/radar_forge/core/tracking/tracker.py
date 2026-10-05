@@ -637,8 +637,9 @@ def build_tracker_enu(
     *,
     origin_lla_deg_m: tuple[float, float, float],
     order: tuple[str, ...] | None = None,
-    acceleration_noise_density_m2ps3: float | Mapping[str, float] = 1.0,
-    jerk_noise_density_m2ps5: float | Mapping[str, float] = 1.0,
+    sigma_acceleration_mps2: float | Mapping[str, float] = 4.0,
+    sigma_jerk_mps3: float | Mapping[str, float] = 1.0,
+    acceleration_correlation_time_s: float = 1.0,
     sigma_velocity_mps: float = 100.0,
     policy: LifecyclePolicy | None = None,
     gate_probability: float = 0.997,
@@ -660,12 +661,14 @@ def build_tracker_enu(
         ENU origin: latitude and longitude in degrees, altitude in metres.
     order : tuple of str or None, optional
         State coordinate order; None groups the coordinates by axis.
-    acceleration_noise_density_m2ps3 : float or mapping of str to float, optional
-        White-acceleration density for the CV axes, m²/s³.
-    jerk_noise_density_m2ps5 : float or mapping of str to float, optional
-        White-jerk density for the CA axes, m²/s⁵.
+    sigma_acceleration_mps2, sigma_jerk_mps3, acceleration_correlation_time_s : optional
+        The process noise: how much the target's acceleration (CV axes, m/s²) or jerk (CA
+        axes, m/s³) varies, and for how long one value lasts (s). See
+        :class:`CartesianMotion` and the Notes of :mod:`~radar_forge.core.tracking.motion`,
+        which derive the defaults, 4 m/s², 1 m/s³ and 1 s.
     sigma_velocity_mps : float, optional
-        Prior standard deviation of each unobserved velocity, m/s.
+        Prior standard deviation of each unobserved velocity at a track's birth, m/s. Unlike
+        ``sigma_acceleration_mps2``, this describes the first estimate, not the target.
     policy, gate_probability, association, alpha, beta, kappa
         As for :func:`build_tracker`.
 
@@ -703,8 +706,9 @@ def build_tracker_enu(
         axes,
         origin_lla_deg_m=origin_lla_deg_m,
         order=order,
-        acceleration_noise_density_m2ps3=acceleration_noise_density_m2ps3,
-        jerk_noise_density_m2ps5=jerk_noise_density_m2ps5,
+        sigma_acceleration_mps2=sigma_acceleration_mps2,
+        sigma_jerk_mps3=sigma_jerk_mps3,
+        acceleration_correlation_time_s=acceleration_correlation_time_s,
     )
     observation = CartesianPosition(
         motion.state_layout, tuple(f"{a}_m" for a in "xyz" if a in axes)

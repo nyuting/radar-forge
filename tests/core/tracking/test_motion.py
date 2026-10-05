@@ -16,6 +16,8 @@ from radar_forge.core.tracking.kalman import process_noise_dwna
 from radar_forge.core.tracking.motion import CartesianMotion, RadialMotion
 
 ORIGIN = (36.00250, -78.94100, 60.0)
+# sigma = 1 with tau = 0.5 s gives q = 2 sigma² tau = 1 exactly, so Q is the published block.
+UNIT_DENSITY = {"acceleration_correlation_time_s": 0.5}
 AXES = [axes for n in (1, 2, 3) for axes in itertools.combinations("xyz", n)]
 SEED = 20261005
 
@@ -30,8 +32,8 @@ def _model(axes: tuple[str, ...], kind: str) -> CartesianMotion:
     return CartesianMotion(
         dict.fromkeys(axes, kind),
         origin_lla_deg_m=ORIGIN,
-        acceleration_noise_density_m2ps3=2.0,
-        jerk_noise_density_m2ps5=2.0,
+        sigma_acceleration_mps2=1.0,
+        sigma_jerk_mps3=1.0,
     )
 
 
@@ -122,14 +124,16 @@ def test_a_cross_axis_covariance_is_carried_through_a_prediction() -> None:
 
 def test_cv_noise_matches_the_published_block() -> None:
     """Bar-Shalom, Li and Kirubarajan (2001), §6.2: q [[T³/3, T²/2], [T²/2, T]]."""
-    cv = CartesianMotion({"x": "CV"}, origin_lla_deg_m=ORIGIN)
+    cv = CartesianMotion(
+        {"x": "CV"}, origin_lla_deg_m=ORIGIN, sigma_acceleration_mps2=1.0, **UNIT_DENSITY
+    )
     # rtol 1e-12: one power and one division per element.
     np.testing.assert_allclose(cv.matrices(1)[1], [[1 / 3, 1 / 2], [1 / 2, 1]], rtol=1e-12)
 
 
 def test_ca_noise_matches_the_published_block() -> None:
     """Bar-Shalom, Li and Kirubarajan (2001), §6.2: the white-jerk (Wiener) block."""
-    ca = CartesianMotion({"z": "CA"}, origin_lla_deg_m=ORIGIN)
+    ca = CartesianMotion({"z": "CA"}, origin_lla_deg_m=ORIGIN, sigma_jerk_mps3=1.0, **UNIT_DENSITY)
     # rtol 1e-12: one power and one division per element.
     np.testing.assert_allclose(
         ca.matrices(1)[1],
@@ -138,22 +142,65 @@ def test_ca_noise_matches_the_published_block() -> None:
     )
 
 
-def test_noise_scales_with_the_density() -> None:
-    weak = CartesianMotion({"x": "CV"}, origin_lla_deg_m=ORIGIN)
-    strong = CartesianMotion(
-        {"x": "CV"}, origin_lla_deg_m=ORIGIN, acceleration_noise_density_m2ps3=16.0
+@pytest.mark.parametrize(("sigma_mps2", "tau_s"), [(4.0, 1.0), (1.5, 5.0), (0.0, 2.0)])
+def test_the_noise_density_is_two_sigma_squared_tau(sigma_mps2: float, tau_s: float) -> None:
+    """Module Notes: q = 2 sigma_a² tau, the white-noise limit of Singer's model."""
+    cartesian = CartesianMotion(
+        {"x": "CV"},
+        origin_lla_deg_m=ORIGIN,
+        sigma_acceleration_mps2=sigma_mps2,
+        acceleration_correlation_time_s=tau_s,
     )
-    # rtol 1e-12: one extra multiplication per element.
-    np.testing.assert_allclose(strong.matrices(0.5)[1], 16 * weak.matrices(0.5)[1], rtol=1e-12)
+    radial = RadialMotion(sigma_mps2, tau_s)
+    # rel 1e-12: three float64 multiplications.
+    assert cartesian.noise_density["x"] == pytest.approx(2 * sigma_mps2**2 * tau_s, rel=1e-12)
+    assert radial.noise_density_m2ps3 == pytest.approx(2 * sigma_mps2**2 * tau_s, rel=1e-12)
 
 
-def test_cv_matches_the_discrete_model_in_velocity_variance_when_q_is_sigma_squared_t() -> None:
-    """The module's claim relating the two noise conventions: q = sigma_a² T."""
+def test_the_defaults_give_q_of_32() -> None:
+    """Module Notes: sigma_a = 4 m/s² and tau = 1 s, measured on scenario 001's truth."""
+    # rel 1e-12: 2 * 16 * 1 is exact in float64.
+    assert RadialMotion().noise_density_m2ps3 == pytest.approx(32.0, rel=1e-12)
+    cartesian = CartesianMotion({"x": "CV"}, origin_lla_deg_m=ORIGIN)
+    assert cartesian.noise_density["x"] == pytest.approx(32.0, rel=1e-12)
+
+
+@pytest.mark.parametrize("kind", ["CV", "CA"])
+def test_two_short_steps_add_the_same_noise_as_one_long_one(kind: str) -> None:
+    """Q(T1 + T2) = F(T2) Q(T1) F(T2)ᵀ + Q(T2): the reason to prefer it to a per-step model.
+
+    Asynchronous sensors cut time into uneven steps, and the uncertainty must not depend on
+    how it was cut.
+    """
+    model = CartesianMotion({"x": kind}, origin_lla_deg_m=ORIGIN)
+    first_s, second_s = 0.3, 1.1
+    f2, q2 = model.matrices(second_s)
+    q1 = model.matrices(first_s)[1]
+    # rtol 1e-12: a few products of polynomials in T, each exact to a few ulps.
+    np.testing.assert_allclose(
+        f2 @ q1 @ f2.T + q2, model.matrices(first_s + second_s)[1], rtol=1e-12
+    )
+
+
+def test_the_discrete_model_adds_less_noise_over_split_steps() -> None:
+    """Module Notes: kalman.process_noise_dwna depends on how the time is cut up."""
+    sigma_mps2 = 3.0
+    f = np.array([[1.0, 1.0], [0.0, 1.0]])
+    half = process_noise_dwna(1.0, sigma_mps2)
+    split = f @ half @ f.T + half
+    whole = process_noise_dwna(2.0, sigma_mps2)
+    # Two 1 s steps add a velocity variance of 2 sigma² against 4 sigma² for one 2 s step.
+    assert split[1, 1] < whole[1, 1]
+
+
+def test_cv_matches_the_discrete_model_in_velocity_variance_when_tau_is_half_the_step() -> None:
+    """The module's claim relating the two noise models: 2 sigma² tau T = sigma² T²."""
     step_s, sigma_accel_mps2 = 2.0, 3.0
     model = CartesianMotion(
         {"x": "CV"},
         origin_lla_deg_m=ORIGIN,
-        acceleration_noise_density_m2ps3=sigma_accel_mps2**2 * step_s,
+        sigma_acceleration_mps2=sigma_accel_mps2,
+        acceleration_correlation_time_s=step_s / 2,
     )
     # rtol 1e-12: both are σ² T², a few float64 operations each.
     np.testing.assert_allclose(
@@ -170,7 +217,7 @@ def test_a_closing_radial_target_loses_range() -> None:
 
 
 def test_radial_noise_is_the_cv_block_with_negative_cross_terms() -> None:
-    radial = RadialMotion()
+    radial = RadialMotion(1.0, 0.5)
     # rtol 1e-12: one power and one division per element.
     np.testing.assert_allclose(
         radial.process_noise(np.zeros(2), 1), [[1 / 3, -1 / 2], [-1 / 2, 1]], rtol=1e-12
@@ -218,24 +265,32 @@ def test_invalid_axes_are_rejected(axes: dict[str, str]) -> None:
 @pytest.mark.parametrize(
     "kwargs",
     [
-        {"acceleration_noise_density_m2ps3": -1.0},
-        {"acceleration_noise_density_m2ps3": np.inf},
-        {"jerk_noise_density_m2ps5": -1.0},
-        {"acceleration_noise_density_m2ps3": {"x": -1.0}},
+        {"sigma_acceleration_mps2": -1.0},
+        {"sigma_acceleration_mps2": np.inf},
+        {"sigma_jerk_mps3": -1.0},
+        {"sigma_acceleration_mps2": {"x": -1.0}},
     ],
 )
-def test_a_negative_or_infinite_density_is_rejected(kwargs: dict[str, Any]) -> None:
-    with pytest.raises(ValueError, match="densit"):
+def test_a_negative_or_infinite_sigma_is_rejected(kwargs: dict[str, Any]) -> None:
+    with pytest.raises(ValueError, match="sigma"):
         CartesianMotion({"x": "CV", "y": "CA"}, origin_lla_deg_m=ORIGIN, **kwargs)
 
 
-def test_a_density_mapping_must_name_exactly_its_axes() -> None:
+def test_a_sigma_mapping_must_name_exactly_its_axes() -> None:
     with pytest.raises(ValueError, match="exactly"):
         CartesianMotion(
             {"x": "CV", "y": "CV"},
             origin_lla_deg_m=ORIGIN,
-            acceleration_noise_density_m2ps3={"x": 1.0},
+            sigma_acceleration_mps2={"x": 1.0},
         )
+
+
+@pytest.mark.parametrize("tau_s", [0.0, -1.0, np.inf])
+def test_a_correlation_time_that_is_not_positive_and_finite_is_rejected(tau_s: float) -> None:
+    with pytest.raises(ValueError, match="acceleration_correlation_time_s"):
+        CartesianMotion({"x": "CV"}, origin_lla_deg_m=ORIGIN, acceleration_correlation_time_s=tau_s)
+    with pytest.raises(ValueError, match="acceleration_correlation_time_s"):
+        RadialMotion(acceleration_correlation_time_s=tau_s)
 
 
 def test_an_order_that_is_not_a_permutation_is_rejected() -> None:
@@ -243,10 +298,10 @@ def test_an_order_that_is_not_a_permutation_is_rejected() -> None:
         CartesianMotion({"x": "CV"}, origin_lla_deg_m=ORIGIN, order=("x_m", "x_m"))
 
 
-@pytest.mark.parametrize("density", [-1.0, np.nan])
-def test_a_negative_or_missing_radial_density_is_rejected(density: float) -> None:
-    with pytest.raises(ValueError, match="acceleration_noise_density_m2ps3"):
-        RadialMotion(density)
+@pytest.mark.parametrize("sigma_mps2", [-1.0, np.nan])
+def test_a_negative_or_missing_radial_sigma_is_rejected(sigma_mps2: float) -> None:
+    with pytest.raises(ValueError, match="sigma_acceleration_mps2"):
+        RadialMotion(sigma_mps2)
 
 
 @pytest.mark.parametrize("dt_s", [-1.0, np.inf])
