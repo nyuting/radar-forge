@@ -156,9 +156,10 @@ defects in the tracker, and §13 turns the first three into the work that follow
   §3.3, were recomputed against the current siting and window; the conclusion is unchanged.)* **Track maintenance under missed detections is therefore not exercised at the default
   settings**, and neither is the coast-and-delete logic of §7, which exists here largely untested
   by the scenario. §13.1 is the fix.
-- **CFAR is one-dimensional.** `core/detection.py` slides its window along one axis. Applied along
-  range it is correct but wasteful here, and it is the wrong detector for a scenario with more than
-  one target or with Doppler-spread clutter. §13.2.
+- **CFAR is one-dimensional.** This scenario's pipeline slides its window along range. That is
+  correct but wasteful here, and it is the wrong detector for a scenario with more than one target
+  or with Doppler-spread clutter. `core/detection.py` now has a 2-D ring (`cfar_detect_2d`), which
+  the pipeline does not use yet. §13.2.
 - **One target.** Association is exercised against clutter, not against a second aircraft. Track
   crossings, track swaps and the cases that motivate JPDA and MHT are out of scope. §13.3.
 - **Velocity unfolding is assumed, not free.** §5 feeds the tracker an *unfolded* range rate.
@@ -613,6 +614,14 @@ for the same `pfa`. This is a change to `core/detection.py` and belongs to that 
 workstream, not to this scenario (§10.1); it lands as a new `axis`-pair argument or a sibling
 function, not as a rewrite, so that this scenario's `pfa` calibration stays valid.
 
+**Landed as sibling functions:** `cfar_valid_mask_2d`, `cfar_noise_estimate_2d_w`,
+`cfar_threshold_2d_w` and `cfar_detect_2d`, with per-axis `n_train` and `n_guard`, `axes` (default
+`(-2, -1)`) and `wrap_axes`. The 1-D functions are unchanged, so this scenario's calibration
+(α = 11.417 dB) is too. Only CA and OS are offered in 2-D: their `pfa` depends only on the number
+of reference cells M, so a ring is calibrated as a 1-D window of M/2 cells per side. GO and SO
+compare two half-windows, which a ring does not have. Switching this scenario's pipeline over is a
+pipeline change, not part of this one.
+
 ### 13.3 Multiple targets — a note only
 
 Everything in §7 that makes GNN sufficient depends on there being one target: gates never overlap,
@@ -644,6 +653,12 @@ the axes that are circular, so a target on the Doppler wrap is labelled as one
 cluster rather than two. It belongs to `core/detection.py`'s workstream, not to
 this one (§10.1), and it would let `pipelines/tracking.py` drop its quiet-row
 roll. It pairs naturally with §13.2.
+
+**Landed:** `cluster_detections(..., wrap_axes=...)` joins clusters across each circular axis and
+takes the centroid relative to the peak, so a target on the wrap centres between bin `n - 1` and
+bin `n`, reported modulo `n`. It also takes an optional `noise_w`, so each `Detection` carries
+`noise_power_w` and `snr_db` (data-001 §6.5). `pipelines/tracking.py` still uses its quiet-row roll
+until it adopts `wrap_axes`.
 
 ---
 
