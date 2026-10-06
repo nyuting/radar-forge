@@ -96,7 +96,7 @@ begins at the map.
       Measurement  z = [range_m, (azimuth_rad,) (elevation_rad,) range_rate_mps]
             |
             v
-  core/tracking.py  TrackManager.step(measurements)
+  core/tracking/kalman.py  KalmanTracker.step(measurements)
             |
             v
   FrameTracks snapshots -> tracks.csv, detections.csv,
@@ -845,7 +845,7 @@ track to be seeded with `P₀`'s `v_max²` rate variance. It is easy to read the
 first clause and seed the state from both measurement components — but before a
 track can unfold, its measurement's velocity component is a *folded* value, and
 a track seeded with it starts out confidently wrong about which way the target
-is going. `TrackManager` gained `n_initiation_rows`, defaulting to 1.
+is going. `TrackManager` (now `KalmanTracker`) gained `n_initiation_rows`, defaulting to 1.
 
 ### 14.6 `sigma_accel_mps2` has to match the target as simulated
 
@@ -893,7 +893,7 @@ Three mechanisms were added in response, all measured:
 
 Assigning confirmed tracks ahead of tentative ones was also tried and rejected:
 it was worse on every count, because a widened track outbids tentative ones for
-false alarms too. The comment in `TrackManager.step` records the numbers.
+false alarms too. The comment in `KalmanTracker.step` records the numbers.
 
 **Measured acceptance, over the default 120-frame window:**
 

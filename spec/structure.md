@@ -79,7 +79,7 @@ src/radar_forge/
 │   ├── __init__.py
 │   ├── scenarios.py             # TOML scenario schema + loader (stdlib tomllib); frame loop
 │   ├── trajectories.py          # trajectory load/resample; monostatic and bistatic radar frames
-│   ├── tracking.py              # RD map → measurements → TrackManager, frame by frame (scenario 3)
+│   ├── tracking.py              # RD map → measurements → KalmanTracker, frame by frame (scenario 3)
 │   ├── generate.py              # scene -> baseband -> cube orchestration, batching, seeding
 │   ├── datasets.py              # torch Dataset / DataLoader wrappers (extra: ml)
 │   └── exporters/
@@ -505,7 +505,7 @@ carrying a filter library to get them would fail `CLAUDE.md`'s test for adding a
 matching and a staleness-based track manager, complete, in roughly one module — which is the
 evidence behind `spec/structure.md` D2's decision to keep `core/tracking.py` unsplit until a
 second association strategy arrives. Its `MultiObjectTracker.step(detections) -> tracks` signature
-is the shape `TrackManager` follows. It is a computer-vision tracker, so nothing about its cost
+is the shape `KalmanTracker` (formerly `TrackManager`) follows. It is a computer-vision tracker, so nothing about its cost
 metrics or box model transfers; the loop structure is the whole borrowing.
 
 **A.13d Tracktable**
