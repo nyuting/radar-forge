@@ -10,6 +10,11 @@ confirmed or deleted.
   new state, and takes everything else from a fixed prior: the starting guess
   used before any measurement.
 
+Not implemented yet: an initiator that picks a different rule for each
+measurement model, and one that never starts a track from a detection, for a
+sensor whose tracks must all come from
+:meth:`~radar_forge.core.tracking.tracker.Tracker.seed`.
+
 References
 ----------
 .. [1] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications
@@ -59,7 +64,7 @@ def _check_independent_blocks(covariance: NDArray[np.float64], indices: tuple[in
     if np.any(np.delete(covariance[list(indices)], list(indices), axis=1) != 0):
         msg = (
             "direct initiation requires independent observed/unobserved prior blocks: "
-            f"the prior covariance links coordinates {indices} to the others"
+            f"the prior covariance links coordinates {indices} to the others."
         )
         raise ValueError(msg)
 

@@ -35,6 +35,7 @@ from radar_forge.core.tracking._validation import (
     TIMESTAMP_TOLERANCE_S,
     as_covariance,
     as_points,
+    check_sigma_point_settings,
     cholesky_factor,
 )
 from radar_forge.core.tracking.coordinates import StateEstimate
@@ -151,15 +152,7 @@ class UKF:
         kappa: float = 0.0,
     ) -> None:
         n_state = state.state_layout.dimension
-        if not np.all(np.isfinite([alpha, beta, kappa])):
-            msg = f"alpha, beta and kappa must be finite; got {alpha}, {beta}, {kappa}"
-            raise ValueError(msg)
-        if alpha <= 0 or beta < 0 or n_state + kappa <= 0:
-            msg = (
-                "require alpha > 0, beta >= 0 and n_state + kappa > 0; "
-                f"got alpha={alpha}, beta={beta}, n_state + kappa={n_state + kappa}"
-            )
-            raise ValueError(msg)
+        check_sigma_point_settings(alpha, beta, kappa, n_state)
 
         self.motion_model = motion_model
         self._points: NDArray[np.float64] | None = None
@@ -204,7 +197,7 @@ class UKF:
             If the layouts do not match.
         """
         if state.state_layout != self.motion_model.state_layout:
-            msg = "the state's StateLayout must match the motion model's"
+            msg = "the state's StateLayout must match the motion model's."
             raise ValueError(msg)
         self._replace_state(state)
 
@@ -218,8 +211,8 @@ class UKF:
         r"""Return the sigma points of the current estimate, shape ``(2 n_state + 1, n_state)``.
 
         Row 0 is the mean. Rows 1 to n are the mean plus :math:`\sqrt{scale}` times each column
-        of the covariance's Cholesky factor, and rows n + 1 to 2n the mean minus them. Periodic
-        elements are wrapped onto their principal interval.
+        of the covariance's Cholesky factor, and rows n + 1 to 2n the mean minus them. Each
+        periodic element is wrapped into [-period/2, period/2).
         """
         if self._points is None:
             s = self._state
@@ -258,7 +251,7 @@ class UKF:
         """
         time_s = float(time_s)
         if not np.isfinite(time_s):
-            msg = f"timestamp_s must be finite; got {time_s}"
+            msg = f"timestamp_s must be finite; got {time_s}."
             raise ValueError(msg)
         dt_s = time_s - self._state.timestamp_s
         if abs(dt_s) <= TIMESTAMP_TOLERANCE_S:
@@ -266,7 +259,7 @@ class UKF:
         if dt_s < 0:
             msg = (
                 "out-of-sequence prediction is not supported: "
-                f"{time_s} s is before the estimate's {self._state.timestamp_s} s"
+                f"{time_s} s is before the estimate's {self._state.timestamp_s} s."
             )
             raise ValueError(msg)
 
@@ -298,11 +291,11 @@ class UKF:
             msg = (
                 "predict the estimator to the measurement's timestamp_s before an update or "
                 f"innovation; the measurement is at {measurement.timestamp_s} s, the estimate "
-                f"at {s.timestamp_s} s"
+                f"at {s.timestamp_s} s."
             )
             raise ValueError(msg)
         if model.state_layout != s.state_layout:
-            msg = "the measurement model's StateLayout must match the filter's"
+            msg = "the measurement model's StateLayout must match the filter's."
             raise ValueError(msg)
 
         points = self._sigma_points()
@@ -398,38 +391,15 @@ class UKF:
         estimate moves most of the way to the measurement. A noisy measurement gives a small
         gain, and the estimate stays near the prediction.
 
-        **Why not the Joseph form.** The linear Kalman filter is often written in the Joseph
-        form, :math:`(I - KH) P^- (I - KH)^T + K R K^T`. That form stays positive semidefinite
-        under roundoff, and even with a gain that is not optimal. It needs the measurement
-        matrix H, which the UKF does not have. The short form is safe here for two reasons:
-
-        - In exact arithmetic :math:`P^- - K S K^T = P^- - P_{xz} S^{-1} P_{xz}^T`. Take the
-          joint covariance of the state and the measurement,
-          :math:`\begin{bmatrix} P^- & P_{xz} \\ P_{xz}^T & S \end{bmatrix}`. The *Schur
-          complement* of S in it is :math:`P^- - P_{xz} S^{-1} P_{xz}^T`: the state's
-          covariance once the part the measurement explains is taken out. The joint
-          covariance is a sum of outer products with weights :math:`W^{(c)}_i`, plus R. With
-          every weight non-negative, as ``alpha = 1`` with ``kappa >= 0`` guarantees for every
-          state size (class Notes), it is positive semidefinite, and so is any Schur
-          complement of it.
-        - In floating point the result is then off by roundoff only, about :math:`n` times
-          float64 epsilon of the largest element. Taking the symmetric part removes the
-          asymmetric part of that error. What is left is five orders of magnitude below the
-          tolerance ``StateEstimate`` allows, so roundoff cannot stop a long run.
-
-        So the filter needs no further safeguards. It takes the symmetric part of each
-        covariance. It never forms :math:`S^{-1}`: K comes from a linear solve, and the NIS from
-        a triangular solve with S's Cholesky factor. It adds no diagonal jitter to P, which
-        would bias every estimate and hide a real loss of definiteness. Only the Cholesky
-        factorisation that places the sigma points retries with a roundoff-sized jitter when it
-        fails, and that jitter is not stored. A square-root UKF, which carries L instead of P,
-        would guarantee definiteness, but its QR and Cholesky-update steps are much harder to
-        read, and nothing here needs it.
-
-        ``tests/core/tracking/test_ukf.py`` runs 200 steps at a range variance of 468 m² and a
-        range-rate variance of 3e-4 m²/s², and checks the covariance stays positive definite.
-        It also runs the nonlinear bistatic model on a CV state for 200 steps, with the
-        default ``alpha`` and ``kappa``, and checks the same.
+        **Why not the Joseph form.** A linear Kalman filter is often written in the Joseph
+        form, :math:`(I - KH) P^- (I - KH)^T + K R K^T`, which stays positive semidefinite
+        under roundoff. It needs the measurement matrix H, which the UKF does not have. The
+        short form is safe here: :math:`P^- - K S K^T` is the Schur complement of S in the
+        joint covariance of state and measurement, and with every sigma-point weight
+        non-negative (class Notes) that joint covariance, and so its Schur complement, is
+        positive semidefinite. Roundoff is then all that is left, and taking the symmetric
+        part of P keeps it far below what ``StateEstimate`` allows. The 200-step covariance
+        tests in ``tests/core/tracking/test_ukf.py`` check this.
 
         References
         ----------

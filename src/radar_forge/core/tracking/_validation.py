@@ -65,7 +65,7 @@ def as_vector(value: ArrayLike, dimension: int, name: str = "vector") -> NDArray
     """
     result = np.array(value, dtype=np.float64, copy=True)
     if dimension < 1 or result.shape != (dimension,) or not np.all(np.isfinite(result)):
-        msg = f"{name} must be finite with shape ({dimension},); got shape {result.shape}"
+        msg = f"{name} must be finite with shape ({dimension},); got shape {result.shape}."
         raise ValueError(msg)
     return result
 
@@ -105,10 +105,116 @@ def as_points(
     result = np.asarray(value, dtype=np.float64)
     if result.shape != (n_points, dimension) or not np.all(np.isfinite(result)):
         msg = (
-            f"{name} must be finite with shape ({n_points}, {dimension}); got shape {result.shape}"
+            f"{name} must be finite with shape ({n_points}, {dimension}); got shape {result.shape}."
         )
         raise ValueError(msg)
     return result
+
+
+def check_points(array: NDArray[np.float64], dimension: int, name: str) -> None:
+    """Raise unless ``array`` is finite with shape ``(dimension,)`` or ``(n_points, dimension)``.
+
+    Parameters
+    ----------
+    array : numpy.ndarray
+        One state, shape ``(dimension,)``, or a stack of states,
+        shape ``(n_points, dimension)``.
+    dimension : int
+        Required length of the last axis.
+    name : str
+        Name used in the error message.
+
+    Raises
+    ------
+    ValueError
+        If ``array`` has the wrong shape or holds a NaN or an infinity.
+    """
+    if array.ndim not in (1, 2) or array.shape[-1] != dimension or not np.all(np.isfinite(array)):
+        msg = (
+            f"{name} must be finite with shape ({dimension},) or (n_points, {dimension}); "
+            f"got shape {array.shape}."
+        )
+        raise ValueError(msg)
+
+
+def check_frame_and_origin(
+    frame: str, origin_lla_deg_m: tuple[float, ...] | None
+) -> tuple[float, float, float] | None:
+    """Check a frame name and an east-north-up origin, and return the origin as a tuple.
+
+    :class:`~radar_forge.core.tracking.coordinates.StateLayout` and
+    :class:`~radar_forge.core.tracking.measurement_models.SensorPose` both call this, so a
+    layout and a sensor site accept exactly the same frames and origins.
+
+    Parameters
+    ----------
+    frame : str
+        Name of the frame, such as ``"ENU"``.
+    origin_lla_deg_m : tuple of float or None
+        Origin of the east-north-up frame: latitude and longitude in degrees, altitude in
+        metres. None means the frame is not tied to the Earth.
+
+    Returns
+    -------
+    tuple of float or None
+        The origin as a ``(latitude_deg, longitude_deg, altitude_m)`` tuple, or None.
+
+    Raises
+    ------
+    ValueError
+        If ``frame`` is empty, or the origin is not three finite numbers with latitude in
+        [-90, 90] and longitude in [-180, 180].
+    """
+    if not frame:
+        msg = "frame must be a nonempty name."
+        raise ValueError(msg)
+    if origin_lla_deg_m is None:
+        return None
+    origin = tuple(float(value) for value in origin_lla_deg_m)
+    if (
+        len(origin) != 3
+        or not np.all(np.isfinite(origin))
+        or abs(origin[0]) > 90
+        or abs(origin[1]) > 180
+    ):
+        msg = (
+            "ENU origin requires latitude and longitude in degrees and altitude in "
+            f"metres; got {origin}."
+        )
+        raise ValueError(msg)
+    return origin[0], origin[1], origin[2]
+
+
+def check_sigma_point_settings(alpha: float, beta: float, kappa: float, n_state: int) -> None:
+    r"""Raise unless the UKF's sigma-point parameters are valid for a state of ``n_state``.
+
+    :class:`~radar_forge.core.tracking.ukf.UKF` calls this when it is built, and
+    :func:`~radar_forge.core.tracking.tracker.build_tracker` calls it before any track exists,
+    so a bad setting fails when the tracker is built, not at the first track birth.
+
+    Parameters
+    ----------
+    alpha, beta, kappa : float
+        The spread :math:`\alpha`, the prior-distribution correction :math:`\beta` and the
+        secondary scaling :math:`\kappa`; see :class:`~radar_forge.core.tracking.ukf.UKF`.
+    n_state : int
+        Number of state coordinates.
+
+    Raises
+    ------
+    ValueError
+        If a parameter is not finite, ``alpha`` is not positive, ``beta`` is negative, or
+        ``n_state + kappa`` is not positive.
+    """
+    if not np.all(np.isfinite([alpha, beta, kappa])):
+        msg = f"alpha, beta and kappa must be finite; got {alpha}, {beta}, {kappa}."
+        raise ValueError(msg)
+    if alpha <= 0 or beta < 0 or n_state + kappa <= 0:
+        msg = (
+            "require alpha > 0, beta >= 0 and n_state + kappa > 0; "
+            f"got alpha={alpha}, beta={beta}, n_state + kappa={n_state + kappa}."
+        )
+        raise ValueError(msg)
 
 
 def _roundoff_allowance(matrix: NDArray[np.float64]) -> float:
@@ -123,11 +229,12 @@ def _check_square(matrix: NDArray[np.float64], dimension: int, name: str) -> Non
     """Raise unless ``matrix`` is a finite, symmetric ``(dimension, dimension)`` array."""
     if dimension < 1 or matrix.shape != (dimension, dimension) or not np.all(np.isfinite(matrix)):
         msg = (
-            f"{name} must be finite with shape ({dimension}, {dimension}); got shape {matrix.shape}"
+            f"{name} must be finite with shape ({dimension}, {dimension}); "
+            f"got shape {matrix.shape}."
         )
         raise ValueError(msg)
     if not np.allclose(matrix, matrix.T, rtol=0.0, atol=_roundoff_allowance(matrix)):
-        msg = f"{name} must be symmetric to within roundoff"
+        msg = f"{name} must be symmetric to within roundoff."
         raise ValueError(msg)
 
 
@@ -184,7 +291,7 @@ def as_covariance(value: ArrayLike, dimension: int) -> NDArray[np.float64]:
     _check_square(result, dimension, "covariance")
     result = (result + result.T) / 2
     if not _is_semidefinite(result):
-        msg = "covariance must be positive semidefinite; it has a negative eigenvalue"
+        msg = "covariance must be positive semidefinite; it has a negative eigenvalue."
         raise ValueError(msg)
     return result
 
@@ -237,5 +344,5 @@ def cholesky_factor(matrix: NDArray[np.float64]) -> NDArray[np.float64]:
             )
         except np.linalg.LinAlgError:
             pass
-    msg = "covariance is singular or not positive definite, beyond roundoff"
+    msg = "covariance is singular or not positive definite, beyond roundoff."
     raise ValueError(msg)

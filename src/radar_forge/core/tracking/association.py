@@ -34,10 +34,9 @@ from typing import Protocol
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.optimize import linear_sum_assignment
 
 from radar_forge.core.tracking.estimation import InnovationStats
-from radar_forge.core.tracking.kalman import gate_threshold
+from radar_forge.core.tracking.kalman import associate_gnn, gate_threshold
 
 __all__ = [
     "AssociationResult",
@@ -177,27 +176,21 @@ class GlobalNearestNeighbour:
 
     GNN first makes as many pairs as the gate allows. Only then, among all
     assignments with that many pairs, does it pick the one with the smallest
-    total cost. ``kalman.associate_gnn`` and Stone Soup's default GNN
-    associator make the same choice. So a track is never left without a
-    measurement just because leaving it out would lower the total cost.
+    total cost. So a track is never left without a measurement just because
+    leaving it out would lower the total cost. Stone Soup's default GNN
+    associator makes the same choice.
 
     Notes
     -----
-    The problem is solved with ``scipy.optimize.linear_sum_assignment`` on an
-    augmented matrix. Each track gets one extra "no measurement" column of its
-    own, a *dummy*. The finite costs are shifted and scaled into ``[0, 1]``,
-    and every dummy entry costs ``n_tracks + 1``. The solver gives every track
-    exactly one column, real or dummy. So an assignment with k real pairs pays
-    for ``n_tracks - k`` dummies.
-
-    Why the solver always prefers more pairs: each extra real pair removes one
-    dummy, which saves ``n_tracks + 1``. All the real pairs together cost at
-    most ``n_tracks``, because there are at most ``n_tracks`` of them and each
-    costs at most 1. So an assignment with more real pairs always costs less,
-    by at least 1, whatever its real costs are. Scaling keeps the order of the
-    costs, so among the assignments with the most pairs the cheapest one still
-    wins. Negative costs, such as a negative log-likelihood, are allowed for
-    the same reason.
+    This is :func:`~radar_forge.core.tracking.kalman.associate_gnn`, the
+    assignment the scenario 003 tracker uses, with no gate of its own: the
+    costs arrive already gated, with ``+inf`` for a rejected pair.
+    ``associate_gnn`` gives each rejected pair a large finite cost, 1e12, and
+    solves with ``scipy.optimize.linear_sum_assignment``, which minimises the
+    total cost. Using a rejected pair then costs 1e12, so the solver makes as
+    many real pairs as it can, provided the real costs differ by far less than
+    1e12, as NIS and log-likelihood costs always do. Negative costs, such as a
+    negative log-likelihood, are allowed.
 
     The alternative is a finite non-assignment cost: leaving a track unpaired
     costs a fixed amount, often worked out from the detection probability and
@@ -242,24 +235,9 @@ class GlobalNearestNeighbour:
         ((0, 0), (1, 1))
         """
         costs = _check_costs(costs)
-        n_tracks, n_measurements = costs.shape
-        finite = np.isfinite(costs)
-        if n_tracks == 0 or n_measurements == 0 or not finite.any():
-            return _result(costs, [])
-        values = costs[finite]
-        scale = max(1.0, float(np.max(np.abs(values))))
-        normalised = values / scale
-        low, high = normalised.min(), normalised.max()
-        augmented = np.full((n_tracks, n_measurements + n_tracks), float(n_tracks + 1))
-        augmented[:, :n_measurements] = np.inf
-        augmented[:, :n_measurements][finite] = (normalised - low) / max(1.0, float(high - low))
-        rows, cols = linear_sum_assignment(augmented)
-        matches = [
-            (int(i), int(j))
-            for i, j in zip(rows, cols, strict=True)
-            if j < n_measurements and finite[i, j]
-        ]
-        return _result(costs, matches)
+        # The costs are already gated, so associate_gnn is given no gate: an
+        # infinite threshold keeps every finite cost.
+        return _result(costs, associate_gnn(costs, np.inf))
 
 
 @dataclass(frozen=True)

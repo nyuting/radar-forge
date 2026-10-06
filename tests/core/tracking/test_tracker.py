@@ -18,9 +18,10 @@ from radar_forge.core.tracking.estimation import InnovationStats
 from radar_forge.core.tracking.lifecycle import LifecyclePolicy
 from radar_forge.core.tracking.measurement_models import Measurement, MeasurementBatch, SensorRoute
 from radar_forge.core.tracking.tracker import Tracker, build_tracker_enu
-from radar_forge.core.tracking.tracks import TrackSnapshot, TrackStatus
+from radar_forge.core.tracking.tracks import TrackSnapshot
 
 ORIGIN = (36.00250, -78.94100, 60.0)
+TENTATIVE, CONFIRMED, COASTING, DELETED = "tentative", "confirmed", "coasting", "deleted"
 
 
 @pytest.fixture
@@ -34,10 +35,10 @@ def batch(
     time_s: float,
     positions_m: Sequence[float],
     variance_m2: float = 0.1,
-    route_id: str = "sensor",
+    sensor_id: str = "sensor",
 ) -> MeasurementBatch:
     """One scan of x-position measurements, all with the same variance."""
-    return tracker.sensors[route_id].batch(
+    return tracker.sensors[sensor_id].batch(
         time_s,
         [("measurement", np.array([p]), np.array([[variance_m2]])) for p in positions_m],
     )
@@ -70,7 +71,7 @@ def test_a_track_is_confirmed_on_the_third_scan() -> None:
     """3-of-5: the birth scan is hit one, so scan 2 is hit three."""
     tracker = one_axis_tracker()
     statuses = [tracker.process(batch(tracker, t, [100.0 + 3.0 * t]))[0].status for t in range(3)]
-    assert statuses == [TrackStatus.TENTATIVE, TrackStatus.TENTATIVE, TrackStatus.CONFIRMED]
+    assert statuses == [TENTATIVE, TENTATIVE, CONFIRMED]
 
 
 def test_no_track_stays_tentative_longer_than_its_first_n_scans() -> None:
@@ -92,7 +93,7 @@ def test_no_track_stays_tentative_longer_than_its_first_n_scans() -> None:
         else:
             snapshots = tracker.process(MeasurementBatch(t, "sensor"))
         for snapshot in snapshots:
-            if snapshot.status == TrackStatus.TENTATIVE:
+            if snapshot.status == TENTATIVE:
                 first_tentative.setdefault(snapshot.track_id, t)
                 longest = max(longest, t - first_tentative[snapshot.track_id] + 1)
     assert longest <= 5
@@ -103,7 +104,7 @@ def test_a_confirmed_track_coasts_through_a_miss_by_dead_reckoning() -> None:
     tracker = confirmed_tracker()
     before = tracker.tracks[0].snapshot()
     after = tracker.process(MeasurementBatch(5, "sensor"))[0]
-    assert after.status == TrackStatus.CONFIRMED
+    assert after.status == COASTING
     # rtol 1e-9: the UKF reproduces a linear prediction to round-off, and these
     # are a handful of float64 operations on numbers near 100.
     np.testing.assert_allclose(after.state[0], before.state[0] + before.state[1], rtol=1e-9)
@@ -117,12 +118,18 @@ def test_coasting_grows_the_covariance() -> None:
 
 
 def test_a_confirmed_track_survives_one_miss_fewer_than_the_limit() -> None:
-    """n_delete_misses = 5: four misses in a row leave the track confirmed."""
+    """n_delete_misses = 5: four misses in a row leave the track alive, coasting."""
     tracker = confirmed_tracker()
     # Scans are processed in time order; each depends on the one before.
     for time_s in range(5, 9):
         snapshot = tracker.process(MeasurementBatch(time_s, "sensor"))[0]
-    assert snapshot.status == TrackStatus.CONFIRMED
+    assert snapshot.status == COASTING
+
+
+def test_a_coasting_track_is_confirmed_again_by_a_hit() -> None:
+    tracker = confirmed_tracker()
+    tracker.process(MeasurementBatch(5, "sensor"))
+    assert tracker.process(batch(tracker, 6, [118.0]))[0].status == CONFIRMED
 
 
 def test_a_confirmed_track_is_reported_deleted_on_the_last_allowed_miss() -> None:
@@ -130,7 +137,7 @@ def test_a_confirmed_track_is_reported_deleted_on_the_last_allowed_miss() -> Non
     # Scans are processed in time order; each depends on the one before.
     for time_s in range(5, 9):
         tracker.process(MeasurementBatch(time_s, "sensor"))
-    assert tracker.process(MeasurementBatch(9, "sensor"))[0].status == TrackStatus.DELETED
+    assert tracker.process(MeasurementBatch(9, "sensor"))[0].status == DELETED
 
 
 def test_a_deleted_track_is_reported_only_once() -> None:
@@ -154,8 +161,8 @@ def test_a_stale_track_is_deleted_before_it_can_take_a_measurement() -> None:
     first = tracker.process(batch(tracker, 0, [100.0]))[0].track_id
     result = tracker.process(batch(tracker, 31, [100.0]))
     assert [(s.track_id == first, s.status) for s in result] == [
-        (True, TrackStatus.DELETED),
-        (False, TrackStatus.TENTATIVE),
+        (True, DELETED),
+        (False, TENTATIVE),
     ]
 
 
@@ -199,7 +206,7 @@ def test_a_confirmed_track_gets_first_pick_over_a_tentative_one() -> None:
     tracker = stationary_confirmed_tracker()
     tracker.process(batch(tracker, 6, [1000.0, 1015.0], variance_m2=1.0))
     confirmed, tentative = tracker.tracks
-    assert (confirmed.status, tentative.status) == (TrackStatus.CONFIRMED, TrackStatus.TENTATIVE)
+    assert (confirmed.status, tentative.status) == (CONFIRMED, TENTATIVE)
 
     detection = Measurement(np.array([1003.0]), np.array([[1.0]]), 7.0, "sensor", "measurement")
     model = tracker.measurement_models["measurement"]
@@ -227,7 +234,7 @@ def test_no_track_is_born_inside_a_confirmed_tracks_gate() -> None:
 def test_a_detection_outside_every_confirmed_gate_starts_a_track() -> None:
     tracker = stationary_confirmed_tracker()
     snapshots = tracker.process(batch(tracker, 6, [1000.0, 1100.0], variance_m2=1.0))
-    assert [s.status for s in snapshots] == [TrackStatus.CONFIRMED, TrackStatus.TENTATIVE]
+    assert [s.status for s in snapshots] == [CONFIRMED, TENTATIVE]
 
 
 def test_the_update_reuses_the_innovation_computed_for_gating(
@@ -256,12 +263,12 @@ def test_the_update_reuses_the_innovation_computed_for_gating(
     )
 
 
-def run_crossing_targets() -> tuple[list[list[str]], tuple[TrackSnapshot, ...]]:
+def run_crossing_targets() -> tuple[list[list[int]], tuple[TrackSnapshot, ...]]:
     """Two targets crossing, seen by two sensors in turn; return IDs per scan."""
     # q = 2 sigma² tau = 0.01 m²/s³: the targets move almost exactly at constant velocity.
     tracker = one_axis_tracker(sigma_acceleration_mps2=0.1, acceleration_correlation_time_s=0.5)
     tracker.add_sensor(SensorRoute("second", ("measurement",)))
-    identifiers: list[list[str]] = []
+    identifiers: list[list[int]] = []
     snapshots: tuple[TrackSnapshot, ...] = ()
     # Alternate scans between the two sensors, and reverse the measurement
     # order on the second, so that association must follow the predicted
@@ -270,19 +277,27 @@ def run_crossing_targets() -> tuple[list[list[str]], tuple[TrackSnapshot, ...]]:
     # Scans are processed in time order; each depends on the one before.
     for scan in range(24):
         time_s = scan / 2
-        route_id = "sensor" if scan % 2 == 0 else "second"
+        sensor_id = "sensor" if scan % 2 == 0 else "second"
         positions_m = [100 + 3 * time_s, 131 - 3 * time_s]
         if scan % 2:
             positions_m.reverse()
-        snapshots = tracker.process(batch(tracker, time_s, positions_m, route_id=route_id))
+        snapshots = tracker.process(batch(tracker, time_s, positions_m, sensor_id=sensor_id))
         identifiers.append([s.track_id for s in snapshots])
     return identifiers, snapshots
 
 
 def test_crossing_targets_keep_their_identities_across_two_sensors() -> None:
-    identifiers, snapshots = run_crossing_targets()
+    identifiers, _ = run_crossing_targets()
     assert all(ids == identifiers[0] for ids in identifiers)
-    assert [s.status for s in snapshots] == [TrackStatus.CONFIRMED] * 2
+
+
+def test_crossing_targets_both_end_confirmed() -> None:
+    _, snapshots = run_crossing_targets()
+    assert [s.status for s in snapshots] == [CONFIRMED] * 2
+
+
+def test_each_crossing_track_is_updated_by_both_sensors() -> None:
+    _, snapshots = run_crossing_targets()
     assert all(s.source_sensor_ids == frozenset({"sensor", "second"}) for s in snapshots)
 
 
@@ -316,7 +331,8 @@ def test_a_target_keeps_one_track_through_clutter_and_missed_detections(
         snapshots = tracker.process(batch(tracker, t, positions_m))
         near = [s for s in snapshots if abs(s.state[0] - truth_m) < 10.0]
         if t >= 10:
-            confirmed = [s for s in near if s.status == TrackStatus.CONFIRMED]
+            # Confirmed or coasting: a missed detection makes the track coast.
+            confirmed = [s for s in near if s.status in (CONFIRMED, COASTING)]
             assert len(confirmed) == 1
             identifiers.add(confirmed[0].track_id)
     assert len(identifiers) == 1
@@ -349,7 +365,7 @@ def test_several_detections_of_one_target_give_one_confirmed_track(
         bin_start_m = np.floor(truth_m / bin_width_m) * bin_width_m
         positions_m = rng.uniform(bin_start_m, bin_start_m + bin_width_m, 3)
         snapshots = tracker.process(batch(tracker, t, positions_m, variance_m2=variance_m2))
-    assert [s.status for s in snapshots].count(TrackStatus.CONFIRMED) == 1
+    assert sum(s.status in (CONFIRMED, COASTING) for s in snapshots) == 1
 
 
 # --------------------------------------------------------------------------- #
@@ -392,7 +408,7 @@ def test_a_measurement_of_the_wrong_dimension_is_rejected() -> None:
 
 
 def test_a_measurement_whose_model_the_sensor_does_not_list_is_rejected() -> None:
-    """A batch built by hand can skip SensorRoute.batch; process() still checks the route."""
+    """A batch built by hand can skip SensorRoute.batch; process() still checks the sensor."""
     tracker = one_axis_tracker()
     stray = Measurement(np.zeros(1), np.eye(1), 0.0, "sensor", "other")
     with pytest.raises(ValueError, match="unregistered models"):
@@ -417,12 +433,12 @@ def test_two_sensors_at_the_same_time_both_update_the_track() -> None:
     tracker = one_axis_tracker()
     tracker.add_sensor(SensorRoute("second", ("measurement",)))
     tracker.process(batch(tracker, 1, [100.0]))
-    tracker.process(batch(tracker, 1, [100.0], route_id="second"))
+    tracker.process(batch(tracker, 1, [100.0], sensor_id="second"))
     assert tracker.tracks[0].n_hits == 2
 
 
 def test_the_sensor_registry_cannot_be_changed_directly() -> None:
-    """Review #10: a route added this way would skip validation."""
+    """Review #10: a sensor added this way would skip validation."""
     tracker = one_axis_tracker()
     with pytest.raises(TypeError):
         tracker.sensors["other"] = SensorRoute("other", ("measurement",))  # type: ignore[index]
@@ -434,21 +450,21 @@ def test_add_sensor_rejects_an_unregistered_model() -> None:
         tracker.add_sensor(SensorRoute("other", ("nonexistent",)))
 
 
-def test_add_sensor_rejects_a_route_already_registered() -> None:
+def test_add_sensor_rejects_a_sensor_already_registered() -> None:
     tracker = one_axis_tracker()
     with pytest.raises(ValueError, match="already registered"):
         tracker.add_sensor(SensorRoute("sensor", ("measurement",)))
 
 
-def test_the_constructor_rejects_a_key_that_is_not_the_route_id() -> None:
+def test_the_constructor_rejects_a_key_that_is_not_the_sensor_id() -> None:
     tracker = one_axis_tracker()
-    with pytest.raises(ValueError, match="route_id"):
+    with pytest.raises(ValueError, match="sensor_id"):
         Tracker(
             tracker.measurement_models,
             {"wrong": SensorRoute("sensor", ("measurement",))},
             tracker.gate,
             tracker.associator,
-            tracker.manager,
+            tracker.initiator,
         )
 
 
@@ -460,7 +476,7 @@ def test_the_constructor_rejects_an_unknown_cost() -> None:
             tracker.sensors,
             tracker.gate,
             tracker.associator,
-            tracker.manager,
+            tracker.initiator,
             cost="distance",  # type: ignore[arg-type]
         )
 
@@ -488,3 +504,8 @@ def test_build_tracker_rejects_an_unknown_association() -> None:
             origin_lla_deg_m=ORIGIN,
             association="JPDA",  # type: ignore[arg-type]
         )
+
+
+def test_build_tracker_rejects_impossible_sigma_point_settings_before_any_track() -> None:
+    with pytest.raises(ValueError, match="alpha"):
+        one_axis_tracker(alpha=0.0)

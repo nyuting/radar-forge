@@ -1,22 +1,24 @@
 """The tracker: one scan of measurements in, the current tracks out.
 
 :class:`Tracker` runs the standard scan loop. For each batch of measurements
-from one sensor at one time it does six steps:
+from one sensor at one time it does five steps:
 
 1. **Predict** every track forward to the batch time, and delete any track
    that has gone too long without a measurement.
-2. **Gate** every track-measurement pair with a chi-square test on the NIS
-   (normalised innovation squared), and score the pairs that pass.
+2. **Gate** every track-measurement pair, and score the pairs that pass. The
+   gate is a *chi-square gate*: a pair passes if its NIS (normalised
+   innovation squared) is below the chi-square quantile for the gate
+   probability (see :class:`~radar_forge.core.tracking.association.ChiSquareGate`).
 3. **Assign** measurements to tracks in two stages. Confirmed tracks pick
    first, from all the measurements. Tentative tracks then pick from the
    measurements that are left.
-4. **Update** each track that got a measurement. Each innovation, the
-   difference between a measurement and what the track expected to see, is
-   computed once, in step 2, and reused here.
+4. **Update** each track that got a measurement, and count a hit or a miss
+   for every track the sensor can see. Counting is when a track is confirmed
+   or deleted, by the M-of-N rule in :mod:`~radar_forge.core.tracking.lifecycle`.
+   Each innovation, the difference between a measurement and what the track
+   expected to see, is computed once, in step 2, and reused here.
 5. **Start** a tentative track from each measurement that no track took,
    unless it lies inside a confirmed track's gate.
-6. **Confirm or delete** tracks by the M-of-N rule in
-   :mod:`~radar_forge.core.tracking.lifecycle`.
 
 Steps 3 and 5 are there so that a new, unproven track cannot take a
 confirmed track's measurement. A tentative track is young, so its covariance
@@ -46,7 +48,10 @@ from typing import Literal
 import numpy as np
 from numpy.typing import NDArray
 
-from radar_forge.core.tracking._validation import TIMESTAMP_TOLERANCE_S
+from radar_forge.core.tracking._validation import (
+    TIMESTAMP_TOLERANCE_S,
+    check_sigma_point_settings,
+)
 from radar_forge.core.tracking.association import (
     Associator,
     ChiSquareGate,
@@ -59,12 +64,13 @@ from radar_forge.core.tracking.initiation import DirectStateInitiator, TrackInit
 from radar_forge.core.tracking.lifecycle import LifecyclePolicy, TrackManager
 from radar_forge.core.tracking.measurement_models import (
     CartesianPosition,
+    Measurement,
     MeasurementBatch,
     MeasurementModel,
     SensorRoute,
 )
 from radar_forge.core.tracking.motion import CartesianMotion, MotionKind, MotionModel
-from radar_forge.core.tracking.tracks import Track, TrackSnapshot, TrackStatus
+from radar_forge.core.tracking.tracks import Track, TrackSnapshot
 from radar_forge.core.tracking.ukf import UKF
 
 __all__ = [
@@ -82,11 +88,8 @@ _SIGMA_ACCELERATION_PRIOR_MPS2 = 10.0
 class Tracker:
     r"""Track many targets from batches of measurements, one scan at a time.
 
-    This is the class Stone Soup calls ``MultiTargetTracker``. Stone Soup
-    builds it from a detector, an initiator, deleters, a data associator and an
-    updater. Here the initiator and deleters are the one ``manager``, the data
-    associator is ``gate`` plus ``associator``, and each track's estimator does
-    the predicting and updating.
+    Each call to :meth:`process` takes one sensor's scan and returns every
+    track as it stands after it. The steps are listed in the module docstring.
 
     Parameters
     ----------
@@ -94,15 +97,17 @@ class Tracker:
         Every measurement model, by the ID that a ``Measurement`` names in its
         ``measurement_model_id``.
     sensors : mapping of str to SensorRoute
-        Every sensor route, keyed by its ``route_id``. A batch's ``sensor_id``
-        picks one. The route lists which measurement models that sensor may
-        use, and may say which tracks the sensor can see.
+        Every sensor, keyed by its ``sensor_id``. A batch's ``sensor_id`` picks
+        one. Each lists which measurement models that sensor may use, and may
+        say which tracks the sensor can see.
     gate : ChiSquareGate
         Rejects track-measurement pairs that are too far apart.
     associator : Associator
         Chooses among the pairs that pass the gate.
-    manager : TrackManager
-        Starts, confirms and deletes tracks.
+    initiator : TrackInitiator
+        Builds the filter for a new track from a measurement no track took.
+    policy : LifecyclePolicy or None, optional
+        When tracks are confirmed and deleted. None uses the defaults.
     cost : {"nis", "negative_log_likelihood"}, default "nis"
         How a pair that passes the gate is scored; smaller is better.
 
@@ -114,26 +119,18 @@ class Tracker:
           and a factor of one half, this is Blackman's generalised distance
           :math:`d^2 + \ln|S|`.
 
-        Why the choice matters: dividing by :math:`S` makes a very uncertain
-        track look like a good match for anything nearby. Take a confirmed
-        track with :math:`S = 2\,\mathrm{m}^2` and a detection 3 m from it:
-        :math:`d^2 = 9 / 2 = 4.5`. A tentative track one scan old still has
-        :math:`S \approx 10^4\,\mathrm{m}^2`, from its 100 m/s velocity
-        prior. The same detection 12 m from it gives
-        :math:`d^2 = 144 / 10^4 \approx 0.01`. So NIS gives the detection to
-        the tentative track. The :math:`\ln|S|` term charges a track for
-        being uncertain: :math:`4.5 + \ln 2 \approx 5.2` against
-        :math:`0.01 + \ln 10^4 \approx 9.2`. So the generalised distance
-        gives it to the confirmed track. The two-stage assignment in
-        :meth:`process` already stops a tentative track winning here. But the
-        same effect can still favour an uncertain confirmed track over a
-        well-placed one. An example is a track that has coasted for several
-        scans.
+        Dividing by :math:`S` makes a very uncertain track, such as one that
+        has coasted for several scans, look like a good match for anything
+        nearby. The :math:`\ln|S|` term charges a track for being uncertain,
+        so the negative log-likelihood favours the better-placed track.
 
     Attributes
     ----------
-    gate, associator, manager, cost
+    gate, associator, initiator, cost
         As given.
+    manager : TrackManager
+        Hands out track identifiers and confirms and deletes tracks, by
+        ``policy``.
     tracks : list of Track
         The live tracks, in order of creation. Deleted tracks are removed.
     last_timestamp_s : float or None
@@ -143,7 +140,7 @@ class Tracker:
     ------
     ValueError
         If ``cost`` is not one of the two names, a key of ``sensors`` is not
-        its route's ``route_id``, or a sensor route is invalid (see
+        its sensor's ``sensor_id``, or a sensor is invalid (see
         :meth:`add_sensor`).
 
     Notes
@@ -152,6 +149,12 @@ class Tracker:
     be justified for the target. The tracker is single-threaded. If a
     user-supplied component raises in the middle of a scan, the tracks already
     changed in that scan are not rolled back.
+
+    This is the class Stone Soup calls ``MultiTargetTracker``. Stone Soup
+    builds it from a detector, an initiator, deleters, a data associator and an
+    updater. Here the deleters are the ``manager``, the data associator is
+    ``gate`` plus ``associator``, and each track's estimator does the
+    predicting and updating.
 
     References
     ----------
@@ -168,7 +171,6 @@ class Tracker:
     ...     UKF, CartesianMotion, CartesianPosition, ChiSquareGate,
     ...     DirectStateInitiator, GlobalNearestNeighbour, LifecyclePolicy,
     ...     SensorRoute, StateEstimate)
-    >>> from radar_forge.core.tracking.lifecycle import TrackManager
     >>> motion = CartesianMotion({"x": "CV"}, origin_lla_deg_m=(36.0, -78.9, 60.0))
     >>> model = CartesianPosition(motion.state_layout, ("x_m",))
     >>> prior = StateEstimate(np.zeros(2), np.diag([1.0, 100.0**2]), 0.0, motion.state_layout)
@@ -178,11 +180,12 @@ class Tracker:
     ...     {"radar": SensorRoute("radar", ("position",))},
     ...     ChiSquareGate(0.997),
     ...     GlobalNearestNeighbour(),
-    ...     TrackManager(initiator, LifecyclePolicy(n_confirm_hits=3, n_confirm_frames=5)),
+    ...     initiator,
+    ...     LifecyclePolicy(n_confirm_hits=3, n_confirm_frames=5),
     ... )
     >>> scan = tracker.sensors["radar"].batch(
     ...     0.0, [("position", np.array([1000.0]), np.array([[4.0]]))])
-    >>> [snapshot.status.value for snapshot in tracker.process(scan)]
+    >>> [snapshot.status for snapshot in tracker.process(scan)]
     ['tentative']
     """
 
@@ -192,29 +195,25 @@ class Tracker:
         sensors: Mapping[str, SensorRoute],
         gate: ChiSquareGate,
         associator: Associator,
-        manager: TrackManager,
+        initiator: TrackInitiator,
+        policy: LifecyclePolicy | None = None,
         cost: Literal["nis", "negative_log_likelihood"] = "nis",
     ) -> None:
         if cost not in ("nis", "negative_log_likelihood"):
             msg = f"cost must be 'nis' or 'negative_log_likelihood'; got {cost!r}."
             raise ValueError(msg)
-        if any(key != route.route_id for key, route in sensors.items()):
-            mismatched = {
-                key: route.route_id for key, route in sensors.items() if key != route.route_id
-            }
-            msg = f"each sensor key must be its route's route_id; got key: route_id {mismatched}."
-            raise ValueError(msg)
+        _check_sensor_keys(sensors)
         self._measurement_models = dict(measurement_models)
         self._sensors: dict[str, SensorRoute] = {}
-        # Routes are few and each is checked against the model registry on its
-        # own, so a plain loop is the clearest form.
-        for route in sensors.values():
-            self.add_sensor(route)
+        # Each sensor goes through add_sensor so it gets the same checks as one added later.
+        for sensor in sensors.values():
+            self.add_sensor(sensor)
         self.gate = gate
         self.associator = associator
-        self.manager = manager
+        self.initiator = initiator
+        self.manager = TrackManager(policy)
         self.cost = cost
-        self.tracks: list[Track] = []
+        self.tracks: list[Track[Estimator]] = []
         self.last_timestamp_s: float | None = None
 
     @property
@@ -224,41 +223,39 @@ class Tracker:
 
     @property
     def sensors(self) -> Mapping[str, SensorRoute]:
-        """The registered sensor routes, by ``route_id``. Read-only.
+        """The registered sensors, by ``sensor_id``. Read-only.
 
         Use :meth:`add_sensor` to register another, so that it is checked.
         """
         return MappingProxyType(self._sensors)
 
-    def add_sensor(self, route: SensorRoute) -> None:
-        """Register one more sensor route, after checking it.
+    def add_sensor(self, sensor: SensorRoute) -> None:
+        """Register one more sensor, after checking it.
 
         Parameters
         ----------
-        route : SensorRoute
-            The route to add, registered under ``route.route_id``.
+        sensor : SensorRoute
+            The sensor to add, registered under ``sensor.sensor_id``.
 
         Raises
         ------
         ValueError
-            If ``route.route_id`` is already registered, the route lists no
+            If ``sensor.sensor_id`` is already registered, the sensor lists no
             measurement models, or it lists a model that is not registered.
         """
-        if route.route_id in self._sensors:
-            msg = f"sensor {route.route_id!r} is already registered."
+        if sensor.sensor_id in self._sensors:
+            msg = f"sensor {sensor.sensor_id!r} is already registered."
             raise ValueError(msg)
-        if not route.measurement_model_ids or not set(route.measurement_model_ids) <= set(
-            self._measurement_models
-        ):
-            unknown = [
-                mid for mid in route.measurement_model_ids if mid not in self._measurement_models
-            ]
+        unknown = [
+            mid for mid in sensor.measurement_model_ids if mid not in self._measurement_models
+        ]
+        if not sensor.measurement_model_ids or unknown:
             msg = (
-                f"sensor {route.route_id!r} must list at least one registered measurement "
-                f"model; got {route.measurement_model_ids}, unregistered {unknown}."
+                f"sensor {sensor.sensor_id!r} must list at least one registered measurement "
+                f"model; got {sensor.measurement_model_ids}, unregistered {unknown}."
             )
             raise ValueError(msg)
-        self._sensors[route.route_id] = route
+        self._sensors[sensor.sensor_id] = sensor
 
     def seed(self, estimator: Estimator, sensor_id: str | None = None) -> TrackSnapshot:
         """Add a track whose filter the caller has already set up.
@@ -306,20 +303,15 @@ class Tracker:
                 f"{self.tracks[0].estimator.state.timestamp_s}; got {estimator.state.timestamp_s}."
             )
             raise ValueError(msg)
-        track = self.manager.seed(estimator, sensor_id)
+        track = self.manager.seed(estimator, estimator.state.timestamp_s, sensor_id)
         self.tracks.append(track)
         return track.snapshot()
 
     def process(self, batch: MeasurementBatch) -> tuple[TrackSnapshot, ...]:
         """Run one scan: predict, gate, assign, update, start and delete tracks.
 
-        The six steps are listed in the module docstring. Association runs in
-        two stages: confirmed tracks are assigned first, from all the
-        measurements, and tentative tracks then share what is left. A
-        measurement that no track took starts a new tentative track only if it
-        lies outside every confirmed track's gate. Both rules stop a young
-        track with a large covariance from taking a confirmed track's
-        measurement, following Blackman & Popoli's track management.
+        The five steps, and why confirmed tracks pick first, are in the module
+        docstring.
 
         Parameters
         ----------
@@ -334,7 +326,7 @@ class Tracker:
             First, the tracks deleted for going too long without a measurement;
             then every other track, in order of creation, including any just
             started. A track deleted in this scan appears once, with status
-            DELETED, and never again.
+            ``"deleted"``, and never again.
 
         Raises
         ------
@@ -349,8 +341,8 @@ class Tracker:
         -----
         A track that the sensor cannot see is left out of the scan: it is
         predicted but records neither a hit nor a miss. A track is out of
-        sight when no model on the route works in the track's state layout, or
-        when the route's ``observable`` test says so.
+        sight when none of the sensor's models works in the track's state
+        layout, or when the sensor's ``observable`` test says so.
 
         Limitations:
 
@@ -363,7 +355,7 @@ class Tracker:
           velocity and fewer false tracks.
         """
         self._check_batch(batch)
-        route = self._sensors[batch.sensor_id]
+        sensor = self._sensors[batch.sensor_id]
         models = [self._measurement_models[m.measurement_model_id] for m in batch.measurements]
         time_s = batch.timestamp_s
         # Snap a time within the tolerance of the last scan onto it, so that no
@@ -377,14 +369,14 @@ class Tracker:
         for track in self.tracks:
             track.estimator.predict_to(max(time_s, track.estimator.state.timestamp_s))
             self.manager.expire(track, time_s)
-            if track.status == TrackStatus.DELETED:
+            if not track.is_alive:
                 reported.append(track.snapshot())
-        self.tracks = [track for track in self.tracks if track.status != TrackStatus.DELETED]
+        self.tracks = [track for track in self.tracks if track.is_alive]
 
-        visible = [track for track in self.tracks if self._can_see(route, track)]
+        visible = [track for track in self.tracks if self._can_see(sensor, track)]
         costs, innovations = self._score_pairs(visible, batch, models)
-        confirmed = [i for i, track in enumerate(visible) if track.status == TrackStatus.CONFIRMED]
-        tentative = [i for i, track in enumerate(visible) if track.status == TrackStatus.TENTATIVE]
+        confirmed = [i for i, track in enumerate(visible) if track.is_confirmed]
+        tentative = [i for i, track in enumerate(visible) if not track.is_confirmed]
         matches = self._assign(costs, confirmed)
         taken = {j for _, j in matches}
         free = [j for j in range(costs.shape[1]) if j not in taken]
@@ -396,11 +388,11 @@ class Tracker:
         for i, track in enumerate(visible):
             j = hit.get(i)
             if j is None:
-                self.manager.record(track)
+                self.manager.record_miss(track)
                 continue
             measurement = batch.measurements[j]
             track.estimator.update(measurement, models[j], innovation=innovations[i, j])
-            self.manager.record(track, measurement)
+            self.manager.record_hit(track, measurement.timestamp_s, measurement.sensor_id)
 
         claimed = set(hit.values())
         inside_confirmed = np.asarray(np.isfinite(costs[confirmed]).any(axis=0), dtype=np.bool_)
@@ -409,7 +401,7 @@ class Tracker:
         for j, (measurement, model) in enumerate(zip(batch.measurements, models, strict=True)):
             if j in claimed or inside_confirmed[j]:
                 continue
-            new_track = self.manager.create(measurement, model)
+            new_track = self._start(measurement, model)
             if new_track is not None:
                 self.tracks.append(new_track)
 
@@ -418,9 +410,21 @@ class Tracker:
             snapshot = track.snapshot()
             track.history.append(snapshot)
             reported.append(snapshot)
-        self.tracks = [track for track in self.tracks if track.status != TrackStatus.DELETED]
+        self.tracks = [track for track in self.tracks if track.is_alive]
         self.last_timestamp_s = time_s
         return tuple(reported)
+
+    def _start(self, measurement: Measurement, model: MeasurementModel) -> Track[Estimator] | None:
+        """Start a tentative track from a measurement no track took, if it can start one.
+
+        Returns None when the initiator cannot build a filter from this
+        measurement, for example because it does not pin down enough of the
+        state.
+        """
+        estimator = self.initiator.initiate(measurement, model)
+        if estimator is None:
+            return None
+        return self.manager.seed(estimator, measurement.timestamp_s, measurement.sensor_id)
 
     def _check_batch(self, batch: MeasurementBatch) -> None:
         """Raise unless the batch can be processed; called before any track changes."""
@@ -442,48 +446,45 @@ class Tracker:
         if batch.sensor_id not in self._sensors:
             msg = f"unknown sensor {batch.sensor_id!r}; register it with add_sensor."
             raise ValueError(msg)
-        if any(
-            m.measurement_model_id not in self._sensors[batch.sensor_id].measurement_model_ids
+        self._check_models(batch)
+
+    def _check_models(self, batch: MeasurementBatch) -> None:
+        """Raise unless each measurement's model is the sensor's and has its dimension."""
+        allowed = self._sensors[batch.sensor_id].measurement_model_ids
+        unregistered = [
+            m.measurement_model_id
             for m in batch.measurements
-        ):
-            unregistered = [
-                m.measurement_model_id
-                for m in batch.measurements
-                if m.measurement_model_id
-                not in self._sensors[batch.sensor_id].measurement_model_ids
-            ]
+            if m.measurement_model_id not in allowed
+        ]
+        if unregistered:
             msg = f"unregistered models {unregistered} for sensor {batch.sensor_id!r}."
             raise ValueError(msg)
         # The check above makes every model ID a registered one, so these lookups succeed.
-        if any(
-            len(m.value)
-            != self._measurement_models[m.measurement_model_id].measurement_layout.dimension
+        mismatched = [
+            (m.measurement_model_id, len(m.value))
             for m in batch.measurements
-        ):
-            mismatched = [
-                (m.measurement_model_id, len(m.value))
-                for m in batch.measurements
-                if len(m.value)
-                != self._measurement_models[m.measurement_model_id].measurement_layout.dimension
-            ]
+            if len(m.value)
+            != self._measurement_models[m.measurement_model_id].measurement_layout.dimension
+        ]
+        if mismatched:
             msg = (
                 "measurement dimensions do not match their models; got (model, dimension) "
                 f"{mismatched}."
             )
             raise ValueError(msg)
 
-    def _can_see(self, route: SensorRoute, track: Track) -> bool:
+    def _can_see(self, sensor: SensorRoute, track: Track[Estimator]) -> bool:
         """Return whether this scan's sensor could have detected the track."""
         layout = track.estimator.state.state_layout
         fits = any(
             self._measurement_models[mid].state_layout == layout
-            for mid in route.measurement_model_ids
+            for mid in sensor.measurement_model_ids
         )
-        return fits and (route.observable is None or route.observable(track.snapshot()))
+        return fits and (sensor.observable is None or sensor.observable(track.snapshot()))
 
     def _score_pairs(
         self,
-        tracks: Sequence[Track],
+        tracks: Sequence[Track[Estimator]],
         batch: MeasurementBatch,
         models: Sequence[MeasurementModel],
     ) -> tuple[NDArray[np.float64], dict[tuple[int, int], InnovationStats]]:
@@ -531,15 +532,12 @@ class Tracker:
         return abs(a_s - b_s) <= TIMESTAMP_TOLERANCE_S
 
 
-def _check_filter_settings(
-    motion: MotionModel, prior: StateEstimate, alpha: float, beta: float, kappa: float
-) -> None:
-    """Build one UKF and discard it, so bad sigma-point settings fail now.
-
-    The settings that are valid depend on the state dimension. Without this
-    check they would fail at the first track birth, in the middle of a scan.
-    """
-    UKF(prior, motion, alpha, beta, kappa)
+def _check_sensor_keys(sensors: Mapping[str, SensorRoute]) -> None:
+    """Raise unless each sensor is keyed by its own ``sensor_id``."""
+    mismatched = {key: s.sensor_id for key, s in sensors.items() if key != s.sensor_id}
+    if mismatched:
+        msg = f"each sensor key must be its sensor_id; got key: sensor_id {mismatched}."
+        raise ValueError(msg)
 
 
 def build_tracker(
@@ -584,12 +582,12 @@ def build_tracker(
     initiator : TrackInitiator or None, optional
         Track-birth rule; None uses :class:`DirectStateInitiator` with ``prior``.
     sensor_id, model_id : str, optional
-        Route and measurement-model IDs the measurements must carry.
+        Sensor and measurement-model IDs the measurements must carry.
 
     Returns
     -------
     Tracker
-        A tracker with no tracks, one :class:`SensorRoute` and one measurement model.
+        A tracker with no tracks, one sensor and one measurement model.
 
     Raises
     ------
@@ -602,7 +600,7 @@ def build_tracker(
     References
     ----------
     .. [1] E. A. Wan and R. van der Merwe, "The unscented Kalman filter for
-           nonlinear estimation," *Proc. IEEE AS-SPCC Symposium*, 2000
+           nonlinear estimation," *Proc. IEEE AS-SPCC Symposium*, 2000, §3
            (the parameters alpha, beta and kappa).
     """
     if motion.state_layout != observation.state_layout or prior.state_layout != motion.state_layout:
@@ -611,7 +609,7 @@ def build_tracker(
     if association not in ("GNN", "NN"):
         msg = f"association must be GNN or NN; got {association!r}."
         raise ValueError(msg)
-    _check_filter_settings(motion, prior, alpha, beta, kappa)
+    check_sigma_point_settings(alpha, beta, kappa, motion.state_layout.dimension)
 
     def factory(state: StateEstimate) -> UKF:
         return UKF(state, motion, alpha, beta, kappa)
@@ -628,7 +626,8 @@ def build_tracker(
         {sensor_id: SensorRoute(sensor_id, (model_id,))},
         ChiSquareGate(gate_probability),
         GlobalNearestNeighbour() if association == "GNN" else NearestNeighbour(),
-        TrackManager(birth, policy),
+        birth,
+        policy,
     )
 
 
@@ -664,8 +663,9 @@ def build_tracker_enu(
     sigma_acceleration_mps2, sigma_jerk_mps3, acceleration_correlation_time_s : optional
         The process noise: how much the target's acceleration (CV axes, m/s²) or jerk (CA
         axes, m/s³) varies, and for how long one value lasts (s). See
-        :class:`CartesianMotion` and the Notes of :mod:`~radar_forge.core.tracking.motion`,
-        which derive the defaults, 4 m/s², 1 m/s³ and 1 s.
+        :class:`CartesianMotion` and the "Process noise" section of
+        :mod:`~radar_forge.core.tracking.motion`, which derives the defaults, 4 m/s², 1 m/s³
+        and 1 s.
     sigma_velocity_mps : float, optional
         Prior standard deviation of each unobserved velocity at a track's birth, m/s. Unlike
         ``sigma_acceleration_mps2``, this describes the first estimate, not the target.
@@ -675,7 +675,7 @@ def build_tracker_enu(
     Returns
     -------
     Tracker
-        A tracker whose one route measures the tracked axes' positions, in metres.
+        A tracker whose one sensor measures the tracked axes' positions, in metres.
 
     Raises
     ------

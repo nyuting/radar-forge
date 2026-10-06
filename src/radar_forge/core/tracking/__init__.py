@@ -1,7 +1,9 @@
 """Tracking: filters, gating, association and track management.
 
-``spec/structure.md`` D2 grows ``core/tracking.py`` into this package. Its public names are
-re-exported here, so ``from radar_forge.core.tracking import TrackManager`` keeps working.
+``core/tracking.py`` grew into this package once it held more than one tracker's
+worth of code. Every public name is re-exported here, so
+``from radar_forge.core.tracking import TrackManager`` works whichever module
+defines it.
 
 Modules
 -------
@@ -12,7 +14,7 @@ coordinates
 motion
     Motion models that predict a state forward in time: Cartesian CV/CA and range-only.
 measurement_models
-    Measurements, the sensor routes they arrive on, and the models that predict them.
+    Measurements, the sensors they arrive from, and the models that predict them.
 estimation
     The estimator interface and the innovation statistics used for gating.
 ukf
@@ -28,9 +30,8 @@ lifecycle
 tracker
     The tracker that runs one scan at a time, and two builders for common set-ups.
 
-``Track``, ``TrackManager`` and ``TrackStatus`` from ``tracks`` and ``lifecycle`` share
-their names with ``kalman``'s, so only ``kalman``'s are re-exported here. Import the
-others from their modules, e.g. ``from radar_forge.core.tracking.tracks import Track``.
+Both trackers, :class:`KalmanTracker` and :class:`Tracker`, keep their tracks
+as :class:`Track` objects and confirm and delete them with :class:`TrackManager`.
 """
 
 from __future__ import annotations
@@ -60,14 +61,12 @@ from radar_forge.core.tracking.estimation import Estimator, InnovationStats, inn
 from radar_forge.core.tracking.initiation import DirectStateInitiator, TrackInitiator
 from radar_forge.core.tracking.kalman import (
     STATE_MODELS,
-    TRACK_STATUSES,
     FrameResult,
+    KalmanFilter,
     KalmanState,
+    KalmanTracker,
     StateModel,
-    Track,
-    TrackManager,
     TrackModel,
-    TrackStatus,
     UpdateResult,
     associate_gnn,
     gate_threshold,
@@ -78,7 +77,7 @@ from radar_forge.core.tracking.kalman import (
     state_model_matrices,
     update,
 )
-from radar_forge.core.tracking.lifecycle import LifecyclePolicy
+from radar_forge.core.tracking.lifecycle import LifecyclePolicy, TrackManager
 from radar_forge.core.tracking.measurement_models import (
     BistaticRangeDopplerModel,
     CartesianPosition,
@@ -95,7 +94,7 @@ from radar_forge.core.tracking.motion import (
     RadialMotion,
 )
 from radar_forge.core.tracking.tracker import Tracker, build_tracker, build_tracker_enu
-from radar_forge.core.tracking.tracks import TrackSnapshot
+from radar_forge.core.tracking.tracks import TRACK_STATUSES, Track, TrackSnapshot, TrackStatus
 from radar_forge.core.tracking.ukf import UKF
 
 __all__ = [
@@ -114,7 +113,9 @@ __all__ = [
     "FrameResult",
     "GlobalNearestNeighbour",
     "InnovationStats",
+    "KalmanFilter",
     "KalmanState",
+    "KalmanTracker",
     "LifecyclePolicy",
     "Measurement",
     "MeasurementBatch",

@@ -34,7 +34,8 @@ SIGMA_RANGE_M = 21.635652855125496
 SIGMA_VELOCITY_MPS = 0.017247813329811023
 V_MAX_MPS = 200.0
 # The old tracker's sigma_accel = 2 m/s² at T = 1 s. Its velocity variance per step matches
-# the white-noise model's when tau = T / 2 (motion module Notes), so q = 2 * 4 * 0.5 = 4 m²/s³.
+# the white-noise model's when tau = T / 2 (motion module docstring, "Process noise"), so
+# q = 2 * 4 * 0.5 = 4 m²/s³.
 SIGMA_ACCELERATION_MPS2 = 2.0
 CORRELATION_TIME_S = 0.5
 
@@ -116,6 +117,39 @@ def test_prediction_backwards_in_time_is_rejected() -> None:
     ukf = UKF(StateEstimate(np.zeros(2), np.eye(2), 1, motion.state_layout), motion)
     with pytest.raises(ValueError, match="out-of-sequence"):
         ukf.predict_to(0)
+
+
+def test_prediction_to_a_nonfinite_time_is_rejected() -> None:
+    motion = RadialMotion()
+    ukf = UKF(StateEstimate(np.zeros(2), np.eye(2), 0, motion.state_layout), motion)
+    with pytest.raises(ValueError, match="timestamp_s must be finite"):
+        ukf.predict_to(np.inf)
+
+
+# A layout that no motion or measurement model in these tests uses: the same names as
+# RadialMotion's, in another frame.
+_OTHER_LAYOUT = StateLayout((Coordinate("range_m", "m"), Coordinate("range_rate_mps", "m/s")))
+
+
+def test_a_filter_rejects_a_state_whose_layout_is_not_the_motion_models() -> None:
+    with pytest.raises(ValueError, match="motion model's"):
+        UKF(StateEstimate(np.zeros(2), np.eye(2), 0, _OTHER_LAYOUT), RadialMotion())
+
+
+def test_set_state_rejects_a_state_whose_layout_is_not_the_motion_models() -> None:
+    motion = RadialMotion()
+    ukf = UKF(StateEstimate(np.zeros(2), np.eye(2), 0, motion.state_layout), motion)
+    with pytest.raises(ValueError, match="motion model's"):
+        ukf.set_state(StateEstimate(np.zeros(2), np.eye(2), 0, _OTHER_LAYOUT))
+
+
+@pytest.mark.parametrize("method", ["innovation_statistics", "update"])
+def test_a_measurement_model_in_another_layout_is_rejected(method: str) -> None:
+    motion = RadialMotion()
+    ukf = UKF(StateEstimate(np.zeros(2), np.eye(2), 0, motion.state_layout), motion)
+    model = CartesianPosition(_OTHER_LAYOUT, ("range_m",))
+    with pytest.raises(ValueError, match="measurement model's StateLayout"):
+        getattr(ukf, method)(_measurement(0.0, 1.0, 0), model)
 
 
 @pytest.mark.parametrize(

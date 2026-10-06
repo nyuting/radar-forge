@@ -1,4 +1,4 @@
-"""Tests for radar_forge.core.tracking.measurement_models: measurements, routes, models."""
+"""Tests for radar_forge.core.tracking.measurement_models: measurements, sensors, models."""
 
 from __future__ import annotations
 
@@ -375,12 +375,24 @@ def test_a_scan_rejects_an_unregistered_model() -> None:
 
 
 @pytest.mark.parametrize(
-    ("route_id", "model_ids"),
+    ("sensor_id", "model_ids"),
     [("", ("position",)), ("sensor", ()), ("sensor", ("",)), ("sensor", ("a", "a"))],
-    ids=["no-route-id", "no-models", "empty-model-id", "repeated-model-id"],
+    ids=["no-sensor-id", "no-models", "empty-model-id", "repeated-model-id"],
 )
-def test_a_route_needs_an_id_and_unique_model_names(
-    route_id: str, model_ids: tuple[str, ...]
+def test_a_sensor_needs_an_id_and_unique_model_names(
+    sensor_id: str, model_ids: tuple[str, ...]
 ) -> None:
-    with pytest.raises(ValueError, match="unique nonempty model routes"):
-        SensorRoute(route_id, model_ids)
+    with pytest.raises(ValueError, match="unique nonempty model IDs"):
+        SensorRoute(sensor_id, model_ids)
+
+
+@pytest.mark.parametrize(
+    ("frame", "origin", "match"),
+    [("", ORIGIN, "frame"), ("ENU", (91.0, 0.0, 0.0), "ENU origin")],
+    ids=["empty-frame", "impossible-origin"],
+)
+def test_a_sensor_pose_checks_its_frame_and_origin_as_a_layout_does(
+    frame: str, origin: tuple[float, float, float], match: str
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        SensorPose(np.zeros(3), frame, origin)

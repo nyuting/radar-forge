@@ -12,9 +12,10 @@ filter expected to see. *S*, the innovation covariance, says how large that diff
 be. Two scores follow from them:
 
 - NIS, the normalised innovation squared, :math:`d^2 = \nu^T S^{-1} \nu`. It is the squared
-  distance in units of standard deviations. Suppose the filter is right about its own
-  uncertainty. Then the NIS follows a chi-squared distribution, with as many degrees of freedom
-  as the measurement has elements. That is what the gate tests.
+  distance in units of standard deviations, and d itself is the *Mahalanobis distance*.
+  Suppose the filter is right about its own uncertainty. Then the NIS follows a chi-squared
+  distribution, with as many degrees of freedom as the measurement has elements. That is
+  what the gate tests.
 - The Gaussian log-likelihood, :math:`-\tfrac12 (m \ln 2\pi + \ln|S| + d^2)`, for :math:`m`
   measured values.
 
@@ -104,7 +105,8 @@ def innovation_stats(predicted: ArrayLike, residual: ArrayLike, cov: ArrayLike) 
     Notes
     -----
     Both scores come from the Cholesky factor L of S, with :math:`L L^T = S`. Solving
-    :math:`L w = \nu` gives the whitened innovation :math:`w`, so :math:`d^2 = w^T w`, and
+    :math:`L w = \nu` gives the *whitened* innovation :math:`w`: the innovation rescaled so
+    that its elements are independent with unit variance. So :math:`d^2 = w^T w`, and
     :math:`\ln|S| = 2 \sum_i \ln L_{ii}`. This never forms :math:`S^{-1}`, which loses accuracy
     when S is badly conditioned, as it is when range and range rate differ in variance by six
     orders of magnitude.
@@ -125,7 +127,7 @@ def innovation_stats(predicted: ArrayLike, residual: ArrayLike, cov: ArrayLike) 
     ):
         msg = (
             f"predicted {predicted.shape}, residual {residual.shape} and covariance "
-            f"{cov.shape} do not agree; expected (m,), (m,) and (m, m)"
+            f"{cov.shape} do not agree; expected (m,), (m,) and (m, m)."
         )
         raise ValueError(msg)
 

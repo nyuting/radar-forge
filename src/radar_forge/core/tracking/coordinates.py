@@ -38,7 +38,12 @@ from typing import Literal
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from radar_forge.core.tracking._validation import as_covariance, as_vector
+from radar_forge.core.tracking._validation import (
+    as_covariance,
+    as_vector,
+    check_frame_and_origin,
+    check_points,
+)
 
 __all__ = [
     "Coordinate",
@@ -50,60 +55,12 @@ __all__ = [
 # points are spread evenly round the circle, so they have no mean direction.
 _MIN_RESULTANT_LENGTH = 1e-12
 
-
-def _check_points(array: NDArray[np.float64], dimension: int, name: str) -> None:
-    """Raise unless ``array`` is finite with shape ``(dimension,)`` or ``(n_points, dimension)``.
-
-    Parameters
-    ----------
-    array : numpy.ndarray
-        One state, shape ``(dimension,)``, or a stack of states,
-        shape ``(n_points, dimension)``.
-    dimension : int
-        Required length of the last axis.
-    name : str
-        Name used in the error message.
-
-    Raises
-    ------
-    ValueError
-        If ``array`` has the wrong shape or holds a NaN or an infinity.
-    """
-    if array.ndim not in (1, 2) or array.shape[-1] != dimension or not np.all(np.isfinite(array)):
-        msg = (
-            f"{name} must be finite with shape ({dimension},) or (n_points, {dimension}); "
-            f"got shape {array.shape}"
-        )
-        raise ValueError(msg)
-
-
-def _check_covariance(covariance: ArrayLike, dimension: int) -> NDArray[np.float64]:
-    """Return a checked, symmetric copy of a state covariance.
-
-    This is the one place :class:`StateEstimate` checks its covariance. The quick
-    test is one Cholesky factorisation. An eigendecomposition is used only when
-    that quick test fails: for a valid matrix that is exactly singular, and for
-    every invalid one. If the check becomes too slow, change this function only.
-
-    Parameters
-    ----------
-    covariance : array_like
-        Covariance, shape ``(dimension, dimension)``.
-    dimension : int
-        Number of state coordinates.
-
-    Returns
-    -------
-    numpy.ndarray
-        Symmetric float64 copy, shape ``(dimension, dimension)``.
-
-    Raises
-    ------
-    ValueError
-        If the covariance is not finite, square, symmetric and positive
-        semidefinite.
-    """
-    return as_covariance(covariance, dimension)
+# How far the mean weights may sum from one. UKF weights are a few fractions such
+# as 1/(2n), and their float64 sum is off from one by about n times machine epsilon,
+# 1e-15. rtol 1e-10 and atol 1e-12 leave a wide margin over that, and still catch
+# any weight that is wrong rather than rounded.
+_WEIGHT_SUM_RTOL = 1e-10
+_WEIGHT_SUM_ATOL = 1e-12
 
 
 @dataclass(frozen=True)
@@ -143,10 +100,10 @@ class Coordinate:
     def __post_init__(self) -> None:
         """Check the name, unit and period."""
         if not self.name or not self.unit:
-            msg = f"coordinate name and unit must be nonempty; got {self.name!r}, {self.unit!r}"
+            msg = f"coordinate name and unit must be nonempty; got {self.name!r}, {self.unit!r}."
             raise ValueError(msg)
         if self.period is not None and not (np.isfinite(self.period) and self.period > 0):
-            msg = f"coordinate period must be finite and positive; got {self.period!r}"
+            msg = f"coordinate period must be finite and positive; got {self.period!r}."
             raise ValueError(msg)
 
 
@@ -194,29 +151,11 @@ class StateLayout:
     def __post_init__(self) -> None:
         """Check the coordinates and origin, and store both as tuples."""
         coordinates = tuple(self.coordinates)
-        if (
-            not coordinates
-            or not self.frame
-            or len({c.name for c in coordinates}) != len(coordinates)
-        ):
-            names = [c.name for c in coordinates]
-            msg = (
-                "state layout requires unique coordinates and a nonempty frame; "
-                f"got names {names} and frame {self.frame!r}"
-            )
+        names = [c.name for c in coordinates]
+        if not coordinates or len(set(names)) != len(names):
+            msg = f"state layout requires unique coordinates; got names {names}."
             raise ValueError(msg)
-        origin = None if self.origin_lla_deg_m is None else tuple(self.origin_lla_deg_m)
-        if origin is not None and (
-            len(origin) != 3
-            or not np.all(np.isfinite(origin))
-            or abs(origin[0]) > 90
-            or abs(origin[1]) > 180
-        ):
-            msg = (
-                "ENU origin requires latitude and longitude in degrees and altitude in "
-                f"metres; got {origin}"
-            )
-            raise ValueError(msg)
+        origin = check_frame_and_origin(self.frame, self.origin_lla_deg_m)
 
         # The coordinates are stored as a tuple, not the list a caller may pass, so that
         # they cannot change after construction. The dataclass is frozen, so the checked
@@ -254,7 +193,7 @@ class StateLayout:
         """
         if not set(names) <= set(self.names):
             unknown = [name for name in names if name not in self.names]
-            msg = f"coordinates {unknown} are not in the layout {self.names}"
+            msg = f"coordinates {unknown} are not in the layout {self.names}."
             raise ValueError(msg)
         return tuple(self.names.index(name) for name in names)
 
@@ -301,9 +240,9 @@ class StateLayout:
         array([700.])
         """
         result = np.array(value, dtype=np.float64, copy=True)
-        _check_points(result, self.dimension, "value")
+        check_points(result, self.dimension, "value")
         if interval not in ("centred", "nonnegative"):
-            msg = f"interval must be 'centred' or 'nonnegative'; got {interval!r}"
+            msg = f"interval must be 'centred' or 'nonnegative'; got {interval!r}."
             raise ValueError(msg)
 
         periodic = np.array([c.period is not None for c in self.coordinates])
@@ -377,8 +316,8 @@ class StateLayout:
         """
         first = np.asarray(a, dtype=np.float64)
         second = np.asarray(b, dtype=np.float64)
-        _check_points(first, self.dimension, "a")
-        _check_points(second, self.dimension, "b")
+        check_points(first, self.dimension, "a")
+        check_points(second, self.dimension, "b")
         return self.wrap(first - second)
 
     def weighted_mean(self, points: ArrayLike, weights: ArrayLike) -> NDArray[np.float64]:
@@ -435,12 +374,12 @@ class StateLayout:
         if array.ndim != 2 or array.shape[1] != self.dimension or not np.all(np.isfinite(array)):
             msg = (
                 f"points must be finite with shape (n_points, {self.dimension}); "
-                f"got shape {array.shape}"
+                f"got shape {array.shape}."
             )
             raise ValueError(msg)
         weight = as_vector(weights, len(array), "weights")
-        if not np.isclose(weight.sum(), 1.0, rtol=1e-10, atol=1e-12):
-            msg = f"mean weights must sum to one; got {weight.sum()!r}"
+        if not np.isclose(weight.sum(), 1.0, rtol=_WEIGHT_SUM_RTOL, atol=_WEIGHT_SUM_ATOL):
+            msg = f"mean weights must sum to one; got {weight.sum()!r}."
             raise ValueError(msg)
 
         periodic = np.array([c.period is not None for c in self.coordinates])
@@ -449,7 +388,7 @@ class StateLayout:
         sine = weight @ np.sin(phase_rad)
         cosine = weight @ np.cos(phase_rad)
         if np.any(np.hypot(sine, cosine) < _MIN_RESULTANT_LENGTH):
-            msg = "periodic coordinate mean is undefined: the weighted points cancel on the circle"
+            msg = "periodic coordinate mean is undefined: the weighted points cancel on the circle."
             raise ValueError(msg)
 
         result = weight @ array
@@ -508,15 +447,14 @@ class StateEstimate:
         """Check, copy, wrap and freeze the mean and covariance."""
         timestamp_s = float(self.timestamp_s)
         if not np.isfinite(timestamp_s):
-            msg = f"timestamp_s must be finite; got {timestamp_s!r}"
+            msg = f"timestamp_s must be finite; got {timestamp_s!r}."
             raise ValueError(msg)
         dimension = self.state_layout.dimension
-        covariance = _check_covariance(self.covariance, dimension)
+        covariance = as_covariance(self.covariance, dimension)
         mean = self.state_layout.normalise(as_vector(self.mean, dimension, "mean"))
 
         mean.setflags(write=False)
         covariance.setflags(write=False)
-        # The dataclass is frozen, so the checked copies are stored through object.
         object.__setattr__(self, "mean", mean)
         object.__setattr__(self, "covariance", covariance)
         object.__setattr__(self, "timestamp_s", timestamp_s)

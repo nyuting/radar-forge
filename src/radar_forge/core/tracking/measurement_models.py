@@ -24,7 +24,7 @@ The classes:
   that made it, and the name of the measurement model that explains it.
 - :class:`MeasurementBatch` is every measurement from one scan of one sensor,
   possibly none.
-- :class:`SensorRoute` names a sensor and the models its measurements may use.
+- :class:`SensorRoute` names a sensor, and the models its measurements may use.
 - :class:`MeasurementModel` is the interface every measurement model follows.
 - :class:`CartesianPosition` reports some of the state's coordinates directly.
 - :class:`SensorPose` is where a sensor stands.
@@ -38,7 +38,8 @@ References
 ----------
 .. [1] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications
        to Tracking and Navigation*, Wiley, 2001, ch. 5 (the measurement equation
-       z = h(x) + w, and its linear case z = Hx + w).
+       z = h(x) + w, and its linear case z = Hx + w, where w is the measurement
+       noise: zero mean, with covariance R).
 .. [2] N. J. Willis, *Bistatic Radar*, 2nd ed., SciTech Publishing, 2005, §1.3
        (bistatic geometry: the range sum and the baseline).
 """
@@ -53,8 +54,13 @@ import numpy as np
 from numpy.typing import NDArray
 
 from radar_forge.core.geodesy import geodetic_to_enu_m
-from radar_forge.core.tracking._validation import as_covariance, as_vector
-from radar_forge.core.tracking.coordinates import Coordinate, StateLayout, _check_points
+from radar_forge.core.tracking._validation import (
+    as_covariance,
+    as_vector,
+    check_frame_and_origin,
+    check_points,
+)
+from radar_forge.core.tracking.coordinates import Coordinate, StateLayout
 
 if TYPE_CHECKING:
     from radar_forge.core.radar import BistaticRadar, Radar
@@ -90,7 +96,8 @@ class Measurement:
         Time of the measurement, in seconds, on the same clock as every other
         measurement and track.
     sensor_id : str
-        The route (sensor) that made the measurement.
+        The sensor that made the measurement: the ``sensor_id`` of its
+        :class:`SensorRoute`.
     measurement_model_id : str
         Name of the measurement model that explains it. The tracker uses this
         name, not the sensor, to choose the equations.
@@ -122,26 +129,42 @@ class Measurement:
         if not self.sensor_id or not self.measurement_model_id:
             msg = (
                 "sensor_id and measurement_model_id are required; got "
-                f"{self.sensor_id!r} and {self.measurement_model_id!r}"
+                f"{self.sensor_id!r} and {self.measurement_model_id!r}."
             )
             raise ValueError(msg)
         timestamp_s = float(self.timestamp_s)
         if not np.isfinite(timestamp_s):
-            msg = f"timestamp_s must be finite; got {timestamp_s!r}"
+            msg = f"timestamp_s must be finite; got {timestamp_s!r}."
             raise ValueError(msg)
         raw = np.asarray(self.value)
         if raw.ndim != 1 or not len(raw):
-            msg = f"measurement value must be a nonempty vector; got shape {raw.shape}"
+            msg = f"measurement value must be a nonempty vector; got shape {raw.shape}."
             raise ValueError(msg)
         value = as_vector(raw, len(raw), "measurement value")
         covariance = as_covariance(self.covariance, len(raw))
 
         value.setflags(write=False)
         covariance.setflags(write=False)
-        # The dataclass is frozen, so the checked copies are stored through object.
         object.__setattr__(self, "value", value)
         object.__setattr__(self, "covariance", covariance)
         object.__setattr__(self, "timestamp_s", timestamp_s)
+
+
+def _check_same_scan(
+    measurements: tuple[Measurement, ...], sensor_id: str, timestamp_s: float
+) -> None:
+    """Raise unless every measurement carries the batch's sensor and time."""
+    strangers = [
+        (m.sensor_id, m.timestamp_s)
+        for m in measurements
+        if m.timestamp_s != timestamp_s or m.sensor_id != sensor_id
+    ]
+    if strangers:
+        msg = (
+            "all observations require the batch sensor and timestamp "
+            f"({sensor_id!r}, {timestamp_s} s); got (sensor, time) {strangers}."
+        )
+        raise ValueError(msg)
 
 
 @dataclass(frozen=True)
@@ -177,8 +200,9 @@ class MeasurementBatch:
     either give each time its own batch, or stamp the whole scan with one time
     and accept the error that adds.
 
-    **One sensor per batch.** The route of the batch's ``sensor_id`` decides
-    which models may explain its measurements and which tracks can see them.
+    **One sensor per batch.** The :class:`SensorRoute` of the batch's
+    ``sensor_id`` decides which models may explain its measurements and which
+    tracks the sensor can see.
     Measurements from two sensors in one batch would need two such decisions,
     so association would be ambiguous.
     """
@@ -192,24 +216,13 @@ class MeasurementBatch:
         timestamp_s = float(self.timestamp_s)
         measurements = tuple(self.measurements)
         if not np.isfinite(timestamp_s):
-            msg = f"timestamp_s must be finite; got {timestamp_s!r}"
+            msg = f"timestamp_s must be finite; got {timestamp_s!r}."
             raise ValueError(msg)
         if not self.sensor_id:
-            msg = "batch sensor_id must be nonempty"
+            msg = "batch sensor_id must be nonempty."
             raise ValueError(msg)
-        if any(m.timestamp_s != timestamp_s or m.sensor_id != self.sensor_id for m in measurements):
-            strangers = [
-                (m.sensor_id, m.timestamp_s)
-                for m in measurements
-                if m.timestamp_s != timestamp_s or m.sensor_id != self.sensor_id
-            ]
-            msg = (
-                "all observations require the batch sensor and timestamp "
-                f"({self.sensor_id!r}, {timestamp_s} s); got (sensor, time) {strangers}"
-            )
-            raise ValueError(msg)
+        _check_same_scan(measurements, self.sensor_id, timestamp_s)
 
-        # The dataclass is frozen, so the checked values are stored through object.
         object.__setattr__(self, "timestamp_s", timestamp_s)
         object.__setattr__(self, "measurements", measurements)
 
@@ -218,22 +231,23 @@ class MeasurementBatch:
 class SensorRoute:
     """A sensor's name, the measurement models it may use, and what it can see.
 
-    A route does two jobs, and only these two. It sends each measurement to a
-    measurement model, by name. And it says which tracks the sensor covers on a
-    scan. It does not make detections. That is the difference from Stone Soup's
-    ``Sensor``, whose ``measure()`` method generates detections from the truth.
+    This describes one sensor to the tracker. It does two jobs, and only these
+    two. It routes each of the sensor's measurements to a measurement model, by
+    name: hence the class name. And it says which tracks the sensor covers on a
+    scan. It does not make detections.
 
     Parameters
     ----------
-    route_id : str
-        Name of the sensor. Its measurements carry it as their ``sensor_id``.
+    sensor_id : str
+        Name of the sensor. Its measurements and batches carry it as their
+        ``sensor_id``.
     measurement_model_ids : tuple of str
         Names of the measurement models this sensor's measurements may use. They
         must be nonempty and unique. One sensor may report several kinds of
         measurement, so each measurement names its own model. The list is there
         to stop a measurement reaching the wrong model. For example, an angle
         measurement from this sensor cannot be sent to a range and Doppler
-        model, unless the route lists that model.
+        model, unless this list names that model.
     observable : callable or None, optional
         Coverage test: given a :class:`~radar_forge.core.tracking.tracks.TrackSnapshot`,
         return True if the sensor can see that track on this scan. The tracker
@@ -244,38 +258,43 @@ class SensorRoute:
     Raises
     ------
     ValueError
-        If ``route_id`` is empty, or ``measurement_model_ids`` is empty, holds an
+        If ``sensor_id`` is empty, or ``measurement_model_ids`` is empty, holds an
         empty name or repeats one.
+
+    Notes
+    -----
+    Stone Soup has a ``Sensor`` class too, but its ``measure()`` method
+    generates detections from the truth. This class only describes a sensor
+    whose detections come from elsewhere.
 
     Examples
     --------
     >>> import numpy as np
-    >>> route = SensorRoute("radar", ("position",))
-    >>> batch = route.batch(1.0, [("position", np.array([5.0]), np.eye(1))])
+    >>> radar = SensorRoute("radar", ("position",))
+    >>> batch = radar.batch(1.0, [("position", np.array([5.0]), np.eye(1))])
     >>> batch.measurements[0].sensor_id
     'radar'
     """
 
-    route_id: str
+    sensor_id: str
     measurement_model_ids: tuple[str, ...]
     observable: Callable[[TrackSnapshot], bool] | None = None
 
     def __post_init__(self) -> None:
-        """Check the route name and the model names."""
+        """Check the sensor name and the model names."""
         model_ids = tuple(self.measurement_model_ids)
         if (
-            not self.route_id
+            not self.sensor_id
             or not model_ids
             or not all(model_ids)
             or len(set(model_ids)) != len(model_ids)
         ):
             msg = (
-                "sensor ID and unique nonempty model routes are required; got "
-                f"{self.route_id!r} with models {model_ids}"
+                "a sensor ID and unique nonempty model IDs are required; got "
+                f"{self.sensor_id!r} with models {model_ids}."
             )
             raise ValueError(msg)
 
-        # The dataclass is frozen, so the checked tuple is stored through object.
         object.__setattr__(self, "measurement_model_ids", model_ids)
 
     def batch(
@@ -297,27 +316,27 @@ class SensorRoute:
         Returns
         -------
         MeasurementBatch
-            The scan, with this route's ``sensor_id``. The arrays are copied.
+            The scan, with this sensor's ``sensor_id``. The arrays are copied.
 
         Raises
         ------
         ValueError
-            If a ``model_id`` is not registered for this route, or as for
+            If a ``model_id`` is not registered for this sensor, or as for
             :class:`Measurement` and :class:`MeasurementBatch`.
         """
         observations = list(observations)
-        if not {o[0] for o in observations} <= set(self.measurement_model_ids):
-            unknown = [o[0] for o in observations if o[0] not in self.measurement_model_ids]
-            msg = f"models {unknown} are not registered for sensor {self.route_id!r}"
+        unknown = [o[0] for o in observations if o[0] not in self.measurement_model_ids]
+        if unknown:
+            msg = f"models {unknown} are not registered for sensor {self.sensor_id!r}."
             raise ValueError(msg)
 
         # Each detection becomes its own Measurement object, which checks itself,
         # so this is a loop over Python objects, not over numbers.
         measurements = tuple(
-            Measurement(value, covariance, timestamp_s, self.route_id, model_id)
+            Measurement(value, covariance, timestamp_s, self.sensor_id, model_id)
             for model_id, value, covariance in observations
         )
-        return MeasurementBatch(timestamp_s, self.route_id, measurements)
+        return MeasurementBatch(timestamp_s, self.sensor_id, measurements)
 
 
 class MeasurementModel(Protocol):
@@ -408,10 +427,10 @@ class CartesianPosition:
     ) -> None:
         periods = dict(periods or {})
         if not names or len(set(names)) != len(names):
-            msg = f"observed coordinate names must be nonempty and unique; got {names}"
+            msg = f"observed coordinate names must be nonempty and unique; got {names}."
             raise ValueError(msg)
         if set(periods) - set(names):
-            msg = f"periods must refer to observed coordinates; got {sorted(periods)}"
+            msg = f"periods must refer to observed coordinates; got {sorted(periods)}."
             raise ValueError(msg)
 
         self.state_layout = state_layout
@@ -445,7 +464,7 @@ class CartesianPosition:
             If ``state`` has the wrong shape or is not finite.
         """
         states = np.asarray(state, dtype=np.float64)
-        _check_points(states, self.state_layout.dimension, "state")
+        check_points(states, self.state_layout.dimension, "state")
         return states[..., list(self.indices)]
 
 
@@ -485,14 +504,13 @@ class SensorPose:
     def __post_init__(self) -> None:
         """Check the position and origin, and store a frozen copy of the position."""
         position = as_vector(self.position_m, 3, "position_m")
-        # A one-coordinate layout checks the frame and origin with the same rules
-        # every state layout uses, so the rules live in one place.
-        check = StateLayout((Coordinate("x_m", "m"),), self.frame, self.origin_lla_deg_m)
+        # The same check StateLayout uses, so a sensor site and a state accept the
+        # same frames and origins.
+        origin = check_frame_and_origin(self.frame, self.origin_lla_deg_m)
 
         position.setflags(write=False)
-        # The dataclass is frozen, so the checked values are stored through object.
         object.__setattr__(self, "position_m", position)
-        object.__setattr__(self, "origin_lla_deg_m", check.origin_lla_deg_m)
+        object.__setattr__(self, "origin_lla_deg_m", origin)
 
     @classmethod
     def from_radar(
@@ -521,9 +539,9 @@ class SensorPose:
         SensorPose
             The site as east, north, up metres about ``origin_lla_deg_m``, shape ``(3,)``.
 
-        References
-        ----------
-        .. [1] :func:`radar_forge.core.geodesy.geodetic_to_enu_m`.
+        See Also
+        --------
+        radar_forge.core.geodesy.geodetic_to_enu_m : The conversion used.
         """
         position_m = geodetic_to_enu_m(
             radar.latitude_deg, radar.longitude_deg, radar.altitude_m, *origin_lla_deg_m
@@ -556,9 +574,9 @@ class SensorPose:
         receiver : SensorPose
             Receiver site as east, north, up metres, shape ``(3,)``.
 
-        References
-        ----------
-        .. [1] :func:`radar_forge.core.geodesy.geodetic_to_enu_m`.
+        See Also
+        --------
+        radar_forge.core.geodesy.geodetic_to_enu_m : The conversion used.
         """
         transmitter_m = geodetic_to_enu_m(
             pair.transmitter_latitude_deg,
@@ -595,7 +613,7 @@ class _Geometry:
 
     Parameters
     ----------
-    space : StateLayout
+    layout : StateLayout
         Layout of the state. It must share the pose's frame and origin.
     pose : SensorPose
         The sensor site.
@@ -617,40 +635,37 @@ class _Geometry:
 
     def __init__(
         self,
-        space: StateLayout,
+        layout: StateLayout,
         pose: SensorPose,
         fixed: Mapping[str, float] | None,
         *,
         include_velocity: bool,
     ) -> None:
         fixed_values = dict(fixed or {})
-        if space.frame != pose.frame or space.origin_lla_deg_m != pose.origin_lla_deg_m:
+        if layout.frame != pose.frame or layout.origin_lla_deg_m != pose.origin_lla_deg_m:
             msg = (
                 "sensor and state must share ENU frame and origin; got state "
-                f"{space.frame!r} {space.origin_lla_deg_m} and sensor "
-                f"{pose.frame!r} {pose.origin_lla_deg_m}"
+                f"{layout.frame!r} {layout.origin_lla_deg_m} and sensor "
+                f"{pose.frame!r} {pose.origin_lla_deg_m}."
             )
             raise ValueError(msg)
+        required = _REQUIRED_NAMES[include_velocity]
         # A fixed value may stand in only for a required coordinate that the state lacks.
-        if not set(fixed_values) <= set(_REQUIRED_NAMES[include_velocity]) - set(space.names):
+        if not set(fixed_values) <= set(required) - set(layout.names):
             msg = (
                 "fixed coordinates must be required, absent state coordinates; got "
-                f"{sorted(fixed_values)}"
+                f"{sorted(fixed_values)}."
             )
             raise ValueError(msg)
-        if not set(_REQUIRED_NAMES[include_velocity]) <= set(space.names) | set(fixed_values):
-            missing = [
-                n
-                for n in _REQUIRED_NAMES[include_velocity]
-                if n not in space.names and n not in fixed_values
-            ]
-            msg = f"geometry requires missing coordinates to be explicitly fixed; got {missing}"
+        missing = [n for n in required if n not in layout.names and n not in fixed_values]
+        if missing:
+            msg = f"geometry requires missing coordinates to be explicitly fixed; got {missing}."
             raise ValueError(msg)
         if not np.all(np.isfinite(list(fixed_values.values()))):
-            msg = f"fixed coordinates must be finite; got {fixed_values}"
+            msg = f"fixed coordinates must be finite; got {fixed_values}."
             raise ValueError(msg)
 
-        self.space = space
+        self.layout = layout
         self.pose = pose
         self.fixed = fixed_values
 
@@ -673,11 +688,11 @@ class _Geometry:
             takes its fixed value.
         """
         names = [f"{a}{suffix}" for a in "xyz"]
-        is_fixed = np.array([n not in self.space.names for n in names])
+        is_fixed = np.array([n not in self.layout.names for n in names])
         fixed_value = np.array([self.fixed.get(n, 0.0) for n in names])
         # A fixed coordinate has no column in the state; index column 0 in its place
         # and let np.where replace that value with the fixed one.
-        column = [self.space.names.index(n) if n in self.space.names else 0 for n in names]
+        column = [self.layout.names.index(n) if n in self.layout.names else 0 for n in names]
         return np.where(is_fixed, fixed_value, np.asarray(state, dtype=np.float64)[..., column])
 
 
@@ -738,13 +753,24 @@ class BistaticRangeDopplerModel:
     tracker whose only model is this one must be given its tracks with
     :meth:`~radar_forge.core.tracking.tracker.Tracker.seed`.
 
+    See Also
+    --------
+    radar_forge.core.radar.BistaticRadar.target_ranges_m : The two ranges, from
+        geodetic positions. Not used here: the tracking state is in local ENU
+        metres, and converting every sigma point back to latitude, longitude and
+        altitude would only add work and roundoff.
+    radar_forge.core.signal.bistatic_doppler_hz : The same path rate, divided by
+        the wavelength, in Hz. Not used here: the measurement is the path rate in
+        m/s, which needs no wavelength.
+
     References
     ----------
     .. [1] Willis (2005), §1.3; see the module References.
 
     Examples
     --------
-    A target 13 m above both sites, which share a place, so the baseline is zero:
+    A target 12 m up, and 13 m from both sites. The sites share a place, so the
+    baseline is zero and the path range is 13 + 13 m:
 
     >>> import numpy as np
     >>> names = ("x_m", "xdot_mps", "y_m", "ydot_mps", "z_m", "zdot_mps")
@@ -798,7 +824,7 @@ class BistaticRangeDopplerModel:
             direction to the target is undefined.
         """
         states = np.asarray(state, dtype=np.float64)
-        _check_points(states, self.state_layout.dimension, "state")
+        check_points(states, self.state_layout.dimension, "state")
         position_m = self._tx.values(states, "_m")
         # A distance is exactly zero only when the two points are equal, so the
         # test compares positions instead of computing norms just for the guard.
@@ -808,7 +834,7 @@ class BistaticRangeDopplerModel:
         ):
             msg = (
                 "bistatic geometry is singular at an asset: a target position is exactly "
-                "on the transmitter or the receiver"
+                "on the transmitter or the receiver."
             )
             raise ValueError(msg)
 

@@ -414,7 +414,7 @@ class TestScenarioTrackerUnfolding:
             product = synthetic_product(range_m - closing_mps * index, 2.0, seed=100 + index)
             tracker.step(product, frame_index=index, time_s=float(index))
 
-        confirmed = tracker.manager.confirmed_tracks
+        confirmed = tracker.tracker.confirmed_tracks
         assert confirmed
         unfold_frame = tracker.unfold_frame_of(confirmed[0].track_id)
         assert unfold_frame is not None

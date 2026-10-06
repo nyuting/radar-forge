@@ -53,14 +53,9 @@ typical change of velocity in one step, is about :math:`a_{max}` [1]_, which giv
 :math:`q \approx a_{max}^2 T`. The sampling interval T is standing in for :math:`\tau` there,
 so that q only means what was intended at one update rate. With two sensors there is no one T.
 
-**The defaults** come from the truth of scenario 001's 120 s window. The acceleration has a
-standard deviation of 3.3 m/s² on the east and north axes, and 4.0 m/s² along the line of
-sight. Its correlation falls to between 0.44 and 0.51 after 1 s, and changes sign by 2 s. So
-:math:`\sigma_a = 4` m/s² and :math:`\tau = 1` s, and q = 32 m²/s³. Run through
-:class:`RadialMotion` and the UKF on that truth, with scenario 003's measurement noise (21.6 m in
-range, 0.017 m/s in range rate), 0.35 % of the true measurements fall outside a 99.7 % gate,
-close to the 0.3 % the gate is designed for. The old default, q = 1 m²/s³, left 31 % outside,
-which is how a track lags a manoeuvre until it loses the target.
+**The defaults**, :math:`\sigma_a = 4` m/s² and :math:`\tau = 1` s (so q = 32 m²/s³), were
+measured from a scenario's truth. ``docs/tracking/README.md`` records the measurement, and how
+well a 99.7 % gate held with them.
 
 A CA model instead treats the *jerk*, the rate of change of acceleration, as random. It takes
 ``sigma_jerk_mps3`` in m/s³ and the same :math:`\tau`, and its density
@@ -162,19 +157,22 @@ class MotionModel(Protocol):
 def _check_dt(dt_s: float) -> None:
     """Raise unless ``dt_s`` is a finite time step that does not go backwards."""
     if not np.isfinite(dt_s) or dt_s < 0:
-        msg = f"dt_s must be finite and nonnegative, in seconds; got {dt_s}"
+        msg = f"dt_s must be finite and nonnegative, in seconds; got {dt_s}."
         raise ValueError(msg)
 
 
 def _check_state_shape(state: NDArray[np.float64], n_state: int) -> None:
     """Raise unless ``state`` has shape ``(n_state,)`` or ``(n_points, n_state)``."""
     if state.ndim not in (1, 2) or state.shape[-1] != n_state:
-        msg = f"state must have shape ({n_state},) or (n_points, {n_state}); got {state.shape}"
+        msg = f"state must have shape ({n_state},) or (n_points, {n_state}); got {state.shape}."
         raise ValueError(msg)
 
 
 def _white_noise_density(sigma: float, correlation_time_s: float) -> float:
-    """Return q = 2 sigma² tau, the noise density of a correlated random process (module Notes)."""
+    """Return q = 2 sigma² tau, the noise density of a correlated random process.
+
+    The module docstring's "Process noise" section derives it.
+    """
     return 2.0 * sigma**2 * correlation_time_s
 
 
@@ -183,7 +181,7 @@ def _check_correlation_time(correlation_time_s: float) -> None:
     if not np.isfinite(correlation_time_s) or correlation_time_s <= 0:
         msg = (
             "acceleration_correlation_time_s must be finite and positive, in seconds; "
-            f"got {correlation_time_s}"
+            f"got {correlation_time_s}."
         )
         raise ValueError(msg)
 
@@ -199,7 +197,7 @@ def _check_sigma_mappings(
     ):
         msg = (
             "a sigma_acceleration_mps2 or sigma_jerk_mps3 mapping must name exactly the axes "
-            f"of its model (CV or CA); got axes {dict(axes)} and values {dict(given)}"
+            f"of its model (CV or CA); got axes {dict(axes)} and values {dict(given)}."
         )
         raise ValueError(msg)
 
@@ -238,16 +236,17 @@ class CartesianMotion:
         in m/s² (:math:`a_{max}/3` for a 3-sigma bound :math:`a_{max}`). One value for every
         CV axis, or a mapping that names exactly the CV axes. A mapping is for motion that is
         less predictable in one direction than another. For example, an aircraft usually turns
-        more freely than it climbs, so z can take a smaller value than x and y. The default is
-        derived from scenario 001 (module Notes). Must be finite and not negative.
+        more freely than it climbs, so z can take a smaller value than x and y. The module
+        docstring's "Process noise" section derives the default. Must be finite and not
+        negative.
     sigma_jerk_mps3 : float or mapping of str to float, default 1.0
         :math:`\sigma_j`, the standard deviation of the jerk on each CA axis, in m/s³. One
         value for every CA axis, or a mapping that names exactly the CA axes. Must be finite
         and not negative.
     acceleration_correlation_time_s : float, default 1.0
         :math:`\tau`, roughly how long one acceleration (or, on a CA axis, one jerk) lasts, in
-        seconds. The noise density of each axis is :math:`q = 2 \sigma^2 \tau` (module Notes).
-        Must be finite and positive.
+        seconds. The noise density of each axis is :math:`q = 2 \sigma^2 \tau` (module
+        docstring, "Process noise"). Must be finite and positive.
     order : tuple of str, optional
         The order of the state's elements, by name, for example ``("x_m", "xdot_mps")``. It
         must name every element exactly once. The default keeps each axis together, in the
@@ -320,7 +319,7 @@ class CartesianMotion:
         frame: str = "ENU",
     ) -> None:
         if not axes or set(axes) - set("xyz") or any(v not in ("CV", "CA") for v in axes.values()):
-            msg = f"axes must map a nonempty subset of x/y/z to CV or CA; got {dict(axes)}"
+            msg = f"axes must map a nonempty subset of x/y/z to CV or CA; got {dict(axes)}."
             raise ValueError(msg)
         # The CV and CA standard deviations have different units (m/s² and m/s³), so each kind
         # of axis takes its own argument.
@@ -333,7 +332,7 @@ class CartesianMotion:
         if not all(np.isfinite(value) and value >= 0 for value in sigma.values()):
             msg = (
                 "sigma_acceleration_mps2 and sigma_jerk_mps3 must be finite and nonnegative; "
-                f"got {sigma}"
+                f"got {sigma}."
             )
             raise ValueError(msg)
         _check_correlation_time(acceleration_correlation_time_s)
@@ -344,7 +343,7 @@ class CartesianMotion:
         names = {axis: _axis_names(axis, axes[axis]) for axis in sorted(axes)}
         default_order = [name for axis in sorted(axes) for name in names[axis][0]]
         if order is not None and sorted(order) != sorted(default_order):
-            msg = f"order must name each of {default_order} exactly once; got {order}"
+            msg = f"order must name each of {default_order} exactly once; got {order}."
             raise ValueError(msg)
 
         unit = {
@@ -359,7 +358,7 @@ class CartesianMotion:
         )
 
         # F and Q are polynomials in T with fixed exponents and coefficients. Working those out
-        # once here lets matrices() build both with one array expression per call.
+        # once here lets each be built with one array expression per call.
         n_state = self.state_layout.dimension
         self._f_exponent = np.zeros((n_state, n_state), dtype=np.int64)
         self._f_coefficient = np.eye(n_state, dtype=np.float64)
@@ -370,7 +369,6 @@ class CartesianMotion:
         for axis, (axis_names, _) in names.items():
             index = np.array(self.state_layout.indices(axis_names))
             rows, cols = np.meshgrid(index, index, indexing="ij")
-            # i and j count the axis's derivatives up from position (0) to the highest one.
             i, j = np.meshgrid(np.arange(len(index)), np.arange(len(index)), indexing="ij")
             # a and b count them down from the highest one instead, as in the Notes formula.
             a, b = len(index) - 1 - i, len(index) - 1 - j
@@ -411,11 +409,17 @@ class CartesianMotion:
         array([[1., 1.],
                [0., 1.]])
         """
+        return self._transition_matrix(dt_s), self._noise_matrix(dt_s)
+
+    def _transition_matrix(self, dt_s: float) -> NDArray[np.float64]:
+        """Return F for a step of ``dt_s`` seconds, after checking the step."""
         _check_dt(dt_s)
-        dt_s = float(dt_s)
-        transition = self._f_coefficient * dt_s**self._f_exponent
-        noise = self._q_coefficient * dt_s**self._q_exponent
-        return transition, noise
+        return self._f_coefficient * float(dt_s) ** self._f_exponent
+
+    def _noise_matrix(self, dt_s: float) -> NDArray[np.float64]:
+        """Return Q for a step of ``dt_s`` seconds, after checking the step."""
+        _check_dt(dt_s)
+        return self._q_coefficient * float(dt_s) ** self._q_exponent
 
     def transition(self, state: NDArray[np.float64], dt_s: float) -> NDArray[np.float64]:
         """Move one state, or a batch of states, forward by ``dt_s`` seconds.
@@ -440,7 +444,7 @@ class CartesianMotion:
         state = np.asarray(state, dtype=np.float64)
         _check_state_shape(state, self.state_layout.dimension)
         # With one state per row, x Fᵀ is F x for every row at once.
-        return state @ self.matrices(dt_s)[0].T
+        return state @ self._transition_matrix(dt_s).T
 
     def process_noise(self, state: NDArray[np.float64], dt_s: float) -> NDArray[np.float64]:
         """Return Q, the covariance a step of ``dt_s`` seconds adds.
@@ -462,7 +466,7 @@ class CartesianMotion:
         ValueError
             If ``dt_s`` is negative or not finite.
         """
-        return self.matrices(dt_s)[1]
+        return self._noise_matrix(dt_s)
 
 
 class RadialMotion:
@@ -476,8 +480,8 @@ class RadialMotion:
     ----------
     sigma_acceleration_mps2 : float, default 4.0
         :math:`\sigma_a`, the standard deviation of the target's radial acceleration, in m/s²
-        (:math:`a_{max}/3` for a 3-sigma bound :math:`a_{max}`). The default is derived from
-        scenario 001 (module Notes). Must be finite and not negative.
+        (:math:`a_{max}/3` for a 3-sigma bound :math:`a_{max}`). The module docstring's
+        "Process noise" section derives the default. Must be finite and not negative.
     acceleration_correlation_time_s : float, default 1.0
         :math:`\tau`, roughly how long one acceleration lasts, in seconds. Must be finite and
         positive.
@@ -485,7 +489,8 @@ class RadialMotion:
     Attributes
     ----------
     noise_density_m2ps3 : float
-        The noise density :math:`q = 2 \sigma_a^2 \tau`, in m²/s³ (module Notes).
+        The noise density :math:`q = 2 \sigma_a^2 \tau`, in m²/s³ (module docstring,
+        "Process noise").
     state_layout : StateLayout
         ``range_m`` (m) then ``range_rate_mps`` (m/s), in the frame ``"radial"``.
 
@@ -527,7 +532,7 @@ class RadialMotion:
         if not np.isfinite(sigma_acceleration_mps2) or sigma_acceleration_mps2 < 0:
             msg = (
                 "sigma_acceleration_mps2 must be finite and nonnegative; "
-                f"got {sigma_acceleration_mps2}"
+                f"got {sigma_acceleration_mps2}."
             )
             raise ValueError(msg)
         _check_correlation_time(acceleration_correlation_time_s)

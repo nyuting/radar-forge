@@ -17,6 +17,9 @@ from radar_forge.core.tracking._validation import (
     as_covariance,
     as_points,
     as_vector,
+    check_frame_and_origin,
+    check_points,
+    check_sigma_point_settings,
     cholesky_factor,
 )
 
@@ -207,3 +210,62 @@ def test_cholesky_factor_rejects_a_matrix_that_is_not_a_finite_square(matrix: An
 def test_cholesky_factor_rejects_an_asymmetric_matrix() -> None:
     with pytest.raises(ValueError, match="symmetric"):
         cholesky_factor(np.array([[4.0, 1.0], [0.0, 2.0]]))
+
+
+# --------------------------------------------------------------------------- #
+# check_points, check_frame_and_origin and check_sigma_point_settings
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("shape", [(3,), (5, 3)], ids=["one", "stack"])
+def test_check_points_accepts_one_state_or_a_stack(shape: tuple[int, ...]) -> None:
+    check_points(np.zeros(shape), 3, "state")
+
+
+@pytest.mark.parametrize(
+    "array",
+    [np.zeros(2), np.zeros((2, 2, 3)), np.array([0.0, np.inf, 0.0])],
+    ids=["wrong-length", "three-axes", "infinite"],
+)
+def test_check_points_rejects_a_wrong_shape_or_a_nonfinite_value(array: Any) -> None:
+    with pytest.raises(ValueError, match="state must be finite"):
+        check_points(array, 3, "state")
+
+
+def test_check_frame_and_origin_returns_the_origin_as_floats() -> None:
+    assert check_frame_and_origin("ENU", (36, -78, 60)) == (36.0, -78.0, 60.0)
+
+
+def test_check_frame_and_origin_allows_no_origin() -> None:
+    assert check_frame_and_origin("local", None) is None
+
+
+def test_check_frame_and_origin_rejects_an_empty_frame() -> None:
+    with pytest.raises(ValueError, match="frame"):
+        check_frame_and_origin("", None)
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [(91.0, 0.0, 0.0), (0.0, -181.0, 0.0), (0.0, 0.0, np.nan), (0.0, 0.0)],
+    ids=["lat", "lon", "nan", "two-values"],
+)
+def test_check_frame_and_origin_rejects_an_impossible_origin(origin: Any) -> None:
+    with pytest.raises(ValueError, match="ENU origin"):
+        check_frame_and_origin("ENU", origin)
+
+
+def test_check_sigma_point_settings_accepts_the_defaults() -> None:
+    check_sigma_point_settings(1.0, 2.0, 0.0, 6)
+
+
+@pytest.mark.parametrize(
+    ("alpha", "beta", "kappa"),
+    [(0.0, 2.0, 0.0), (1.0, -1.0, 0.0), (1.0, 2.0, -6.0), (np.nan, 2.0, 0.0)],
+    ids=["zero-alpha", "negative-beta", "n-plus-kappa-zero", "nan"],
+)
+def test_check_sigma_point_settings_rejects_an_impossible_setting(
+    alpha: float, beta: float, kappa: float
+) -> None:
+    with pytest.raises(ValueError, match="alpha"):
+        check_sigma_point_settings(alpha, beta, kappa, 6)

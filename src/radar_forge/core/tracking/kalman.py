@@ -1,18 +1,18 @@
 r"""Kalman filtering, validation gating, assignment and track management.
 
-This module is the whole of the tracking stack specified by
+This module is the tracking stack specified by
 ``spec/scenario-003-tracking.md``: a linear Kalman filter over a
 constant-velocity motion model, a chi-squared validation gate, global
-nearest-neighbour assignment, and an M-of-N track manager. It is deliberately
-one module -- ``spec/structure.md`` D2 keeps it unsplit until a *second*
-association strategy (JPDA, MHT) or a fusion layer arrives, and three state
-models are not that.
+nearest-neighbour assignment, and :class:`KalmanTracker`, the frame loop that
+runs them. Track confirmation and deletion are the package's shared
+:class:`~radar_forge.core.tracking.lifecycle.TrackManager`, and each track is
+the shared :class:`~radar_forge.core.tracking.tracks.Track`.
 
 The decomposition follows Stone Soup's vocabulary at a fraction of its surface
 area: :func:`predict` and :func:`update` are the predictor and updater,
 :func:`normalised_innovation_squared` and :func:`gate_threshold` are the gater,
-:func:`associate_gnn` is the data associator, and :class:`TrackManager` is the
-initiator/deleter loop. The state models are *data* -- :func:`state_model_matrices`
+:func:`associate_gnn` is the data associator, and :class:`KalmanTracker` is the
+tracker loop. The state models are *data* -- :func:`state_model_matrices`
 returns the matrices and callables for a model rather than a subclass -- so
 adding one is a table entry, not a class hierarchy.
 
@@ -59,19 +59,20 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.optimize import linear_sum_assignment
 from scipy.stats import chi2
 
+from radar_forge.core.tracking.lifecycle import LifecyclePolicy, TrackManager
+from radar_forge.core.tracking.tracks import Track
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
 __all__ = [
     "STATE_MODELS",
-    "TRACK_STATUSES",
     "FrameResult",
+    "KalmanFilter",
     "KalmanState",
+    "KalmanTracker",
     "StateModel",
-    "Track",
-    "TrackManager",
     "TrackModel",
-    "TrackStatus",
     "UpdateResult",
     "associate_gnn",
     "gate_threshold",
@@ -86,10 +87,7 @@ __all__ = [
 StateModel = Literal["range_1d", "enu_2d", "enu_3d"]
 """The state vectors this module can build."""
 
-TrackStatus = Literal["tentative", "confirmed", "coasting", "deleted"]
-
 STATE_MODELS: tuple[StateModel, ...] = get_args(StateModel)
-TRACK_STATUSES: tuple[TrackStatus, ...] = get_args(TrackStatus)
 
 # An unassociated pair must be impossible for the assignment solver to pick, but
 # scipy rejects a cost matrix containing inf, so the forbidden cost has to be a
@@ -922,63 +920,38 @@ def associate_gnn(
 
 
 @dataclass
-class Track:
-    """One target hypothesis, and the bookkeeping that decides whether it lives.
+class KalmanFilter:
+    """One track's filter in :class:`KalmanTracker`: its estimate and how it is measured.
 
-    Mutable, unlike the estimates it carries: a track *is* the thing that
-    changes from frame to frame, and copying it each step would make the
-    manager's loop harder to read for no benefit.
+    This is what a :class:`~radar_forge.core.tracking.tracks.Track` carries as
+    its ``estimator`` in :class:`KalmanTracker`. It is not an
+    :class:`~radar_forge.core.tracking.estimation.Estimator`: the predict and
+    update are the functions :func:`predict` and :func:`update` above, and
+    this only holds what they produce.
 
     Attributes
     ----------
-    track_id : int
-        Identity, unique within a :class:`TrackManager` and stable for the life
-        of the track. A track whose id changes mid-run is a track that was lost
-        and re-initiated, which the acceptance criteria forbid.
     estimate : KalmanState
-        The current state estimate, posterior if this frame associated and
-        prior if it coasted.
-    status : str
-        One of :data:`TRACK_STATUSES`.
-    n_hits : int
-        Frames in which this track associated a measurement.
-    n_frames : int
-        Frames this track has existed for, counting the one that created it.
-    n_misses_in_a_row : int
-        Consecutive frames without an association. Reset by every hit.
-    measurement_dim : int
+        The current state estimate: posterior if this frame associated, prior
+        if it coasted.
+    measurement_dim : int, default 1
         Dimension of the measurement this track last used. Records the §5.3
         bootstrap: the frame at which it steps from 1 to 2 is the frame the
         track became able to unfold its Doppler, and is the single most
         informative diagnostic this scenario produces.
-    last_nis : float or None
+    last_nis : float or None, default None
         The normalised innovation squared of the last association, or ``None``
         if the track has never associated or coasted this frame.
     """
 
-    track_id: int
     estimate: KalmanState
-    status: TrackStatus = "tentative"
-    n_hits: int = 1
-    n_frames: int = 1
-    n_misses_in_a_row: int = 0
     measurement_dim: int = 1
     last_nis: float | None = None
-
-    @property
-    def is_alive(self) -> bool:
-        """Whether this track still takes part in association."""
-        return self.status != "deleted"
-
-    @property
-    def is_confirmed(self) -> bool:
-        """Whether this track has passed the M-of-N initiation test."""
-        return self.status in ("confirmed", "coasting")
 
 
 @dataclass(frozen=True)
 class FrameResult:
-    """What one call to :meth:`TrackManager.step` did.
+    """What one call to :meth:`KalmanTracker.step` did.
 
     Attributes
     ----------
@@ -993,15 +966,15 @@ class FrameResult:
 
     associations: dict[int, int]
     unassociated: tuple[int, ...]
-    tracks: tuple[Track, ...]
+    tracks: tuple[Track[KalmanFilter], ...]
 
 
 @dataclass
-class TrackManager:
+class KalmanTracker:
     """Gate, assign, update, initiate and delete, one frame at a time.
 
-    The loop is the shape motpy and Stone Soup both use, and it is small enough
-    to read in one sitting:
+    The tracker scenario 003 runs on. The loop is the shape motpy and Stone
+    Soup both use, and it is small enough to read in one sitting:
 
     1. **Predict** every live track to the current frame.
     2. **Gate** every (track, measurement) pair, at the dimension *that track*
@@ -1015,6 +988,12 @@ class TrackManager:
        first ``n_confirm_frames`` frames, and **delete** one that can no longer
        reach that count, or any track that has missed ``n_delete_misses`` frames
        in a row.
+
+    Steps 5 and 6 are the shared
+    :class:`~radar_forge.core.tracking.lifecycle.TrackManager`, the same one
+    :class:`~radar_forge.core.tracking.tracker.Tracker` uses. What is particular
+    to this tracker is the bootstrap of steps 2 and 4 and the re-acquisition of
+    :meth:`_forget_rate`.
 
     Parameters
     ----------
@@ -1030,7 +1009,8 @@ class TrackManager:
     n_confirm_hits, n_confirm_frames : int, optional
         The M and N of M-of-N initiation, default 4 and 5.
     n_delete_misses : int, optional
-        Consecutive misses after which a confirmed track is deleted, default 3.
+        Consecutive misses after which a tentative track is deleted, and after
+        which a confirmed track's rate is forgotten, default 3.
     n_initiation_rows : int, optional
         How many leading measurement components seed a new track's state,
         default 1. The rest start at zero carrying ``initial_covariance``'s
@@ -1045,6 +1025,22 @@ class TrackManager:
         delete at ``n_delete_misses`` with no re-acquisition. See
         :meth:`_forget_rate`.
 
+    Attributes
+    ----------
+    tracks : list of Track
+        The live tracks, in order of creation. Each carries a
+        :class:`KalmanFilter`.
+    manager : TrackManager
+        Hands out track identifiers and applies the M-of-N and deletion rules,
+        built from the parameters above.
+
+    Raises
+    ------
+    ValueError
+        If ``gate_probability`` is not strictly between 0 and 1, or the M-of-N
+        and deletion counts are impossible (see
+        :class:`~radar_forge.core.tracking.lifecycle.LifecyclePolicy`).
+
     Notes
     -----
     The M-of-N parameters are sized against the false-alarm rate in the
@@ -1052,6 +1048,10 @@ class TrackManager:
     spurious confirmed track roughly a once-in-four-hundred-runs event. The
     deletion count is sized against the coast time a reader can see on the plot,
     and is not derived.
+
+    Tracks are deleted by miss count only. The manager's ``max_coast_time_s``
+    limit is not applied, because frames are evenly spaced and the miss count
+    already measures time.
 
     References
     ----------
@@ -1067,25 +1067,26 @@ class TrackManager:
     n_delete_misses: int = 3
     n_initiation_rows: int = 1
     n_reacquire_frames: int = 5
-    tracks: list[Track] = field(default_factory=list)
-    _next_track_id: int = 0
+    tracks: list[Track[KalmanFilter]] = field(default_factory=list)
+    manager: TrackManager = field(init=False)
 
     def __post_init__(self) -> None:
-        """Validate the management parameters against each other."""
+        """Validate the gate, and build the manager, which validates the counts."""
         if not 0.0 < self.gate_probability < 1.0:
             msg = (
                 f"gate_probability must lie strictly between 0 and 1; got {self.gate_probability}."
             )
             raise ValueError(msg)
-        if self.n_confirm_hits > self.n_confirm_frames:
-            msg = (
-                f"n_confirm_hits ({self.n_confirm_hits}) cannot exceed n_confirm_frames "
-                f"({self.n_confirm_frames}); no track could ever be confirmed."
+        self.manager = TrackManager(
+            LifecyclePolicy(
+                n_confirm_hits=self.n_confirm_hits,
+                n_confirm_frames=self.n_confirm_frames,
+                n_delete_misses=self.n_delete_misses,
+                n_reacquire_frames=self.n_reacquire_frames,
+                # The frame records in pipelines.tracking keep the history.
+                n_history=0,
             )
-            raise ValueError(msg)
-        if self.n_delete_misses < 1:
-            msg = f"n_delete_misses must be at least 1; got {self.n_delete_misses}."
-            raise ValueError(msg)
+        )
 
     @property
     def lost_track_ids(self) -> tuple[int, ...]:
@@ -1093,11 +1094,11 @@ class TrackManager:
         return tuple(
             track.track_id
             for track in self.tracks
-            if track.is_confirmed and track.n_misses_in_a_row >= self.n_delete_misses
+            if track.is_confirmed and track.n_misses >= self.n_delete_misses
         )
 
     @property
-    def confirmed_tracks(self) -> list[Track]:
+    def confirmed_tracks(self) -> list[Track[KalmanFilter]]:
         """The live tracks that have passed the M-of-N test."""
         return [track for track in self.tracks if track.is_confirmed]
 
@@ -1105,6 +1106,7 @@ class TrackManager:
         self,
         measurements: Sequence[ArrayLike],
         *,
+        time_s: float,
         measurement_dims: Sequence[int] | None = None,
     ) -> FrameResult:
         """Advance every track one frame against this frame's measurements.
@@ -1115,6 +1117,8 @@ class TrackManager:
             This frame's measurements. Every entry must have the full
             ``model.measurement_dim`` length; a track measuring fewer components
             takes the leading ones, per :meth:`TrackModel.restricted`.
+        time_s : float
+            The frame time, in seconds, recorded as each hit's time.
         measurement_dims : sequence of int, optional
             Per-track measurement dimension for this frame, in the order of
             :attr:`tracks`. This is how the caller expresses the §5.3 bootstrap:
@@ -1148,7 +1152,7 @@ class TrackManager:
         stacked = [np.asarray(z, dtype=np.float64) for z in measurements]
 
         # 1. Predict, and remember each track's model for this frame.
-        predictions = [predict(track.estimate, self.model) for track in live]
+        predictions = [predict(track.estimator.estimate, self.model) for track in live]
         models = [self.model.restricted(dim) for dim in dims]
 
         # 2. Gate. A pair outside its gate is forbidden rather than merely
@@ -1204,43 +1208,39 @@ class TrackManager:
         pairs = associate_gnn(cost, loosest) if live and stacked else []
         assigned = dict(pairs)
 
-        # 4. Update the assigned; coast the rest.
+        # 4. Update the assigned; coast the rest. 6. The manager counts each
+        #    hit or miss and promotes or deletes as it goes.
         associations: dict[int, int] = {}
         for track_index, track in enumerate(live):
-            track.n_frames += 1
-            prediction = predictions[track_index]
+            kalman = track.estimator
+            kalman.estimate = predictions[track_index]
             model = models[track_index]
-            track.measurement_dim = model.measurement_dim
+            kalman.measurement_dim = model.measurement_dim
 
             matched_index = assigned.get(track_index)
             if matched_index is None:
-                track.estimate = prediction
-                track.n_misses_in_a_row += 1
-                track.last_nis = None
-                if track.status == "confirmed":
-                    track.status = "coasting"
+                kalman.last_nis = None
+                self.manager.record_miss(track)
+                # A confirmed track gets a grace period before deletion, during
+                # which its rate is forgotten and its gate widens every frame.
+                if track.status == "coasting" and track.n_misses == self.n_delete_misses:
+                    self._forget_rate(kalman)
                 continue
 
             # The pair may have gated at a lower dimension than the track's own.
             model = model.restricted(int(pair_dims[track_index, matched_index]))
-            track.measurement_dim = model.measurement_dim
-            result = update(prediction, stacked[matched_index][: model.measurement_dim], model)
-            track.estimate = result.posterior
-            track.n_hits += 1
-            track.n_misses_in_a_row = 0
-            track.last_nis = result.nis
-            if track.status == "coasting":
-                track.status = "confirmed"
+            kalman.measurement_dim = model.measurement_dim
+            result = update(kalman.estimate, stacked[matched_index][: model.measurement_dim], model)
+            kalman.estimate = result.posterior
+            kalman.last_nis = result.nis
+            self.manager.record_hit(track, time_s)
             associations[track.track_id] = matched_index
 
         # 5. Initiate from what nothing claimed.
         claimed = set(assigned.values())
         unassociated = tuple(index for index in range(len(stacked)) if index not in claimed)
         for index in unassociated:
-            self.tracks.append(self._initiate(stacked[index]))
-
-        # 6. Promote and delete.
-        self._manage(live)
+            self.tracks.append(self._initiate(stacked[index], time_s))
 
         self.tracks = [track for track in self.tracks if track.is_alive]
         return FrameResult(
@@ -1249,7 +1249,7 @@ class TrackManager:
             tracks=tuple(self.tracks),
         )
 
-    def _forget_rate(self, track: Track) -> Track:
+    def _forget_rate(self, kalman: KalmanFilter) -> None:
         """Reset a coasting track's rate variance to its initiation value.
 
         A confirmed track stops associating when its measurements stop passing
@@ -1271,16 +1271,15 @@ class TrackManager:
         of any tentative rival. The track is deleted only if that fails for
         ``n_reacquire_frames`` more frames.
         """
-        n_state = track.estimate.n_state
+        n_state = kalman.estimate.n_state
         n_axes = n_state // 2
-        covariance = track.estimate.covariance.copy()
+        covariance = kalman.estimate.covariance.copy()
         covariance[n_axes:, n_axes:] = self.initial_covariance[n_axes:, n_axes:]
         covariance[:n_axes, n_axes:] = 0.0
         covariance[n_axes:, :n_axes] = 0.0
-        track.estimate = KalmanState(state=track.estimate.state, covariance=covariance)
-        return track
+        kalman.estimate = KalmanState(state=kalman.estimate.state, covariance=covariance)
 
-    def _initiate(self, measurement: NDArray[np.float64]) -> Track:
+    def _initiate(self, measurement: NDArray[np.float64], time_s: float) -> Track[KalmanFilter]:
         """Seed a tentative track from an unassociated measurement.
 
         Single-point initiation: the first ``n_initiation_rows`` measurement
@@ -1294,43 +1293,5 @@ class TrackManager:
         state = np.zeros(self.initial_covariance.shape[0], dtype=np.float64)
         n_known = min(self.n_initiation_rows, measurement.size, state.size)
         state[:n_known] = measurement[:n_known]
-
-        self._next_track_id += 1
-        return Track(
-            track_id=self._next_track_id,
-            estimate=KalmanState(state=state, covariance=self.initial_covariance.copy()),
-            status="tentative",
-            measurement_dim=1,
-        )
-
-    def _manage(self, live: Sequence[Track]) -> None:
-        """Apply M-of-N confirmation and the deletion rules."""
-        for track in live:
-            if track.n_misses_in_a_row >= self.n_delete_misses:
-                if not track.is_confirmed:
-                    track.status = "deleted"
-                    continue
-                # A confirmed track gets a grace period before deletion, during
-                # which its rate is forgotten and its gate widens every frame.
-                if track.n_misses_in_a_row == self.n_delete_misses:
-                    self._forget_rate(track)
-                if track.n_misses_in_a_row >= self.n_delete_misses + self.n_reacquire_frames:
-                    track.status = "deleted"
-                continue
-
-            if track.status != "tentative":
-                continue
-
-            if track.n_hits >= self.n_confirm_hits:
-                track.status = "confirmed"
-            elif track.n_frames >= self.n_confirm_frames:
-                # Out of frames to reach M hits: this was clutter.
-                track.status = "deleted"
-            else:
-                # Delete early when the remaining frames cannot reach M hits,
-                # rather than carrying a hypothesis that is already arithmetically
-                # dead. Without this a false alarm survives the full N frames and
-                # keeps competing for measurements it can never be confirmed on.
-                remaining = self.n_confirm_frames - track.n_frames
-                if track.n_hits + remaining < self.n_confirm_hits:
-                    track.status = "deleted"
+        estimate = KalmanState(state=state, covariance=self.initial_covariance.copy())
+        return self.manager.seed(KalmanFilter(estimate), time_s)

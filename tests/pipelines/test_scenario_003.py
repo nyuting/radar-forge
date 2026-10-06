@@ -107,7 +107,7 @@ def from_first_confirmation(records):
 
 def primary(confirmed, frame):
     """The confirmed track closest to truth in range."""
-    return min(confirmed, key=lambda track: abs(track.estimate.state[0] - frame.range_m))
+    return min(confirmed, key=lambda track: abs(track.estimator.estimate.state[0] - frame.range_m))
 
 
 @pytest.fixture(scope="module")
@@ -149,7 +149,7 @@ class TestS1:
     def test_criterion_2_range_rmse_is_well_inside_one_bin(self, s1_run):
         scenario, _, records = s1_run
         errors_m = [
-            primary(confirmed, frame).estimate.state[0] - frame.range_m
+            primary(confirmed, frame).estimator.estimate.state[0] - frame.range_m
             for frame, confirmed, _ in records
             if confirmed
         ]
@@ -170,9 +170,9 @@ class TestS1:
         """
         _, _, records = s1_run
         errors = [
-            primary(confirmed, frame).estimate.state[1] - frame.radial_velocity_mps
+            primary(confirmed, frame).estimator.estimate.state[1] - frame.radial_velocity_mps
             for frame, confirmed, _ in records
-            if confirmed and primary(confirmed, frame).measurement_dim == 2
+            if confirmed and primary(confirmed, frame).estimator.measurement_dim == 2
         ]
         if errors:
             assert float(np.sqrt(np.mean(np.square(errors)))) < 12.0
@@ -197,7 +197,7 @@ class TestS1:
             if not confirmed:
                 continue
             track = primary(confirmed, frame)
-            if track.track_id not in result.associations or track.measurement_dim != 2:
+            if track.track_id not in result.associations or track.estimator.measurement_dim != 2:
                 continue
             measurement = result.measurements[result.associations[track.track_id]]
             total += 1
@@ -214,9 +214,12 @@ class TestS1:
         """
         _, _, records = s1_run
         samples = [
-            (primary(confirmed, frame).last_nis, primary(confirmed, frame).measurement_dim)
+            (
+                primary(confirmed, frame).estimator.last_nis,
+                primary(confirmed, frame).estimator.measurement_dim,
+            )
             for frame, confirmed, _ in records
-            if confirmed and primary(confirmed, frame).last_nis is not None
+            if confirmed and primary(confirmed, frame).estimator.last_nis is not None
         ]
         assert samples
         values = np.array([value for value, _ in samples])
@@ -272,7 +275,7 @@ class TestDualPrf:
     def test_criterion_2_range_rmse_is_far_inside_one_bin(self, dual_prf_run):
         scenario, _, records = dual_prf_run
         errors_m = [
-            primary(confirmed, frame).estimate.state[0] - frame.range_m
+            primary(confirmed, frame).estimator.estimate.state[0] - frame.range_m
             for frame, confirmed, _ in records
             if confirmed
         ]
@@ -283,7 +286,7 @@ class TestDualPrf:
         """The criterion as originally written, met because §5.3 is not needed."""
         _, _, records = dual_prf_run
         errors = [
-            primary(confirmed, frame).estimate.state[1] - frame.radial_velocity_mps
+            primary(confirmed, frame).estimator.estimate.state[1] - frame.radial_velocity_mps
             for frame, confirmed, _ in records
             if confirmed
         ]
@@ -312,5 +315,5 @@ class TestDualPrf:
         _, _, records = dual_prf_run
         for frame, confirmed, _ in records:
             if confirmed:
-                assert primary(confirmed, frame).measurement_dim == 2
+                assert primary(confirmed, frame).estimator.measurement_dim == 2
                 break

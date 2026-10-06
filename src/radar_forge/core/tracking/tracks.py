@@ -3,17 +3,19 @@
 A track is the tracker's belief that one target exists, together with the
 filter that estimates where it is. This module has three names:
 
-- :class:`TrackStatus`: where a track is in its life: tentative, confirmed or
-  deleted.
+- :data:`TrackStatus`: where a track is in its life: tentative, confirmed,
+  coasting or deleted.
 - :class:`Track`: the live, changeable record. The tracker owns it, and it
   changes every scan as the filter predicts and updates.
 - :class:`TrackSnapshot`: a frozen copy of one track at one moment. This is
-  what the tracker hands to callers. Changing it cannot change the tracker.
+  what :class:`~radar_forge.core.tracking.tracker.Tracker` hands to callers.
+  Changing it cannot change the tracker.
 
-``kalman.py`` has its own ``Track`` and its own ``TrackStatus``, a ``Literal``
-that also has a ``"coasting"`` value. The two sets live side by side until the
-pipeline moves to this tracker and ``kalman.py`` is removed. Until then the
-package ``__init__`` re-exports ``kalman``'s, so import these from this module.
+Both trackers in this package use the same :class:`Track`. Only the filter it
+carries differs: a :class:`~radar_forge.core.tracking.tracker.Tracker` track
+carries an :class:`~radar_forge.core.tracking.estimation.Estimator` such as the
+UKF, and a :class:`~radar_forge.core.tracking.kalman.KalmanTracker` track
+carries a :class:`~radar_forge.core.tracking.kalman.KalmanFilter`.
 
 References
 ----------
@@ -26,7 +28,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from enum import StrEnum
+from typing import Generic, Literal, TypeVar, get_args
 
 import numpy as np
 from numpy.typing import NDArray
@@ -35,32 +37,35 @@ from radar_forge.core.tracking.coordinates import StateEstimate
 from radar_forge.core.tracking.estimation import Estimator
 
 __all__ = [
+    "TRACK_STATUSES",
     "Track",
     "TrackSnapshot",
     "TrackStatus",
 ]
 
+TrackStatus = Literal["tentative", "confirmed", "coasting", "deleted"]
+"""Where a track is in its life.
 
-class TrackStatus(StrEnum):
-    """Where a track is in its life.
+``"tentative"``
+    Newly started and not yet trusted. It becomes confirmed by the M-of-N
+    rule: M hits (scans in which it got a measurement) within its first N
+    scans. If it cannot reach M hits in time, it is deleted. See
+    :mod:`~radar_forge.core.tracking.lifecycle`.
+``"confirmed"``
+    Has passed the M-of-N test, and got a measurement in its latest scan.
+``"coasting"``
+    Confirmed, but missed its latest scan. To *coast* is to carry a track
+    through a scan with no measurement: the filter predicts it forward and
+    there is nothing to update it with. The next hit makes it confirmed again.
+``"deleted"``
+    Removed. The tracker reports a track with this status once, in the scan
+    it is deleted, and then forgets it.
+"""
 
-    Attributes
-    ----------
-    TENTATIVE
-        Newly started and not yet trusted. It becomes confirmed by the M-of-N
-        rule: M hits (scans in which it got a measurement) within its first N
-        scans. If it cannot reach M hits in time, it is deleted. See
-        :mod:`~radar_forge.core.tracking.lifecycle`.
-    CONFIRMED
-        Has passed the M-of-N test. Callers usually display only these.
-    DELETED
-        Removed. The tracker reports a track with this status once, in the
-        scan it is deleted, and then forgets it.
-    """
+TRACK_STATUSES: tuple[TrackStatus, ...] = get_args(TrackStatus)
+"""Every :data:`TrackStatus`, in the order a track moves through them."""
 
-    TENTATIVE = "tentative"
-    CONFIRMED = "confirmed"
-    DELETED = "deleted"
+FilterT = TypeVar("FilterT")
 
 
 @dataclass(frozen=True)
@@ -69,7 +74,7 @@ class TrackSnapshot:
 
     Attributes
     ----------
-    track_id : str
+    track_id : int
         The track's identifier, unique within one tracker and fixed for the
         track's life.
     estimate : StateEstimate
@@ -86,7 +91,7 @@ class TrackSnapshot:
         it was born from.
     """
 
-    track_id: str
+    track_id: int
     estimate: StateEstimate
     status: TrackStatus
     last_measurement_time_s: float
@@ -117,21 +122,30 @@ class TrackSnapshot:
 
 
 @dataclass
-class Track:
+class Track(Generic[FilterT]):
     """The live record of one target: its filter and its lifecycle counters.
 
-    Each track owns its own estimator. The counters are what
+    Each track owns its own filter. The counters are what
     :class:`~radar_forge.core.tracking.lifecycle.TrackManager` reads to decide
     whether to confirm or delete the track.
 
+    ``Track`` is generic in its filter, written ``Track[FilterT]``. The
+    lifecycle does not depend on how the state is estimated, so one record
+    serves both trackers: ``Track[Estimator]`` in
+    :class:`~radar_forge.core.tracking.tracker.Tracker` and
+    ``Track[KalmanFilter]`` in
+    :class:`~radar_forge.core.tracking.kalman.KalmanTracker`.
+
     Attributes
     ----------
-    track_id : str
-        The track's identifier, unique within one tracker.
-    estimator : Estimator
+    track_id : int
+        The track's identifier, unique within one tracker and fixed for the
+        track's life. A track whose identifier changes mid-run is a track that
+        was lost and started again.
+    estimator : FilterT
         The filter that holds this track's state estimate. No other track may
         share it.
-    status : TrackStatus, default TENTATIVE
+    status : TrackStatus, default "tentative"
         Where the track is in its life.
     n_frames : int, default 1
         Scans this track has taken part in, counting the one it was born in. A
@@ -152,9 +166,9 @@ class Track:
         capped by ``LifecyclePolicy.n_history``.
     """
 
-    track_id: str
-    estimator: Estimator
-    status: TrackStatus = TrackStatus.TENTATIVE
+    track_id: int
+    estimator: FilterT
+    status: TrackStatus = "tentative"
     n_frames: int = 1
     n_hits: int = 1
     n_misses: int = 0
@@ -162,8 +176,23 @@ class Track:
     source_sensor_ids: set[str] = field(default_factory=set)
     history: deque[TrackSnapshot] = field(default_factory=lambda: deque(maxlen=0))
 
-    def snapshot(self) -> TrackSnapshot:
+    @property
+    def is_alive(self) -> bool:
+        """Whether the track still takes part in association: not deleted."""
+        return self.status != "deleted"
+
+    @property
+    def is_confirmed(self) -> bool:
+        """Whether the track has passed the M-of-N test: confirmed or coasting."""
+        return self.status in ("confirmed", "coasting")
+
+    def snapshot(self: Track[Estimator]) -> TrackSnapshot:
         """Return a frozen copy of the track as it is now.
+
+        Only a track whose filter is an
+        :class:`~radar_forge.core.tracking.estimation.Estimator` has a
+        snapshot, because only an estimator reports a timed
+        :class:`~radar_forge.core.tracking.coordinates.StateEstimate`.
 
         Returns
         -------
