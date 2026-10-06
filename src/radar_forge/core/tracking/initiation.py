@@ -18,7 +18,8 @@ sensor whose tracks must all come from
 References
 ----------
 .. [1] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications
-       to Tracking and Navigation*, Wiley, 2001, §11.7 (track initiation).
+       to Tracking and Navigation*, Wiley, 2001, §5.5.3 (initialising a tracking
+       filter from its first measurement).
 """
 
 from __future__ import annotations
@@ -140,7 +141,7 @@ class DirectStateInitiator:
 
     References
     ----------
-    .. [1] Bar-Shalom, Li and Kirubarajan (2001), §11.7; see the module References.
+    .. [1] Bar-Shalom, Li and Kirubarajan (2001), §5.5.3; see the module References.
 
     Examples
     --------

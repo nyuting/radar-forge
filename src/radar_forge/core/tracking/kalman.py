@@ -35,9 +35,9 @@ References
        Handbook of Algorithms*, YBS Publishing, 2011, ch. 2 (gating), ch. 3
        (assignment).
 .. [2] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with
-       Applications to Tracking and Navigation*, Wiley, 2001, §5.2 (discrete
-       white-noise acceleration), §6.3 (validation gating and nearest
-       neighbour), §11.7 (track initiation).
+       Applications to Tracking and Navigation*, Wiley, 2001, §5.2 (the Kalman
+       filter), §5.5 (initialising the state estimate), §6.3.2 (discrete
+       white-noise acceleration).
 .. [3] S. S. Blackman and R. Popoli, *Design and Analysis of Modern Tracking
        Systems*, Artech House, 1999, ch. 6 (M-of-N initiation, global nearest
        neighbour).
@@ -239,7 +239,7 @@ def process_noise_dwna(
 ) -> NDArray[np.float64]:
     r"""Return the discrete white-noise acceleration process noise covariance.
 
-    Implements the piecewise-constant white acceleration model of [2]_ §5.2, in
+    Implements the piecewise-constant white acceleration model of [2]_ §6.3.2, in
     which the acceleration is taken as constant over each sampling interval and
     independent between intervals. Per axis, with :math:`T` the step and
     :math:`\sigma_a` the acceleration standard deviation,

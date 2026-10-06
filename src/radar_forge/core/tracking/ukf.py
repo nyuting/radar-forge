@@ -129,7 +129,7 @@ class UKF:
 
     References
     ----------
-    .. [1] Wan and van der Merwe (2000), §3.
+    .. [1] Wan and van der Merwe (2000), §3, Eq. (15).
     .. [2] Julier (2002).
 
     Examples

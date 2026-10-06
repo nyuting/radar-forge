@@ -22,11 +22,11 @@ same physical value, so subtraction and averaging must take the wrap into accoun
 
 References
 ----------
-.. [1] K. V. Mardia and P. E. Jupp, *Directional Statistics*, Wiley, 2000, ch. 2
+.. [1] K. V. Mardia and P. E. Jupp, *Directional Statistics*, Wiley, 2000, §2.2.1
        (the mean direction of circular data, used by
        :meth:`StateLayout.weighted_mean`).
 .. [2] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications
-       to Tracking and Navigation*, Wiley, 2001, ch. 5 (the state estimate and its
+       to Tracking and Navigation*, Wiley, 2001, §5.2.1 (the state estimate and its
        covariance).
 """
 
@@ -360,7 +360,7 @@ class StateLayout:
 
         References
         ----------
-        .. [1] Mardia and Jupp (2000), ch. 2; see the module References.
+        .. [1] Mardia and Jupp (2000), §2.2.1; see the module References.
 
         Examples
         --------
@@ -427,7 +427,7 @@ class StateEstimate:
 
     References
     ----------
-    .. [1] Bar-Shalom, Li and Kirubarajan (2001), ch. 5; see the module References.
+    .. [1] Bar-Shalom, Li and Kirubarajan (2001), §5.2.1; see the module References.
 
     Examples
     --------

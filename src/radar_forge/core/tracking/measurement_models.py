@@ -37,9 +37,9 @@ States use the x = east, y = north, z = up convention of
 References
 ----------
 .. [1] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications
-       to Tracking and Navigation*, Wiley, 2001, ch. 5 (the measurement equation
-       z = h(x) + w, and its linear case z = Hx + w, where w is the measurement
-       noise: zero mean, with covariance R).
+       to Tracking and Navigation*, Wiley, 2001, §4.3.1 (the linear
+       measurement equation z = Hx + w, where w is the measurement noise: zero
+       mean, with covariance R) and §10.2.1 (the nonlinear case z = h(x) + w).
 .. [2] N. J. Willis, *Bistatic Radar*, 2nd ed., SciTech Publishing, 2005, §1.3
        (bistatic geometry: the range sum and the baseline).
 """
@@ -405,7 +405,7 @@ class CartesianPosition:
 
     References
     ----------
-    .. [1] Bar-Shalom, Li and Kirubarajan (2001), ch. 5; see the module References.
+    .. [1] Bar-Shalom, Li and Kirubarajan (2001), §4.3.1; see the module References.
 
     Examples
     --------

@@ -22,8 +22,8 @@ be. Two scores follow from them:
 References
 ----------
 .. [1] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications to Tracking
-       and Navigation*, Wiley, 2001, §5.4 (the innovation, its covariance, and the NIS
-       consistency test).
+       and Navigation*, Wiley, 2001, §5.2.6 (the innovation and its
+       covariance) and §5.4.2 (the NIS consistency test).
 """
 
 from __future__ import annotations
@@ -67,7 +67,7 @@ class InnovationStats:
 
     References
     ----------
-    .. [1] Bar-Shalom, Li and Kirubarajan (2001), §5.4.
+    .. [1] Bar-Shalom, Li and Kirubarajan (2001), §5.2.6 and §5.4.2.
     """
 
     predicted_measurement: NDArray[np.float64]
@@ -152,7 +152,7 @@ class Estimator(Protocol):
 
     References
     ----------
-    .. [1] Bar-Shalom, Li and Kirubarajan (2001), §5.2 (the predict and update cycle).
+    .. [1] Bar-Shalom, Li and Kirubarajan (2001), §5.2.4 (the predict and update cycle).
     """
 
     @property

@@ -266,7 +266,7 @@ class ChiSquareGate:
     References
     ----------
     .. [1] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with
-           Applications to Tracking and Navigation*, Wiley, 2001, ch. 5 (the
+           Applications to Tracking and Navigation*, Wiley, 2001, §5.4.2 (the
            NIS of a consistent filter is chi-square distributed).
     .. [2] S. S. Blackman and R. Popoli, *Design and Analysis of Modern Tracking
            Systems*, Artech House, 1999, ch. 6 (gating).

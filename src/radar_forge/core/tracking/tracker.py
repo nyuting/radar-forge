@@ -600,8 +600,8 @@ def build_tracker(
     References
     ----------
     .. [1] E. A. Wan and R. van der Merwe, "The unscented Kalman filter for
-           nonlinear estimation," *Proc. IEEE AS-SPCC Symposium*, 2000, §3
-           (the parameters alpha, beta and kappa).
+           nonlinear estimation," *Proc. IEEE AS-SPCC Symposium*, 2000, §3,
+           Eq. (15) (the parameters alpha, beta and kappa).
     """
     if motion.state_layout != observation.state_layout or prior.state_layout != motion.state_layout:
         msg = "motion, observation and prior require the same StateLayout."
