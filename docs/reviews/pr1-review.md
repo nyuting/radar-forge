@@ -302,11 +302,13 @@ This applies when IMM lands (#6). `IMM` needs every mode to share one `StateSpac
 - **Banners that repeat the docstring.** Most functions have a `####` banner plus an `Inputs:`/`Outputs:` block that restates the NumPy docstring right below it. (From here on, "banner" means either kind of block. `tracking_config.py` has only the `Inputs:`/`Outputs:` kind.) Claude counted at bedfde0: 198 banner lines, all in `tracking/`, and 204 `Inputs:`/`Outputs:` lines (190 in `tracking/`, 14 in `pipelines/tracking_config.py`), against 0 of each on main. With the text between them, that's about 1,000 of the 4,400 lines in `tracking/`, roughly a quarter. Move anything not already in the docstring into `Parameters`/`Returns`, then delete the banners. The explanations are genuinely good for learners; they just belong in one place.
 - **Inline comments that say what the line does.** For example, in `management.py:223–225`:
 
+  <!-- fmt:off -->
   ```python
   track.hit_count += 1                                      # successful association
   track.miss_count = 0                                      # consecutive miss streak is broken
   track.score += 1                                          # simple quality score used by local track management
   ```
+  <!-- fmt:on -->
 
   Each comment restates its line. The one fact a reader needs isn't said anywhere: `score` is never read (#24). Delete comments like these. Where there *is* a why, write it as a sentence above the block.
 
