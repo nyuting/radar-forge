@@ -778,7 +778,7 @@ def explicit_ring(power_w, cut, *, wrap_doppler):
     """Return the ring cells around ``cut`` of a (n_doppler, n_range) map, one by one.
 
     Deliberately the plainest possible enumeration, so it shares no code, and no
-    off-by-one, with the summed-area table under test. The loops are the point.
+    off-by-one, with the box filters under test. The loops are the point.
     """
     margin_doppler = RING_N_GUARD[0] + RING_N_TRAIN[0]
     margin_range = RING_N_GUARD[1] + RING_N_TRAIN[1]
@@ -830,7 +830,7 @@ def measure_false_alarm_rate_2d(rng, *, pfa, variant, n_maps_per_chunk=8):
 
 
 def test_ring_mean_equals_the_explicit_ring_mean():
-    """The summed-area table reproduces the ring mean, at the centre and across the wrap.
+    """The ring mean matches the explicit ring, at the centre and across the wrap.
 
     The cells at Doppler row 0 and at the last row take half their ring from the
     far end of the map, which is where an off-by-one in the padding would show.
@@ -843,7 +843,7 @@ def test_ring_mean_equals_the_explicit_ring_mean():
     for cut in [(12, 20), (0, 6), (23, 33), (1, 7)]:
         ring = explicit_ring(power_w, cut, wrap_doppler=True)
         assert ring.size == RING_N_REFERENCE
-        # Roundoff only: the table is a few hundred unit-mean terms.
+        # Roundoff only: running sums of a few hundred unit-mean terms.
         np.testing.assert_allclose(estimate_w[cut], ring.mean(), rtol=1e-12)
 
 
@@ -1027,28 +1027,20 @@ def test_opposite_corners_join_when_both_axes_wrap():
     np.testing.assert_allclose(found[0].centroid_index, (7 + 2 / 3, 7 + 2 / 3), rtol=1e-12)
 
 
-def test_a_noise_map_gives_each_detection_its_snr():
-    """In a flat floor the noise at the peak is the floor, so the SNR is exact."""
+def test_a_detection_carries_the_noise_estimate_at_its_peak():
+    """In a flat floor the ring around the peak holds only floor cells."""
     power_w = np.full((32, 64), 2.0)
     power_w[16, 32] = 200.0
-    noise_w = cfar_noise_estimate_2d_w(power_w, n_train=(2, 4), n_guard=(1, 1))
-    found = cluster_detections(power_w > 100.0, power_w, noise_w=noise_w)
+    estimate_w = cfar_noise_estimate_2d_w(power_w, n_train=(2, 4), n_guard=(1, 1))
+    found = cluster_detections(power_w > 100.0, power_w, noise_estimate_w=estimate_w)
     assert len(found) == 1
-    # Roundoff only: a summed-area table over a constant floor.
-    np.testing.assert_allclose(found[0].noise_power_w, 2.0, rtol=1e-12)
-    np.testing.assert_allclose(found[0].snr_db, 20.0, rtol=1e-12)
+    # Roundoff only: box means over a constant floor.
+    np.testing.assert_allclose(found[0].cfar_noise_estimate_w, 2.0, rtol=1e-12)
 
 
-def test_a_detection_without_a_noise_map_has_no_snr():
+def test_a_detection_without_a_noise_estimate_carries_nan():
     found = cluster_detections(np.array([False, True, False]), np.array([0.0, 1.0, 0.0]))[0]
-    assert math.isnan(found.noise_power_w)
-    assert math.isnan(found.snr_db)
-
-
-def test_snr_is_infinite_at_the_edges_of_its_domain():
-    """Zero noise or zero signal give infinities, not a math domain error."""
-    assert Detection((0,), (0.0,), 1.0, 1.0, 1, noise_power_w=0.0).snr_db == math.inf
-    assert Detection((0,), (0.0,), 0.0, 0.0, 1, noise_power_w=1.0).snr_db == -math.inf
+    assert math.isnan(found.cfar_noise_estimate_w)
 
 
 def test_a_target_on_the_doppler_wrap_gives_one_detection(rng):
@@ -1082,10 +1074,10 @@ def test_a_target_on_the_doppler_wrap_gives_one_detection(rng):
     settings = {"n_train": (4, 8), "n_guard": (3, 2), "wrap_axes": (0,)}
     pfa = 1e-6
     mask = cfar_detect_2d(power_w, pfa=pfa, **settings)
-    noise_w = cfar_noise_estimate_2d_w(power_w, **settings)
+    estimate_w = cfar_noise_estimate_2d_w(power_w, **settings)
 
     assert len(cluster_detections(mask, power_w)) == 2
-    found = cluster_detections(mask, power_w, noise_w=noise_w, wrap_axes=(0,))
+    found = cluster_detections(mask, power_w, noise_estimate_w=estimate_w, wrap_axes=(0,))
     assert len(found) == 1
     assert found[0].peak_index[1] == n_range_bin
     assert found[0].peak_index[0] in (NOMINAL_N_PULSES - 1, 0)
@@ -1094,10 +1086,10 @@ def test_a_target_on_the_doppler_wrap_gives_one_detection(rng):
     # bound that a split or a one-sided centroid (off by 1 or more) cannot meet.
     assert abs(found[0].centroid_index[0] - (NOMINAL_N_PULSES - 0.5)) < 0.1
 
-    # The peak crossed its threshold, so its SNR exceeds the threshold factor.
+    # The peak crossed its threshold, so it exceeds its noise estimate by alpha.
     n_reference = 15 * 21 - 7 * 5
     alpha_linear = cfar_threshold_factor(pfa=pfa, n_train=n_reference // 2)
-    assert found[0].snr_db > 10.0 * math.log10(alpha_linear)
+    assert found[0].peak_power_w / found[0].cfar_noise_estimate_w > alpha_linear
 
 
 # --------------------------------------------------------------------------- #
@@ -1152,9 +1144,9 @@ def test_rejects_power_that_is_not_finite(bad_power_w):
         cfar_detect_2d(power_w, pfa=1e-3, n_train=(2, 4), n_guard=(1, 1))
 
 
-def test_rejects_a_noise_map_of_the_wrong_shape():
-    with pytest.raises(ValueError, match="noise_w shape"):
-        cluster_detections(np.zeros(8, dtype=bool), np.zeros(8), noise_w=np.zeros(9))
+def test_rejects_a_noise_estimate_of_the_wrong_shape():
+    with pytest.raises(ValueError, match="noise_estimate_w shape"):
+        cluster_detections(np.zeros(8, dtype=bool), np.zeros(8), noise_estimate_w=np.zeros(9))
 
 
 def test_rejects_an_out_of_bounds_wrap_axis():

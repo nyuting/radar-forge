@@ -656,9 +656,10 @@ roll. It pairs naturally with §13.2.
 
 **Landed:** `cluster_detections(..., wrap_axes=...)` joins clusters across each circular axis and
 takes the centroid relative to the peak, so a target on the wrap centres between bin `n - 1` and
-bin `n`, reported modulo `n`. It also takes an optional `noise_w`, so each `Detection` carries
-`noise_power_w` and `snr_db` (data-001 §6.5). `pipelines/tracking.py` still uses its quiet-row roll
-until it adopts `wrap_axes`.
+bin `n`, reported modulo `n`. It also takes an optional `noise_estimate_w`, so each `Detection`
+carries the CFAR estimate at its peak as `cfar_noise_estimate_w`. That is not the burst's thermal
+`noise_power_w`, against which data-001 §6.5 defines `snr_db`. `pipelines/tracking.py` still uses
+its quiet-row roll until it adopts `wrap_axes`.
 
 ---
 

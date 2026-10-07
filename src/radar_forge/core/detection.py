@@ -9,7 +9,7 @@ the cells *around* the cell under test (CUT) and scales that estimate by a
 constant :math:`\alpha` chosen so that the probability of false alarm holds at a
 design value regardless of the floor's absolute level.
 
-The one-dimensional functions lay the reference window along one ``axis``:
+The reference window is one-dimensional, laid out along ``axis``:
 
 .. code-block:: text
 
@@ -19,30 +19,6 @@ The one-dimensional functions lay the reference window along one ``axis``:
 
 The guard cells are excluded from the estimate so that energy spilling out of a
 strong target does not inflate the very threshold meant to detect it.
-
-The ``_2d`` functions use a rectangular ring over two axes instead, usually the
-Doppler and range axes of a ``(n_doppler, n_range)`` map. ``n_train`` and
-``n_guard`` then give one count per axis:
-
-.. code-block:: text
-
-    T T T T T T T T T
-    T T G G G G G T T      T  training cell (the reference ring)
-    T T G G X G G T T      G  guard cell
-    T T G G G G G T T      X  cell under test
-    T T T T T T T T T
-
-    n_train = (1, 2), n_guard = (1, 2)
-
-A window along range sees only the cells in the target's own Doppler row. The
-ring draws its cells from both dimensions, so it collects more of them without
-reaching as far along either axis. A noise estimate from more cells is less
-noisy, so the threshold factor, and with it the CFAR loss, falls [6]_.
-
-An axis named in ``wrap_axes`` is treated as a circle: the window runs off one
-end and back in at the other. The Doppler axis of a range-Doppler map is
-circular, because a discrete Fourier transform is periodic, and so is a folded
-range axis.
 
 The four variants differ only in how they reduce the :math:`2N` reference cells
 (``N = n_train``) to one noise estimate:
@@ -59,11 +35,25 @@ Variant    Noise estimate
            interfering targets, at ~0.5 dB CFAR loss versus ``"ca"``
 =========  ==========================================================
 
-Only ``"ca"`` and ``"os"`` are offered in two dimensions. Their :math:`P_{fa}`
-depends on how many reference cells there are, not on where those cells lie, so
-a ring of :math:`M` cells is calibrated exactly like a one-dimensional window of
-:math:`M/2` cells per side. ``"go"`` and ``"so"`` compare the two halves of the
-window, and a ring has no single natural way to be cut in half.
+The ``_2d`` functions replace the window with a rectangular ring over two axes,
+usually the ``(n_doppler, n_range)`` axes of a range-Doppler map, with one
+``n_train`` and one ``n_guard`` per axis:
+
+.. code-block:: text
+
+    T T T T T T T T T
+    T T G G G G G T T      T  training cell
+    T T G G X G G T T      G  guard cell
+    T T G G G G G T T      X  cell under test
+    T T T T T T T T T
+
+    n_train = (1, 2), n_guard = (1, 2)
+
+Only ``"ca"`` and ``"os"`` are offered for the ring. Their :math:`P_{fa}`
+depends on the number of reference cells :math:`M`, not on where they lie, so a
+ring is calibrated as a window of :math:`M/2` cells per side; ``"go"`` and
+``"so"`` need two half-windows, which a ring does not have. An axis named in
+``wrap_axes`` is circular, as the Doppler axis of a range-Doppler map is.
 
 Each variant has a closed-form :math:`P_{fa}(\alpha)` for square-law-detected
 complex Gaussian noise, in which the cell powers are i.i.d. exponential.
@@ -75,13 +65,13 @@ false-alarm-rate measurement over many noise realisations exposes it.
 
 Notes
 -----
-Cells closer than ``n_guard + n_train`` to either end of ``axis`` have no
-complete reference window, unless the axis wraps. Rather than silently estimating the floor from a
-truncated window — which changes :math:`P_{fa}` in exactly the way CFAR exists
-to prevent — those cells are given a ``nan`` threshold and never declared
+Cells closer than ``n_guard + n_train`` to either end of a non-circular axis
+have no complete reference window. Rather than silently estimating the floor
+from a truncated window — which changes :math:`P_{fa}` in exactly the way CFAR
+exists to prevent — those cells are given a ``nan`` threshold and never declared
 detections. :func:`cfar_valid_mask` and :func:`cfar_valid_mask_2d` report which
-cells were actually tested, and any measured false-alarm rate must be taken
-over those cells alone.
+cells were actually tested, and any measured false-alarm rate must be taken over
+those cells alone.
 
 References
 ----------
@@ -164,8 +154,7 @@ class Detection:
         Power-weighted centroid of the cluster, in fractional cell indices.
         Interpolates between cells, so it resolves a target's position more
         finely than ``peak_index`` when the target straddles two bins. On a
-        circular axis it lies in ``[0, n)``, so a cluster that straddles the
-        wrap between cells ``n - 1`` and ``0`` centres near ``n - 0.5``.
+        circular axis it lies in ``[0, n)``.
     peak_power_w : float
         Detected power of the peak cell, in watts.
     total_power_w : float
@@ -173,9 +162,10 @@ class Detection:
     n_cells : int
         Number of threshold crossings in the cluster. A cluster of one cell is
         the signature of a false alarm; a real target usually spans several.
-    noise_power_w : float
-        The CFAR noise estimate at the peak cell, in watts, if a noise map was
-        passed to :func:`cluster_detections`; ``nan`` otherwise.
+    cfar_noise_estimate_w : float
+        CFAR noise estimate at the peak cell, in watts, if
+        :func:`cluster_detections` was given one; ``nan`` otherwise. This is
+        the local estimate, not the receiver's thermal noise power.
     """
 
     peak_index: tuple[int, ...]
@@ -183,36 +173,7 @@ class Detection:
     peak_power_w: float
     total_power_w: float
     n_cells: int
-    noise_power_w: float = math.nan
-
-    @property
-    def snr_db(self) -> float:
-        """Signal-to-noise ratio of the peak cell, in dB.
-
-        ``10 log10(peak_power_w / noise_power_w)``: the column ``snr_db`` of
-        data-001 §6.5, and the SNR that sets a measurement's Cramér-Rao bound.
-        ``nan`` when the noise power is unknown.
-
-        Returns
-        -------
-        float
-            The peak cell's SNR in dB; ``nan`` if ``noise_power_w`` is ``nan``,
-            ``inf`` if it is zero, and ``-inf`` if ``peak_power_w`` is zero.
-
-        Examples
-        --------
-        >>> Detection((3,), (3.0,), 200.0, 260.0, 3, noise_power_w=2.0).snr_db
-        20.0
-        """
-        if math.isnan(self.noise_power_w):
-            return math.nan
-        if self.noise_power_w == 0.0:
-            return math.inf
-        # math.log10 raises on zero rather than returning -inf, and a mask
-        # passed with an all-zero map gives a zero-power peak.
-        if self.peak_power_w == 0.0:
-            return -math.inf
-        return 10.0 * math.log10(self.peak_power_w / self.noise_power_w)
+    cfar_noise_estimate_w: float = math.nan
 
 
 def default_os_rank(n_train: int) -> int:
@@ -457,9 +418,8 @@ def cfar_threshold_factor(
 
     n_ref = 2 * n_train
     if variant == "ca":
-        # P^(-1/M) - 1 written as expm1(-ln P / M): the same number, but without
-        # subtracting 1 from a value near 1, which loses digits as M grows.
-        # A 2-D ring makes M run to hundreds. (Form taken from PR 1's cfar_2d.)
+        # P^(-1/M) - 1 as expm1(-ln P / M): P^(-1/M) is close to 1 when M is
+        # large, as it is for a 2-D ring, and subtracting 1 from it loses digits.
         return float(n_ref * math.expm1(-math.log(pfa) / n_ref))
 
     if variant == "os" and rank is not None:
@@ -811,10 +771,10 @@ def cfar_valid_mask_2d(
     Returns
     -------
     numpy.ndarray
-        Boolean array of ``shape``. Along an axis that does not wrap, the
-        ``n_guard + n_train`` cells at each end are False. Along an axis that
-        wraps, every cell is True. Every cell is False if either axis is
-        shorter than one window, because the ring would then overlap itself.
+        Boolean array of ``shape``, True where the cell was tested. False in the
+        ``n_guard + n_train`` cells at each end of an axis that does not wrap,
+        and everywhere if either axis is shorter than the ring, which would
+        then overlap itself.
 
     Raises
     ------
@@ -851,73 +811,65 @@ def cfar_noise_estimate_2d_w(
     r"""Estimate the local noise floor around each cell from a 2-D ring, in watts.
 
     The ring is the box of ``n_guard + n_train`` cells per side around the cell
-    under test, less the box of ``n_guard`` cells per side (which holds the cell
-    under test itself). It holds
+    under test, less the box of ``n_guard`` cells per side. With
+    :math:`t_i` = ``n_train[i]`` and :math:`g_i` = ``n_guard[i]`` it holds
 
     .. math::
 
         M = (2 g_0 + 2 t_0 + 1)(2 g_1 + 2 t_1 + 1) - (2 g_0 + 1)(2 g_1 + 1)
 
-    cells, which is always even.
+    reference cells.
 
     Parameters
     ----------
     power_w : array_like
         Detected (square-law) power, in watts, with at least two dimensions. For
-        a range-Doppler map this is ``np.abs(rd_map) ** 2``, shape
+        a range-Doppler map this is ``np.abs(rd_map) ** 2``, of shape
         ``(n_doppler, n_range)``.
     n_train : tuple of int
-        Training cells per side, one count for each of ``axes``, e.g. ``(4, 8)``
-        for four Doppler and eight range cells. Each must be at least one.
+        Training cells per side, one count for each of ``axes``. Each must be
+        at least one.
     n_guard : tuple of int
         Guard cells per side, one count for each of ``axes``. Set each wide
-        enough to cover a target's spread along that axis: the mainlobe of the
-        range window along range, and of the Doppler window along Doppler.
+        enough to cover a target's mainlobe along that axis, or a strong target
+        raises its own threshold and masks itself.
     variant : {'ca', 'os'}, optional
-        ``'ca'`` for the mean of the ring, ``'os'`` for its ``rank``-th smallest
-        cell. Default ``'ca'``.
+        Reduction rule. Default ``'ca'``.
     rank : int, optional
         For ``variant='os'``: one-based rank of the order statistic, in
-        ``1 .. M``. Defaults to :func:`default_os_rank` of ``M // 2``, that is,
-        about :math:`3M/4`.
+        ``1 .. M``. Defaults to :func:`default_os_rank` of ``M // 2``.
     axes : tuple of int, optional
-        The two axes the ring spans. Default ``(-2, -1)``: Doppler and range of
-        a ``(n_doppler, n_range)`` map.
+        The two axes the ring spans. Default ``(-2, -1)``.
     wrap_axes : tuple of int, optional
-        Which of ``axes`` are circular. Default none. Pass the Doppler axis,
-        ``(0,)`` for a ``(n_doppler, n_range)`` map, and add the range axis
-        when the range is folded.
+        Which of ``axes`` are circular. Default none. For a
+        ``(n_doppler, n_range)`` map, pass ``(0,)``.
 
     Returns
     -------
     numpy.ndarray
         Noise-floor estimate in watts, the same shape as ``power_w``, and
-        ``nan`` wherever the ring is incomplete (see
-        :func:`cfar_valid_mask_2d`).
+        ``nan`` wherever the ring is incomplete
+        (see :func:`cfar_valid_mask_2d`).
 
     Raises
     ------
     ValueError
         If ``variant`` is not ``'ca'`` or ``'os'``, a count or ``rank`` is out of
-        range, the axes are invalid, ``wrap_axes`` names an axis not in
-        ``axes``, or ``power_w`` has fewer than two dimensions, a negative value
-        or a value that is not finite.
+        range, ``axes`` or ``wrap_axes`` are invalid, or ``power_w`` has fewer
+        than two dimensions or holds negative or non-finite values.
 
     Notes
     -----
-    ``'ca'`` uses a summed-area table, the 2-D form of the cumulative sum the
-    1-D estimator uses: after two cumulative sums, the total of any box is four
-    lookups, so the cost is linear in the map size and independent of the ring's
-    size. ``'os'`` needs the individual cells, so it materialises each ring and
-    is far slower.
-
-    A circular axis is handled by padding the map with ``n_guard + n_train``
-    wrapped cells at each end of that axis (``np.pad(mode="wrap")``) and then
-    keeping only the centres that belong to the original map.
+    A circular axis is first extended by ``n_guard + n_train`` wrapped cells at
+    each end. ``'ca'`` is then the outer box's total less the guard box's, each
+    from :func:`scipy.ndimage.uniform_filter`, so its cost is linear in the map
+    size and independent of the ring's size. ``'os'`` runs
+    :func:`scipy.ndimage.rank_filter` with the ring as its footprint, which
+    visits every ring cell and is substantially slower.
 
     References
     ----------
-    See module references [4]_ (OS) and [6]_ (two-dimensional windows).
+    See module references [1]_ (CA) and [4]_ (OS).
 
     Examples
     --------
@@ -968,7 +920,7 @@ def cfar_threshold_2d_w(
     """Return the adaptive detection threshold for each cell from a 2-D ring, in watts.
 
     The ring's noise estimate from :func:`cfar_noise_estimate_2d_w`, scaled by
-    the threshold factor for a window of the same number of reference cells.
+    the threshold factor from :func:`cfar_threshold_factor`.
 
     Parameters
     ----------
@@ -995,11 +947,9 @@ def cfar_threshold_2d_w(
 
     Notes
     -----
-    The false-alarm probability of CA and OS depends only on how many reference
-    cells there are, because the reference cells are i.i.d. under the noise
-    model and neither rule cares where they lie. So a ring of :math:`M` cells
-    takes the threshold factor of a 1-D window of :math:`M/2` cells per side,
-    from :func:`cfar_threshold_factor`.
+    Under the noise model the reference cells are i.i.d., and neither CA nor OS
+    depends on where they lie, so a ring of :math:`M` cells takes the threshold
+    factor of a window of :math:`M/2` cells per side.
 
     Examples
     --------
@@ -1107,7 +1057,7 @@ def cluster_detections(
     mask: ArrayLike,
     power_w: ArrayLike,
     *,
-    noise_w: ArrayLike | None = None,
+    noise_estimate_w: ArrayLike | None = None,
     connectivity: int = 1,
     wrap_axes: tuple[int, ...] = (),
 ) -> list[Detection]:
@@ -1126,20 +1076,20 @@ def cluster_detections(
     power_w : array_like
         Detected power in watts, the same shape as ``mask``. Used to locate each
         cluster's peak and centroid.
-    noise_w : array_like, optional
-        The CFAR noise estimate in watts, the same shape as ``mask``, as
-        returned by :func:`cfar_noise_estimate_w` or
-        :func:`cfar_noise_estimate_2d_w`. If given, each detection carries the
-        estimate at its peak cell as ``noise_power_w``, and so an SNR.
+    noise_estimate_w : array_like, optional
+        CFAR noise estimate in watts, the same shape as ``mask``, from
+        :func:`cfar_noise_estimate_w` or :func:`cfar_noise_estimate_2d_w`. If
+        given, each detection carries its value at the peak cell as
+        ``cfar_noise_estimate_w``.
     connectivity : int, optional
         How many axes two cells may differ along and still count as adjacent.
         ``1`` (default) means face-connected only — in 2-D, the 4-neighbourhood.
         ``mask.ndim`` means fully connected, the 8-neighbourhood in 2-D, which
         also merges targets touching only at a corner.
     wrap_axes : tuple of int, optional
-        Axes that are circular, so that cells at the two ends of the axis are
-        adjacent. Default none. Pass the Doppler axis of a range-Doppler map, so
-        that a target on the ±v wrap is one detection, not two.
+        Axes that are circular, so that the cells at the two ends are adjacent.
+        Default none. Pass the Doppler axis of a range-Doppler map, so that a
+        target on the ±v wrap is one detection, not two.
 
     Returns
     -------
@@ -1150,7 +1100,7 @@ def cluster_detections(
     Raises
     ------
     ValueError
-        If ``mask``, ``power_w`` and ``noise_w`` do not all have the same shape,
+        If ``mask``, ``power_w`` and ``noise_estimate_w`` differ in shape,
         if ``connectivity`` is outside ``1 .. mask.ndim``, or if an axis in
         ``wrap_axes`` is out of bounds.
 
@@ -1162,12 +1112,9 @@ def cluster_detections(
     for false-alarm rate outside the CFAR threshold, so it changes the operating
     point that ``pfa`` was calibrated for.
 
-    On a circular axis, the centroid is taken relative to the peak cell, with
-    each cell's index unwrapped to lie within half a circle of it. A cluster
-    that does not straddle the wrap therefore gets the same centroid as on an
-    ordinary axis, and one that does gets a centroid between ``n - 1`` and
-    ``n``, reported modulo ``n``. This assumes that a cluster covers less than
-    half the axis, which holds for any target.
+    On a circular axis the centroid is a weighted mean of each cell's offset from
+    the peak, taken the short way round, and is reported modulo the axis length.
+    That assumes a cluster covers less than half the axis.
 
     Examples
     --------
@@ -1197,9 +1144,11 @@ def cluster_detections(
     if flags.shape != values_w.shape:
         msg = f"mask shape {flags.shape} does not match power_w shape {values_w.shape}."
         raise ValueError(msg)
-    noise_map_w = None if noise_w is None else np.asarray(noise_w, dtype=np.float64)
-    if noise_map_w is not None and noise_map_w.shape != flags.shape:
-        msg = f"noise_w shape {noise_map_w.shape} does not match mask shape {flags.shape}."
+    estimates_w = (
+        None if noise_estimate_w is None else np.asarray(noise_estimate_w, dtype=np.float64)
+    )
+    if estimates_w is not None and estimates_w.shape != flags.shape:
+        msg = f"noise_estimate_w shape {estimates_w.shape} does not match mask shape {flags.shape}."
         raise ValueError(msg)
     if not 1 <= connectivity <= max(1, flags.ndim):
         msg = f"connectivity must be between 1 and mask.ndim ({flags.ndim}), got {connectivity!r}."
@@ -1237,7 +1186,9 @@ def cluster_detections(
                 peak_power_w=float(cluster_w[peak]),
                 total_power_w=total_power_w,
                 n_cells=int(cluster_w.size),
-                noise_power_w=math.nan if noise_map_w is None else float(noise_map_w[peak_index]),
+                cfar_noise_estimate_w=(
+                    math.nan if estimates_w is None else float(estimates_w[peak_index])
+                ),
             )
         )
 
@@ -1410,11 +1361,15 @@ class _Ring:
 
     def interior(self, shape: tuple[int, ...]) -> tuple[slice, ...]:
         """Index of the cells with a complete ring: all of a circular axis, the middle of others."""
-        index = [slice(None)] * len(shape)
-        for axis, margin, wraps in zip(self.axes, self.margins, self.wraps, strict=True):
-            if not wraps:
-                index[axis] = slice(margin, shape[axis] - margin)
-        return tuple(index)
+        widths = (0 if self.wraps[0] else self.margins[0], 0 if self.wraps[1] else self.margins[1])
+        return _inner(shape, self.axes, widths)
+
+    def box_size(self, ndim: int, half_widths: tuple[int, int]) -> tuple[int, ...]:
+        """Filter size of a box ``half_widths`` cells per side on the ring axes, 1 elsewhere."""
+        size = [1] * ndim
+        for axis, half_width in zip(self.axes, half_widths, strict=True):
+            size[axis] = 2 * half_width + 1
+        return tuple(size)
 
     def wrap_padding(self, ndim: int) -> list[tuple[int, int]]:
         """``np.pad`` widths that extend each circular axis by one margin at each end."""
@@ -1456,54 +1411,20 @@ def _ring(
 
 
 def _ring_mean_w(padded_w: NDArray[np.float64], ring: _Ring) -> NDArray[np.float64]:
-    """Mean over the ring of every cell with a complete ring, from a summed-area table.
+    """Mean over the ring of every cell with a complete ring.
 
-    ``table`` holds cumulative sums along both ring axes, prefixed with a zero,
-    so ``table[i, j]`` is the total of ``padded_w[:i, :j]`` and the total of any
-    box is four lookups.
+    The ring's total is the outer box's total less the guard box's, and
+    ``uniform_filter`` gives each box's mean with a running sum along each axis.
     """
-    table = padded_w
-    for axis in ring.axes:
-        table = np.cumsum(table, axis=axis)
-    table = np.pad(table, [(1, 0) if axis in ring.axes else (0, 0) for axis in range(table.ndim)])
-    ring_total_w = _box_total(table, ring, ring.margins) - _box_total(table, ring, ring.n_guard)
-    # The difference of two large running totals can come out a roundoff-sized
-    # negative where the ring holds only zeros, and a noise power cannot.
-    return np.maximum(ring_total_w, 0.0) / ring.n_reference
-
-
-def _box_total(
-    table: NDArray[np.float64], ring: _Ring, half_widths: tuple[int, int]
-) -> NDArray[np.float64]:
-    """Total over a box of ``half_widths`` cells per side, for every tested centre.
-
-    Along each ring axis the padded map has ``n = table.shape[axis] - 1`` cells,
-    and the centres run over ``margin .. n - 1 - margin``. The box around centre
-    ``p`` spans ``[p - h, p + h]``, whose total along one axis is
-    ``table[p + h + 1] - table[p - h]``; in two axes that is four terms.
-    """
-    upper: list[slice] = []
-    lower: list[slice] = []
-    for axis, margin, half in zip(ring.axes, ring.margins, half_widths, strict=True):
-        n_padded = table.shape[axis] - 1
-        upper.append(slice(margin + half + 1, n_padded - margin + half + 1))
-        lower.append(slice(margin - half, n_padded - margin - half))
-    return (
-        _slice_pair(table, ring.axes, upper[0], upper[1])
-        - _slice_pair(table, ring.axes, lower[0], upper[1])
-        - _slice_pair(table, ring.axes, upper[0], lower[1])
-        + _slice_pair(table, ring.axes, lower[0], lower[1])
-    )
-
-
-def _slice_pair(
-    values: NDArray[np.float64], axes: tuple[int, int], first: slice, second: slice
-) -> NDArray[np.float64]:
-    """Return ``values`` sliced by ``first`` along ``axes[0]`` and ``second`` along ``axes[1]``."""
-    index: list[slice] = [slice(None)] * values.ndim
-    index[axes[0]] = first
-    index[axes[1]] = second
-    return values[tuple(index)]
+    outer_size = ring.box_size(padded_w.ndim, ring.margins)
+    guard_size = ring.box_size(padded_w.ndim, ring.n_guard)
+    outer_mean_w: NDArray[np.float64] = ndimage.uniform_filter(padded_w, size=outer_size)
+    guard_mean_w: NDArray[np.float64] = ndimage.uniform_filter(padded_w, size=guard_size)
+    ring_total_w = outer_mean_w * math.prod(outer_size) - guard_mean_w * math.prod(guard_size)
+    # The difference of two box totals can come out a roundoff-sized negative
+    # where the ring holds only zeros, and a noise power cannot.
+    centres = _inner(padded_w.shape, ring.axes, ring.margins)
+    return np.maximum(ring_total_w[centres], 0.0) / ring.n_reference
 
 
 def _ring_order_statistic_w(
@@ -1511,33 +1432,23 @@ def _ring_order_statistic_w(
 ) -> NDArray[np.float64]:
     """Return the ``rank``-th smallest ring cell for every cell with a complete ring.
 
-    As in 1-D there is no running-sum shortcut, so each ring is gathered and
-    partitioned.
+    The footprint is the outer box with the guard box, ``n_train`` cells in from
+    each edge, switched off.
     """
-    (margin_0, margin_1), (guard_0, guard_1) = ring.margins, ring.n_guard
-    window_shape = (2 * margin_0 + 1, 2 * margin_1 + 1)
-    moved = np.moveaxis(padded_w, ring.axes, (-2, -1))
-    # Shape (..., n_tested_0, n_tested_1, window_0, window_1), and a view.
-    windows = np.lib.stride_tricks.sliding_window_view(moved, window_shape, axis=(-2, -1))
-    in_ring = np.ones(window_shape, dtype=np.bool_)
-    in_ring[
-        margin_0 - guard_0 : margin_0 + guard_0 + 1, margin_1 - guard_1 : margin_1 + guard_1 + 1
-    ] = False
-    ring_rows, ring_cols = np.nonzero(in_ring)
+    footprint = np.ones(ring.box_size(padded_w.ndim, ring.margins), dtype=np.bool_)
+    footprint[_inner(footprint.shape, ring.axes, ring.n_train)] = False
+    picked_w: NDArray[np.float64] = ndimage.rank_filter(padded_w, rank - 1, footprint=footprint)
+    return picked_w[_inner(padded_w.shape, ring.axes, ring.margins)]
 
-    picked = np.empty(windows.shape[:-2], dtype=np.float64)
-    n_tested_rows = windows.shape[-4]
-    cells_per_row = picked[..., 0, :].size * ring.n_reference
-    chunk = max(1, _OS_MAX_WINDOW_ELEMENTS // cells_per_row)
-    # The window view is free, but gathering the ring cells copies them, so the
-    # copy is made a block of rows at a time. A Python loop is unavoidable: the
-    # point is to *not* have the whole array live at once.
-    for start in range(0, n_tested_rows, chunk):
-        block = windows[..., start : start + chunk, :, ring_rows, ring_cols]
-        picked[..., start : start + chunk, :] = np.partition(block, rank - 1, axis=-1)[
-            ..., rank - 1
-        ]
-    return np.moveaxis(picked, (-2, -1), ring.axes)
+
+def _inner(
+    shape: tuple[int, ...], axes: tuple[int, int], widths: tuple[int, int]
+) -> tuple[slice, ...]:
+    """Index that drops ``widths[i]`` cells from each end of axis ``axes[i]``."""
+    index = [slice(None)] * len(shape)
+    for axis, width in zip(axes, widths, strict=True):
+        index[axis] = slice(width, shape[axis] - width)
+    return tuple(index)
 
 
 def _label_on_circles(
