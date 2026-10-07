@@ -92,6 +92,7 @@ __all__ = [
     "iterate_frames",
     "load_scenario",
     "peak_range_velocity",
+    "range_axis_m",
 ]
 
 _SITE_KEYS = frozenset({"latitude_deg", "longitude_deg", "altitude_m"})
@@ -663,6 +664,51 @@ class RangeDopplerProduct:
     velocity_axis_mps: NDArray[np.float64]
 
 
+def range_axis_m(burst: RadarLike) -> NDArray[np.float64]:
+    r"""Return the range axis of a burst's range-Doppler map, in metres.
+
+    One bin per fast-time sample of a repetition interval,
+    ``burst.n_samples_per_pri`` of them, unshifted and starting at zero.
+    :func:`form_range_doppler_map` labels its maps with this axis, and it is
+    known before any IQ exists, which is what a tracker needs to set its range
+    period.
+
+    Parameters
+    ----------
+    burst : Radar or BistaticRadar
+        The burst. Its waveform decides how a bin maps to range; see
+        :func:`form_range_doppler_map`'s Notes.
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape ``(n_range_bins,)``, uniformly spaced.
+
+    Notes
+    -----
+    The axis is circular: a return beyond its last bin lands back near its
+    first. For the pulsed burst it spans one repetition interval of delay,
+    :math:`c/2\,\mathrm{PRF}`, which is :attr:`Radar.unambiguous_range_m`.
+    For an FMCW burst it spans the beat frequencies a *complex* sample rate
+    :math:`f_s` represents, :math:`[0, f_s)`, which is twice the
+    :attr:`Radar.unambiguous_range_m` the real-sampling limit :math:`f_s/2`
+    gives.
+    """
+    n_range_bins = burst.n_samples_per_pri
+    if burst.transmitter.waveform == "pulsed":
+        sample_index = np.arange(n_range_bins, dtype=np.float64)
+        return sample_index * SPEED_OF_LIGHT_MPS / (2.0 * burst.receiver.sample_rate_hz)
+    return np.asarray(
+        range_bin_centers_m(
+            n_range_bins,
+            burst.transmitter.bandwidth_hz,
+            burst.transmitter.chirp_duration_s,
+            burst.receiver.sample_rate_hz,
+        ),
+        dtype=np.float64,
+    )
+
+
 def form_range_doppler_map(
     baseband: NDArray[np.complex128], burst: RadarLike
 ) -> RangeDopplerProduct:
@@ -729,16 +775,8 @@ def form_range_doppler_map(
         n_samples = burst.n_samples_per_pri
         pri_window = compressed[:, group_delay_samples : group_delay_samples + n_samples]
         rd_map = doppler_fft(pri_window, axis=0)
-        sample_index = np.arange(pri_window.shape[1], dtype=np.float64)
-        range_axis_m = sample_index * SPEED_OF_LIGHT_MPS / (2.0 * burst.receiver.sample_rate_hz)
     else:
         rd_map = range_doppler_map(baseband)
-        range_axis_m = range_bin_centers_m(
-            rd_map.shape[1],
-            burst.transmitter.bandwidth_hz,
-            burst.transmitter.chirp_duration_s,
-            burst.receiver.sample_rate_hz,
-        )
 
     velocity_axis_mps = doppler_bin_centers_mps(
         rd_map.shape[0],
@@ -747,7 +785,7 @@ def form_range_doppler_map(
     )
     return RangeDopplerProduct(
         rd_map=rd_map,
-        range_axis_m=np.asarray(range_axis_m, dtype=np.float64),
+        range_axis_m=range_axis_m(burst),
         velocity_axis_mps=np.asarray(velocity_axis_mps, dtype=np.float64),
     )
 
