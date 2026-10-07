@@ -20,15 +20,20 @@ from radar_forge.core.detection import (
     CFAR_VARIANTS,
     Detection,
     cfar_detect,
+    cfar_detect_2d,
+    cfar_noise_estimate_2d_w,
     cfar_noise_estimate_w,
     cfar_probability_of_false_alarm,
+    cfar_threshold_2d_w,
     cfar_threshold_factor,
     cfar_threshold_w,
     cfar_valid_mask,
+    cfar_valid_mask_2d,
     cluster_detections,
     default_os_rank,
 )
 from radar_forge.core.dsp import doppler_bin_centers_mps, range_doppler_map
+from radar_forge.core.windows import taper
 
 # --------------------------------------------------------------------------- #
 # Monte-Carlo sizing
@@ -754,3 +759,396 @@ def test_rejects_an_unreachable_false_alarm_rate():
 def test_rejects_an_out_of_bounds_axis():
     with pytest.raises(ValueError, match="out of bounds"):
         cfar_noise_estimate_w(np.ones((4, 32)), n_train=4, axis=5)
+
+
+# --------------------------------------------------------------------------- #
+# Two-dimensional CFAR (spec 003 §13.2)
+#
+# The ring is (doppler, range) throughout: RING_N_TRAIN = (2, 4) and
+# RING_N_GUARD = (1, 2) give margins (3, 6) and a ring of
+# 7 * 13 - 3 * 5 = 76 cells.
+# --------------------------------------------------------------------------- #
+
+RING_N_TRAIN = (2, 4)
+RING_N_GUARD = (1, 2)
+RING_N_REFERENCE = 76
+
+
+def explicit_ring(power_w, cut, *, wrap_doppler):
+    """Return the ring cells around ``cut`` of a (n_doppler, n_range) map, one by one.
+
+    Deliberately the plainest possible enumeration, so it shares no code, and no
+    off-by-one, with the box filters under test. The loops are the point.
+    """
+    margin_doppler = RING_N_GUARD[0] + RING_N_TRAIN[0]
+    margin_range = RING_N_GUARD[1] + RING_N_TRAIN[1]
+    n_doppler = power_w.shape[0]
+    cells = []
+    for offset_doppler in range(-margin_doppler, margin_doppler + 1):
+        for offset_range in range(-margin_range, margin_range + 1):
+            in_guard = (
+                abs(offset_doppler) <= RING_N_GUARD[0] and abs(offset_range) <= RING_N_GUARD[1]
+            )
+            if in_guard:
+                continue
+            row = cut[0] + offset_doppler
+            if wrap_doppler:
+                row %= n_doppler
+            cells.append(power_w[row, cut[1] + offset_range])
+    return np.array(cells)
+
+
+def measure_false_alarm_rate_2d(rng, *, pfa, variant, n_maps_per_chunk=8):
+    """Run a Doppler-wrapping 2-D CFAR over seeded noise maps and count crossings.
+
+    The maps are stacked on a leading axis, which also checks that the ring
+    works on the last two axes of a 3-D array. Neighbouring cells share most of
+    their rings, so their decisions are slightly dependent; the 1-D rate tests
+    above make the same approximation, and the 99.9% interval absorbs it.
+    """
+    shape = (64, 256)
+    n_tested_per_map = int(
+        cfar_valid_mask_2d(shape, n_train=RING_N_TRAIN, n_guard=RING_N_GUARD, wrap_axes=(0,)).sum()
+    )
+    n_maps = max(1, math.ceil(EXPECTED_FALSE_ALARMS / pfa / n_tested_per_map))
+
+    n_hit = 0
+    # Chunked over maps to bound peak memory; the maps are independent.
+    for start in range(0, n_maps, n_maps_per_chunk):
+        n_chunk = min(n_maps_per_chunk, n_maps - start)
+        power_w = rng.exponential(1.0, size=(n_chunk, *shape))
+        mask = cfar_detect_2d(
+            power_w,
+            pfa=pfa,
+            n_train=RING_N_TRAIN,
+            n_guard=RING_N_GUARD,
+            variant=variant,
+            wrap_axes=(-2,),
+        )
+        n_hit += int(np.count_nonzero(mask))
+    return n_hit, n_maps * n_tested_per_map
+
+
+def test_ring_mean_equals_the_explicit_ring_mean():
+    """The ring mean matches the explicit ring, at the centre and across the wrap.
+
+    The cells at Doppler row 0 and at the last row take half their ring from the
+    far end of the map, which is where an off-by-one in the padding would show.
+    """
+    rng = np.random.default_rng(20261006)
+    power_w = rng.exponential(1.0, size=(24, 40))
+    estimate_w = cfar_noise_estimate_2d_w(
+        power_w, n_train=RING_N_TRAIN, n_guard=RING_N_GUARD, wrap_axes=(0,)
+    )
+    for cut in [(12, 20), (0, 6), (23, 33), (1, 7)]:
+        ring = explicit_ring(power_w, cut, wrap_doppler=True)
+        assert ring.size == RING_N_REFERENCE
+        # Roundoff only: running sums of a few hundred unit-mean terms.
+        np.testing.assert_allclose(estimate_w[cut], ring.mean(), rtol=1e-12)
+
+
+def test_ring_order_statistic_equals_the_explicit_sorted_ring():
+    """The OS ring picks the rank-th smallest of exactly the ring's cells."""
+    rng = np.random.default_rng(20261006)
+    power_w = rng.exponential(1.0, size=(24, 40))
+    rank = 50
+    estimate_w = cfar_noise_estimate_2d_w(
+        power_w,
+        n_train=RING_N_TRAIN,
+        n_guard=RING_N_GUARD,
+        variant="os",
+        rank=rank,
+        wrap_axes=(0,),
+    )
+    for cut in [(12, 20), (0, 6), (23, 33)]:
+        ring = explicit_ring(power_w, cut, wrap_doppler=True)
+        # Exact: an order statistic selects one of the inputs.
+        assert estimate_w[cut] == np.sort(ring)[rank - 1]
+
+
+@pytest.mark.parametrize("variant", ["ca", "os"])
+def test_ring_follows_its_axes_when_the_map_is_transposed(variant):
+    """A (range, doppler) map with axes=(-1, -2) gives the transposed estimate."""
+    rng = np.random.default_rng(20261006)
+    power_w = rng.exponential(1.0, size=(24, 40))
+    settings = {"n_train": RING_N_TRAIN, "n_guard": RING_N_GUARD, "variant": variant}
+    estimate_w = cfar_noise_estimate_2d_w(power_w, wrap_axes=(0,), **settings)
+    transposed_w = cfar_noise_estimate_2d_w(power_w.T, axes=(-1, -2), wrap_axes=(-1,), **settings)
+    np.testing.assert_array_equal(np.isnan(transposed_w), np.isnan(estimate_w.T))
+    # Roundoff only: the same sums, accumulated along the other axis first.
+    np.testing.assert_allclose(transposed_w, estimate_w.T, rtol=1e-12)
+
+
+def test_valid_mask_2d_tests_every_doppler_row_but_not_the_range_edges():
+    """With Doppler wrapping, only the range margins go untested."""
+    wrapped = cfar_valid_mask_2d(
+        (8, 20), n_train=RING_N_TRAIN, n_guard=RING_N_GUARD, wrap_axes=(0,)
+    )
+    expected = np.zeros((8, 20), dtype=bool)
+    expected[:, 6:14] = True
+    np.testing.assert_array_equal(wrapped, expected)
+
+    unwrapped = cfar_valid_mask_2d((8, 20), n_train=RING_N_TRAIN, n_guard=RING_N_GUARD)
+    expected[:3] = False
+    expected[-3:] = False
+    np.testing.assert_array_equal(unwrapped, expected)
+
+
+def test_valid_mask_2d_matches_where_the_estimate_is_defined():
+    rng = np.random.default_rng(20261006)
+    power_w = rng.exponential(1.0, size=(16, 40))
+    for wrap_axes in [(), (0,), (0, 1)]:
+        estimate_w = cfar_noise_estimate_2d_w(
+            power_w, n_train=RING_N_TRAIN, n_guard=RING_N_GUARD, wrap_axes=wrap_axes
+        )
+        valid = cfar_valid_mask_2d(
+            power_w.shape, n_train=RING_N_TRAIN, n_guard=RING_N_GUARD, wrap_axes=wrap_axes
+        )
+        np.testing.assert_array_equal(valid, ~np.isnan(estimate_w))
+
+
+def test_valid_mask_2d_is_empty_when_an_axis_is_shorter_than_the_ring():
+    """Wrapping a ring round an axis shorter than itself would count cells twice."""
+    valid = cfar_valid_mask_2d((6, 40), n_train=RING_N_TRAIN, n_guard=RING_N_GUARD, wrap_axes=(0,))
+    assert not valid.any()
+
+
+def test_ring_threshold_factor_satisfies_the_cell_averaging_closed_form():
+    """In a unit floor the threshold is alpha, and (1 + alpha / M) ** -M is pfa.
+
+    The closed form is the Gamma moment-generating function for M cells, which
+    shares no code with the calibration, so this checks that the ring is
+    calibrated for its own cell count M.
+
+    This is the test that pins M exactly. The Monte-Carlo rate test below cannot:
+    calibrating this ring for 2M cells instead of M gives a measured rate of
+    about 1.15e-3 against a design 1e-3, inside its 99.9% interval, because the
+    CA threshold factor changes slowly once M is large.
+    """
+    pfa = 1e-4
+    threshold_w = cfar_threshold_2d_w(
+        np.ones((32, 64)), pfa=pfa, n_train=RING_N_TRAIN, n_guard=RING_N_GUARD
+    )
+    alpha_linear = float(np.nanmax(threshold_w))
+    # Roundoff only: a closed form evaluated at its own inverse.
+    np.testing.assert_allclose(
+        (1.0 + alpha_linear / RING_N_REFERENCE) ** -RING_N_REFERENCE, pfa, rtol=1e-10
+    )
+
+
+def test_a_ring_has_less_cfar_loss_than_a_line_of_the_same_reach():
+    """The reason for a 2-D window: more reference cells for the same reach in range.
+
+    Both windows reach 10 cells along range; the ring also draws on two Doppler
+    rows each side, so its estimate is less noisy and its threshold factor lower.
+    """
+    floor_w = np.ones((32, 64))
+    line_w = cfar_threshold_w(floor_w, pfa=1e-4, n_train=8, n_guard=2)
+    ring_w = cfar_threshold_2d_w(floor_w, pfa=1e-4, n_train=(2, 8), n_guard=(1, 2))
+    assert np.nanmax(ring_w) < np.nanmax(line_w)
+
+
+@pytest.mark.parametrize(("variant", "pfa"), [("ca", 1e-3), ("os", 1e-2)])
+def test_ring_false_alarm_rate_matches_design_pfa(rng, variant, pfa):
+    """The measured false-alarm rate of the ring is consistent with the design pfa.
+
+    The test that would catch a ring calibrated for the wrong number of cells.
+    OS is measured at a cheaper 1e-2 for the same reason as in 1-D.
+    """
+    n_hit, n_tested = measure_false_alarm_rate_2d(rng, pfa=pfa, variant=variant)
+    assert_rate_consistent_with_design(n_hit, n_tested, pfa)
+
+
+def test_order_statistic_ring_holds_detection_where_cell_averaging_loses_it():
+    """Four strong interferers in the ring mask a target from CA but not from OS.
+
+    A flat floor makes the outcome exact: CA's ring mean is pulled up to about
+    590, so its threshold is in the thousands; OS's 51st-smallest cell is still
+    the floor.
+    """
+    power_w = np.ones((32, 64))
+    power_w[16, 32] = 1000.0
+    for interferer in [(13, 32), (19, 32), (16, 27), (16, 37)]:
+        power_w[interferer] = 1e4
+    settings = {"pfa": 1e-4, "n_train": (2, 4), "n_guard": (1, 1)}
+    assert not cfar_detect_2d(power_w, variant="ca", **settings)[16, 32]
+    assert cfar_detect_2d(power_w, variant="os", **settings)[16, 32]
+
+
+# --------------------------------------------------------------------------- #
+# Circular axes in clustering (spec 003 §13.5, §14.2)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_cluster_across_a_circular_axis_is_one_detection():
+    """Cells at both ends of a circular axis are one target, centred on the wrap."""
+    power_w = np.zeros(64)
+    power_w[[63, 0]] = 4.0
+    mask = power_w > 0.5
+
+    assert len(cluster_detections(mask, power_w)) == 2
+    found = cluster_detections(mask, power_w, wrap_axes=(0,))
+    assert len(found) == 1
+    assert found[0].n_cells == 2
+    np.testing.assert_allclose(found[0].centroid_index[0], 63.5, rtol=1e-12)
+
+
+def test_wrapping_leaves_a_centroid_away_from_the_wrap_unchanged():
+    """A cluster that does not straddle the wrap gets its ordinary centroid."""
+    power_w = np.zeros(32)
+    power_w[10:13] = [1.0, 4.0, 3.0]
+    mask = power_w > 0.5
+    plain = cluster_detections(mask, power_w)[0].centroid_index[0]
+    wrapped = cluster_detections(mask, power_w, wrap_axes=(0,))[0].centroid_index[0]
+    # Roundoff only: the same mean, taken relative to the peak.
+    np.testing.assert_allclose(wrapped, plain, rtol=1e-12)
+
+
+def test_diagonal_neighbours_across_the_wrap_join_only_when_fully_connected():
+    """Connectivity applies across the wrap exactly as it does inside the map."""
+    power_w = np.zeros((8, 8))
+    power_w[7, 3] = 2.0
+    power_w[0, 4] = 1.0
+    mask = power_w > 0.5
+    assert len(cluster_detections(mask, power_w, connectivity=1, wrap_axes=(0,))) == 2
+    assert len(cluster_detections(mask, power_w, connectivity=2)) == 2
+    assert len(cluster_detections(mask, power_w, connectivity=2, wrap_axes=(0,))) == 1
+
+
+def test_opposite_corners_join_when_both_axes_wrap():
+    """On a torus the corners (0, 0) and (n-1, n-1) are diagonal neighbours."""
+    power_w = np.zeros((8, 8))
+    power_w[0, 0] = 2.0
+    power_w[7, 7] = 1.0
+    mask = power_w > 0.5
+    assert len(cluster_detections(mask, power_w, connectivity=2, wrap_axes=(0,))) == 2
+    found = cluster_detections(mask, power_w, connectivity=2, wrap_axes=(0, 1))
+    assert len(found) == 1
+    np.testing.assert_allclose(found[0].centroid_index, (7 + 2 / 3, 7 + 2 / 3), rtol=1e-12)
+
+
+def test_a_detection_carries_the_noise_estimate_at_its_peak():
+    """In a flat floor the ring around the peak holds only floor cells."""
+    power_w = np.full((32, 64), 2.0)
+    power_w[16, 32] = 200.0
+    estimate_w = cfar_noise_estimate_2d_w(power_w, n_train=(2, 4), n_guard=(1, 1))
+    found = cluster_detections(power_w > 100.0, power_w, noise_estimate_w=estimate_w)
+    assert len(found) == 1
+    # Roundoff only: box means over a constant floor.
+    np.testing.assert_allclose(found[0].cfar_noise_estimate_w, 2.0, rtol=1e-12)
+
+
+def test_a_detection_without_a_noise_estimate_carries_nan():
+    found = cluster_detections(np.array([False, True, False]), np.array([0.0, 1.0, 0.0]))[0]
+    assert math.isnan(found.cfar_noise_estimate_w)
+
+
+def test_a_target_on_the_doppler_wrap_gives_one_detection(rng):
+    """End to end: one target straddling the ±v wrap comes back as one detection.
+
+    The regression test for spec 003 §14.2, and the detection-level form of
+    "one detection per target" that a tracker relies on. The target advances by
+    n_pulses / 2 - 0.5 cycles across the aperture, which after the fftshift
+    lies exactly halfway between the last Doppler bin and the first. A Hann
+    slow-time taper keeps its sidelobes below the threshold, so the only
+    question is whether the two halves of its mainlobe are joined.
+    """
+    n_range_bin = 40
+    n_doppler_cycles = NOMINAL_N_PULSES / 2 - 0.5
+
+    pulse_index = np.arange(NOMINAL_N_PULSES)[:, None]
+    sample_index = np.arange(NOMINAL_N_SAMPLES)[None, :]
+    target = 0.5 * np.exp(
+        2j
+        * np.pi
+        * (
+            n_range_bin * sample_index / NOMINAL_N_SAMPLES
+            + n_doppler_cycles * pulse_index / NOMINAL_N_PULSES
+        )
+    )
+    noise = rng.normal(size=target.shape) + 1j * rng.normal(size=target.shape)
+    cube = target + noise / math.sqrt(2.0)
+    power_w = np.abs(range_doppler_map(cube, slow_time_window=taper("hann", NOMINAL_N_PULSES))) ** 2
+
+    # Doppler guard of 3 covers the Hann mainlobe, which is 2 bins either side.
+    settings = {"n_train": (4, 8), "n_guard": (3, 2), "wrap_axes": (0,)}
+    pfa = 1e-6
+    mask = cfar_detect_2d(power_w, pfa=pfa, **settings)
+    estimate_w = cfar_noise_estimate_2d_w(power_w, **settings)
+
+    assert len(cluster_detections(mask, power_w)) == 2
+    found = cluster_detections(mask, power_w, noise_estimate_w=estimate_w, wrap_axes=(0,))
+    assert len(found) == 1
+    assert found[0].peak_index[1] == n_range_bin
+    assert found[0].peak_index[0] in (NOMINAL_N_PULSES - 1, 0)
+    # The mainlobe is symmetric about the wrap, so only noise moves the centroid.
+    # At this SNR (over 30 dB) that is a few hundredths of a bin; 0.1 bin is a
+    # bound that a split or a one-sided centroid (off by 1 or more) cannot meet.
+    assert abs(found[0].centroid_index[0] - (NOMINAL_N_PULSES - 0.5)) < 0.1
+
+    # The peak crossed its threshold, so it exceeds its noise estimate by alpha.
+    n_reference = 15 * 21 - 7 * 5
+    alpha_linear = cfar_threshold_factor(pfa=pfa, n_train=n_reference // 2)
+    assert found[0].peak_power_w / found[0].cfar_noise_estimate_w > alpha_linear
+
+
+# --------------------------------------------------------------------------- #
+# Documented failure modes of the 2-D functions and the new arguments
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("variant", ["go", "so"])
+def test_ring_rejects_the_half_window_variants(variant):
+    with pytest.raises(ValueError, match="for a 2-D ring"):
+        cfar_threshold_2d_w(
+            np.ones((32, 64)), pfa=1e-3, n_train=(2, 4), n_guard=(1, 1), variant=variant
+        )
+
+
+def test_ring_rejects_a_one_dimensional_map():
+    with pytest.raises(ValueError, match="at least two dimensions"):
+        cfar_noise_estimate_2d_w(np.ones(64), n_train=(2, 4), n_guard=(1, 1))
+
+
+def test_ring_rejects_a_repeated_axis():
+    with pytest.raises(ValueError, match="two different axes"):
+        cfar_noise_estimate_2d_w(np.ones((32, 64)), n_train=(2, 4), n_guard=(1, 1), axes=(1, -1))
+
+
+def test_ring_rejects_a_wrap_axis_it_does_not_span():
+    with pytest.raises(ValueError, match="must be among the ring's axes"):
+        cfar_noise_estimate_2d_w(
+            np.ones((3, 32, 64)), n_train=(2, 4), n_guard=(1, 1), wrap_axes=(0,)
+        )
+
+
+def test_ring_rejects_a_rank_outside_the_ring():
+    with pytest.raises(ValueError, match="rank must be a one-based index"):
+        cfar_noise_estimate_2d_w(
+            np.ones((32, 64)),
+            n_train=RING_N_TRAIN,
+            n_guard=RING_N_GUARD,
+            variant="os",
+            rank=RING_N_REFERENCE + 1,
+        )
+
+
+@pytest.mark.parametrize("bad_power_w", [np.nan, np.inf])
+def test_rejects_power_that_is_not_finite(bad_power_w):
+    """A nan or inf would otherwise spread silently into every window it touches."""
+    power_w = np.ones((32, 64))
+    power_w[16, 32] = bad_power_w
+    with pytest.raises(ValueError, match="power_w must be finite"):
+        cfar_detect(power_w, pfa=1e-3, n_train=4)
+    with pytest.raises(ValueError, match="power_w must be finite"):
+        cfar_detect_2d(power_w, pfa=1e-3, n_train=(2, 4), n_guard=(1, 1))
+
+
+def test_rejects_a_noise_estimate_of_the_wrong_shape():
+    with pytest.raises(ValueError, match="noise_estimate_w shape"):
+        cluster_detections(np.zeros(8, dtype=bool), np.zeros(8), noise_estimate_w=np.zeros(9))
+
+
+def test_rejects_an_out_of_bounds_wrap_axis():
+    with pytest.raises(ValueError, match="out of bounds"):
+        cluster_detections(np.zeros((4, 4), dtype=bool), np.zeros((4, 4)), wrap_axes=(2,))

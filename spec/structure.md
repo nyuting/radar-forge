@@ -51,7 +51,7 @@ src/radar_forge/
 │   ├── dsp.py                   # range FFT, Doppler FFT, matched filter, MTI (range axis is bistatic mean range when bistatic)
 │   ├── windows.py               # Taylor, Chebyshev, Hamming, Hann tapers; coherent gain, loss
 │   ├── ambiguity.py             # velocity folding; dual-PRF Doppler unfolding
-│   ├── detection.py             # CA/GO/SO/OS-CFAR, Pfa calibration, detection clustering
+│   ├── detection.py             # CA/GO/SO/OS-CFAR (1-D), CA/OS 2-D ring, Pfa calibration, wrap-aware clustering
 │   ├── clutter.py               # land/sea clutter models; ECA / Wiener-SMI cancellation
 │   └── tracking.py              # KF, EKF, gating, assignment, simple track manager
 ├── array/
