@@ -138,6 +138,8 @@ _TRACKING_KEYS = frozenset(
         "n_slope_frames",
         "state_model",
         "simulated_angles",
+        "estimator",
+        "acceleration_correlation_time_s",
     }
 )
 

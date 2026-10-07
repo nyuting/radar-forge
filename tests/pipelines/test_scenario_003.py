@@ -34,11 +34,7 @@ from radar_forge.pipelines.scenarios import (
     iterate_frames,
     load_scenario,
 )
-from radar_forge.pipelines.tracking import (
-    ScenarioTracker,
-    configs_from_scenario,
-    dual_prf_measurements,
-)
+from radar_forge.pipelines.tracking import ScenarioTracker
 
 pytestmark = pytest.mark.slow
 
@@ -57,15 +53,7 @@ def run(toml_path, n_frames=N_FRAMES):
     """
     scenario = load_scenario(toml_path)
     scenario = replace(scenario, duration_s=n_frames / scenario.frame_rate_hz)
-    detection, tracking = configs_from_scenario(scenario)
-    spans_mps = [2.0 * burst.unambiguous_velocity_mps for burst in scenario.bursts]
-
-    tracker = ScenarioTracker(
-        fold_span_mps=spans_mps[0],
-        frame_time_s=1.0 / scenario.frame_rate_hz,
-        detection=detection,
-        tracking=tracking,
-    )
+    tracker = ScenarioTracker.from_scenario(scenario)
 
     records = []
     for frame in iterate_frames(scenario):
@@ -73,18 +61,12 @@ def run(toml_path, n_frames=N_FRAMES):
             form_range_doppler_map(cube, burst)
             for cube, burst in zip(frame.iq, scenario.bursts, strict=True)
         ]
-        if len(products) == 2:
-            measurements = dual_prf_measurements(products, spans_mps, config=detection)
-            result = tracker.step_unfolded(
-                measurements, frame_index=frame.index, time_s=frame.time_s
-            )
-        else:
-            result = tracker.step(
-                products[0],
-                frame_index=frame.index,
-                time_s=frame.time_s,
-                truth_velocity_mps=frame.radial_velocity_mps,
-            )
+        result = tracker.step(
+            products,
+            frame_index=frame.index,
+            time_s=frame.time_s,
+            truth_velocity_mps=frame.radial_velocity_mps,
+        )
         confirmed = [track for track in result.tracks if track.is_confirmed]
         records.append((frame, confirmed, result))
     return scenario, tracker, records
@@ -107,7 +89,7 @@ def from_first_confirmation(records):
 
 def primary(confirmed, frame):
     """The confirmed track closest to truth in range."""
-    return min(confirmed, key=lambda track: abs(track.estimator.estimate.state[0] - frame.range_m))
+    return min(confirmed, key=lambda track: abs(track.state[0] - frame.range_m))
 
 
 @pytest.fixture(scope="module")
@@ -149,7 +131,7 @@ class TestS1:
     def test_criterion_2_range_rmse_is_well_inside_one_bin(self, s1_run):
         scenario, _, records = s1_run
         errors_m = [
-            primary(confirmed, frame).estimator.estimate.state[0] - frame.range_m
+            primary(confirmed, frame).state[0] - frame.range_m
             for frame, confirmed, _ in records
             if confirmed
         ]
@@ -170,9 +152,9 @@ class TestS1:
         """
         _, _, records = s1_run
         errors = [
-            primary(confirmed, frame).estimator.estimate.state[1] - frame.radial_velocity_mps
+            primary(confirmed, frame).state[1] - frame.radial_velocity_mps
             for frame, confirmed, _ in records
-            if confirmed and primary(confirmed, frame).estimator.measurement_dim == 2
+            if confirmed and primary(confirmed, frame).measurement_dim == 2
         ]
         if errors:
             assert float(np.sqrt(np.mean(np.square(errors)))) < 12.0
@@ -197,7 +179,7 @@ class TestS1:
             if not confirmed:
                 continue
             track = primary(confirmed, frame)
-            if track.track_id not in result.associations or track.estimator.measurement_dim != 2:
+            if track.track_id not in result.associations or track.measurement_dim != 2:
                 continue
             measurement = result.measurements[result.associations[track.track_id]]
             total += 1
@@ -215,11 +197,11 @@ class TestS1:
         _, _, records = s1_run
         samples = [
             (
-                primary(confirmed, frame).estimator.last_nis,
-                primary(confirmed, frame).estimator.measurement_dim,
+                primary(confirmed, frame).nis,
+                primary(confirmed, frame).measurement_dim,
             )
             for frame, confirmed, _ in records
-            if confirmed and primary(confirmed, frame).estimator.last_nis is not None
+            if confirmed and primary(confirmed, frame).nis is not None
         ]
         assert samples
         values = np.array([value for value, _ in samples])
@@ -275,7 +257,7 @@ class TestDualPrf:
     def test_criterion_2_range_rmse_is_far_inside_one_bin(self, dual_prf_run):
         scenario, _, records = dual_prf_run
         errors_m = [
-            primary(confirmed, frame).estimator.estimate.state[0] - frame.range_m
+            primary(confirmed, frame).state[0] - frame.range_m
             for frame, confirmed, _ in records
             if confirmed
         ]
@@ -286,7 +268,7 @@ class TestDualPrf:
         """The criterion as originally written, met because §5.3 is not needed."""
         _, _, records = dual_prf_run
         errors = [
-            primary(confirmed, frame).estimator.estimate.state[1] - frame.radial_velocity_mps
+            primary(confirmed, frame).state[1] - frame.radial_velocity_mps
             for frame, confirmed, _ in records
             if confirmed
         ]
@@ -298,7 +280,8 @@ class TestDualPrf:
         span_mps = 2.0 * scenario.bursts[0].unambiguous_velocity_mps
         for frame, confirmed, result in records:
             for measurement in result.measurements:
-                assert measurement.velocity_unfolded_mps is not None
+                if measurement.status == "accepted":
+                    assert measurement.velocity_unfolded_mps is not None
             if not confirmed:
                 continue
             track = primary(confirmed, frame)
@@ -315,5 +298,5 @@ class TestDualPrf:
         _, _, records = dual_prf_run
         for frame, confirmed, _ in records:
             if confirmed:
-                assert primary(confirmed, frame).estimator.measurement_dim == 2
+                assert primary(confirmed, frame).measurement_dim == 2
                 break
