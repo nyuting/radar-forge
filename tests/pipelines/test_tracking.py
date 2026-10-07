@@ -698,6 +698,30 @@ class TestScenarioTrackerSettings:
         with pytest.raises(ValueError, match="fold velocity differently"):
             ScenarioTracker((burst, burst))
 
+    def test_rejects_a_dual_prf_search_no_wider_than_one_burst_resolves(self):
+        dual = bursts("fmcw_dual_prf")
+        # The boundary itself is refused: the search must reach past the smaller fold.
+        smaller_mps = min(burst.unambiguous_velocity_mps for burst in dual)
+        with pytest.raises(ValueError, match="v_max_mps"):
+            ScenarioTracker(dual, tracking=TrackingConfig(v_max_mps=smaller_mps))
+
+    @pytest.mark.parametrize(
+        ("v_max_mps", "status"), [(200.0, "accepted"), (60.0, "unresolved_velocity")]
+    )
+    def test_the_dual_prf_search_is_bounded_by_v_max_mps(self, v_max_mps, status):
+        """A target at 80 m/s resolves under a 200 m/s bound and not under a 60 m/s one.
+
+        The 5:6 pair resolves up to about 229 m/s, so 80 m/s has exactly one
+        consistent unfolding, and a search capped at 60 m/s cannot reach it.
+        """
+        tracker = ScenarioTracker(
+            bursts("fmcw_dual_prf"), tracking=TrackingConfig(v_max_mps=v_max_mps)
+        )
+        target = (15_000.0, 80.0)
+        record = tracker.step(dual_products([target], [target]), frame_index=0, time_s=0.0)
+        statuses = {m.status for m in record.measurements if abs(m.range_m - 15_000.0) < 150.0}
+        assert statuses == {status}
+
     def test_step_needs_one_product_per_burst(self):
         tracker = ScenarioTracker(bursts("fmcw_low_prf"))
         with pytest.raises(ValueError, match="one range-Doppler product per burst"):

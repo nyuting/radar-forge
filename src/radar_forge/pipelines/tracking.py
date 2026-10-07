@@ -305,7 +305,9 @@ class TrackingConfig:
       standard deviation of a new track's range rate. On the ``"ukf"`` path it
       also decides whether velocity is measured at all: a single burst whose
       unambiguous velocity is below ``v_max_mps`` may fold the Doppler, so the
-      tracker measures range alone.
+      tracker measures range alone. With two bursts it is also the span the
+      dual-PRF pair is asked to resolve over (:func:`dual_prf_detections`), so
+      it must exceed the smaller burst's unambiguous velocity.
     - ``unfolding_mode`` must be ``"none"`` on the ``"ukf"`` path, which has no
       track-aided unfolding: it unfolds by dual PRF or not at all.
     - ``state_model`` must be ``"range_1d"`` on the ``"ukf"`` path.
@@ -1155,7 +1157,8 @@ class ScenarioTracker:
     ------
     ValueError
         If there are not one or two bursts; if two bursts share an unambiguous
-        velocity, so their folds cannot be told apart; if ``tracking.estimator``
+        velocity, so their folds cannot be told apart, or ``tracking.v_max_mps``
+        does not exceed the smaller of the two; if ``tracking.estimator``
         or ``tracking.unfolding_mode`` is not a known name; or if the ``"ukf"``
         estimator is asked for track-aided or oracle unfolding, or for a state
         model other than ``"range_1d"``.
@@ -1275,6 +1278,16 @@ class ScenarioTracker:
             msg = (
                 "the two bursts of a dual-PRF pair must fold velocity differently; both have "
                 f"an unambiguous velocity of {self.bursts[0].unambiguous_velocity_mps} m/s."
+            )
+            raise ValueError(msg)
+        if len(self.bursts) == 2 and self.tracking.v_max_mps <= min(
+            burst.unambiguous_velocity_mps for burst in self.bursts
+        ):
+            msg = (
+                "v_max_mps bounds the dual-PRF velocity search, so it must exceed the smaller "
+                "unambiguous velocity, "
+                f"{min(burst.unambiguous_velocity_mps for burst in self.bursts)} m/s; "
+                f"got {self.tracking.v_max_mps} m/s."
             )
             raise ValueError(msg)
         if self.tracking.estimator not in ESTIMATORS:
@@ -1444,7 +1457,11 @@ class ScenarioTracker:
         if len(self.bursts) == 2:
             spans_mps = [2.0 * burst.unambiguous_velocity_mps for burst in self.bursts]
             detections = dual_prf_detections(
-                products, spans_mps, config=self.detection, wrap_range=wrap_range
+                products,
+                spans_mps,
+                config=self.detection,
+                max_velocity_mps=self.tracking.v_max_mps,
+                wrap_range=wrap_range,
             )
         else:
             detections = frame_detections(products[0], self.detection, wrap_range=wrap_range)
