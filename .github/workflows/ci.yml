@@ -17,6 +17,10 @@ jobs:
   check:
     name: lint · types · tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    # uv run reads .python-version (3.11) unless told otherwise, and would
+    # silently replace the matrix venv with a 3.11 one that has no extras.
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
     strategy:
       fail-fast: false
       matrix:
@@ -29,7 +33,7 @@ jobs:
           enable-cache: true
 
       - name: Install
-        run: uv sync --extra dev --python ${{ matrix.python-version }}
+        run: uv sync --extra dev
 
       - name: Lint
         run: make lint
