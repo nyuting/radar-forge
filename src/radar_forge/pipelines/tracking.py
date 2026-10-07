@@ -10,8 +10,9 @@ of the two trackers in :mod:`radar_forge.core.tracking`, chosen by
   Kalman filter with track-aided Doppler unfolding. Scenario 003's own runs use
   it.
 * ``"ukf"``: :class:`~radar_forge.core.tracking.Tracker`, an unscented Kalman
-  filter that measures range modulo the burst's unambiguous range. The runs of
-  scenario 001's three waveforms (S1, S2, S3) use it.
+  filter that measures range modulo the span of the burst's range axis
+  (:func:`~radar_forge.pipelines.scenarios.range_axis_m`). The runs of scenario
+  001's three waveforms (S1, S2, S3) use it.
 
 Between the map and the tracker this module does:
 
@@ -1134,11 +1135,11 @@ class ScenarioTracker:
         ``"ukf"``.
     folding_layout : StateLayout
         One coordinate, ``range_m``, with the period the measured range has:
-        the first burst's unambiguous range on the ``"ukf"`` path, and none on
-        the ``"kalman"`` path. Range folding is handled here and nowhere else.
-        The measurement model, the exported range (:meth:`StateLayout.wrap`)
-        and the range error of a scored track
-        (:meth:`StateLayout.residual`) all use it.
+        the span of the first burst's range axis
+        (:func:`~radar_forge.pipelines.scenarios.range_axis_m`) on the
+        ``"ukf"`` path, and none on the ``"kalman"`` path. The measurement
+        model, the exported range (:meth:`StateLayout.wrap`) and the range
+        error of a scored track (:meth:`StateLayout.residual`) all use it.
     min_unfold_frames : int or None
         ``"kalman"`` path only, ``None`` otherwise. Frames of associated range
         history a track needs before it may unfold its Doppler, from
@@ -1161,19 +1162,22 @@ class ScenarioTracker:
 
     Notes
     -----
-    **What is measured.** A burst folds range at its unambiguous range and
+    **What is measured.** A burst folds range at the span of its range axis and
     Doppler at its unambiguous velocity, and the tracker should measure only
     what does not fold, or what has been unfolded.
 
     - Range: on the ``"ukf"`` path the radar only ever sees range modulo the
-      first burst's unambiguous range, and the measurement model says exactly
-      that. The filter's range state is left unwrapped. It sits on whichever
-      fold the first detection gave it, and only its value modulo the period
-      means anything, which is why the exported range is wrapped. Over
-      scenario 001's window this matters only for the pulsed burst (S2), whose
-      unambiguous range is 6.0 km against a target at 16-22 km. For the FMCW
-      bursts the wrap changes nothing. The ``"kalman"`` path treats range as
-      unambiguous.
+      span of the first burst's range axis, and the measurement model says
+      exactly that. The span is ``Radar.unambiguous_range_m`` for a pulsed
+      burst and twice it for an FMCW burst, whose deramped baseband is complex
+      (:func:`~radar_forge.pipelines.scenarios.range_axis_m`, and
+      ``spec/scenario-003-tracking.md`` §14.11). The filter's range state is
+      left unwrapped. It sits on whichever fold the first detection gave it,
+      and only its value modulo the period means anything, which is why the
+      exported range is wrapped. Over scenario 001's window this matters only
+      for the pulsed burst (S2), whose span is 6.0 km against a target at 16-22
+      km. For the FMCW bursts, whose spans are 50 km and more, the wrap changes
+      nothing. The ``"kalman"`` path treats range as unambiguous.
     - Range rate: with two bursts it is unfolded by
       :func:`dual_prf_detections` and measured. With one burst on the
       ``"ukf"`` path it is measured only if the burst's unambiguous velocity
