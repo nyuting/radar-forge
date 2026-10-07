@@ -981,6 +981,63 @@ Over that window the target runs 18.16 to 21.47 km and the radial rate -39.6 to 
 The dual-PRF variant inherits the same window so that the pair is compared over the same frames,
 even though §14.7's argument means it would survive any window.
 
+### 14.11 The UKF tracker over S1, S2 and S3
+
+`core/tracking/`'s UKF `Tracker` runs over all three of scenario 001's waveforms from
+`pipelines/tracking.py`, beside `KalmanTracker`. A scenario's `[tracking]` table picks the tracker
+with `estimator = "kalman"` (the default, and both scenario 003 TOMLs above) or `"ukf"`. Three
+TOMLs run the UKF: `scenario_003_ukf_fmcw_low_prf.toml`, `scenario_003_ukf_pulsed_medium_prf.toml`
+and `scenario_003_ukf_fmcw_dual_prf.toml`. Above `[detection]` each is its scenario 001 TOML
+verbatim, so they run over scenario 001's own window, frames 0 to 119. `ScenarioTracker`'s
+docstring has the rules; in short:
+
+- **Range** is measured modulo the span of the map's range axis, `n_range_bins` times the bin
+  width, because that is where the map wraps. CFAR and clustering treat the range axis as a
+  circle (`frame_detections(..., wrap_range=True)`). The filter's range is continuous, and the
+  exported range is wrapped into one period; `metadata.json` records the period as
+  `tracking.range_period_m`.
+- **Range rate** is measured when it cannot be folded: with two bursts, after the dual-PRF
+  unfolding, or with one burst whose unambiguous velocity exceeds `v_max_mps`. So S1 measures
+  range alone, and S2 and S3 measure both. There is no track-aided unfolding on this path.
+- **Measurement noise** is one bin over √12, from each frame's own axes.
+
+Measured over the 120 frames with the shipped TOMLs:
+
+| Waveform | Frames with a confirmed track | Confirmed track IDs | Primary track's confirmed frames | Range RMSE | Range-rate RMSE |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| S1, FMCW 1 kHz | 118 | 1 | 118 | 7.5 m | 6.01 m/s |
+| S2, pulsed 25 kHz | 109 | 6 | 59 | 1.4 m | 0.40 m/s |
+| S3, FMCW 5 + 6 kHz | 118 | 1 | 118 | 2.5 m | 0.07 m/s |
+
+S1's range-rate error is that of a range-only track, which infers range rate from the change in
+range.
+
+**S2 loses the target near the end of every repetition interval.** Its 10 µs pulse fills a quarter
+of the 40 µs interval. An echo that arrives in the interval's last 10 µs is cut off by the end of
+the interval. The receive chain keeps exactly one interval of compressed output (`form_range_doppler_map`
+in `pipelines/scenarios.py`), so a target whose folded range is within about 200 m of 5996 m leaves too little energy to detect, and
+one further inside is detected weak and biased short. This is eclipsing by the next transmitted
+pulse, the pulsed waveform's blind zone, not a fault of the tracker. Over the window the folded
+range crosses the wrap twice, near frames 13 and 75, and each time the target is undetected for
+about 7 frames, longer than `n_delete_misses = 5`. So the track is deleted and a new one starts
+after the gap. The settings are left as they are: lengthening the coast to bridge a blind zone
+would hide it.
+
+**An FMCW map spans twice `Radar.unambiguous_range_m`.** The deramped baseband is complex, so beat
+frequencies over all of `[0, f_s)` are distinct, not only `[0, f_s/2)`. `Radar.unambiguous_range_m`
+gives `c f_s / 4α`, the real-sampling limit. The map's own axis wraps at twice that, 74.9 km for S1
+and 60.0 and 50.0 km for S3's bursts, and the UKF's range period follows the axis. For the pulsed
+burst the two agree. Whether `Radar.unambiguous_range_m` should say so is left to `core/radar.py`.
+
+**Dual-PRF pairing, both trackers.** Two detections, one per burst, are paired when they are within
+the range tolerance and each is the other's nearest in range. Every detection is written with a
+`status` and the pair's `pair_id` (`spec/data-001-formats.md` §6.5). An earlier draft required
+each detection to have exactly one detection of the other burst within the tolerance. On the S3
+scenario-003 run that refused the target's pair in two of the first five frames, because a
+one-cell false alarm lay 80–140 m away, and delayed confirmation from frame 3 to frame 8. Mutual
+nearest neighbours pairs the target and leaves the false alarm out. Both scenario-003 runs give
+the same tracks as before the UKF path was added, frame for frame.
+
 ---
 
 ## References
