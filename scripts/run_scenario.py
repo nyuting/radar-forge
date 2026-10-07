@@ -46,7 +46,7 @@ from radar_forge.pipelines.tracking import (
 # A monostatic run writes the first six. A bistatic run appends the last three,
 # so the bistatic column set is a superset of the monostatic one and the D5 COCO
 # exporter can consume either unchanged -- see
-# spec/scenario-002-bistatic.md S8. In a bistatic run `range_m` is the
+# spec/scenario-002-bistatic.md §3.6. In a bistatic run `range_m` is the
 # bistatic mean range and `radial_velocity_mps` the bisector rate.
 TRUTH_COLUMNS = [
     "frame",
@@ -277,16 +277,18 @@ def render_frame(
             if confirmed:
                 track = max(confirmed, key=lambda candidate: candidate.n_hits)
                 track_estimate = (
-                    float(track.estimate.state[0]),
+                    float(track.estimator.estimate.state[0]),
                     float(
-                        fold_velocity_mps(track.estimate.state[1], burst.unambiguous_velocity_mps)
+                        fold_velocity_mps(
+                            track.estimator.estimate.state[1], burst.unambiguous_velocity_mps
+                        )
                     ),
                 )
                 # One standard deviation of the innovation in each component, so
                 # the ellipse is the gate the associator actually applied.
                 gate_extent = (
-                    3.0 * float(np.sqrt(track.estimate.covariance[0, 0])),
-                    3.0 * float(np.sqrt(track.estimate.covariance[1, 1])),
+                    3.0 * float(np.sqrt(track.estimator.estimate.covariance[0, 0])),
+                    3.0 * float(np.sqrt(track.estimator.estimate.covariance[1, 1])),
                 )
 
         figure = render_range_doppler(
@@ -376,19 +378,21 @@ def write_tracking_csvs(out_dir: Path, frames: Sequence[FrameTracks]) -> tuple[P
         writer.writerow(TRACK_COLUMNS)
         for record in frames:
             for track in record.tracks:
-                covariance = track.estimate.covariance
+                covariance = track.estimator.estimate.covariance
                 writer.writerow(
                     [
                         record.frame_index,
                         f"{record.time_s:.3f}",
                         track.track_id,
                         track.status,
-                        track.measurement_dim,
-                        f"{track.estimate.state[0]:.3f}",
-                        f"{track.estimate.state[1]:.6f}",
+                        track.estimator.measurement_dim,
+                        f"{track.estimator.estimate.state[0]:.3f}",
+                        f"{track.estimator.estimate.state[1]:.6f}",
                         f"{covariance[0, 0]:.6e}",
                         f"{covariance[1, 1]:.6e}",
-                        "" if track.last_nis is None else f"{track.last_nis:.6f}",
+                        ""
+                        if track.estimator.last_nis is None
+                        else f"{track.estimator.last_nis:.6f}",
                         int(track.track_id in record.associations),
                     ]
                 )
@@ -431,8 +435,8 @@ def render_track_frame(
             for track in entry.tracks:
                 if track.track_id == best_id and track.is_confirmed:
                     track_time_s.append(entry.time_s)
-                    track_range_m.append(float(track.estimate.state[0]))
-                    track_sigma_m.append(float(np.sqrt(track.estimate.covariance[0, 0])))
+                    track_range_m.append(float(track.estimator.estimate.state[0]))
+                    track_sigma_m.append(float(np.sqrt(track.estimator.estimate.covariance[0, 0])))
 
     figure = render_range_time_history(
         truth_time_s,

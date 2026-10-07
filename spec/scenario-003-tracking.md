@@ -96,7 +96,7 @@ begins at the map.
       Measurement  z = [range_m, (azimuth_rad,) (elevation_rad,) range_rate_mps]
             |
             v
-  core/tracking.py  TrackManager.step(measurements)
+  core/tracking/kalman.py  KalmanTracker.step(measurements)
             |
             v
   FrameTracks snapshots -> tracks.csv, detections.csv,
@@ -146,14 +146,14 @@ builds:
 
 ## 4. Known limitations
 
-Stated up front, in the same spirit as scenario 001 §3. These are properties of the scenario, not
+Stated up front, in the same spirit as scenario 001 §2.2. These are properties of the scenario, not
 defects in the tracker, and §13 turns the first three into the work that follows this slice.
 
 - **The target is far too easy to detect.** Post-integration peak-to-floor over this scenario's
   window measures **45–49 dB**, rising to about 69 dB at the track's 5.33 km closest approach,
   against an 11.417 dB threshold factor: Pd is 1 to many decimal places. *(The figures 51.7 dB at
-  17.87 km and 64.8 dB at 8.39 km, written before the geographic re-anchoring of refactor-001
-  §3.3, were recomputed against the current siting and window; the conclusion is unchanged.)* **Track maintenance under missed detections is therefore not exercised at the default
+  17.87 km and 64.8 dB at 8.39 km, written before the geographic re-anchoring onto
+  Raleigh-Durham (`scripts/translate_flight_coordinates.py`), were recomputed against the current siting and window; the conclusion is unchanged.)* **Track maintenance under missed detections is therefore not exercised at the default
   settings**, and neither is the coast-and-delete logic of §7, which exists here largely untested
   by the scenario. §13.1 is the fix.
 - **CFAR is one-dimensional.** This scenario's pipeline slides its window along range. That is
@@ -170,7 +170,7 @@ defects in the tracker, and §13 turns the first three into the work that follow
   nothing else. The ENU state models of §6 need azimuth (and elevation) and therefore run on a
   **simulated** angle measurement until `array/` exists; §6.3 says exactly what that means and why
   the default state model is the one that needs no such crutch.
-- **Truth is itself smoothed.** Scenario 001 §3 notes that radial velocity is a central difference
+- **Truth is itself smoothed.** Scenario 001 §2.2 notes that radial velocity is a central difference
   over an irregularly sampled track. Track velocity error is therefore measured against a
   reference that is already low-pass filtered over several seconds. Range truth does not have this
   problem, which is why §12's tight acceptance criterion is stated on range and the velocity one
@@ -183,7 +183,7 @@ defects in the tracker, and §13 turns the first three into the work that follow
 ## 2. Scenario
 
 The radar, the site, the waveform, the target and the trajectory are **exactly** scenario 001's
-S1 (`fmcw-low-prf`) variant. See `spec/scenario-001-xband.md` §2 and §4; those tables
+S1 (`fmcw-low-prf`) variant. See `spec/scenario-001-xband.md` §2 and §3; those tables
 are not repeated here, and if they disagree with anything below, they win.
 
 The inherited numbers this document depends on:
@@ -236,7 +236,7 @@ scenario adds:
 | `F`, `Q` | `(n_state, n_state)` float64. `range_1d`'s transition carries `−T`, not `+T`; see §14.1 |
 | Innovation, NIS | `ν` is `(dim,)`; `S` is `(dim, dim)`; `d² = νᵀS⁻¹ν` is scalar |
 | Association cost matrix | `(n_tracks, n_measurements)` float64 of `d²`, non-gated pairs forbidden; solved by `scipy.optimize.linear_sum_assignment` |
-| Coordinate frame | Local ENU tangent plane at the receive site, metres; azimuth 0° at true north increasing clockwise, per `structure.md` D5 and scenario 001 §5 step 1 |
+| Coordinate frame | Local ENU tangent plane at the receive site, metres; azimuth 0° at true north increasing clockwise, per `data-001-formats.md` DF2 and scenario 001 §5 step 1 |
 | Sign convention | Closing velocity positive, in the measurement **and** in the state; see §14.1 |
 | Fold span | `v_span = 15.295534 m/s` for S1; `k = round((ṙ_pred − ṙ_meas)/v_span)` |
 | `FrameTracks` | Stores **snapshots**, not references — a `Track` is mutable by design; see §14.8 |
@@ -285,7 +285,7 @@ units is the whole of the pipeline's detection step, and it must use the existin
 - velocity, from `dsp.doppler_bin_centers_mps(n_bins, pulse_repetition_interval_s, wavelength_m)`.
 
 Interpolating a fractional index into those axes — rather than deriving bin spacing locally —
-keeps the unshifted-range / fftshifted-Doppler asymmetry of scenario 001 §7.1 in one place. A
+keeps the unshifted-range / fftshifted-Doppler asymmetry of scenario 001 §4.3 in one place. A
 tracker that silently reinvents the Doppler axis will produce closing targets that open, and the
 picture will still look plausible.
 
@@ -369,7 +369,7 @@ than a 100 % error in the range row.
 
 ## 9. Outputs
 
-Extending scenario 001 §6. Written under `--out <dir>` by `scripts/run_scenario.py`:
+Extending scenario 001 §3.6. Written under `--out <dir>` by `scripts/run_scenario.py`:
 
 | File | Content |
 | :--- | :--- |
@@ -445,7 +445,7 @@ whether the update is linear.
 | `enu_3d` | `[e, n, u, ė, ṅ, u̇]` | EKF | nonlinear, as above plus elevation |
 
 Positions are metres in the local ENU frame of `core/geodesy.py`, azimuth 0° at true north
-increasing clockwise, per `spec/structure.md` D5 and scenario 001 §7 step 1.
+increasing clockwise, per `spec/data-001-formats.md` DF2 and scenario 001 §5 step 1.
 
 ### 6.1 Why the state is a parameter and not a choice
 
@@ -558,7 +558,7 @@ another reason §13.1 matters.
 
 ## 8. Frame and CPI structure
 
-Unchanged from scenario 001 §5: one frame per second, a 256 ms CPI inside it, range migration
+Unchanged from scenario 001 §4.2: one frame per second, a 256 ms CPI inside it, range migration
 negligible at a quarter of a range bin. The tracker's `T` is the **frame** interval, 1.0 s, not
 the CPI length — measurements are timestamped at frame time, and the 744 ms of idle time between
 CPIs is absorbed into the process noise. This is the standard approximation and must be named in
@@ -576,7 +576,7 @@ CPIs is absorbed into the process noise. This is the standard approximation and 
    `**What radar-forge borrows:**` paragraph): Stone Soup (MIT), FilterPy (MIT), motpy (MIT),
    Tracktable (BSD-3-Clause) and labeledRFS/VisualRFS (MIT ports of Vo's MATLAB). The licence
    summary shifts to `### A.14` and gains a row each. The same five are added to `README.md`'s
-   `### Reference frameworks` table and `spec/starter.md` §2.1.
+   `### Reference frameworks` table and `spec/starter.md` §3.1.4.
 3. **D2's promotion trigger is not fired.** Three state models are not a second association
    strategy and not a fusion layer; per §6.2 they are data, not structure. One module. Restating
    it here so that the next person to open `core/tracking.py` knows the rule before they add JPDA
@@ -627,7 +627,7 @@ pipeline change, not part of this one.
 Everything in §7 that makes GNN sufficient depends on there being one target: gates never overlap,
 assignment is trivially optimal, and a track swap is impossible. A second aircraft changes all
 three, and the honest consequence is that JPDA or MHT becomes necessary — which per
-`spec/structure.md` D2 and §11.3 above fires the promotion of `core/tracking.py` to
+`spec/structure.md` D2 and §11 item 3 above fires the promotion of `core/tracking.py` to
 `core/tracking/{filters,association,fusion}.py`. It also needs a synthetic second trajectory,
 since `data/flight_coordinates.csv` has one aircraft, and it needs OSPA or GOSPA rather than RMSE
 as its accuracy measure, since with multiple targets "the error" is no longer a single number.
@@ -703,7 +703,7 @@ tests/pipelines/test_scenario_003.py           tests/teaching/test_track_plot.py
 
 `scripts/run_scenario.py`, `src/radar_forge/pipelines/scenarios.py` and
 `src/radar_forge/teaching/scopes/rd_map.py` are **shared with both scenario 001 and scenario 002**
-— `spec/scenario-002-bistatic.md` §10 claims the same three files. This slice makes only
+— `spec/scenario-002-bistatic.md` §4.7 claims two of them. This slice makes only
 the additive edits in steps 2, 3 and 5, and every existing call site and TOML must keep working
 unchanged. Coordinate before touching them: scenario 002 is in flight at the time of writing, and
 its `Radar | BistaticRadar` union already reaches `scripts/run_scenario.py`.
@@ -763,7 +763,7 @@ noiseless constant-velocity target must be tracked with zero steady-state innova
 precision, in every `state_model`; `associate_gnn` must return the known optimal assignment of a
 hand-built cost matrix with a unique solution; `gate_threshold` must match the tabulated χ²
 quantile at each `dim` in §7's table; `process_noise_dwna` must reproduce the worked `Q` in
-reference [2]; the EKF Jacobians must match a complex-step or central-difference derivative of
+reference [2], §6.3.2; the EKF Jacobians must match a complex-step or central-difference derivative of
 `h` to `1e-8`; the §5.3 fold selector must recover the correct index for every fold in
 ±191 m/s; and the empirical gate acceptance rate over a seeded draw must match
 `gate_probability` inside its binomial confidence interval.
@@ -828,7 +828,7 @@ Doppler row before clustering, then maps the indices back. The clean fix is a
 
 ### 14.3 The target's own sidelobes become extra detections
 
-Scenario 001 applies no Doppler taper. At the 51–65 dB post-integration SNR §4
+Scenario 001 applies no Doppler taper. At the 45–69 dB post-integration SNR §4
 describes, the target's Doppler sidelobes sit tens of decibels above an 11.4 dB
 threshold and are detected at its range, each seeding a competing track. Over
 twelve frames the target gives one cluster of 30–95 cells at its true bin plus
@@ -861,7 +861,7 @@ track to be seeded with `P₀`'s `v_max²` rate variance. It is easy to read the
 first clause and seed the state from both measurement components — but before a
 track can unfold, its measurement's velocity component is a *folded* value, and
 a track seeded with it starts out confidently wrong about which way the target
-is going. `TrackManager` gained `n_initiation_rows`, defaulting to 1.
+is going. `TrackManager` (now `KalmanTracker`) gained `n_initiation_rows`, defaulting to 1.
 
 ### 14.6 `sigma_accel_mps2` has to match the target as simulated
 
@@ -909,7 +909,7 @@ Three mechanisms were added in response, all measured:
 
 Assigning confirmed tracks ahead of tentative ones was also tried and rejected:
 it was worse on every count, because a widened track outbids tentative ones for
-false alarms too. The comment in `TrackManager.step` records the numbers.
+false alarms too. The comment in `KalmanTracker.step` records the numbers.
 
 **Measured acceptance, over the default 120-frame window:**
 
@@ -953,7 +953,7 @@ before its fourth hit and those frames are 15% of a 20-frame window.
   `tests/pipelines/test_tracking.py` share a basename, which the default prepend
   mode refuses.
 - §11 items 1 and 2 needed no work: `structure.md` already carried A.13a–e, A.14
-  and the extended B.1 row, and `README.md` and `spec/starter.md` §2.1 already
+  and the extended B.1 row, and `README.md` and `spec/starter.md` §3.1.4 already
   listed all five tracking projects.
 
 ### 14.9 Not done
@@ -970,7 +970,7 @@ before its fourth hit and those frames are 15% of a 20-frame window.
 
 ### 14.10 The default window moved to 663 s
 
-§2 and scenario 001 both start at `start_time_s = 0`. Refactor-001 §3.3 moved the site, and
+§2 as first written and scenario 001 both started at `start_time_s = 0`. The re-anchoring onto Raleigh-Durham (`scripts/translate_flight_coordinates.py`) moved the site, and
 radial velocity is a property of the site-to-track geometry, not of the track: from 0 s the
 target's range rate now swings 22 m/s inside the ten frames §5.3's bootstrap needs, which no fold
 selector can survive. Both scenario 003 TOMLs start at **663.0 s**, the earliest window that still
@@ -985,24 +985,23 @@ even though §14.7's argument means it would survive any window.
 
 ## References
 
-.. [1] Y. Bar-Shalom, P. K. Willett and X. Tian, *Tracking and Data Fusion: A Handbook of
-       Algorithms*, YBS Publishing, 2011, ch. 2 (gating), ch. 3 (assignment).
+.. [1] Y. Bar-Shalom and X. R. Li, *Multitarget-Multisensor Tracking: Principles and
+       Techniques*, YBS Publishing, 1995, §2.3.2 (the validation region), §2.6.1 (logic-based
+       track formation), §7.1.1 (data association as an assignment problem).
 .. [2] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications to Tracking and
-       Navigation*, Wiley, 2001, §5.2 (discrete white-noise acceleration), §6.3 (validation
-       gating and nearest neighbour), §10.3 (the extended Kalman filter and range/range-rate
-       measurement Jacobians), §11.7 (track initiation).
-.. [3] S. S. Blackman and R. Popoli, *Design and Analysis of Modern Tracking Systems*, Artech
-       House, 1999, ch. 6 (M-of-N initiation, global nearest neighbour), §4.3 (Doppler-aided
-       tracking and ambiguity resolution).
-.. [4] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed., McGraw-Hill, 2014,
-       §6.5 (CFAR), §7.3 (measurement accuracy and the range and Doppler CRLBs).
-.. [5] D. F. Crouse, "On implementing 2D rectangular assignment algorithms," *IEEE Trans. Aerosp.
+       Navigation*, Wiley, 2001, §5.4.2 (the NIS consistency test), §5.5 (initialisation of
+       state estimators), §6.3.2 (discrete white-noise acceleration), §10.3 (the extended
+       Kalman filter).
+.. [3] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed., McGraw-Hill, 2014,
+       §6.5 (CFAR), §7.1.2–7.1.3 (the CRLB), §7.2.1–7.2.2 (range and Doppler estimators).
+.. [4] D. F. Crouse, "On implementing 2D rectangular assignment algorithms," *IEEE Trans. Aerosp.
        Electron. Syst.*, vol. 52, no. 4, pp. 1679-1696, 2016. The algorithm behind
        `scipy.optimize.linear_sum_assignment`.
-.. [6] P. A. Thomas, J. Barr, B. Balaji and K. White, "An open source framework for tracking and
+.. [5] P. A. Thomas, J. Barr, B. Balaji and K. White, "An open source framework for tracking and
        state estimation ('Stone Soup')," *Proc. SPIE 10200, Signal Processing, Sensor/Information
-       Fusion, and Target Recognition XXVI*, 2017.
-.. [7] R. R. Labbe, *Kalman and Bayesian Filters in Python*, 2020. The FilterPy companion text.
-.. [8] B.-T. Vo and B.-N. Vo, "Labeled random finite sets and multi-object conjugate priors,"
+       Fusion, and Target Recognition XXVI*, paper 1020008, 2017, doi:10.1117/12.2266249.
+.. [6] R. R. Labbe, *Kalman and Bayesian Filters in Python*, online book,
+       https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python. The FilterPy companion text.
+.. [7] B.-T. Vo and B.-N. Vo, "Labeled random finite sets and multi-object conjugate priors,"
        *IEEE Trans. Signal Process.*, vol. 61, no. 13, pp. 3460-3475, 2013. Cited for the
        future work in §13.3, not implemented here.

@@ -4,7 +4,7 @@ Ground truth here is analytic, per docs/conventions/testing.md §3: a noiseless
 constant-velocity target must be tracked with zero steady-state innovation to
 float precision; the gate thresholds must match tabulated chi-squared
 quantiles; the process noise must reproduce the worked matrix in Bar-Shalom
-§5.2; and the assignment must return the known optimum of a hand-built cost
+§6.3.2; and the assignment must return the known optimum of a hand-built cost
 matrix with a unique solution.
 
 The consistency tests matter more than they look. A filter with a mis-scaled R
@@ -19,9 +19,10 @@ from scipy.stats import beta
 
 from radar_forge.core.tracking import (
     STATE_MODELS,
+    KalmanFilter,
     KalmanState,
+    KalmanTracker,
     Track,
-    TrackManager,
     associate_gnn,
     gate_threshold,
     innovation_of,
@@ -71,7 +72,7 @@ def initial_covariance():
 
 
 class TestProcessNoiseDwna:
-    """The discrete white-noise acceleration model of Bar-Shalom §5.2."""
+    """The discrete white-noise acceleration model of Bar-Shalom §6.3.2."""
 
     def test_matches_the_worked_matrix(self):
         """Reproduces sigma_a^2 * [[T^4/4, T^3/2], [T^3/2, T^2]] exactly."""
@@ -409,12 +410,33 @@ class TestAssociateGnn:
 # --------------------------------------------------------------------------- #
 
 
+class FrameClock:
+    """A KalmanTracker stepped one frame at a time, FRAME_TIME_S apart.
+
+    ``KalmanTracker.step`` takes each frame's time. These tests count frames, so
+    this supplies frame k's time, ``k * FRAME_TIME_S``, and passes every other
+    attribute through to the tracker.
+    """
+
+    def __init__(self, tracker):
+        self.tracker = tracker
+        self.frame = 0
+
+    def step(self, measurements, **kwargs):
+        result = self.tracker.step(measurements, time_s=self.frame * FRAME_TIME_S, **kwargs)
+        self.frame += 1
+        return result
+
+    def __getattr__(self, name):
+        return getattr(self.tracker, name)
+
+
 def manager(model, **kwargs):
-    """A TrackManager at the scenario's own M-of-N parameters."""
-    return TrackManager(model=model, initial_covariance=initial_covariance(), **kwargs)
+    """A KalmanTracker at the scenario's own M-of-N parameters."""
+    return FrameClock(KalmanTracker(model=model, initial_covariance=initial_covariance(), **kwargs))
 
 
-class TestTrackManagerInitiation:
+class TestKalmanTrackerInitiation:
     """M-of-N confirmation, sized in §3 against the false-alarm rate."""
 
     def test_a_steady_target_is_confirmed_on_the_fourth_hit(self, model):
@@ -452,7 +474,7 @@ class TestTrackManagerInitiation:
         assert tracker.tracks == []
 
 
-class TestTrackManagerMaintenance:
+class TestKalmanTrackerMaintenance:
     """Coasting and deletion, the logic the default link budget never exercises."""
 
     def _confirmed(self, model):
@@ -464,18 +486,18 @@ class TestTrackManagerMaintenance:
 
     def test_a_confirmed_track_coasts_through_a_miss(self, model):
         tracker = self._confirmed(model)
-        before = tracker.confirmed_tracks[0].estimate.state[0]
+        before = tracker.confirmed_tracks[0].estimator.estimate.state[0]
         tracker.step([])
         track = tracker.confirmed_tracks[0]
         assert track.status == "coasting"
         # Dead reckoning: one frame of the estimated rate.
-        assert track.estimate.state[0] == pytest.approx(before - 80.0, abs=5.0)
+        assert track.estimator.estimate.state[0] == pytest.approx(before - 80.0, abs=5.0)
 
     def test_coasting_grows_the_covariance(self, model):
         tracker = self._confirmed(model)
-        before = tracker.confirmed_tracks[0].estimate.covariance[0, 0]
+        before = tracker.confirmed_tracks[0].estimator.estimate.covariance[0, 0]
         tracker.step([])
-        assert tracker.confirmed_tracks[0].estimate.covariance[0, 0] > before
+        assert tracker.confirmed_tracks[0].estimator.estimate.covariance[0, 0] > before
 
     def test_a_confirmed_track_survives_three_misses_but_forgets_its_rate(self, model):
         """The grace period: three misses widen the gate rather than delete.
@@ -485,12 +507,12 @@ class TestTrackManagerMaintenance:
         given a chance to re-acquire the target it can still see.
         """
         tracker = self._confirmed(model)
-        before = tracker.confirmed_tracks[0].estimate.covariance[1, 1]
+        before = tracker.confirmed_tracks[0].estimator.estimate.covariance[1, 1]
         for _ in range(3):
             tracker.step([])
         track = tracker.confirmed_tracks[0]
-        assert track.estimate.covariance[1, 1] > before
-        assert track.estimate.covariance[1, 1] == pytest.approx(V_MAX_MPS**2, rel=1e-9)
+        assert track.estimator.estimate.covariance[1, 1] > before
+        assert track.estimator.estimate.covariance[1, 1] == pytest.approx(V_MAX_MPS**2, rel=1e-9)
         assert track.track_id in tracker.lost_track_ids
 
     def test_a_widened_track_re_acquires_its_target_and_keeps_its_id(self, model):
@@ -504,7 +526,7 @@ class TestTrackManagerMaintenance:
         confirmed = tracker.confirmed_tracks
         assert len(confirmed) == 1
         assert confirmed[0].track_id == original
-        assert confirmed[0].n_misses_in_a_row == 0
+        assert confirmed[0].n_misses == 0
 
     def test_a_confirmed_track_is_deleted_once_the_grace_period_expires(self, model):
         tracker = self._confirmed(model)
@@ -529,7 +551,7 @@ class TestTrackManagerMaintenance:
         # were hits, 4 and 5 were misses, so this is frame 6.
         tracker.step([np.array([10_000.0 - 80.0 * 6, 80.0])])
         survivor = tracker.confirmed_tracks[0]
-        assert survivor.n_misses_in_a_row == 0
+        assert survivor.n_misses == 0
         assert survivor.status == "confirmed"
 
 
@@ -550,23 +572,25 @@ class TestVelocityGateFallback:
         updates on range alone instead, and records the lower dimension.
         """
         tracker = self._confirmed(model)
-        before = tracker.confirmed_tracks[0].estimate.state[0]
+        before = tracker.confirmed_tracks[0].estimator.estimate.state[0]
         # Correct range, velocity wrong by one 15.2955 m/s fold span.
         tracker.step([np.array([10_000.0 - 80.0 * 4, 80.0 - 15.2955])])
         track = tracker.confirmed_tracks[0]
         assert track.status == "confirmed"
-        assert track.measurement_dim == 1
-        assert track.n_misses_in_a_row == 0
-        assert abs(track.estimate.state[0] - (10_000.0 - 320.0)) < abs(before - (10_000.0 - 320.0))
+        assert track.estimator.measurement_dim == 1
+        assert track.n_misses == 0
+        assert abs(track.estimator.estimate.state[0] - (10_000.0 - 320.0)) < abs(
+            before - (10_000.0 - 320.0)
+        )
 
     def test_a_measurement_wrong_in_range_is_still_rejected(self, model):
         """The fallback must not become a gate that admits anything."""
         tracker = self._confirmed(model)
         tracker.step([np.array([25_000.0, 80.0])])
-        assert tracker.confirmed_tracks[0].n_misses_in_a_row == 1
+        assert tracker.confirmed_tracks[0].n_misses == 1
 
 
-class TestTrackManagerAgainstClutter:
+class TestKalmanTrackerAgainstClutter:
     """One target plus false alarms, which is scenario 003's whole association load."""
 
     def test_the_target_keeps_its_track_through_clutter(self, model, rng):
@@ -586,15 +610,20 @@ class TestTrackManagerAgainstClutter:
             if step == 5:
                 target_id = min(
                     tracker.confirmed_tracks,
-                    key=lambda t: abs(t.estimate.state[0] - (range_m - closing_mps * step)),
+                    key=lambda t: abs(
+                        t.estimator.estimate.state[0] - (range_m - closing_mps * step)
+                    ),
                 ).track_id
 
         confirmed = tracker.confirmed_tracks
         assert len(confirmed) >= 1
         target = min(
-            confirmed, key=lambda t: abs(t.estimate.state[0] - (range_m - closing_mps * 19))
+            confirmed,
+            key=lambda t: abs(t.estimator.estimate.state[0] - (range_m - closing_mps * 19)),
         )
-        assert target.estimate.state[0] == pytest.approx(range_m - closing_mps * 19, abs=75.0)
+        assert target.estimator.estimate.state[0] == pytest.approx(
+            range_m - closing_mps * 19, abs=75.0
+        )
         # Criterion 1: the identity is stable. Which integer it is depends on
         # the shuffled order of the first frame's measurements and means nothing.
         assert target.track_id == target_id
@@ -685,7 +714,7 @@ class TestValidation:
             manager(model, gate_probability=1.5)
 
     def test_track_reports_its_own_state(self, model):
-        track = Track(track_id=7, estimate=KalmanState(np.zeros(2), np.eye(2)))
+        track = Track(track_id=7, estimator=KalmanFilter(KalmanState(np.zeros(2), np.eye(2))))
         assert track.is_alive
         assert not track.is_confirmed
 

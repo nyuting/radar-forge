@@ -3,7 +3,7 @@ r"""Turn range-Doppler maps into tracks: detect, unfold, associate, filter.
 This module is the pipeline half of
 ``spec/scenario-003-tracking.md``. It owns everything between a
 :class:`~radar_forge.pipelines.scenarios.RangeDopplerProduct` and a call to
-:class:`~radar_forge.core.tracking.TrackManager`:
+:class:`~radar_forge.core.tracking.KalmanTracker`:
 
 * CFAR detection and the conversion of fractional cell indices into metres and
   metres per second (§5.1), using the bin-centre helpers of
@@ -17,8 +17,8 @@ This module is the pipeline half of
 is deliberate: the tracker's contract is "you give me measurements and a
 model", and where a measurement came from is not its business.
 
-Two departures from the specification as written, both recorded in its §5.3 and
-§13 and both found by running it:
+Two departures from the specification as written, both recorded in its §14.2 and
+§14.4 and both found by running it:
 
 **The Doppler axis is circular and clustering is not.**
 :func:`~radar_forge.core.detection.cluster_detections` labels with a
@@ -43,13 +43,11 @@ threshold. See ``tests/core/test_tracking.py`` for the pinned floor.
 References
 ----------
 .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
-       McGraw-Hill, 2014, §6.5 (CFAR), §7.3 (measurement accuracy).
-.. [2] S. S. Blackman and R. Popoli, *Design and Analysis of Modern Tracking
-       Systems*, Artech House, 1999, §4.3 (Doppler-aided tracking and ambiguity
-       resolution).
-.. [3] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with
-       Applications to Tracking and Navigation*, Wiley, 2001, §11.7 (track
-       initiation).
+       McGraw-Hill, 2014, §6.5 (CFAR), §7.1 and §7.2 (estimators and their
+       accuracy: the CRLB, range and Doppler estimators).
+.. [2] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with
+       Applications to Tracking and Navigation*, Wiley, 2001, §5.5
+       (initialisation of state estimators).
 """
 
 from __future__ import annotations
@@ -63,8 +61,9 @@ from numpy.typing import NDArray
 from radar_forge.core.ambiguity import unfold_doppler_dual_prf
 from radar_forge.core.detection import CfarVariant, cfar_detect, cluster_detections
 from radar_forge.core.tracking import (
+    KalmanFilter,
+    KalmanTracker,
     Track,
-    TrackManager,
     state_model_matrices,
 )
 
@@ -288,7 +287,7 @@ def frame_detections(
     to be belongs to ``core/detection.py``'s workstream, not to this one.
 
     Detections within ``merge_range_bins`` of a stronger one are then discarded.
-    Scenario 001 applies no Doppler taper, so a target at the 51-65 dB
+    Scenario 001 applies no Doppler taper, so a target at the 45-69 dB
     post-integration SNR of §4 puts its *sidelobes* tens of decibels above an
     11.4 dB threshold: measured over the first twelve frames, the target yields
     one cluster of 30-95 cells at its true bin plus one-cell satellites at the
@@ -483,7 +482,7 @@ def unfold_velocity_mps(
 ) -> tuple[float, int]:
     r"""Resolve a folded range rate against a prediction, and return the fold index.
 
-    The track's predicted range rate is unfolded, so it selects the fold [2]_:
+    The track's predicted range rate is unfolded, so it selects the fold:
 
     .. math::
 
@@ -580,7 +579,7 @@ def range_slope_sigma_mps(
         \sqrt{\frac{12}{N(N^2 - 1)}}
 
     This is the estimator scenario 003 §5.3 uses to size its bootstrap, and it
-    reproduces the values quoted there: 6.84 m/s at :math:`N = 5` and 3.34 m/s
+    reproduces the values §14.4 quotes: 6.84 m/s at :math:`N = 5` and 3.34 m/s
     at :math:`N = 8`.
 
     Parameters
@@ -682,6 +681,15 @@ def minimum_unfold_history_frames(
     raise ValueError(msg)
 
 
+def _copy_track(track: Track[KalmanFilter]) -> Track[KalmanFilter]:
+    """Return a copy of a track that later frames cannot change."""
+    return replace(
+        track,
+        estimator=replace(track.estimator),
+        source_sensor_ids=set(track.source_sensor_ids),
+    )
+
+
 @dataclass(frozen=True)
 class FrameTracks:
     """What the tracker did with one frame.
@@ -708,7 +716,7 @@ class FrameTracks:
     time_s: float
     measurements: tuple[Measurement, ...]
     associations: dict[int, int]
-    tracks: tuple[Track, ...]
+    tracks: tuple[Track[KalmanFilter], ...]
     unfold_reference_id: int | None = None
 
 
@@ -716,7 +724,7 @@ class FrameTracks:
 class ScenarioTracker:
     """Drive detection, unfolding and tracking over a scenario's frames.
 
-    Holds the state that spans frames: the :class:`TrackManager` itself, and the
+    Holds the state that spans frames: the :class:`KalmanTracker` itself, and the
     per-track range history the §5.3 bootstrap needs. Feed it one
     :class:`~radar_forge.pipelines.scenarios.RangeDopplerProduct` per frame.
 
@@ -742,7 +750,7 @@ class ScenarioTracker:
         ``frame_time_s`` and ``unfold_sigma_gate``, and setting it
         independently of those would let a track unfold before its range slope
         can tell it which fold to take.
-    manager : radar_forge.core.tracking.TrackManager
+    tracker : radar_forge.core.tracking.KalmanTracker
         The filter and track-management state, built from ``tracking``.
     frames : list of FrameTracks
         Every frame stepped so far, in order, appended by :meth:`step` and
@@ -762,7 +770,7 @@ class ScenarioTracker:
     frame_time_s: float = 1.0
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
-    manager: TrackManager = field(init=False)
+    tracker: KalmanTracker = field(init=False)
     min_unfold_frames: int = field(init=False)
     frames: list[FrameTracks] = field(default_factory=list, init=False)
     _range_history: dict[int, list[float]] = field(default_factory=dict, init=False)
@@ -793,7 +801,7 @@ class ScenarioTracker:
                 dtype=np.float64,
             )
         )
-        self.manager = TrackManager(
+        self.tracker = KalmanTracker(
             model=model,
             initial_covariance=initial_covariance,
             gate_probability=self.tracking.gate_probability,
@@ -809,7 +817,7 @@ class ScenarioTracker:
             self.tracking.unfold_sigma_gate,
         )
 
-    def is_unfoldable(self, track: Track) -> bool:
+    def is_unfoldable(self, track: Track[KalmanFilter]) -> bool:
         """Whether this track has enough range history to select a Doppler fold."""
         return len(self._range_history.get(track.track_id, ())) >= self.min_unfold_frames
 
@@ -821,9 +829,9 @@ class ScenarioTracker:
         """
         return self._unfold_frame.get(track_id)
 
-    def _reference_track(self) -> Track | None:
+    def _reference_track(self) -> Track[KalmanFilter] | None:
         """Return the track whose prediction selects the fold for this frame."""
-        candidates = [track for track in self.manager.tracks if self.is_unfoldable(track)]
+        candidates = [track for track in self.tracker.tracks if self.is_unfoldable(track)]
         if not candidates:
             return None
         return max(candidates, key=lambda track: len(self._range_history[track.track_id]))
@@ -898,16 +906,16 @@ class ScenarioTracker:
         measurements: list[Measurement],
         frame_index: int,
         time_s: float,
-        reference: Track | None,
+        reference: Track[KalmanFilter] | None,
         *,
         unfolded: bool = False,
     ) -> FrameTracks:
-        """Run the manager over one frame's measurements and record the result."""
-        live = [track for track in self.manager.tracks if track.is_alive]
+        """Run the tracker over one frame's measurements and record the result."""
+        live = [track for track in self.tracker.tracks if track.is_alive]
         if unfolded:
             # Nothing is ambiguous, so a new track may be seeded from both
             # measurement components and every track measures both from birth.
-            self.manager.n_initiation_rows = 2
+            self.tracker.n_initiation_rows = 2
             dims = [2] * len(live)
         else:
             dims = [2 if self.is_unfoldable(track) else 1 for track in live]
@@ -927,7 +935,7 @@ class ScenarioTracker:
             )
             for measurement in measurements
         ]
-        result = self.manager.step(vectors, measurement_dims=dims)
+        result = self.tracker.step(vectors, time_s=time_s, measurement_dims=dims)
 
         # Range history drives the bootstrap, so it counts associations, not
         # frames: a coasting track learns nothing new about its range slope.
@@ -941,7 +949,7 @@ class ScenarioTracker:
         # are unambiguous and were never the reason it was lost, and the fold
         # monitor needs them the moment it comes back.
         alive_ids = {track.track_id for track in result.tracks}
-        alive_ids.update(self.manager.lost_track_ids)
+        alive_ids.update(self.tracker.lost_track_ids)
         self._range_history = {
             track_id: history
             for track_id, history in self._range_history.items()
@@ -953,13 +961,14 @@ class ScenarioTracker:
             time_s=time_s,
             measurements=tuple(measurements),
             associations=result.associations,
-            # Snapshots, not the live Track objects. A Track is mutable by
-            # design -- it is the thing that changes from frame to frame -- so
-            # keeping references here would make every recorded frame show the
-            # *final* state of every track, and a plot or a CSV built from the
-            # history would be silently wrong in a way that still looks like a
-            # track. KalmanState is frozen, so the copy is shallow and cheap.
-            tracks=tuple(replace(track) for track in result.tracks),
+            # Copies, not the live Track objects. A Track and its KalmanFilter
+            # are mutable by design -- they are the things that change from
+            # frame to frame -- so keeping references here would make every
+            # recorded frame show the *final* state of every track, and a plot
+            # or a CSV built from the history would be silently wrong in a way
+            # that still looks like a track. Both are copied; KalmanState is
+            # frozen, so the copies are shallow and cheap.
+            tracks=tuple(_copy_track(track) for track in result.tracks),
             unfold_reference_id=reference.track_id if reference is not None else None,
         )
         self.frames.append(frame)
@@ -968,7 +977,7 @@ class ScenarioTracker:
     def _unfold_all(
         self,
         measurements: Sequence[Measurement],
-        reference: Track | None,
+        reference: Track[KalmanFilter] | None,
         truth_velocity_mps: float | None,
     ) -> list[Measurement]:
         """Attach an unfolded velocity to each measurement, where one is available."""
@@ -993,7 +1002,9 @@ class ScenarioTracker:
                 raise ValueError(msg)
             predicted_mps: float | None = truth_velocity_mps
         else:
-            predicted_mps = float(reference.estimate.state[1]) if reference is not None else None
+            predicted_mps = (
+                float(reference.estimator.estimate.state[1]) if reference is not None else None
+            )
 
         if predicted_mps is None:
             return list(measurements)

@@ -33,7 +33,7 @@ These are the rules the git hooks and CI enforce. Read them before your first co
   in an X-band and an S-band variant.
 - [`spec/scenario-003-tracking.md`](../spec/scenario-003-tracking.md) — CFAR
   detection, data association and Kalman tracking stacked on scenario 001's S1 variant, in two
-  waveform variants. §14 records the seven things building it changed.
+  waveform variants. §14 records the things building it changed.
 
 ## Scenario companions
 
@@ -50,3 +50,6 @@ pipeline, the pictures and the knobs. They are **not normative**; the `spec/` do
 ## Library guides
 
 API documentation and the intern onboarding tutorials land here as the modules are built.
+
+- [**tracking**](tracking/README.md) — what is in `core/tracking/`, the order one scan runs in,
+  a short example, choosing the process noise, and the tracker's limitations.

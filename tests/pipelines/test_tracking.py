@@ -77,7 +77,7 @@ class TestRangeSlope:
     """The independent, Doppler-free velocity estimate."""
 
     def test_matches_the_closed_form_sigma(self):
-        """Reproduces the two values scenario 003 §5.3 quotes, 6.84 and 3.34."""
+        """Reproduces the two values scenario 003 §14.4 quotes, 6.84 and 3.34."""
         assert range_slope_sigma_mps(5, SIGMA_RANGE_M, 1.0) == pytest.approx(6.842, abs=5e-4)
         assert range_slope_sigma_mps(8, SIGMA_RANGE_M, 1.0) == pytest.approx(3.338, abs=5e-4)
 
@@ -414,7 +414,7 @@ class TestScenarioTrackerUnfolding:
             product = synthetic_product(range_m - closing_mps * index, 2.0, seed=100 + index)
             tracker.step(product, frame_index=index, time_s=float(index))
 
-        confirmed = tracker.manager.confirmed_tracks
+        confirmed = tracker.tracker.confirmed_tracks
         assert confirmed
         unfold_frame = tracker.unfold_frame_of(confirmed[0].track_id)
         assert unfold_frame is not None

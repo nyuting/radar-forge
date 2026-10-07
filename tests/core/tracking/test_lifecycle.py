@@ -1,0 +1,181 @@
+"""Tests for radar_forge.core.tracking.lifecycle: M-of-N confirmation and deletion.
+
+The manager is driven directly with ``record_hit`` and ``record_miss``, one
+call per scan, so each test can count hits and misses by hand against the
+M-of-N rule. Most tests
+use 4-of-5, as main's tracker does, because it makes "M unreachable" happen
+after only two misses.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from radar_forge.core.tracking.coordinates import StateEstimate
+from radar_forge.core.tracking.lifecycle import LifecyclePolicy, TrackManager
+from radar_forge.core.tracking.motion import CartesianMotion
+from radar_forge.core.tracking.tracks import Track, TrackStatus
+from radar_forge.core.tracking.ukf import UKF
+
+ORIGIN = (36.00250, -78.94100, 60.0)
+MOTION = CartesianMotion({"x": "CV"}, origin_lla_deg_m=ORIGIN)
+PRIOR = StateEstimate(np.zeros(2), np.diag([1.0, 100.0**2]), 0.0, MOTION.state_layout)
+
+
+def manager(**policy: int | float) -> TrackManager:
+    """A manager with the given policy fields and defaults for the rest."""
+    return TrackManager(LifecyclePolicy(**policy))  # type: ignore[arg-type]
+
+
+def run(track_manager: TrackManager, scans: str) -> tuple[Track[UKF], list[TrackStatus]]:
+    """Seed a track at 0 s, then record ``scans`` ("h" hit, "m" miss), one per second.
+
+    Returns the track and its statuses: the first at birth, the rest one per scan.
+    """
+    track = track_manager.seed(UKF(PRIOR, MOTION), 0.0, "sensor")
+    statuses = [track.status]
+    # Each record depends on the counts the previous one left behind.
+    for scan, kind in enumerate(scans, start=1):
+        if kind == "h":
+            track_manager.record_hit(track, float(scan), "sensor")
+        else:
+            track_manager.record_miss(track)
+        statuses.append(track.status)
+    return track, statuses
+
+
+TENTATIVE, CONFIRMED, COASTING, DELETED = "tentative", "confirmed", "coasting", "deleted"
+
+
+def test_a_track_is_confirmed_on_the_mth_hit() -> None:
+    """3-of-5 with a miss in between: birth, hit, miss, hit is the third hit."""
+    _, statuses = run(manager(n_confirm_hits=3), "hmh")
+    assert statuses == [TENTATIVE, TENTATIVE, TENTATIVE, CONFIRMED]
+
+
+def test_an_isolated_false_alarm_is_deleted_and_never_confirmed() -> None:
+    """One detection, then nothing: deleted within its first N scans."""
+    _, statuses = run(manager(n_confirm_hits=4), "mmmm")
+    assert CONFIRMED not in statuses
+    assert DELETED in statuses[: 5 + 1]
+
+
+def test_a_tentative_track_dies_as_soon_as_m_is_unreachable() -> None:
+    """4-of-5: after two misses, 1 hit + 2 scans left cannot make 4."""
+    _, statuses = run(manager(n_confirm_hits=4), "mm")
+    assert statuses == [TENTATIVE, TENTATIVE, DELETED]
+
+
+def test_a_tentative_track_out_of_frames_is_deleted_on_the_last_one() -> None:
+    """4-of-5: three hits, then two misses. M stays reachable until scan 5 ends.
+
+    After the first miss, 3 hits and 1 scan left can still make 4, so the
+    track lives. The second miss uses up the fifth scan, so the deadline itself
+    deletes it.
+    """
+    _, statuses = run(manager(n_confirm_hits=4), "hhmm")
+    assert statuses == [TENTATIVE, TENTATIVE, TENTATIVE, TENTATIVE, DELETED]
+
+
+def test_a_hit_after_the_first_n_scans_cannot_save_a_tentative_track() -> None:
+    """The window does not slide: a track that is deleted stays deleted."""
+    track, _ = run(manager(n_confirm_hits=3), "mmmhh")
+    assert track.status == DELETED
+
+
+def test_a_tentative_track_that_misses_is_deleted_with_no_grace_period() -> None:
+    """n_delete_misses = 1: one miss deletes a tentative track outright.
+
+    By M-of-N alone it would live: 1 hit and 3 scans left can still make 3.
+    """
+    _, statuses = run(manager(n_confirm_hits=3, n_delete_misses=1), "m")
+    assert statuses == [TENTATIVE, DELETED]
+
+
+def test_a_confirmed_track_coasts_until_n_delete_misses() -> None:
+    """3-of-5 and 5 misses allowed: confirmed on scan 2, deleted on the fifth miss."""
+    _, statuses = run(manager(n_confirm_hits=3, n_delete_misses=5), "hhmmmmm")
+    assert statuses == [TENTATIVE, TENTATIVE, CONFIRMED] + [COASTING] * 4 + [DELETED]
+
+
+def test_a_hit_resets_the_miss_count() -> None:
+    track, statuses = run(manager(n_confirm_hits=3, n_delete_misses=3), "hhmmhmm")
+    assert statuses[-3:] == [CONFIRMED, COASTING, COASTING]
+    assert track.n_misses == 2
+
+
+def test_a_hit_records_its_time_and_sensor() -> None:
+    track, _ = run(manager(), "hm")
+    assert (track.last_measurement_time_s, track.source_sensor_ids) == (1.0, {"sensor"})
+
+
+def test_reacquire_frames_extend_only_a_confirmed_track() -> None:
+    """2 misses delete a track, and a confirmed one gets 2 more: 4 in all."""
+    policy = {"n_confirm_hits": 2, "n_delete_misses": 2, "n_reacquire_frames": 2}
+    _, statuses = run(manager(**policy), "hmmmm")
+    assert statuses == [TENTATIVE, CONFIRMED] + [COASTING] * 3 + [DELETED]
+
+
+def test_reacquire_frames_do_not_extend_a_tentative_track() -> None:
+    """3-of-5 would keep it, but n_delete_misses = 1 deletes it at its first miss."""
+    policy = {"n_confirm_hits": 3, "n_delete_misses": 1, "n_reacquire_frames": 5}
+    _, statuses = run(manager(**policy), "m")
+    assert statuses == [TENTATIVE, DELETED]
+
+
+def test_a_one_of_n_policy_confirms_a_track_at_birth() -> None:
+    _, statuses = run(manager(n_confirm_hits=1), "")
+    assert statuses == [CONFIRMED]
+
+
+def test_track_ids_count_up_from_one() -> None:
+    track_manager = manager()
+    ids = [track_manager.seed(UKF(PRIOR, MOTION), 0.0).track_id for _ in range(3)]
+    assert ids == [1, 2, 3]
+
+
+def test_a_gap_of_exactly_max_coast_time_keeps_the_track() -> None:
+    track_manager = manager(max_coast_time_s=30.0)
+    track, _ = run(track_manager, "")
+    track_manager.expire(track, 30.0)
+    assert track.status == TENTATIVE
+
+
+def test_a_gap_longer_than_max_coast_time_deletes_the_track() -> None:
+    track_manager = manager(max_coast_time_s=30.0)
+    track, _ = run(track_manager, "")
+    track_manager.expire(track, 30.5)
+    assert track.status == DELETED
+
+
+@pytest.mark.parametrize(
+    ("policy", "match"),
+    [
+        ({"n_confirm_hits": 6, "n_confirm_frames": 5}, "n_confirm_hits"),
+        ({"n_confirm_hits": 0}, "n_confirm_hits"),
+        ({"n_delete_misses": 0}, "n_delete_misses"),
+        ({"n_reacquire_frames": -1}, "n_reacquire_frames"),
+        ({"n_history": -1}, "n_history"),
+        ({"max_coast_time_s": 0.0}, "max_coast_time_s"),
+        ({"max_coast_time_s": float("inf")}, "max_coast_time_s"),
+        ({"n_confirm_hits": True}, "int"),
+        ({"n_confirm_frames": 5.0}, "int"),
+    ],
+    ids=[
+        "M above N",
+        "M of zero",
+        "deletion count below one",
+        "negative re-acquisition count",
+        "negative history",
+        "zero coast time",
+        "infinite coast time",
+        "bool count",
+        "float count",
+    ],
+)
+def test_the_policy_rejects_an_impossible_setting(
+    policy: dict[str, int | float], match: str
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        LifecyclePolicy(**policy)  # type: ignore[arg-type]
