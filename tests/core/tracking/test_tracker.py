@@ -342,7 +342,8 @@ def test_a_target_keeps_one_track_through_clutter_and_missed_detections(
     strict=True,
     reason=(
         "Several detections of one target in one scan each start a track, and GNN keeps "
-        "all of them fed. Fixed on the detection side by PR B: one detection per target."
+        "all of them fed. The tracker leaves this to detection, which clusters each target "
+        "into one detection: see tests/pipelines/test_tracking.py::TestUkfPath."
     ),
 )
 def test_several_detections_of_one_target_give_one_confirmed_track(
@@ -509,3 +510,32 @@ def test_build_tracker_rejects_an_unknown_association() -> None:
 def test_build_tracker_rejects_impossible_sigma_point_settings_before_any_track() -> None:
     with pytest.raises(ValueError, match="alpha"):
         one_axis_tracker(alpha=0.0)
+
+
+# --------------------------------------------------------------------------- #
+# What the last scan did: associations and NIS
+# --------------------------------------------------------------------------- #
+
+
+def test_the_last_scan_records_which_measurement_each_track_took_and_its_nis() -> None:
+    """The NIS recorded is the one the gate scored, computed before the update."""
+    tracker = confirmed_tracker()
+    (track,) = tracker.tracks
+    scan = batch(tracker, 5.0, [500.0, 115.0])
+    predicted = copy.deepcopy(track.estimator)
+    predicted.predict_to(5.0)
+    stats = predicted.innovation_statistics(
+        scan.measurements[1], tracker.measurement_models["measurement"]
+    )
+
+    tracker.process(scan)
+
+    assert tracker.last_associations == {track.track_id: 1}
+    np.testing.assert_allclose(tracker.last_nis[track.track_id], stats.nis, rtol=1e-12)
+
+
+def test_a_track_that_missed_or_was_born_is_not_in_the_last_scans_record() -> None:
+    tracker = confirmed_tracker()
+    tracker.process(batch(tracker, 5.0, [5000.0]))
+    assert tracker.last_associations == {}
+    assert tracker.last_nis == {}

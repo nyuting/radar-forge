@@ -136,6 +136,13 @@ class Tracker:
         The live tracks, in order of creation. Deleted tracks are removed.
     last_timestamp_s : float or None
         Time of the last processed batch, seconds. None before the first.
+    last_associations : dict of int to int
+        For each track updated in the last scan, the index into that batch's
+        ``measurements`` of the measurement it took. A track that missed, or
+        was born in, the scan is absent.
+    last_nis : dict of int to float
+        For each track in ``last_associations``, the normalised innovation
+        squared of the measurement it took.
 
     Raises
     ------
@@ -218,6 +225,8 @@ class Tracker:
         self.cost = cost
         self.tracks: list[Track[Estimator]] = []
         self.last_timestamp_s: float | None = None
+        self.last_associations: dict[int, int] = {}
+        self.last_nis: dict[int, float] = {}
 
     @property
     def measurement_models(self) -> Mapping[str, MeasurementModel]:
@@ -386,6 +395,8 @@ class Tracker:
         matches += self._assign(costs, tentative, free)
 
         hit = dict(matches)
+        self.last_associations = {}
+        self.last_nis = {}
         # Each update changes one track's own filter, so tracks are updated one
         # at a time.
         for i, track in enumerate(visible):
@@ -395,6 +406,8 @@ class Tracker:
                 continue
             measurement = batch.measurements[j]
             track.estimator.update(measurement, models[j], innovation=innovations[i, j])
+            self.last_associations[track.track_id] = j
+            self.last_nis[track.track_id] = innovations[i, j].nis
             self.manager.record_hit(track, measurement.timestamp_s, measurement.sensor_id)
 
         claimed = set(hit.values())
