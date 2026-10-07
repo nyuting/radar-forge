@@ -512,7 +512,11 @@ def test_nis_is_chi_squared_over_independent_runs(
 def test_a_measurement_within_roundoff_of_the_filter_time_is_accepted() -> None:
     """Times computed two ways (k * dt against a running sum) differ by roundoff."""
     ukf, model, _ = _ready_filter()
-    running_sum_s = sum([0.1] * 10)
+    # A loop, not sum(): from Python 3.12 sum() compensates for roundoff, and
+    # sum([0.1] * 10) is exactly 1.0. A tracker accumulates time step by step.
+    running_sum_s = 0.0
+    for _ in range(10):
+        running_sum_s += 0.1
     assert running_sum_s != 1.0
     ukf.update(_measurement(9_960.0, SIGMA_RANGE_M**2, running_sum_s), model)
     assert ukf.state.timestamp_s == 1.0
