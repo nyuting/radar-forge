@@ -257,14 +257,19 @@ def reference_site(scenario: Scenario) -> dict[str, object]:
 def tracking_metadata(scenario: Scenario, tracker: ScenarioTracker) -> dict[str, object]:
     """The resolved tracking settings, with what a reader of tracks.csv needs to know.
 
-    The settings are the ones the run used, defaults included, under their
-    Python names. ``state_fields`` indexes the ``cov_<i>_<j>`` columns of
+    The settings are the ones the run used, defaults included, under the
+    scenario TOML's names, so every key of the ``[tracking]`` table appears
+    with its value, as data-001 §6.1 asks. ``state_fields`` indexes the ``cov_<i>_<j>`` columns of
     tracks.csv (data-001 §6.1). ``range_period_m`` is the period of the
     exported range when range folds, and ``None`` when it does not, so that a
     reader knows once, here, whether ``range_m`` is absolute or modulo.
     """
+    settings = asdict(tracker.tracking)
+    # configs_from_scenario renames the TOML's velocity_unfolding to the field
+    # unfolding_mode on the way in; this renames it back on the way out.
+    settings["velocity_unfolding"] = settings.pop("unfolding_mode")
     return {
-        **asdict(tracker.tracking),
+        **settings,
         # Recorded explicitly, so no stored run is ambiguous about whether its
         # angles were measured or synthesised (scenario 003 §6.3).
         "simulated_angles": bool((scenario.tracking_table or {}).get("simulated_angles", False)),

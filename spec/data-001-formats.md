@@ -664,7 +664,7 @@ item 5. Only rule R7, which AC8 cites, is in place.
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 1.0.0 | 2026-09-29 | First proposal |
-| 1.1.0 | 2026-10-07 | `detections.csv` adds `burst_index`, `status` and `pair_id`; `metadata.json` `tracking` adds `range_period_m` |
+| 1.1.0 | 2026-10-07 | `detections.csv` adds `burst_index`, `status` and `pair_id`; `metadata.json` `tracking` adds `range_period_m`, and records the resolved settings, defaults included, beside the `[tracking]` table's own keys |
 
 ## References
 

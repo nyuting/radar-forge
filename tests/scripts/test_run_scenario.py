@@ -99,6 +99,24 @@ class TestCell:
         assert runner._cell(0.5) == "0.5"
 
 
+@pytest.mark.parametrize(
+    "name",
+    ["scenario_003_tracking", "scenario_003_tracking_dual_prf", "scenario_003_ukf_fmcw_dual_prf"],
+)
+def test_metadata_tracking_keeps_every_key_of_the_toml_table(name):
+    """data-001 §6.1: ``tracking`` is the [tracking] table as written, plus additions.
+
+    Renaming a key is a major change (§8), so each key of the table must come
+    back under its own name, with its own value.
+    """
+    scenario = runner.load_scenario(ROOT / "scenarios" / f"{name}.toml")
+    tracker = runner.ScenarioTracker.from_scenario(scenario)
+    tracking = runner.tracking_metadata(scenario, tracker)
+    assert scenario.tracking_table is not None
+    for key, value in scenario.tracking_table.items():
+        assert tracking[key] == value, key
+
+
 @pytest.mark.slow
 def test_a_ukf_run_writes_the_data_001_files(tmp_path):
     """Three frames of the S3 UKF scenario: the headers, the metadata keys and the metrics."""
