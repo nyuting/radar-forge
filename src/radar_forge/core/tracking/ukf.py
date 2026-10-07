@@ -23,7 +23,8 @@ References
        *Proc. IEEE Adaptive Systems for Signal Processing, Communications, and Control
        Symposium*, 2000, pp. 153-158, §3 (the UKF algorithm).
 .. [2] S. J. Julier, "The scaled unscented transformation," *Proc. American Control
-       Conference*, 2002, pp. 4555-4559 (the parameters alpha, beta and kappa).
+       Conference*, 2002, pp. 4555-4559 (the scaled unscented transformation and
+       its scaling parameter alpha).
 """
 
 from __future__ import annotations
@@ -64,7 +65,8 @@ class UKF:
     motion_model : MotionModel
         Moves states forward in time and gives the process noise Q.
     alpha : float, default 1.0
-        :math:`\alpha`, the standard sigma-point symbol for how far the points spread from the
+        :math:`\alpha`, the scaling parameter of the scaled unscented transformation [2]_:
+        the standard sigma-point symbol for how far the points spread from the
         mean. Must be positive. See Notes for why the default is 1.
     beta : float, default 2.0
         :math:`\beta`, the standard sigma-point symbol for prior knowledge of the distribution.
@@ -92,7 +94,7 @@ class UKF:
 
     Notes
     -----
-    With :math:`\lambda = \alpha^2 (n + \kappa) - n`, the weights are [2]_
+    With :math:`\lambda = \alpha^2 (n + \kappa) - n`, the weights are [1]_
 
     .. math::
 
@@ -116,7 +118,7 @@ class UKF:
     :math:`\kappa \ge 0` (``kappa = 1`` works as well). The covariances the filter computes
     are then weighted sums of outer products with no negative term, so they are positive
     semidefinite by construction (see :meth:`update`). Other common settings do not have this:
-    ``alpha = 0.5, kappa = 0`` gives :math:`W^{(c)}_0 = -0.25`, and ``kappa = 3 - n``, Julier's
+    ``alpha = 0.5, kappa = 0`` gives :math:`W^{(c)}_0 = -0.25`, and ``kappa = 3 - n``, the usual
     choice for a Gaussian and Stone Soup's default, gives a negative :math:`W^{(c)}_0` for
     :math:`n \ge 3` at ``alpha = 0.5``.
 

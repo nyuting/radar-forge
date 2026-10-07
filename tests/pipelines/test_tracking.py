@@ -77,7 +77,7 @@ class TestRangeSlope:
     """The independent, Doppler-free velocity estimate."""
 
     def test_matches_the_closed_form_sigma(self):
-        """Reproduces the two values scenario 003 §5.3 quotes, 6.84 and 3.34."""
+        """Reproduces the two values scenario 003 §14.4 quotes, 6.84 and 3.34."""
         assert range_slope_sigma_mps(5, SIGMA_RANGE_M, 1.0) == pytest.approx(6.842, abs=5e-4)
         assert range_slope_sigma_mps(8, SIGMA_RANGE_M, 1.0) == pytest.approx(3.338, abs=5e-4)
 

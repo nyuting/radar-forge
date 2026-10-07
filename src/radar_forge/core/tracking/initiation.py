@@ -18,8 +18,9 @@ sensor whose tracks must all come from
 References
 ----------
 .. [1] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications
-       to Tracking and Navigation*, Wiley, 2001, §5.5.3 (initialising a tracking
-       filter from its first measurement).
+       to Tracking and Navigation*, Wiley, 2001, §5.5 (initialisation of
+       state estimators). Its §5.5.3 starts a track from two measurements; the
+       one-measurement-plus-prior rule here is the simpler variant.
 """
 
 from __future__ import annotations
@@ -141,7 +142,7 @@ class DirectStateInitiator:
 
     References
     ----------
-    .. [1] Bar-Shalom, Li and Kirubarajan (2001), §5.5.3; see the module References.
+    .. [1] Bar-Shalom, Li and Kirubarajan (2001), §5.5; see the module References.
 
     Examples
     --------

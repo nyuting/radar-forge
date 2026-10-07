@@ -37,11 +37,12 @@ States use the x = east, y = north, z = up convention of
 References
 ----------
 .. [1] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications
-       to Tracking and Navigation*, Wiley, 2001, §4.3.1 (the linear
-       measurement equation z = Hx + w, where w is the measurement noise: zero
-       mean, with covariance R) and §10.2.1 (the nonlinear case z = h(x) + w).
-.. [2] N. J. Willis, *Bistatic Radar*, 2nd ed., SciTech Publishing, 2005, §1.3
-       (bistatic geometry: the range sum and the baseline).
+       to Tracking and Navigation*, Wiley, 2001, §4.3.1 (the
+       discrete-time state-space model) and §10.2 (estimation in nonlinear
+       stochastic systems). In z = Hx + w, w is the measurement noise: zero
+       mean, with covariance R.
+.. [2] N. J. Willis, *Bistatic Radar*, 2nd ed., SciTech Publishing, 2005, ch. 3
+       (coordinate systems and geometry: the range sum and the baseline).
 """
 
 from __future__ import annotations
@@ -765,7 +766,7 @@ class BistaticRangeDopplerModel:
 
     References
     ----------
-    .. [1] Willis (2005), §1.3; see the module References.
+    .. [1] Willis (2005), ch. 3; see the module References.
 
     Examples
     --------

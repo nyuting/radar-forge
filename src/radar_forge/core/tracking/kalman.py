@@ -31,22 +31,22 @@ contract here is "you give me measurements and a model".
 
 References
 ----------
-.. [1] Y. Bar-Shalom, P. K. Willett and X. Tian, *Tracking and Data Fusion: A
-       Handbook of Algorithms*, YBS Publishing, 2011, ch. 2 (gating), ch. 3
-       (assignment).
+.. [1] Y. Bar-Shalom and X. R. Li, *Multitarget-Multisensor Tracking: Principles
+       and Techniques*, YBS Publishing, 1995, §2.3.2 (the validation region),
+       §2.6.1 (logic-based track formation), §7.1.1 (data association as an
+       assignment problem).
 .. [2] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with
        Applications to Tracking and Navigation*, Wiley, 2001, §5.2 (the Kalman
        filter), §5.5 (initialising the state estimate), §6.3.2 (discrete
        white-noise acceleration).
-.. [3] S. S. Blackman and R. Popoli, *Design and Analysis of Modern Tracking
-       Systems*, Artech House, 1999, ch. 6 (M-of-N initiation, global nearest
-       neighbour).
-.. [4] D. F. Crouse, "On implementing 2D rectangular assignment algorithms,"
+.. [3] D. F. Crouse, "On implementing 2D rectangular assignment algorithms,"
        *IEEE Trans. Aerosp. Electron. Syst.*, vol. 52, no. 4, pp. 1679-1696,
        2016. The algorithm behind ``scipy.optimize.linear_sum_assignment``.
-.. [5] R. R. Labbe, *Kalman and Bayesian Filters in Python*, 2020. The FilterPy
-       companion text; the source of the ``Q_discrete_white_noise`` formulation
-       reimplemented in :func:`process_noise_dwna`.
+.. [4] R. R. Labbe, *Kalman and Bayesian Filters in Python*, online book,
+       https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python, ch. 7
+       ("Kalman Filter Math": the piecewise white noise model). The FilterPy
+       companion text; FilterPy's ``Q_discrete_white_noise``, which
+       :func:`process_noise_dwna` reimplements, follows [2]_ §6.3.2.
 """
 
 from __future__ import annotations
@@ -512,7 +512,7 @@ def _enu_model(
         velocity = state[n_axes:]
         range_m = float(np.linalg.norm(position))
         # atan2(east, north): zero at true north, increasing clockwise, per
-        # spec/structure.md D5 and core.geodesy. The mathematical convention
+        # spec/data-001-formats.md DF2 and core.geodesy. The mathematical convention
         # would put zero at east and turn the other way, which produces a track
         # that mirrors the truth and still looks like a track.
         azimuth_rad = float(np.arctan2(position[0], position[1]))
@@ -686,7 +686,7 @@ def normalised_innovation_squared(
     r"""Return the normalised innovation squared, :math:`\nu^T S^{-1} \nu`.
 
     The statistic validation gating tests and the consistency criterion
-    averages [2]_ §6.3. Under a correct filter it is chi-squared distributed
+    averages [2]_ §5.4.2. Under a correct filter it is chi-squared distributed
     with ``measurement_dim`` degrees of freedom, so its mean over many frames
     should be the measurement dimension itself -- a check that catches a
     mis-scaled :math:`R` or :math:`Q` that no single-frame assertion would.
@@ -738,9 +738,11 @@ def normalised_innovation_squared(
 def gate_threshold(gate_probability: float, dim: int) -> float:
     r"""Return the chi-squared gate threshold for a measurement dimension.
 
-    A measurement is validated when :math:`d^2 \le \chi^2_{\text{dim}}(P_G)`
-    [2]_ §6.3. The gate is a statement about the filter's own uncertainty, not a
-    fixed number of metres, and neither its width nor its *dimension* may be
+    A measurement is validated when :math:`d^2 \le \chi^2_{\text{dim}}(P_G)`.
+    The gate is the validation region of [1]_ §2.3.2, and :math:`d^2` is
+    chi-squared distributed for a consistent filter ([2]_ §5.4.2). The gate is
+    a statement about the filter's own uncertainty, not a fixed number of
+    metres, and neither its width nor its *dimension* may be
     hard-coded: the dimension varies within a single run of scenario 003,
     because a track starts range-only and is promoted to range-and-rate once its
     Doppler fold becomes resolvable.
@@ -849,11 +851,12 @@ def associate_gnn(
 ) -> list[tuple[int, int]]:
     r"""Assign measurements to tracks by global nearest neighbour.
 
-    Solves the rectangular assignment problem over the matrix of normalised
-    innovations [1]_ ch. 3, forbidding any pair that falls outside the gate, and
+    Solves the rectangular assignment problem (data association posed as an
+    assignment problem, [1]_ §7.1.1) over the matrix of normalised
+    innovations, forbidding any pair that falls outside the gate, and
     returns the minimum-total-:math:`d^2` set of one-to-one pairings. The solver
     is ``scipy.optimize.linear_sum_assignment``, which implements the algorithm
-    of [4]_; ``scipy`` is already a core dependency, so this adds none.
+    of [3]_; ``scipy`` is already a core dependency, so this adds none.
 
     Global nearest neighbour rather than JPDA is a deliberate limit. Per
     ``spec/structure.md`` D2, a second association strategy is exactly the
@@ -1014,7 +1017,7 @@ class KalmanTracker:
     n_initiation_rows : int, optional
         How many leading measurement components seed a new track's state,
         default 1. The rest start at zero carrying ``initial_covariance``'s
-        variance. The default is what scenario 003 §7 requires: a brand-new
+        variance. The default is what scenario 003 §14.5 requires: a brand-new
         track is still in its range-only bootstrap, so the velocity component
         of the measurement it was born from is a *folded* value and seeding the
         state with it is worse than seeding nothing. Raise it only for a
@@ -1055,8 +1058,8 @@ class KalmanTracker:
 
     References
     ----------
-    .. [3] S. S. Blackman and R. Popoli, *Design and Analysis of Modern Tracking
-           Systems*, Artech House, 1999, ch. 6.
+    .. [1] Bar-Shalom and Li (1995), §2.6.1 (logic-based track formation); see the
+           module References.
     """
 
     model: TrackModel

@@ -17,8 +17,8 @@ This module is the pipeline half of
 is deliberate: the tracker's contract is "you give me measurements and a
 model", and where a measurement came from is not its business.
 
-Two departures from the specification as written, both recorded in its §5.3 and
-§13 and both found by running it:
+Two departures from the specification as written, both recorded in its §14.2 and
+§14.4 and both found by running it:
 
 **The Doppler axis is circular and clustering is not.**
 :func:`~radar_forge.core.detection.cluster_detections` labels with a
@@ -43,13 +43,11 @@ threshold. See ``tests/core/test_tracking.py`` for the pinned floor.
 References
 ----------
 .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
-       McGraw-Hill, 2014, §6.5 (CFAR), §7.3 (measurement accuracy).
-.. [2] S. S. Blackman and R. Popoli, *Design and Analysis of Modern Tracking
-       Systems*, Artech House, 1999, §4.3 (Doppler-aided tracking and ambiguity
-       resolution).
-.. [3] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with
-       Applications to Tracking and Navigation*, Wiley, 2001, §11.7 (track
-       initiation).
+       McGraw-Hill, 2014, §6.5 (CFAR), §7.1 and §7.2 (estimators and their
+       accuracy: the CRLB, range and Doppler estimators).
+.. [2] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with
+       Applications to Tracking and Navigation*, Wiley, 2001, §5.5
+       (initialisation of state estimators).
 """
 
 from __future__ import annotations
@@ -289,7 +287,7 @@ def frame_detections(
     to be belongs to ``core/detection.py``'s workstream, not to this one.
 
     Detections within ``merge_range_bins`` of a stronger one are then discarded.
-    Scenario 001 applies no Doppler taper, so a target at the 51-65 dB
+    Scenario 001 applies no Doppler taper, so a target at the 45-69 dB
     post-integration SNR of §4 puts its *sidelobes* tens of decibels above an
     11.4 dB threshold: measured over the first twelve frames, the target yields
     one cluster of 30-95 cells at its true bin plus one-cell satellites at the
@@ -484,7 +482,7 @@ def unfold_velocity_mps(
 ) -> tuple[float, int]:
     r"""Resolve a folded range rate against a prediction, and return the fold index.
 
-    The track's predicted range rate is unfolded, so it selects the fold [2]_:
+    The track's predicted range rate is unfolded, so it selects the fold:
 
     .. math::
 
@@ -581,7 +579,7 @@ def range_slope_sigma_mps(
         \sqrt{\frac{12}{N(N^2 - 1)}}
 
     This is the estimator scenario 003 §5.3 uses to size its bootstrap, and it
-    reproduces the values quoted there: 6.84 m/s at :math:`N = 5` and 3.34 m/s
+    reproduces the values §14.4 quotes: 6.84 m/s at :math:`N = 5` and 3.34 m/s
     at :math:`N = 8`.
 
     Parameters

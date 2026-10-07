@@ -46,7 +46,7 @@ from radar_forge.pipelines.tracking import (
 # A monostatic run writes the first six. A bistatic run appends the last three,
 # so the bistatic column set is a superset of the monostatic one and the D5 COCO
 # exporter can consume either unchanged -- see
-# spec/scenario-002-bistatic.md S8. In a bistatic run `range_m` is the
+# spec/scenario-002-bistatic.md §3.6. In a bistatic run `range_m` is the
 # bistatic mean range and `radial_velocity_mps` the bisector rate.
 TRUTH_COLUMNS = [
     "frame",

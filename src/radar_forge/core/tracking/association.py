@@ -22,9 +22,9 @@ several hypotheses open (MHT) are not implemented.
 
 References
 ----------
-.. [1] S. S. Blackman and R. Popoli, *Design and Analysis of Modern Tracking
-       Systems*, Artech House, 1999, ch. 6 (gating and global nearest-neighbour
-       assignment).
+.. [1] Y. Bar-Shalom and X. R. Li, *Multitarget-Multisensor Tracking: Principles
+       and Techniques*, YBS Publishing, 1995, §2.3.2 (the validation region),
+       §7.1.1 (data association as an assignment problem).
 """
 
 from __future__ import annotations
@@ -177,8 +177,10 @@ class GlobalNearestNeighbour:
     GNN first makes as many pairs as the gate allows. Only then, among all
     assignments with that many pairs, does it pick the one with the smallest
     total cost. So a track is never left without a measurement just because
-    leaving it out would lower the total cost. Stone Soup's default GNN
-    associator makes the same choice.
+    leaving it out would lower the total cost. Stone Soup's
+    ``GNNWith2DAssignment`` differs: it prices a missed detection just above
+    the largest gated distance and minimises the total cost, so it can leave a
+    track unassigned to lower the total.
 
     Notes
     -----
@@ -200,8 +202,7 @@ class GlobalNearestNeighbour:
 
     References
     ----------
-    .. [1] S. S. Blackman and R. Popoli, *Design and Analysis of Modern Tracking
-           Systems*, Artech House, 1999, ch. 6.
+    .. [1] Bar-Shalom and Li (1995), §7.1.1; see the module References.
     .. [2] D. F. Crouse, "On implementing 2D rectangular assignment
            algorithms," *IEEE Trans. Aerosp. Electron. Syst.*, vol. 52, no. 4,
            pp. 1679-1696, 2016. The algorithm behind
@@ -268,8 +269,8 @@ class ChiSquareGate:
     .. [1] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with
            Applications to Tracking and Navigation*, Wiley, 2001, §5.4.2 (the
            NIS of a consistent filter is chi-square distributed).
-    .. [2] S. S. Blackman and R. Popoli, *Design and Analysis of Modern Tracking
-           Systems*, Artech House, 1999, ch. 6 (gating).
+    .. [2] Bar-Shalom and Li (1995), §2.3.2 (the validation region); see the
+           module References.
 
     Examples
     --------

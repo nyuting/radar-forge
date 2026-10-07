@@ -49,7 +49,7 @@ consequences follow:
   at every T. It is left for the first scenario that needs it.
 
 **Why not the usual rule of thumb.** Textbooks often choose q so that :math:`\sqrt{q T}`, the
-typical change of velocity in one step, is about :math:`a_{max}` [1]_, which gives
+typical change of velocity in one step, is about :math:`a_{max} T` [1]_, which gives
 :math:`q \approx a_{max}^2 T`. The sampling interval T is standing in for :math:`\tau` there,
 so that q only means what was intended at one update rate. With two sensors there is no one T.
 

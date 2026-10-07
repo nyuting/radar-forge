@@ -26,8 +26,8 @@ References
        (the mean direction of circular data, used by
        :meth:`StateLayout.weighted_mean`).
 .. [2] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications
-       to Tracking and Navigation*, Wiley, 2001, §5.2.1 (the state estimate and its
-       covariance).
+       to Tracking and Navigation*, Wiley, 2001, §5.2.1 (the dynamic estimation
+       problem: the state estimate and its covariance).
 """
 
 from __future__ import annotations

@@ -152,8 +152,8 @@ tracker doesn't yet have these, and the change that switches it over adds them:
   `measurement_dim` that `KalmanFilter` records;
 - range, azimuth and range-rate measurement models for a monostatic radar;
 - the interacting multiple model (IMM) filter and the coordinated-turn motion model;
-- Singer's motion model, which carries the acceleration in the state and is exact for steps
-  shorter than the correlation time. Its white-noise limit sets the process noise now;
+- Singer's motion model, which carries the acceleration in the state and is exact at every
+  time step. Its white-noise limit sets the process noise now;
 - an initiator for the bistatic model. One bistatic measurement (a path length and a path
   rate) cannot fix a target's position, and `DirectStateInitiator` returns None for it. So a
   tracker whose only model is `BistaticRangeDopplerModel` never starts a track by itself.

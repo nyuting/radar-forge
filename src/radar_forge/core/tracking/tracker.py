@@ -26,7 +26,7 @@ is large, and by NIS it matches almost anything. In a single joint assignment
 it can win the detection that belongs to the confirmed track. The confirmed
 track then misses and is eventually deleted, and the target's identity passes
 to a newer track. Giving confirmed tracks first pick, and not starting tracks
-inside their gates, are the standard remedies (Blackman & Popoli).
+inside their gates, are this library's remedies for that.
 
 Two builders cover the common cases: :func:`build_tracker` for one sensor and
 one measurement model, and :func:`build_tracker_enu` for position
@@ -34,9 +34,9 @@ measurements in a local east-north-up frame.
 
 References
 ----------
-.. [1] S. S. Blackman and R. Popoli, *Design and Analysis of Modern Tracking
-       Systems*, Artech House, 1999, ch. 6 (gating, assignment and track
-       management).
+.. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
+       McGraw-Hill, 2014, §7.3 (introduction to tracking; §7.3.4, the tracking
+       cycle). The five steps above are this library's, not quoted from it.
 """
 
 from __future__ import annotations
@@ -116,8 +116,9 @@ class Tracker:
           their expected spread :math:`S`, the innovation covariance.
         - ``"negative_log_likelihood"`` scores
           :math:`\tfrac12 (d^2 + \ln|S| + n_z \ln 2\pi)`. Up to a constant
-          and a factor of one half, this is Blackman's generalised distance
-          :math:`d^2 + \ln|S|`.
+          and a factor of one half, this is :math:`d^2 + \ln|S|`, the
+          negative log of the Gaussian density of the innovation,
+          :math:`\mathcal{N}(\nu; 0, S)` [2]_.
 
         Dividing by :math:`S` makes a very uncertain track, such as one that
         has coasted for several scans, look like a good match for anything
@@ -158,8 +159,10 @@ class Tracker:
 
     References
     ----------
-    .. [1] S. S. Blackman and R. Popoli, *Design and Analysis of Modern Tracking
-           Systems*, Artech House, 1999, ch. 6.
+    .. [1] Richards (2014), §7.3; see the module References.
+    .. [2] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with
+           Applications to Tracking and Navigation*, Wiley, 2001, §5.2.6 (the
+           innovations and the likelihood function).
 
     Examples
     --------

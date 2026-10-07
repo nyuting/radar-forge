@@ -4,7 +4,7 @@ Ground truth here is analytic, per docs/conventions/testing.md §3: a noiseless
 constant-velocity target must be tracked with zero steady-state innovation to
 float precision; the gate thresholds must match tabulated chi-squared
 quantiles; the process noise must reproduce the worked matrix in Bar-Shalom
-§5.2; and the assignment must return the known optimum of a hand-built cost
+§6.3.2; and the assignment must return the known optimum of a hand-built cost
 matrix with a unique solution.
 
 The consistency tests matter more than they look. A filter with a mis-scaled R
@@ -72,7 +72,7 @@ def initial_covariance():
 
 
 class TestProcessNoiseDwna:
-    """The discrete white-noise acceleration model of Bar-Shalom §5.2."""
+    """The discrete white-noise acceleration model of Bar-Shalom §6.3.2."""
 
     def test_matches_the_worked_matrix(self):
         """Reproduces sigma_a^2 * [[T^4/4, T^3/2], [T^3/2, T^2]] exactly."""

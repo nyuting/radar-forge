@@ -4,7 +4,8 @@ A track is the tracker's belief that one target exists, together with the
 filter that estimates where it is. This module has three names:
 
 - :data:`TrackStatus`: where a track is in its life: tentative, confirmed,
-  coasting or deleted.
+  coasting or deleted, the stages of a logic-based track formation
+  procedure [1]_.
 - :class:`Track`: the live, changeable record. The tracker owns it, and it
   changes every scan as the filter predicts and updates.
 - :class:`TrackSnapshot`: a frozen copy of one track at one moment. This is
@@ -19,9 +20,9 @@ carries a :class:`~radar_forge.core.tracking.kalman.KalmanFilter`.
 
 References
 ----------
-.. [1] S. S. Blackman and R. Popoli, *Design and Analysis of Modern Tracking
-       Systems*, Artech House, 1999, ch. 6 (track initiation, confirmation and
-       deletion).
+.. [1] Y. Bar-Shalom and X. R. Li, *Multitarget-Multisensor Tracking: Principles
+       and Techniques*, YBS Publishing, 1995, §2.6.1 (a logic-based track formation
+       procedure).
 """
 
 from __future__ import annotations

@@ -22,8 +22,9 @@ be. Two scores follow from them:
 References
 ----------
 .. [1] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications to Tracking
-       and Navigation*, Wiley, 2001, §5.2.6 (the innovation and its
-       covariance) and §5.4.2 (the NIS consistency test).
+       and Navigation*, Wiley, 2001, §5.2.4 (the Kalman filter
+       algorithm, with the innovation and its covariance), §5.2.6 (the innovations
+       and the likelihood function) and §5.4.2 (the NIS consistency test).
 """
 
 from __future__ import annotations
@@ -67,7 +68,7 @@ class InnovationStats:
 
     References
     ----------
-    .. [1] Bar-Shalom, Li and Kirubarajan (2001), §5.2.6 and §5.4.2.
+    .. [1] Bar-Shalom, Li and Kirubarajan (2001), §5.2.4, §5.2.6 and §5.4.2.
     """
 
     predicted_measurement: NDArray[np.float64]

@@ -2,7 +2,10 @@
 
 A tracker cannot tell a real target from a false alarm (clutter) after one
 measurement. So every new track starts *tentative*, and has to earn
-confirmation. This module applies the M-of-N rule from Blackman & Popoli:
+confirmation. This module applies an M-of-N rule, a logic-based track
+formation rule of the kind Bar-Shalom & Li describe [1]_. The details below,
+counting M hits in the track's *first* N scans and deleting it as soon as M is
+out of reach, are this library's choice:
 
 - **Confirm** a tentative track once it has M hits (``n_confirm_hits``) within
   its *first* N scans (``n_confirm_frames``). A hit is a scan in which the
@@ -46,9 +49,9 @@ without waiting for scan 5.
 
 References
 ----------
-.. [1] S. S. Blackman and R. Popoli, *Design and Analysis of Modern Tracking
-       Systems*, Artech House, 1999, ch. 6 (M-of-N track initiation and track
-       deletion).
+.. [1] Y. Bar-Shalom and X. R. Li, *Multitarget-Multisensor Tracking: Principles
+       and Techniques*, YBS Publishing, 1995, §2.6.1 (a logic-based track formation
+       procedure), §7.3 (a logic-based multitarget track initiator).
 """
 
 from __future__ import annotations
@@ -165,13 +168,13 @@ class TrackManager:
 
     In Stone Soup's terms the manager plays the deleters: the
     ``n_delete_misses`` rule is ``UpdateTimeStepsDeleter`` and the
-    ``max_coast_time_s`` rule is ``UpdateTimeDeleter``. Its M-of-N
-    confirmation is what Stone Soup's ``MultiMeasurementInitiator`` does.
+    ``max_coast_time_s`` rule is ``UpdateTimeDeleter``. Stone Soup's nearest
+    confirmation rule, ``MultiMeasurementInitiator``, confirms after a total
+    number of updates, with no N-scan window.
 
     References
     ----------
-    .. [1] S. S. Blackman and R. Popoli, *Design and Analysis of Modern Tracking
-           Systems*, Artech House, 1999, ch. 6.
+    .. [1] Bar-Shalom and Li (1995), §2.6.1; see the module References.
     """
 
     def __init__(self, policy: LifecyclePolicy | None = None) -> None:
