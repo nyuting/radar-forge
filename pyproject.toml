@@ -103,7 +103,6 @@ known-first-party = ["radar_forge"]
 # Types
 # --------------------------------------------------------------------------- #
 [tool.mypy]
-python_version = "3.11"
 files = ["src", "scripts", "tools"]
 strict = true
 warn_unreachable = true

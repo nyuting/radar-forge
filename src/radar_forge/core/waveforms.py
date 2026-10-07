@@ -317,5 +317,8 @@ def lfm_chirp(
         sweep_rate = -sweep_rate
 
     phase_rad = 2.0 * np.pi * (start_frequency_hz * time_s + 0.5 * sweep_rate * time_s**2)
-    result: NDArray[np.complex128] = amplitude_linear * np.exp(1j * phase_rad)
+    # Typed in two steps: numpy's stubs type np.exp of a complex array as dtype[Any],
+    # and then resolve float * dtype[Any] to float64.
+    carrier: NDArray[np.complex128] = np.exp(1j * phase_rad)
+    result: NDArray[np.complex128] = amplitude_linear * carrier
     return result
