@@ -36,6 +36,8 @@ These are the rules the git hooks and CI enforce. Read them before your first co
   waveform variants. §14 records the things building it changed.
 
 ## Scenario companions
+- [`spec/tracker-001.md`](../spec/tracker-001.md) — tracking architecture: one tracker loop
+  with interchangeable KF, EKF and UKF filters, and how `core/tracking/` meets the pipelines.
 
 Visual, orienting walk-throughs for running a scenario for the first time — the geometry, the
 pipeline, the pictures and the knobs. They are **not normative**; the `spec/` documents above are.

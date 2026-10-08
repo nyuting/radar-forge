@@ -63,3 +63,4 @@ code that is plain, documented, and cites its source passes it.
 | `Makefile` | The single definition of every gate |
 | `spec/` | Design specification; the intended end state |
 | `spec/data-001-formats.md` | File formats, columns, units and conventions for every input, output and product |
+| `spec/tracker-001.md` | Tracking architecture: one tracker, interchangeable KF/EKF/UKF, how they must not drift |

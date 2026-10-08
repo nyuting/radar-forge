@@ -20,6 +20,9 @@ list. The vertical slices through it are specified one document each:
 | Scenario 2 | [`scenario-002-bistatic.md`](scenario-002-bistatic.md) | the same path over a two-site bistatic geometry |
 | Scenario 3 | [`scenario-003-tracking.md`](scenario-003-tracking.md) | CFAR detection -> association -> Kalman tracking |
 
+Two documents cut across the slices: [`data-001-formats.md`](data-001-formats.md) (file formats)
+and [`tracker-001.md`](tracker-001.md) (the tracking architecture).
+
 ---
 
 ## 2. Directory Layout & Module Structure

@@ -30,6 +30,9 @@ stitching together seven incompatible codebases.
   slice, stacked on it: CFAR detection, data association and Kalman tracking. Its §14 records what
   building it changed, including why velocity unfolding is only 86% reliable at S1's PRF and why a
   dual-PRF variant ships alongside
+- [`spec/tracker-001.md`](spec/tracker-001.md) — tracking architecture in `core/tracking/`: one
+  tracker loop with interchangeable KF, EKF and UKF filters, GNN association and explicit
+  measurement models, and the path from today's two trackers to one
 
 Each scenario also has a visual, non-normative companion under
 [`docs/scenarios/`](docs/scenarios/), for running one for the first time.
