@@ -12,6 +12,8 @@ These are the rules the git hooks and CI enforce. Read them before your first co
   `[review]`.
 - [**testing.md**](conventions/testing.md) — test layout, float-comparison tolerances,
   analytic ground truth over golden data, fixtures and seeding, property-based tests, markers.
+- [**review.md**](conventions/review.md) — writing a PR review: where it lives, its layout, how a
+  finding and a check are phrased, the voice, and what to review against.
 
 ## Getting started
 
@@ -34,10 +36,10 @@ These are the rules the git hooks and CI enforce. Read them before your first co
 - [`spec/scenario-003-tracking.md`](../spec/scenario-003-tracking.md) — CFAR
   detection, data association and Kalman tracking stacked on scenario 001's S1 variant, in two
   waveform variants. §14 records the things building it changed.
-
-## Scenario companions
 - [`spec/tracker-001.md`](../spec/tracker-001.md) — tracking architecture: one tracker loop
   with interchangeable KF, EKF and UKF filters, and how `core/tracking/` meets the pipelines.
+
+## Scenario companions
 
 Visual, orienting walk-throughs for running a scenario for the first time — the geometry, the
 pipeline, the pictures and the knobs. They are **not normative**; the `spec/` documents above are.

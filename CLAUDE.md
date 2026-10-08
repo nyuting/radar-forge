@@ -57,6 +57,7 @@ code that is plain, documented, and cites its source passes it.
 | `docs/conventions/style.md` | Naming, units, data layout, docstrings, typing, API surface |
 | `docs/conventions/commits.md` | Commit and branch conventions |
 | `docs/conventions/testing.md` | Test layout, tolerances, golden data, markers |
+| `docs/conventions/review.md` | Writing a PR review: layout, findings, checks, voice, what to check against |
 | `src/radar_forge/core/constants.py` | Every physical constant, defined once |
 | `.githooks/` | pre-commit, commit-msg, pre-push |
 | `scripts/check_conventions.py` | Rules R1–R7: TOML config, layout, docstrings, constants, units, broadcasting, Markdown anchors |

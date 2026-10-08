@@ -158,6 +158,14 @@ catches it in anything committed, which is the case that matters.
 - `snake_case` functions and variables, `PascalCase` classes, `UPPER_SNAKE` module constants. **[ruff]**
 - Array-dimension counts are `n_`-prefixed **[review]**: `n_pulses`, `n_samples`, `n_elements`, `n_targets`.
   Use the same names in shape annotations so `(n_pulses, n_samples)` is unambiguous everywhere.
+- `_index` names a position in an ordered sequence; `_id` names a key **[review]**. An index
+  is only meaningful against its array: `range_index` is a bin of the map, `burst_index`
+  picks `scenario.bursts[burst_index]`, and reordering the array changes it. An id is a label
+  other records look a thing up by, and it does not change if the order does: `track_id`,
+  `sensor_id = "rx0"`. An id may be an integer counted from 0 (`detection_id`), but it is
+  still a key, not an index; never use it to index an array. `kalman.py` uses both:
+  `track_index` is a row of the cost matrix, and `track.track_id` is the track's label.
+  Plurals are `_indices` and `_ids`. Never write `_idx`.
 - Single letters are allowed **only** where they are the standard symbol in the cited
   reference, and only inside a function whose docstring maps them: `R`, `sigma`, `lambda_`
   (trailing underscore — `lambda` is a keyword). Never as a parameter of a public function.
