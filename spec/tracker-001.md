@@ -110,8 +110,9 @@ requirement, and has a reason.
 ## 3. Architecture: strict decoupling
 
 The tracker is cut into pieces, each behind a small protocol. Each piece sees only the
-protocols of its neighbours. The cut follows [Stone Soup](https://stonesoup.readthedocs.io)'s,
-so a student who moves on to Stone Soup recognises it.
+protocols of its neighbours. The cut is close to [Stone Soup](https://stonesoup.readthedocs.io)'s,
+so a student who moves on to Stone Soup recognises it. Stone Soup cuts finer in two places: its
+predictor and updater are one `Estimator` here, and its hypothesiser is the gate here.
 
 | Piece | Protocol or type | Module (target, §13) | Knows about |
 | :--- | :--- | :--- | :--- |
@@ -156,8 +157,7 @@ Every filter satisfies `Estimator` (`core/tracking/estimation.py`):
 
 `Tracker` and `Track` see only this protocol. A filter is chosen by passing an *estimator
 factory* (a callable from a prior `StateEstimate` to an `Estimator`, with the motion model bound
-in) to the
-initiator, which is what `DirectStateInitiator(estimator_factory, ...)` already takes.
+in) to the initiator, which is what `DirectStateInitiator(estimator_factory, ...)` already takes.
 
 ### 4.2 One correction core
 
@@ -194,10 +194,11 @@ measurement's period would make the track jump by one span whenever the target c
 **The covariance update (TD3).** The correction core uses:
 
 - the **Joseph form**, (I − KH) P⁻ (I − KH)ᵀ + K R Kᵀ, when the filter supplies H or J. It is
-  positive semidefinite for any K, so roundoff cannot make a variance negative. This is what
+  positive semidefinite for any K, because both terms have the form A M Aᵀ with M positive
+  semidefinite, so roundoff cannot make a variance negative. This is what
   `kalman.update` does today;
 - the **short form**, P⁻ − K S Kᵀ, when it does not (the UKF). The UKF has no H. With every
-  sigma-point weight non-negative (§4.4), P⁻ − K S Kᵀ is the Schur complement of S in a
+  sigma-point *covariance* weight non-negative (§4.4), P⁻ − K S Kᵀ is the Schur complement of S in a
   positive semidefinite joint covariance, so it is positive semidefinite up to roundoff, which
   the symmetrisation contains. This is the argument in `UKF.update`'s docstring.
 
@@ -210,7 +211,8 @@ without H.
 
 `KalmanFilter` (target `kalman.py`) is a stateful `Estimator`, shaped like `UKF`: it holds a
 `StateEstimate` and a motion model, and implements the protocol. One class covers the KF and
-the EKF, because the EKF is the KF with H replaced by the Jacobian at the prediction.
+the EKF, because the EKF is the KF with H replaced by the Jacobian at the prediction
+(Bar-Shalom, Li and Kirubarajan 2001, §10.3).
 
 - **Motion.** It needs F and Q, so it accepts a *linear* motion model: one with
   `matrices(dt_s) -> (F, Q)`. `CartesianMotion.matrices` exists; `RadialMotion` gains it. Every
@@ -230,12 +232,19 @@ the EKF, because the EKF is the KF with H replaced by the Jacobian at the predic
 
 `UKF` (`ukf.py`) keeps its current shape. Two requirements:
 
-- **Non-negative weights.** The defaults α = 1, β = 2, κ = 0 give, for any n, a mean weight
-  w₀ᵐ = 1 − n/(α²(n + κ)) = 0 and covariance weight w₀ᶜ = 2, with every other weight 1/(2n).
-  All are non-negative, which §4.2's short-form argument needs. `check_sigma_point_settings`
-  must reject settings that make any weight negative, rather than only requiring
-  n + κ > 0 as today. κ = 3 − n (Julier's choice) gives a negative w₀ᵐ for n > 3, so it is
-  rejected for those states, with a message saying why.
+- **Non-negative covariance weights.** The weights are w₀ᵐ = 1 − n/(α²(n + κ)) for the
+  mean, w₀ᶜ = w₀ᵐ + 1 − α² + β for the covariance, and wᵢ = 1/(2α²(n + κ)) for every other
+  point, in both. §4.2's short-form argument needs every *covariance* weight non-negative,
+  because a weighted sum of outer products is positive semidefinite only then. The mean
+  weights don't enter that argument: a negative w₀ᵐ changes how the mean is formed, not
+  whether P stays positive semidefinite. So `check_sigma_point_settings` must reject settings
+  with w₀ᶜ < 0, rather than only requiring n + κ > 0 as today, and its message must say why.
+  - The defaults α = 1, β = 2, κ = 0 give w₀ᵐ = 0, w₀ᶜ = 2 and wᵢ = 1/(2n), for any n.
+  - With α = 1 and β = 2, w₀ᶜ = κ/(n + κ) + 2, which is non-negative for κ ≥ −2n/3. The
+    heuristic n + κ = 3 of Julier and Uhlmann (1997), κ = 3 − n, makes w₀ᵐ negative for n > 3, but keeps w₀ᶜ ≥ 0 up to n = 9, so it is accepted.
+  - A small α, such as the 10⁻³ that Wan and van der Merwe (2000) call usual, makes w₀ᶜ large
+    and negative, so it is rejected. That departs from the paper this UKF follows, on purpose:
+    the short-form update of §4.2 is only safe without it.
 - **Protocol names.** `predict_to` takes `timestamp_s`, as `Estimator` says. Today it takes
   `time_s`, so a keyword call through the protocol raises `TypeError`
   (TD13).
@@ -248,8 +257,8 @@ added once.
 
 | Guard | Check | Tolerance |
 | :--- | :--- | :--- |
-| KF ≡ UKF on linear models | the real `KalmanFilter` and `UKF`, same prior, same `LinearMeasurement`, 200 steps | `rtol=atol=1e-10` on mean and covariance |
-| EKF ≈ UKF on a nonlinear model | the spherical model of §6.1; the gap must shrink as the prior covariance shrinks, at second order | fitted log-log slope ≥ 1.8 |
+| KF ≡ UKF on linear models | the real `KalmanFilter` and `UKF`, same prior, same `LinearMeasurement`, 200 steps | `rtol=1e-10` on mean and covariance, with each `atol` 10⁻¹⁰ times the scale of that entry's prior variance, since the entries mix m² and (m/s)² |
+| EKF ≈ UKF on a nonlinear model | the spherical model of §6.1; scale the prior covariance by s², and the gap in the updated mean must shrink at second order in s, because it is ½ tr(∇²h P) to leading order | fitted slope of log gap against log s ≥ 1.8 (against log s², it would be 1) |
 | Consistency, every filter | NEES and NIS over Monte Carlo runs (§12) | chi-square interval at 99.9 % |
 | Definiteness, every filter | 200 steps, symmetric to `rtol=1e-12`, Cholesky succeeds | exact |
 
@@ -260,7 +269,7 @@ with a third copy proves nothing about each other.
 ## 5. State and motion models
 
 - **Canonical Cartesian order.** Per-axis interleaved, `[x_m, xdot_mps, y_m, ydot_mps, z_m,
-  zdot_mps]`, which is Bar-Shalom's order and `CartesianMotion`'s default. Axes are local ENU:
+  zdot_mps]`, which is `CartesianMotion`'s default. Axes are local ENU:
   x east, y north, z up. Any other order is legal through `CartesianMotion(order=...)`, and is
   safe because nothing indexes by position (principle 3). The positions-first order of
   `kalman.py`'s ENU models goes with them.
@@ -268,9 +277,9 @@ with a third copy proves nothing about each other.
   `[range_m, range_rate_mps]`, closing-positive, so its F carries −T. This is scenario 003's
   `range_1d`.
 - **Process noise: two conventions, both named.** The continuous white-noise acceleration
-  model (q in m²/s³, Bar-Shalom, Li and Kirubarajan 2001, §6.2) is the library default, because
+  model (q in m²/s³, Bar-Shalom, Li and Kirubarajan 2001, §6.2.2) is the library default, because
   its Q is correct for any step length and so for asynchronous sensors. The discrete
-  white-noise acceleration model (DWNA, σₐ² in m²/s⁴, §6.3.2) is kept as a named option,
+  white-noise acceleration model (DWNA, σₐ² in m²/s⁴, the same book's §6.3.2) is kept as a named option,
   because scenario 003 chose it on purpose (`spec/scenario-003-tracking.md` §6.2) and its
   results must not move during migration. Both live in `motion.py`; each docstring points at
   the other and states when they agree (`motion.py` module docstring). TD5.
@@ -309,7 +318,8 @@ non-finite Jacobian.
 **Converted measurements, for initiation only.** One spherical measurement can seed a Cartesian
 track: position from (r, θ, φ), with a covariance from the polar-to-Cartesian Jacobian. At
 long range and coarse angle accuracy, the naive conversion is biased and its covariance is
-wrong; the initiator uses the debiased conversion of Lerro and Bar-Shalom (1993). The converted
+wrong; the initiator uses a debiased conversion instead: Lerro and Bar-Shalom (1993) for 2-D
+(r, θ), and Suchomski (1999), which extends it, for 3-D (r, θ, φ). The converted
 position seeds the prior; every later update uses the spherical model.
 
 ### 6.2 Range rate in the gate
@@ -350,6 +360,20 @@ log-likelihood (`Tracker(cost=...)`), forbids pairs outside the gate, and solves
 cost; the docstring says so, and names a finite non-assignment cost as the alternative.
 `NearestNeighbour` is the greedy version, for teaching.
 
+**Costs across measurement dimensions.** With the range-only retry of §8.3, one cost matrix
+can hold pairs scored at different measurement dimensions: range and rate (2) beside range
+alone (1). Raw NIS can't be compared across dimensions, because its expectation is the
+dimension. A 1-D pair costs about 1 and a 2-D pair about 2, so a pair that fell back to range
+alone undercuts its full-dimension rivals in the solve. `KalmanTracker` does this today: each
+pair tries the full model first and falls back only if that gate fails, but the fallback
+pairs then enter the same matrix as raw NIS (`kalman.py:1186-1196`). So
+when the dimensions in one matrix differ, the cost is the negative log-likelihood,
+½ νᵀ S⁻¹ ν + ½ ln |2π S|, the negative of the `log_likelihood` that `innovation_stats` already
+returns. NIS stays available as a
+cost only when every pair has the same dimension. If a scan would put NIS costs of different
+dimensions in one matrix, `Tracker` raises rather than solve it. This may move scenario 003's numbers when it migrates
+(§13 step 5). The commit records the move, as §12 requires.
+
 ### 7.3 Assignment order
 
 The two trackers disagree today, and the disagreement is measured, so this spec makes it a
@@ -368,8 +392,8 @@ measurement, recorded in the docstring. TD8.
 
 ### 7.4 Extension point: JPDA
 
-JPDA updates each track with a weighted mixture of the measurements in its gate, instead of
-one. To admit it without changing `Tracker`'s loop:
+JPDA (Fortmann, Bar-Shalom and Scheffe 1983) updates each track with a weighted mixture of the
+measurements in its gate, instead of one. To admit it without changing `Tracker`'s loop:
 
 - `AssociationResult` gains optional association weights, shape (n_tracks, n_measurements + 1),
   the last column for "no measurement". GNN and NN leave it empty.
@@ -377,13 +401,13 @@ one. To admit it without changing `Tracker`'s loop:
   computed from each pair's `InnovationStats` by a helper in `association.py`, and applied
   through the correction core.
 
-JPDA itself is deferred to the first scenario with dense clutter, as scenario 003 §7 already
-records.
+JPDA itself is deferred to the first multi-target scenario: scenario 003 §7 records GNN as a
+deliberate limit, and its §13.3 names a second target as what makes JPDA or MHT necessary.
 
 ### 7.5 Out of scope: PMBM
 
-The Poisson multi-Bernoulli mixture filter (García-Fernández et al. 2018) handles heavy clutter
-and births better than GNN. It is out of scope, for a structural reason: it replaces the split
+The Poisson multi-Bernoulli mixture filter (García-Fernández et al. 2018) models clutter,
+missed detections and the birth of new targets inside the filter itself. It is out of scope, for a structural reason: it replaces the split
 this spec is built on. In PMBM, association hypotheses, track existence and birth are all part
 of the filter's density, so there is no separate associator, initiator or lifecycle to swap.
 It would be a second tracker, not a fourth filter, and belongs in a library built on random
@@ -407,7 +431,7 @@ All lifecycle settings live in `LifecyclePolicy`, once. Pipeline configs hold a
 | M-of-N confirmation, counted from birth | `n_confirm_hits`, `n_confirm_frames` | exists |
 | Tentative deletion once M is unreachable | (derived) | exists |
 | Deletion after misses in a row | `n_delete_misses` | exists |
-| Re-acquisition window for confirmed tracks | `n_reacquire_misses` (renamed, TD13) | exists, KF stack only |
+| Re-acquisition window for confirmed tracks | `n_reacquire_misses` (renamed, TD13) | the count exists in both stacks (`LifecyclePolicy`); the rate reset that widens the gate is KF stack only (§8.3) |
 | Deletion after a coast time | `max_coast_time_s` | exists |
 | **Covariance-based deletion** | `max_position_sigma_m` | **new** |
 
@@ -417,16 +441,18 @@ eigenvalue of its position covariance exceeds `max_position_sigma_m`, whatever i
 covariance is the thing itself, and it grows at the rate the motion model says, so a fast
 target and a slow scan are handled without retuning counts. `None`, the default, turns the rule
 off. Position components are found by name through `StateLayout`. Stone Soup's
-`CovarianceBasedDeleter` is the precedent.
+`CovarianceBasedDeleter` is the nearest precedent, with a different measure: it thresholds the
+trace of the covariance (optionally over chosen components), which mixes units unless those are
+all positions. A standard deviation in metres is a number an intern can choose.
 
 `Track.score`, `age` and `existence_probability` (unused in any decision,
-`docs/reviews/pr1-review.md` §24) stay out of `Track` until a decision uses them.
+`docs/reviews/pr1-review.md` #24) stay out of `Track` until a decision uses them.
 
 ### 8.3 Scenario 003's special cases, made general
 
 `KalmanTracker` has three behaviours `Tracker` lacks (`docs/tracking/README.md`,
-"Limitations"). They are what blocks the pipeline's move to `Tracker`, and their home was the
-open question of the tracking-names proposal for PR D. This spec settles it: the
+"Limitations"). They are what blocks the pipeline's move to `Tracker`, and where they should
+live was left open until now. This spec settles it: the
 mechanism goes in `core/tracking/`, generic and named by coordinates; the scenario's policy goes
 in `pipelines/`.
 
@@ -443,7 +469,7 @@ principle 3.
 ## 9. Multiple models (IMM)
 
 IMM runs a bank of filters with different motion models and mixes them by mode probability
-(Blom and Bar-Shalom 1988). It is specified here only as an extension point:
+(Blom and Bar-Shalom 1988; Bar-Shalom, Li and Kirubarajan 2001, ch. 11). It is specified here only as an extension point:
 
 - `IMM` is an `Estimator` that holds `Estimator`s. `Tracker` sees one estimator per track, so
   nothing outside `IMM` changes.
@@ -456,7 +482,8 @@ IMM runs a bank of filters with different motion models and mixes them by mode p
   unchanged.
 
 It is built with the first manoeuvring scenario, together with the coordinated-turn motion
-model, per scenario 003 §13.4 and the PR #2 review.
+model, as the PR #1 review planned. Scenario 003 §13.4 sets the same bar from the other side:
+IMM only once `sigma_accel_mps2` is shown to be the binding error on the circuit's turns.
 
 ## 10. Integration with the rest of radar-forge
 
@@ -471,16 +498,17 @@ model, per scenario 003 §13.4 and the PR #2 review.
 | Result | `TrackSnapshot` per live track, and the association of the scan | as the state layout | `core/tracking/tracks.py` |
 | Output | `tracks.csv`, `detections.csv` | `spec/data-001-formats.md` §6.5, §6.6 | `scripts/run_scenario.py` |
 
-`TrackSnapshot` carries what `tracks.csv` needs from one object: the estimate, status, hit and
-miss counts, the measurement index it took this scan, and that update's NIS
-(as the PR #13 review asked). The layout's coordinate names become
+`TrackSnapshot` is to carry what `tracks.csv` needs from one object: the estimate, status, hit
+and miss counts, the measurement index it took this scan, and that update's NIS, as the PR #13
+review asked. Today it carries the first two only, with the last measurement time and the
+source sensors. The layout's coordinate names become
 `metadata.json` `tracking.state_fields`, so `cov_<i>_<j>` is indexed by name, not by guess.
 
 ### 10.2 Rules
 
 - `core/tracking/` imports nothing from `pipelines/` (§3).
-- Constants come from `core.constants`, geodetic conversions from `core.geodesy`; none are
-  redefined (CLAUDE.md).
+- Constants come from `core.constants` (CLAUDE.md), and geodetic conversions from
+  `core.geodesy`; neither is redefined in `core/tracking/` (§6.1).
 - Tracker settings come from the scenario TOML's `[tracking]` table, read once by the pipeline
   into `LifecyclePolicy`, the gate, the motion model and the filter factory. Scenario-only
   settings (`max_velocity_mps`, unfolding tolerances) stay in `pipelines/`.
@@ -511,11 +539,11 @@ way round. The requirement is:
 | :--- | :--- | :--- |
 | Unit, analytic | dead reckoning; Q against the published matrices; a known GNN optimum; M-of-N by hand; Jacobians against central differences | exact or `rtol=1e-12`; Jacobians at the tolerance `tests/core/test_tracking.py` already justifies |
 | Unit, statistical | gate acceptance rate | Clopper–Pearson interval, fixed seed |
-| Filter consistency | NEES and NIS over 200 runs × 30 steps, every estimator (§4.5) | chi-square interval at 99.9 %, `slow` |
+| Filter consistency | NEES and NIS over 200 runs × 30 steps, every estimator (§4.5), per Bar-Shalom, Li and Kirubarajan (2001) §5.4.2 | chi-square interval at 99.9 %, `slow` |
 | Drift guards | §4.5 | as tabled there |
 | Lifecycle | confirmation, deletion, re-acquisition, covariance deletion on hand-countable sequences | exact |
-| End to end | scenario 003 S1 and the dual-PRF variant; scenario 001's S1/S2/S3 | `spec/scenario-003-tracking.md` §12 criteria, unchanged by migration |
-| Track metrics | range and rate RMSE, mean NIS, OSPA, track breaks | `spec/data-001-formats.md` §6.9 |
+| End to end | scenario 003 over S1, and its dual-PRF variant over S3 | `spec/scenario-003-tracking.md` §12 and §14.7, unchanged by migration |
+| Track metrics | range and rate RMSE, mean NIS, OSPA (Schuhmacher, Vo and Vo 2008), track breaks | `spec/data-001-formats.md` §6.9 |
 
 Two rules carry over from `docs/conventions/testing.md`: never loosen a tolerance to pass, and
 prefer analytic truth to recorded output. Migration adds one: **each step of §13 leaves
@@ -528,20 +556,35 @@ it would be later. The names and module moves are TD13's.
 
 0. **Renames that do not wait.** `SensorRoute` → `SensorRegistration`, `observable` → `covers`,
    `UKF.predict_to(time_s)` → `predict_to(timestamp_s)`. A small PR on main.
+   *Check:* `git grep -nE 'SensorRoute|^\s*observable ?:|observable=|\.observable\b|``observable``|def predict_to\(self, time_s' -- src tests docs/tracking`
+   returns nothing. The pattern skips the observability prose in `kalman.py`, which stays.
 1. **Gate and GNN into `association.py`;** `kalman.py` imports them from there.
+   *Check:* `git grep -n 'from radar_forge.core.tracking.kalman import' -- src/radar_forge/core/tracking/association.py`
+   returns nothing.
 2. **One innovation API and the correction core** (§4.2). `InnovationStats.residual` becomes
-   `innovation`. `UKF` calls the core.
+   `innovation`. `UKF` calls the core. *Check:* AC2.
 3. **`KalmanFilter` as an `Estimator`** (§4.3), on the core, with `RadialMotion.matrices`. The
-   KF ≡ UKF guard (§4.5) lands here.
+   KF ≡ UKF guard (§4.5) lands here. The same PR first renames today's `KalmanFilter`
+   (`kalman.py`), which holds a track's estimate and is not a filter, to `KalmanTrackState`.
+   Otherwise two public classes share one name until step 7, the trap TD12 avoids for
+   `Measurement`. *Check:* AC3 and AC4, and `git grep -nE '^class KalmanFilter\b' -- src` finds
+   exactly one class.
 4. **The spherical measurement model** (§6.1) with its Jacobian and the debiased initiator.
 5. **Scenario mechanisms in `Tracker`** (§8.3), and `assignment="joint"` (§7.3).
 6. **Scenario 003 on `Tracker`.** `pipelines/tracking.py` becomes an adapter: plots in,
    batches out, snapshots back. `TrackingConfig.state_model` is honoured (it is ignored today).
-7. **Delete the old stack:** `KalmanTracker`, `KalmanState`, `TrackModel`, `FrameResult`, and
-   the rest of TD13's renames. Module moves (§3 target column). Refresh the stale text:
+7. **Delete the old stack:** `KalmanTracker`, `KalmanTrackState`, `KalmanState`, `TrackModel`,
+   `FrameResult`, and the rest of TD13's renames. Two of those renames are scenario TOML keys
+   (TD13), so this step also updates the scenario 003 TOMLs and spec, and the data-001
+   `metadata.json` schema. Module moves (§3 target column). Refresh the stale text:
    `kalman.py`'s "promotes this module to a subpackage", `estimation.py`'s "the one
    implementation", `spec/structure.md` D2, and `spec/data-001-formats.md`'s `core/tracking.py`
-   paths.
+   paths. *Check:* AC1, AC7 and AC8;
+   `git grep -nE '^class (KalmanTracker|KalmanTrackState|KalmanState|TrackModel|FrameResult)\b' -- src`
+   returns nothing; and so does
+   `git grep -nE 'n_reacquire_frames|\bCartesianPosition\b|\bRadialMotion\b|def normalise|\.normalise\(|\.noise_density\b[^_]|self\.noise_density\b|sigma_accel_mps2' -- src tests scripts scenarios spec/scenario-003-tracking.md docs/tracking`.
+   Also fix `kalman.py`'s module docstring if it survives: it says "a linear Kalman filter",
+   but the ENU models make it an extended one (`:138`, `:479`).
 8. **Covariance-based deletion** (§8.2). Independent of the rest; any time after step 2.
 
 ## 14. Decisions
@@ -612,12 +655,14 @@ untested against real data); implementing PMBM at all (§7.5).
 
 ### TD12 — `Plot` for the pipeline's detection report
 
-`pipelines.tracking.Measurement` is renamed `Plot`, ASTERIX CAT048's word for a detection report
-and `spec/data-001-formats.md` §4's ("Detections (plots)"). *Why:* two public classes named
-`Measurement` in one package tree, holding different things, is a trap. `core.tracking.Measurement`
-keeps the name, as Stone Soup's term.
+`pipelines.tracking.Measurement` is renamed `Plot`. ASTERIX CAT048 ("Monoradar Target Reports")
+sends a target report either as a plot or as a track, and a plot is the untracked form, which is
+what this class holds; `spec/data-001-formats.md` §4 already says "Detections (plots)". *Why:*
+two public classes named `Measurement` in one package tree, holding different things, is a
+trap. `core.tracking.Measurement` keeps the name, as the textbook word for z. (Stone Soup's
+equivalent class is `Detection`; that name is taken here by `core.detection.Detection`.)
 
-### TD13 — Names follow the proposal
+### TD13 — Target names
 
 The target names are below; the module moves are §3's target column, and `InnovationStats.residual`
 becomes `innovation`, the textbook term (Bar-Shalom, Li and Kirubarajan 2001, §5.2). `SensorRoute` becomes
@@ -633,7 +678,7 @@ and "route" is not a tracking term a student can look up.
 | `LifecyclePolicy.n_reacquire_frames` | `n_reacquire_misses` | it counts misses, not frames |
 | `CartesianPosition`, `indices` | `LinearMeasurement`, `mapping` | its docstring says "despite the name, any coordinates"; it is z = Hx + w |
 | `RadialMotion` | `RadialConstantVelocity` | says which motion |
-| `build_tracker` | `build_ukf_tracker` | it always builds a UKF |
+| `build_tracker`, `build_tracker_enu` | same names, each with an `estimator_factory` argument defaulting to the UKF | both always build a UKF today. Per TD2, the filter is one argument, not one builder per filter |
 | `UKF.predict_to(time_s)` | `predict_to(timestamp_s)` | the `Estimator` protocol's name |
 | `StateLayout.normalise` | removed | it is `wrap` under a second name |
 | `CartesianMotion.noise_density` | `acceleration_noise_density_m2ps3`, `jerk_noise_density_m2ps5` | one dict held two units |
@@ -643,6 +688,13 @@ and "route" is not a tracking term a student can look up.
 Textbook names stay: `UKF`, `KalmanFilter`, `ChiSquareGate`, `NearestNeighbour`,
 `GlobalNearestNeighbour`, `TrackInitiator`, `StateEstimate`, `TrackSnapshot`, `Measurement`,
 `TrackManager`, `BistaticRangeDopplerModel`.
+
+`sigma_accel_mps2` and `n_reacquire_frames` are also keys in the scenario 003 TOMLs'
+`[tracking]` table (`spec/scenario-003-tracking.md`, "Parameters as shipped"), and
+`metadata.json` records them. So renaming them changes a file format, not only code:
+the TOMLs, scenario 003's spec and `spec/data-001-formats.md` change in the same PR, the
+`metadata.json` schema version is bumped, and a TOML that still uses an old key fails with a
+message naming the new one, rather than being silently ignored.
 
 ### TD14 — Readable before fast
 
@@ -671,7 +723,7 @@ Textbook names stay: `UKF`, `KalmanFilter`, `ChiSquareGate`, `NearestNeighbour`,
 | AC5 | The NEES/NIS and definiteness tests are parametrised over every estimator | [test] |
 | AC6 | Every analytic Jacobian matches a central difference | [test] |
 | AC7 | No tracking code indexes a state by position: a reviewer finds no slice of a state or covariance by integer outside `StateLayout` | [review] |
-| AC8 | Scenario 003's end-to-end criteria (`spec/scenario-003-tracking.md` §12) pass on `Tracker` with the same numbers as on `KalmanTracker` | [test] |
+| AC8 | Scenario 003's end-to-end criteria (`spec/scenario-003-tracking.md` §12) pass on `Tracker`, and every number that differs from `KalmanTracker`'s is explained in the commit that moved it (§12; §7.2's cost change may move some) | [test] |
 | AC9 | `core/tracking/` imports nothing from `pipelines/` | [review] |
 | AC10 | This spec passes `scripts/check_conventions.py` R7 | [hook] |
 
@@ -693,20 +745,26 @@ These hold after migration; each is stated in a docstring, not discovered by a u
 ## References
 
 - Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications to Tracking and
-  Navigation*, Wiley, 2001. §5.2 (the Kalman filter, the Joseph form), §5.4.2 (NEES and NIS
-  consistency tests), §6.2 and §6.3.2 (continuous and discrete white-noise acceleration),
-  §10.3 (the extended Kalman filter), §11.6 (the IMM estimator).
-- Y. Bar-Shalom and X. R. Li, *Multitarget-Multisensor Tracking: Principles and Techniques*,
-  YBS Publishing, 1995. §2.3.2 (the validation region), §2.6.1 (logic-based track formation).
+  Navigation*, Wiley, 2001. §5.2 (linear estimation in dynamic systems: the Kalman filter, and
+  the properties of the innovations), §5.4.2 (the statistical tests for filter consistency),
+  §6.2.2 (the continuous white noise acceleration model), §6.3.2 (the discrete white noise
+  acceleration model), §10.3 (the extended Kalman filter), ch. 11 (adaptive estimation and
+  maneuvering targets, including the interacting multiple model estimator).
+- S. J. Julier and J. K. Uhlmann, "A new extension of the Kalman filter to nonlinear systems,"
+  *Proc. SPIE*, vol. 3068, *Signal Processing, Sensor Fusion, and Target Recognition VI*,
+  1997, p. 182 ff. (the heuristic n + κ = 3).
 - E. A. Wan and R. van der Merwe, "The unscented Kalman filter for nonlinear estimation,"
   *Proc. IEEE Adaptive Systems for Signal Processing, Communications, and Control Symposium*,
-  2000, pp. 153-158.
+  2000, pp. 153-158 (the UKF, its sigma-point weights, and the usual α, β and κ).
 - S. J. Julier, "The scaled unscented transformation," *Proc. American Control Conference*,
-  2002, pp. 4555-4559.
+  vol. 6, 2002, pp. 4555-4559.
 - D. F. Crouse, "On implementing 2D rectangular assignment algorithms," *IEEE Trans. Aerosp.
   Electron. Syst.*, vol. 52, no. 4, pp. 1679-1696, 2016.
 - D. Lerro and Y. Bar-Shalom, "Tracking with debiased consistent converted measurements versus
-  EKF," *IEEE Trans. Aerosp. Electron. Syst.*, vol. 29, no. 3, pp. 1015-1022, 1993.
+  EKF," *IEEE Trans. Aerosp. Electron. Syst.*, vol. 29, no. 3, pp. 1015-1022, 1993 (2-D polar
+  measurements).
+- P. Suchomski, "Explicit expressions for debiased statistics of 3D converted measurements,"
+  *IEEE Trans. Aerosp. Electron. Syst.*, vol. 35, no. 1, pp. 368-370, 1999.
 - H. A. P. Blom and Y. Bar-Shalom, "The interacting multiple model algorithm for systems with
   Markovian switching coefficients," *IEEE Trans. Autom. Control*, vol. 33, no. 8,
   pp. 780-783, 1988.
@@ -717,5 +775,7 @@ These hold after migration; each is stated in a docstring, not discovered by a u
   Electron. Syst.*, vol. 54, no. 4, pp. 1883-1901, 2018.
 - D. Schuhmacher, B.-T. Vo and B.-N. Vo, "A consistent metric for performance evaluation of
   multi-object filters," *IEEE Trans. Signal Process.*, vol. 56, no. 8, pp. 3447-3457, 2008.
-- Stone Soup, <https://stonesoup.readthedocs.io>: the component split of §3, and
-  `CovarianceBasedDeleter`.
+- Stone Soup, <https://stonesoup.readthedocs.io>: the component split of §3; `Sensor.measure`;
+  `stonesoup.deleter.error.CovarianceBasedDeleter`; `stonesoup.types.detection.Detection`.
+- EUROCONTROL, *ASTERIX Part 4, Category 048: Monoradar Target Reports*,
+  EUROCONTROL-SPEC-0149-4, ed. 1.32, 2024, §4.6.2 (plots and tracks).
