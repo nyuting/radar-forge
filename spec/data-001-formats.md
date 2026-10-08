@@ -222,9 +222,11 @@ One row per fix, per target.
 \* Exactly one of `time_utc` and `time_s`.
 
 `data/flight_coordinates.csv` and its excerpt `tests/data/golden/flight_coordinates_head.csv` use
-these names. `load_flight_csv` (`pipelines/trajectories.py`) reads exactly this table. It rejects
-the old `timestamp,lat,lon` header with a message naming the new columns, and it rejects a file
-whose `target_id` names more than one target until multi-target scenarios exist.
+these names, with `time_s` measured from the first fix, so the shipped track has no epoch. The
+recorded track's first fix was at `2026-09-03T00:17:56Z`. `load_flight_csv`
+(`pipelines/trajectories.py`) reads exactly this table. It rejects the old `timestamp,lat,lon`
+header with a message naming the new columns, and it rejects a file whose `target_id` names more
+than one target until multi-target scenarios exist.
 
 ### 6.4 `truth.csv`
 
@@ -621,7 +623,7 @@ round-trip representation costs a few bytes per cell.
 | `%.3f` / `%.6f` / `%.6e` float formatting | shortest round-trip | precision change (DF9) |
 | `rd_*.png`, `track_*.png`, `*.mp4` in the run root | `figures/` | move; `clear_previous_frames` globs must follow |
 | — | `inputs/scenario.toml`, `inputs/trajectory.csv` | new |
-| Trajectory header `timestamp,lat,lon` | `time_utc,latitude_deg,longitude_deg` (§6.3) | rename, **done** |
+| Trajectory header `timestamp,lat,lon` | `time_s,latitude_deg,longitude_deg` (§6.3) | rename, **done** |
 
 Every existing output column keeps its name, unit and sign, so a reader of today's output files
 keeps working on the new ones. The one rename is to an input, the trajectory header, and it has

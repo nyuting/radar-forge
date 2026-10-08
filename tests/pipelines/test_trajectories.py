@@ -10,6 +10,7 @@ scenario spec §2.2 asks for.
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -37,7 +38,7 @@ S1_RADAR = Radar(
 
 TARGET_ALTITUDE_M = 1500.0
 
-# The spec/data-001-formats.md §6.3 header of a recorded track.
+# The spec/data-001-formats.md §6.3 header of a recorded track with an absolute epoch.
 HEADER = "time_utc,latitude_deg,longitude_deg"
 
 # Scenario 002: the Raleigh-Durham illuminator, received at the Duke Receiver.
@@ -91,12 +92,22 @@ class TestLoadFlightCsv:
         assert trajectory.n_fixes == 50  # 51 lines, one of them the header
 
     def test_time_is_measured_from_the_first_fix(self) -> None:
+        """The shipped track is in time_s, so it carries no epoch."""
         trajectory = load_flight_csv(GOLDEN_CSV, altitude_m=TARGET_ALTITUDE_M)
         assert trajectory.time_s[0] == 0.0
+        assert trajectory.epoch is None
+
+    def test_a_time_utc_file_keeps_its_epoch(self, tmp_path: Path) -> None:
+        recorded = tmp_path / "recorded.csv"
+        recorded.write_text(
+            f"{HEADER}\n2026-09-03T00:17:56Z,35.9,-78.9\n2026-09-03T00:18:04Z,35.9,-78.9\n"
+        )
+        trajectory = load_flight_csv(recorded, altitude_m=TARGET_ALTITUDE_M)
         assert trajectory.epoch == datetime(2026, 9, 3, 0, 17, 56, tzinfo=UTC)
+        np.testing.assert_array_equal(trajectory.time_s, [0.0, 8.0])
 
     def test_the_second_fix_is_eight_seconds_in(self) -> None:
-        """00:17:56Z to 00:18:04Z -- the irregular sampling the spec S3 warns about."""
+        """0 s to 8 s -- the irregular sampling the spec S3 warns about."""
         trajectory = load_flight_csv(GOLDEN_CSV, altitude_m=TARGET_ALTITUDE_M)
         assert trajectory.time_s[1] == 8.0
 
@@ -234,7 +245,10 @@ class TestResample:
         )
 
     def test_keeps_the_epoch(self) -> None:
-        trajectory = load_flight_csv(GOLDEN_CSV, altitude_m=TARGET_ALTITUDE_M)
+        trajectory = dataclasses.replace(
+            _straight_north_track(speed_mps=100.0, duration_s=10.0, n_fixes=11),
+            epoch=datetime(2026, 9, 3, 0, 17, 56, tzinfo=UTC),
+        )
         assert resample(trajectory, np.arange(0.0, 10.0)).epoch == trajectory.epoch
 
     @pytest.mark.parametrize("bad_time_s", [-1.0, 1.0e6])
