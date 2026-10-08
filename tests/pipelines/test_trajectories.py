@@ -5,7 +5,7 @@ docs/conventions/testing.md S3: a target flying straight at the radar must
 report its speed exactly, and a target circling the radar must report zero.
 The recorded CSV cannot check any of that -- it carries no speed column -- so
 it is exercised only for loading and plumbing, which is the division the
-scenario spec S3 asks for.
+scenario spec §2.2 asks for.
 """
 
 from __future__ import annotations
@@ -194,7 +194,7 @@ class TestToRadarFrame:
         np.testing.assert_allclose(track.elevation_deg, 90.0, rtol=1e-9)
 
     def test_a_target_due_north_reads_zero_azimuth(self) -> None:
-        """Azimuth zero at true north, increasing clockwise, per D5.
+        """Azimuth zero at true north, increasing clockwise, per data-001 DF2.
 
         Compared on the circle: the azimuth axis is wrapped to [0, 360), and a
         due-north target whose east offset rounds to -1e-12 metres legitimately

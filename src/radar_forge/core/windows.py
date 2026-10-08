@@ -19,10 +19,9 @@ References
 .. [1] F. J. Harris, "On the use of windows for harmonic analysis with the
        discrete Fourier transform," *Proc. IEEE*, vol. 66, no. 1, pp. 51-83,
        Jan. 1978.
-.. [2] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
-       McGraw-Hill, 2014, §14.4 (windowing in Doppler processing).
-.. [3] T. T. Taylor, "Design of line-source antennas for narrow beamwidth and
-       low side lobes," *IRE Trans. Antennas Propag.*, vol. 3, no. 1, 1955.
+.. [2] T. T. Taylor, "Design of line-source antennas for narrow beamwidth and
+       low side lobes," *IRE Trans. Antennas Propag.*, vol. AP-3, no. 1,
+       pp. 16-28, Jan. 1955.
 """
 
 from __future__ import annotations
@@ -116,16 +115,17 @@ def taper(
 
     Notes
     -----
-    Approximate costs, for the fixed-shape windows [1]_. "Broadening" is the
-    -3 dB mainlobe width relative to the rectangular case, and "SNR loss" is
-    :func:`processing_loss_db`:
+    Approximate costs, for the fixed-shape windows [1]_. "ENBW" is the
+    equivalent noise bandwidth in bins, which also measures how much the
+    mainlobe broadens, and "SNR loss" is :func:`processing_loss_db`, equal to
+    :math:`10\log_{10}` of the ENBW:
 
     ========================  ===============  ===========  =========
-    Taper                     First sidelobe   Broadening   SNR loss
+    Taper                     First sidelobe   ENBW         SNR loss
     ========================  ===============  ===========  =========
     ``rectangular``                  -13 dB         1.00x      0.00 dB
     ``hann``                         -32 dB         1.50x      1.76 dB
-    ``hamming``                      -43 dB         1.47x      1.34 dB
+    ``hamming``                      -43 dB         1.36x      1.34 dB
     ``blackman``                     -58 dB         1.73x      2.37 dB
     ``blackmanharris``               -92 dB         2.00x      3.02 dB
     ========================  ===============  ===========  =========
@@ -136,7 +136,8 @@ def taper(
     For ``"taylor"`` the number of near-in equal-level sidelobes :math:`\bar{n}`
     is chosen as the smallest value that makes the requested ``sidelobe_db``
     physically realisable, :math:`\bar{n} \ge 2A^2 + 1/2` with
-    :math:`A = \cosh^{-1}(10^{\mathrm{SLL}/20}) / \pi` [3]_. Fixing
+    :math:`A = \cosh^{-1}(10^{\mathrm{SLL}/20}) / \pi` (the :math:`A` of
+    Taylor's design [2]_). Fixing
     :math:`\bar{n}` at a small constant instead — a common shortcut — silently
     returns a window that does not achieve the sidelobe level it was asked for.
 
@@ -357,7 +358,7 @@ def processing_loss_db(window: ArrayLike) -> float:
 
 
 def _taylor_nbar(sidelobe_db: float) -> int:
-    r"""Return the smallest :math:`\bar{n}` that realises ``sidelobe_db`` [3]_."""
+    r"""Return the smallest :math:`\bar{n}` that realises ``sidelobe_db``."""
     a_parameter = np.arccosh(10.0 ** (sidelobe_db / 20.0)) / np.pi
     return max(2, int(np.ceil(2.0 * a_parameter**2 + 0.5)))
 

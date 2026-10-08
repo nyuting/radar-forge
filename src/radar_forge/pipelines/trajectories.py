@@ -32,9 +32,9 @@ loading and plumbing.
 References
 ----------
 .. [1] National Imagery and Mapping Agency, *Department of Defense World
-       Geodetic System 1984*, NIMA TR8350.2, 3rd ed., 2000.
+       Geodetic System 1984*, NIMA TR8350.2, 3rd ed., Amendment 1, 2000.
 .. [2] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
-       McGraw-Hill, 2014, S8.2 (radial velocity and the Doppler shift).
+       McGraw-Hill, 2014, §2.6.1 (the Doppler shift).
 """
 
 from __future__ import annotations
@@ -339,7 +339,7 @@ class BistaticTargetTrack:
 
     The bistatic counterpart of :class:`TargetTrack`. Where a monostatic track
     carries one range and one radial velocity, this carries the two ranges of
-    ``spec/scenario-002-bistatic.md`` §4 and the single bisector rate
+    ``spec/scenario-002-bistatic.md`` §4.4 and the single bisector rate
     that follows from them.
 
     Attributes

@@ -86,8 +86,8 @@ Anything implementing a cited reference should have at least one test reproducin
 example from that reference, with the citation in the test.
 
 ```python
-def test_matches_richards_worked_example() -> None:
-    """Richards, FRSP 2e, §2.2: the worked example returns -103.6 dBm at 10 km."""
+def test_matches_the_textbook_worked_example() -> None:
+    """<Author>, <book>, §<section>, <example number>: its inputs give its printed result."""
 ```
 
 ---

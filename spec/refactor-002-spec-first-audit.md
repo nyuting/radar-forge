@@ -77,13 +77,13 @@ Integrate winning elements into `src/`. Constraints:
 | :--- | :--- |
 | R1.3.1 | No behavioural change without a test that would have caught the old behaviour |
 | R1.3.2 | No tolerance weakened; a moved number is re-derived from first principles and documented |
-| R1.3.3 | Licensing follows `structure.md` §4.2 and D4 — copyleft or unlicensed code is never vendored |
+| R1.3.3 | Licensing follows `structure.md` B.2 rule 4 and D4 — copyleft or unlicensed code is never vendored |
 | R1.3.4 | Where the spec is the wrong party, the spec is corrected and the correction recorded |
 
 ## 2. Qualitative multidisciplinary test evaluation
 
-`refactor-001` §5.2 audited the suite for **structural** coverage and closed the gaps it found —
-911 tests, 99% line and branch coverage. This item asks a different question: not *is it covered*
+`refactor-001` §5.2 asked for an audit of the suite's **structural** coverage. This item asks a
+different question: not *is it covered*
 but **does it make sense**.
 
 The suite can be complete and still be unconvincing: a test can pass over a physically impossible
@@ -174,14 +174,14 @@ has no referent. §1.2 is therefore reframed: audit the code against the *specif
 equations, bounds, contracts, decisions — which is a real and useful audit, and the one the
 request is reaching for. It is not the literal function-by-function code diff described.
 
-### 4.2 The upstream comparison was already done, and found nothing adoptable
+### 4.2 The upstream comparison finds nothing adoptable
 
-`refactor-001` §5.1 cross-referenced `src/` against every reference project catalogued in
-`structure.md` Part A and adopted nothing — RadarBook, pyAPRiL, RadarSimPy, ovrtx, RASPNet and
-AIRadarLib are all GPL, proprietary, or declare no licence, and D4 already requires writing from
+`refactor-001` §5.1 asked for `src/` to be cross-referenced against every reference project
+catalogued in `structure.md` Part A, and none is adoptable — RadarBook, pyAPRiL, RadarSimPy,
+ovrtx, RASPNet and AIRadarLib are all GPL, proprietary, or declare no licence, and D4 already requires writing from
 published equations; the permissively-licensed references (Phased-Array-Antenna-Model,
 pyroomacoustics, RF-Genesis) map to `array/` and raytracing modules that do not yet exist. That
-result stands and is not re-litigated here. §1 is about `spec/` versus `src/`, which is a
+is not re-litigated here. §1 is about `spec/` versus `src/`, which is a
 different comparison.
 
 ### 4.3 The anchor invariant is already met where it applies
@@ -193,8 +193,8 @@ remaining work is small: state the rule, and verify the existing anchors resolve
 ### 4.4 Scenario spec filenames
 
 The request names `spec/scenario-001.md`, `-002`, `-003`. Those files are
-`spec/scenario-001-xband.md`, `spec/scenario-002-bistatic.md` and `spec/scenario-003-tracking.md`
-since refactor-001 §4.
+`spec/scenario-001-xband.md`, `spec/scenario-002-bistatic.md` and
+`spec/scenario-003-tracking.md`.
 
 ## 5. Acceptance criteria
 

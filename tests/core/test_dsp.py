@@ -87,8 +87,9 @@ class TestMatchedFilter:
         peak_index = int(np.argmax(compressed))
         above_half_power = compressed >= compressed[peak_index] / np.sqrt(2.0)
         width_s = int(np.sum(above_half_power)) / sample_rate_hz
-        # The exact unweighted-LFM -3 dB width is 0.886/B (Richards FRSP 2e
-        # eq. 8.29). A +/-20% band around that is tight enough to catch a
+        # For large BT the compressed LFM is approximately a sinc with Rayleigh
+        # (peak-to-null) width 1/B (Richards FRSP 2e §4.6.1); the -3 dB width of
+        # that sinc is 0.886/B. A +/-20% band around that is tight enough to catch a
         # compression that is not happening, and loose enough for the residual
         # sample quantisation.
         np.testing.assert_allclose(width_s, 0.886 / bandwidth_hz, rtol=0.2)

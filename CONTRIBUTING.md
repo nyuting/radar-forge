@@ -86,6 +86,7 @@ Runs in well under a second so it never gets in your way:
    | R4 `constants` | Redefining a shared constant, or hardcoding its literal (`3e8`, `1.38e-23`, …) |
    | R5 `units` | A parameter named `range`, `gain_tx`, `power`… with no unit suffix |
    | R6 `broadcast` | `np.tile`/`np.repeat`/`np.broadcast_to` with no justification comment |
+   | R7 `anchor` | An in-file Markdown link `](#section)` with no matching heading |
 
    Each failure prints the rule, the offending line, the fix, and a link to the guide. Rules that
    a tool genuinely cannot judge are tagged **[review]** in
@@ -156,5 +157,5 @@ deliberately maintained as the worked example of every convention at once.
 
 Include the `radar-forge` version, Python version, a minimal reproducing script, and — for a
 numerical discrepancy — the expected value *and where it comes from*. "The sidelobes look
-wrong" cannot be acted on; "first sidelobe is −13.2 dB, Richards §4.3 gives −13.26 dB for an
+wrong" cannot be acted on; "first sidelobe is −12.1 dB, Richards §1.3.2 gives −13.2 dB for an
 unweighted ULA" can.

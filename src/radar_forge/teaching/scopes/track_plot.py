@@ -7,19 +7,16 @@ tracker's characteristic failures live -- a track that lags through a turn, a
 track that swaps onto a false alarm, a track that was deleted and re-initiated
 under a new identity.
 
-Range against time, not a plan view, and deliberately. `spec/structure.md` and
-`spec/scenario-003-tracking.md` §9 both call this a plan view, and it is not
-one: a plan view is the ground plane, and this radar measures range and range
-rate and nothing else (§4), so an east-north plot would have to invent a
-bearing for every point it drew. Range against time is what the radar actually
-knows, and the gap between the truth line and the track line is the error, read
-straight off the y axis. The function is named for what it draws.
+Range against time, not a plan view, and deliberately: a plan view is the ground plane,
+and this radar measures range and range rate and nothing else (§4), so an
+east-north plot would have to invent a bearing for every point it drew. Range
+against time is what the radar actually knows, and the gap between the truth
+line and the track line is the error, read straight off the y axis. The
+function is named for what it draws.
 
 References
 ----------
-.. [1] S. S. Blackman and R. Popoli, *Design and Analysis of Modern Tracking
-       Systems*, Artech House, 1999, ch. 6.
-.. [2] ``spec/scenario-003-tracking.md``, §9 (outputs).
+.. [1] ``spec/scenario-003-tracking.md``, §9 (outputs).
 """
 
 from __future__ import annotations

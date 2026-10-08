@@ -274,12 +274,12 @@ The shapes, frames and conventions every module in §5 must agree on.
 
 | Contract | Statement |
 | :--- | :--- |
-| IQ cube layout | `(n_pulses, n_samples)`, complex128. Slow time on axis 0, fast time on axis 1 — the canonical `(n_pulses, n_samples, n_rx)` of `docs/conventions/style.md` §4 with the receive axis dropped |
+| IQ cube layout | `(n_pulses, n_samples)`, complex128. Slow time on axis 0, fast time on axis 1 — the canonical `(n_pulses, n_samples, n_rx)` of `docs/conventions/style.md` §3.1 with the receive axis dropped |
 | RD map layout | `(n_doppler_bins, n_range_bins)`, complex128 |
 | Range axis | `(n_range_bins,)` float64, **unshifted**: zero range is bin 0 |
 | Velocity axis | `(n_doppler_bins,)` float64, **`fftshift`-ed**: zero Doppler at `n_bins // 2` |
 | Doppler sign | **Closing velocity is positive**, per `spec/structure.md` D5 |
-| Coordinate frame | Local ENU tangent plane at the radar site, WGS-84; azimuth 0° at true north, increasing clockwise, per D5 |
+| Coordinate frame | Local ENU tangent plane at the radar site, WGS-84; azimuth 0° at true north, increasing clockwise, per `spec/data-001-formats.md` DF2 |
 | Angle units | Radians inside `core/`, degrees at the TOML and CSV boundaries, with the unit in the name |
 | Type signatures | `NDArray[np.float64]` / `ArrayLike` in, `NDArray` out; `mypy --strict` |
 
@@ -442,7 +442,7 @@ begins.
 | Step | Module | Notes |
 | :--- | :--- | :--- |
 | 0 | `core/constants.py` *(edit)* | Add `WGS84_SEMI_MAJOR_AXIS_M`, `WGS84_FLATTENING`. **Load-bearing**: rule R4 in `scripts/check_conventions.py` rejects the literal `6_378_137.0` outside this module, so geodesy cannot be written first. R4's literal map must also be corrected — it suggested `EARTH_RADIUS_M` for that literal, which is wrong for an ellipsoid semi-major axis. |
-| 1 | `core/geodesy.py` *(new)* | WGS-84 geodetic ↔ ECEF ↔ local ENU; ENU → range/azimuth/elevation. Azimuth 0° at true north, increasing clockwise, per D5. |
+| 1 | `core/geodesy.py` *(new)* | WGS-84 geodetic ↔ ECEF ↔ local ENU; ENU → range/azimuth/elevation. Azimuth 0° at true north, increasing clockwise, per `spec/data-001-formats.md` DF2. |
 | 2 | `core/radar.py` | Frozen `Transmitter`, `Receiver`, `Radar` dataclasses; `wavelength_m`, `unambiguous_range_m`, `unambiguous_velocity_mps` properties. Validation only, no simulation. |
 | 3 | `core/targets.py` | `PointTarget`, constant RCS, **Swerling 0 only**. Swerling 1–4 stay unimplemented and are named as such. |
 | 4 | `core/signal.py` | `PropagationPaths` exactly as specified in D1, plus `line_of_sight_paths`, `fmcw_deramp_baseband`, `pulsed_baseband`, `thermal_noise`. Reuses `radar_equation.received_power_w` and `waveforms.lfm_chirp` / `beat_frequency_hz` — **adds no new waveform or link-budget mathematics**. |
@@ -491,9 +491,10 @@ Encoded as `tests/pipelines/test_scenario_001.py`, marked `slow`, over a 5-frame
 ## References
 
 .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed., McGraw-Hill, 2014.
-       §4.4 (LFM), §5.3 (pulse-Doppler ambiguity), §8.3 (matched filtering).
-.. [2] G. L. Charvat, *Small and Short-Range Radar Systems*, CRC Press, 2014, §2.5 (FMCW deramp).
-.. [3] L. Harrison and G. Andrews, *Introduction to Radar Using Python and MATLAB*, Artech
-       House, 2020, ch. 2, ch. 4.
+       §4.6.1 (LFM), §3.1.3 (Doppler and range ambiguities), §4.2 (the waveform matched filter).
+.. [2] G. L. Charvat, *Small and Short-Range Radar Systems*, CRC Press, 2014, ch. 3,
+       "Mathematics of FMCW Radar" (FMCW deramp).
+.. [3] A. Harrison, *Introduction to Radar Using Python and MATLAB*, Artech House, 2020,
+       ch. 4 (the radar range equation), ch. 8 (pulse compression and LFM).
 .. [4] National Imagery and Mapping Agency, *Department of Defense World Geodetic System 1984*,
-       NIMA TR8350.2, 3rd ed., 2000.
+       NIMA TR8350.2, 3rd ed., Amendment 1, 2000.

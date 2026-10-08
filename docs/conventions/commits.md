@@ -78,9 +78,8 @@ fix(core): correct 1/R^4 term in the range equation
 The denominator used R^2, which is the one-way form. Two-way propagation
 loses another R^2 on the return path.
 
-Richards, Fundamentals of Radar Signal Processing 2e, eq. 2.11.
-Received power at 100 m drops 40 dB, now matching the textbook worked
-example in §2.2 to within 0.01 dB.
+Richards, Fundamentals of Radar Signal Processing 2e, §2.2.1.
+Received power at 100 m drops 40 dB, the extra factor of R^2 = 10^4.
 ```
 
 ## Breaking changes

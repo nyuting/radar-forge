@@ -264,15 +264,16 @@ already enforces it.
 
 ### 8.3 `radar.simulate(scene)` exists only in `README.md`
 
-There is no `simulate` method anywhere in `src/radar_forge/`. The call appears once, at
-`README.md:89`, in an illustrative snippet. §2.2 is therefore a documentation fix, unless the
+There is no `simulate` method anywhere in `src/radar_forge/`. When this was written, the call
+appeared once, at `README.md:89`, in an illustrative snippet; the README now says there is no
+`simulate` method. §2.2 is therefore a documentation fix, unless the
 intent is to *add* the method — which would be new API surface, not a rename.
 
 ### 8.4 `chirp_time` is already `chirp_time_s`; bare `velocity` is prose only
 
-Code and configuration already carry the `_s` suffix, and `CLAUDE.md:21` cites `chirp_time_s` as
-an exemplar. §2.1's first row is thus `chirp_time_s -> chirp_duration_s`, a readability rename
-that also edits `CLAUDE.md`. `README.md:80` is the one true offender, using bare `chirp_time`.
+Code and configuration already carry the `_s` suffix, and when this was written `CLAUDE.md:21`
+cited `chirp_time_s` as an exemplar (it now cites `chirp_duration_s`). §2.1's first row is thus `chirp_time_s -> chirp_duration_s`, a readability rename
+that also edits `CLAUDE.md`. `README.md:80` was the one true offender, using bare `chirp_time`; it has since been fixed.
 Bare `velocity` appears only inside docstrings and comments in `core/ambiguity.py`; every
 identifier is already `*_velocity_mps` or `velocity_mps`.
 

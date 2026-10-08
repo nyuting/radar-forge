@@ -104,7 +104,7 @@ class TestTaper:
         .. [1] F. J. Harris, "On the use of windows for harmonic analysis with
                the discrete Fourier transform," Proc. IEEE 66(1), 1978, Table 1.
         """
-        # atol 0.5 dB: Harris tabulates to 0.1 dB, and a discrete window of
+        # atol 0.5 dB: Harris tabulates sidelobes to 1 dB, and a discrete window of
         # finite length straddles the true continuous sidelobe peak.
         np.testing.assert_allclose(
             peak_sidelobe_db(taper(name, N_LONG, normalize=False)), expected_db, atol=0.5
@@ -235,8 +235,8 @@ class TestGainAndLoss:
 
         References
         ----------
-        .. [1] F. J. Harris, Proc. IEEE 66(1), 1978, Table 1, "Processing Gain"
-               column, re-expressed as a loss in dB.
+        .. [1] F. J. Harris, Proc. IEEE 66(1), 1978, Table 1, "Equiv. noise BW"
+               column, re-expressed as 10 log10(ENBW) dB.
         """
         # atol 0.01 dB: Harris tabulates to two decimals and this is an exact
         # closed-form ratio, so there is nothing to be loose about.

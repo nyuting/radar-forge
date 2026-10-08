@@ -145,7 +145,7 @@ The frame at which it steps from 1 to 2 is the frame the track became unfoldable
 
 ## Where to look next
 
-- The specification, including the seven things building it changed:
+- The specification, including the things building it changed:
   [`spec/scenario-003-tracking.md`](../../spec/scenario-003-tracking.md) §14
 - The slice underneath it: [scenario 001](scenario-001-xband.md)
 - The bistatic slice, which this one does **not** build on: [scenario 002](scenario-002-bistatic.md)

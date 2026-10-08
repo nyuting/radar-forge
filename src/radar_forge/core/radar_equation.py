@@ -15,11 +15,11 @@ bistatic form reduces exactly to the monostatic one when they are equal, and
 References
 ----------
 .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
-       McGraw-Hill, 2014, §2.2 (eq. 2.11).
-.. [2] L. Harrison and G. Andrews, *Introduction to Radar Using Python and
-       MATLAB*, Artech House, 2020, ch. 2.
-.. [3] N. J. Willis, *Bistatic Radar*, 2nd ed., SciTech Publishing, 2005, §2.2
-       (the bistatic range equation and its ovals of Cassini).
+       McGraw-Hill, 2014, §2.2.1 (the simple point-target radar range equation).
+.. [2] A. Harrison, *Introduction to Radar Using Python and MATLAB*, Artech
+       House, 2020, ch. 4 (the radar range equation).
+.. [3] N. J. Willis, *Bistatic Radar*, 2nd ed., SciTech Publishing, 2005, §4.1
+       (the bistatic range equation), §4.3 (ovals of Cassini).
 """
 
 from __future__ import annotations

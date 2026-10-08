@@ -2,11 +2,11 @@
 """Translate the flight track from its original anchor to Raleigh-Durham.
 
 `data/flight_coordinates.csv` is a real ADS-B track of a light aircraft in the
-circuit of an airport. Refactor-001 §3.3 re-anchors the repository's geography
+circuit of an airport. This script re-anchors the repository's geography
 onto Raleigh-Durham International Airport (RDU) and a receiver site at Duke
 University in Durham, North Carolina.
 
-The decision recorded there is **translate, not synthesise**: a single constant
+The track is **translated, not synthesised**: a single constant
 offset in latitude and longitude is added to every fix, so that the track's
 shape, its inter-fix timing, its altitudes and the ADS-B position noise are all
 preserved bit for bit. Only the anchor moves. Every tolerance in the test suite
@@ -28,9 +28,9 @@ golden fixture the same way.
 
 References
 ----------
-.. [1] ``spec/refactor-001-standardisation-and-reading-pipeline.md`` §3.3.
-.. [2] FAA Airport Master Record, RDU: airport reference point
-       35-52-39.0000N / 078-47-15.0000W.
+.. [1] FAA NASR airport record, RDU: airport reference point
+       35-52-39.5000N / 078-47-14.9000W (FAA data effective 1 Oct 2026). The
+       anchor used here, 35-52-39N / 078-47-15W, is within about 16 m of it.
 """
 
 from __future__ import annotations
@@ -53,7 +53,8 @@ __all__ = [
 SOURCE_AIRPORT_LATITUDE_DEG = 1.3592
 SOURCE_AIRPORT_LONGITUDE_DEG = 103.9894
 
-#: Raleigh-Durham International Airport reference point, 35-52-39N 078-47-15W.
+#: Raleigh-Durham International Airport, 35-52-39N 078-47-15W: within about 16 m
+#: of the FAA airport reference point.
 DESTINATION_AIRPORT_LATITUDE_DEG = 35.87750
 DESTINATION_AIRPORT_LONGITUDE_DEG = -78.78750
 

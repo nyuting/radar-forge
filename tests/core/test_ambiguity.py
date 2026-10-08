@@ -15,7 +15,7 @@ import pytest
 
 from radar_forge.core.ambiguity import fold_velocity_mps, unfold_doppler_dual_prf
 
-# Scenario 001 S3: FMCW bursts at 5.0 kHz and 6.0 kHz, per spec S4.
+# Scenario 001 S3: FMCW bursts at 5.0 kHz and 6.0 kHz, per spec §3.4.
 V_UA_A = 38.24
 V_UA_B = 45.89
 MAX_VELOCITY_MPS = 191.0

@@ -45,11 +45,14 @@ and a burst is a waveform configuration, so both terms are already taken.
 References
 ----------
 .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
-       McGraw-Hill, 2014, §1.3 (PRF and ambiguity), §5.3 (pulse-Doppler).
+       McGraw-Hill, 2014, §3.1.3 (Doppler and range ambiguities), §5.3 (pulse
+       Doppler processing).
 .. [2] G. L. Charvat, *Small and Short-Range Radar Systems*, CRC Press, 2014,
-       §2.5 (FMCW deramp and the beat-frequency range relation).
-.. [3] N. J. Willis, *Bistatic Radar*, 2nd ed., SciTech Publishing, 2005, §1.3
-       (geometry and the bistatic angle), §4.2 (range resolution).
+       ch. 3, "Mathematics of FMCW Radar" (FMCW deramp and the beat-frequency
+       range relation).
+.. [3] N. J. Willis, *Bistatic Radar*, 2nd ed., SciTech Publishing, 2005, §1.2
+       (definitions and the bistatic angle), ch. 3 (geometry), §7.1 (range
+       resolution).
 """
 
 from __future__ import annotations

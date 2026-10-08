@@ -1,9 +1,9 @@
 """Tests for scenario configuration and the frame generator.
 
-The three shipped TOMLs are checked against the specification's S4 table, but
+The three shipped TOMLs are checked against the specification's §3.4 table, but
 by *re-deriving* every unambiguous limit from the Radar the file produces
 rather than by comparing against numbers copied out of the table. That is what
-the specification asks for at the end of S4: a spec table is documentation, a
+the specification asks for at the end of §3.4: a spec table is documentation, a
 test is a guarantee.
 """
 
@@ -363,7 +363,7 @@ class TestBurstRangeDoppler:
         )
 
     def test_the_range_axis_is_unshifted_and_the_velocity_axis_is_centred(self) -> None:
-        """The dsp asymmetry the spec S7.1 insists on, carried through intact."""
+        """The dsp asymmetry the spec §4.3 insists on, carried through intact."""
         scenario = _short_window(load_scenario(S1_TOML), 1)
         product = form_range_doppler_map(
             next(iter(iterate_frames(scenario))).iq[0], scenario.bursts[0]

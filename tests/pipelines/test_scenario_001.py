@@ -1,6 +1,6 @@
 """Acceptance tests for scenario 001: the range-Doppler peak against the truth.
 
-This is the criterion the whole vertical slice exists to satisfy, spec S9. For
+This is the criterion the whole vertical slice exists to satisfy, spec §6. For
 each variant, and for every frame, the brightest range-Doppler cell must fall
 where the truth labels say it must -- folded in Doppler for S1, folded in range
 for S2, and unfolded for S3 once the dual-PRF pair has been combined.
@@ -47,7 +47,7 @@ S3_TOML = SCENARIOS_DIR / "scenario_001_fmcw_dual_prf.toml"
 # The five-frame window the folding tests run over. It is a property of the
 # site-to-track geometry, not of the waveform: the radial velocity is the
 # component of the aircraft's motion along the line of sight, so moving the
-# receiver moves the whole profile. Refactor-001 §3.3 re-anchored the geometry
+# receiver moves the whole profile. The re-anchoring of the geometry
 # to Durham NC, and the window that folded before (2646 s) now carries only
 # 10.9 m/s. Re-derived by sweeping the resampled track for the five-frame run
 # with the largest minimum |radial velocity| that is still a light aircraft's

@@ -59,7 +59,7 @@ code that is plain, documented, and cites its source passes it.
 | `docs/conventions/testing.md` | Test layout, tolerances, golden data, markers |
 | `src/radar_forge/core/constants.py` | Every physical constant, defined once |
 | `.githooks/` | pre-commit, commit-msg, pre-push |
-| `scripts/check_conventions.py` | Rules R1–R6: TOML config, layout, docstrings, constants, units, broadcasting |
+| `scripts/check_conventions.py` | Rules R1–R7: TOML config, layout, docstrings, constants, units, broadcasting, Markdown anchors |
 | `Makefile` | The single definition of every gate |
 | `spec/` | Design specification; the intended end state |
 | `spec/data-001-formats.md` | File formats, columns, units and conventions for every input, output and product |

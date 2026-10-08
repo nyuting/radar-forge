@@ -23,11 +23,11 @@ best guess.
 References
 ----------
 .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
-       McGraw-Hill, 2014, §5.3.3 (multiple PRF ambiguity resolution).
-.. [2] M. I. Skolnik, *Introduction to Radar Systems*, 3rd ed., McGraw-Hill,
-       2001, §3.2 (multiple-PRF and the Chinese remainder approach).
-.. [3] G. W. Stimson, *Introduction to Airborne Radar*, 2nd ed., SciTech, 1998,
-       ch. 25 (PRF ratios, ghosts, and blind zones).
+       McGraw-Hill, 2014, §5.5.4 (ambiguity resolution).
+.. [2] G. W. Stimson, *Introduction to Airborne Radar*, 2nd ed., SciTech, 1998,
+       ch. 12 (resolving range ambiguities, eliminating ghosts), ch. 21
+       (resolving Doppler ambiguities), ch. 25 (the crucial choice of PRF),
+       ch. 27 (eliminating blind zones).
 """
 
 from __future__ import annotations

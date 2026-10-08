@@ -63,7 +63,7 @@ the two defining ones.
 | `received_power_w` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | [R1](#recommended-not-applied) | ✓ |
 | `bistatic_received_power_w` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | [R1](#recommended-not-applied) | ✓ |
 
-Both match Richards eq. 2.11 and Willis §2.2 term for term, including the `(4π)³` hoisted to a
+Both match Richards §2.2.1 and Willis §4.1 (eq. 4.1a) term for term, including the `(4π)³` hoisted to a
 module constant. The bistatic denominator carries the product `R_t²R_r²`, not a power of a sum,
 so the ovals of Cassini are right and the equal-range reduction to the monostatic form is exact —
 the doctest asserts it. The ranges are validated strictly positive and the loss factor is
@@ -286,7 +286,7 @@ scenario 001 S2 show its target at the wrong range — while computing the resid
 carrier phase the target imposed. Using the folded delay there would corrupt the Doppler, and
 the comment says so. Eclipsing is named as unmodelled, with the 25% duty cycle of S2 quantified.
 `fmcw_deramp_baseband` checks the stop-and-hop bound and *warns* rather than silently smearing,
-at a quarter of a range bin of intra-chirp motion; scenario 001 §5 says range migration must be
+at a quarter of a range bin of intra-chirp motion; scenario 001 §4.2 says range migration must be
 documented in this module, and it is, with the S1 arithmetic (0.08 m against a 74.95 m bin).
 
 `bistatic_doppler_hz` uses the vector form `(v·û_t + v·û_r)/λ` rather than
@@ -351,8 +351,8 @@ and derives them from `fftfreq` rather than by hand.
 | `cfar_detect` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `cluster_detections` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
-The four closed-form `P_fa(α)` expressions match their cited sources — Gandhi & Kassam eqs.
-12–13 for CA/GO/SO, Rohling eq. 8 for OS — and the module's own Notes pin down two cross-variant
+The four closed-form `P_fa(α)` expressions match their cited sources — Gandhi & Kassam for
+CA/GO/SO, Rohling eq. 14 for OS — and the module's own Notes pin down two cross-variant
 identities at `N = 1` that are hand-checkable: SO and OS at rank 1 are both the minimum of two
 unit-mean exponentials, giving `2/(2+α)`, and GO and OS at rank 2 are both the maximum, giving
 `2/((1+α)(2+α))`. The warning that a *single* reference cell would give `1/(1+α)`, and that no

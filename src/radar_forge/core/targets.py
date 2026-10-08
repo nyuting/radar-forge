@@ -21,9 +21,10 @@ unlucky draw.
 References
 ----------
 .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
-       McGraw-Hill, 2014, §2.3 (radar cross-section), §7.2 (Swerling models).
+       McGraw-Hill, 2014, §2.2.3 (radar cross section), §2.2.7 (Swerling models).
 .. [2] M. I. Skolnik, *Introduction to Radar Systems*, 3rd ed., McGraw-Hill,
-       2001, §2.7.
+       2001, §2.7 (radar cross section of targets), §2.8 (radar cross-section
+       fluctuations).
 """
 
 from __future__ import annotations

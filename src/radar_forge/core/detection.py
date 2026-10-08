@@ -32,7 +32,7 @@ Variant    Noise estimate
 ``"so"``   smaller of the two half-window means — holds detection when
            a second target sits in one half of the window
 ``"os"``   the ``rank``-th smallest cell — robust to several
-           interfering targets, at ~0.5 dB CFAR loss versus ``"ca"``
+           interfering targets, at 0.5-0.9 dB CFAR loss versus ``"ca"``
 =========  ==========================================================
 
 The ``_2d`` functions replace the window with a rectangular ring over two axes,
@@ -77,19 +77,19 @@ References
 ----------
 .. [1] H. M. Finn and R. S. Johnson, "Adaptive detection mode with threshold
        control as a function of spatially sampled clutter-level estimates,"
-       *RCA Review*, vol. 29, pp. 414-465, 1968. (CA-CFAR.)
-.. [2] V. G. Hansen and J. H. Sawyers, "Detectability loss due to greatest-of
-       selection in a cell-averaging CFAR," *IEEE Trans. Aerosp. Electron.
+       *RCA Review*, vol. 29, pp. 414-464, Sept. 1968. (CA-CFAR.)
+.. [2] V. G. Hansen and J. H. Sawyers, "Detectability loss due to 'greatest
+       of' selection in a cell-averaging CFAR," *IEEE Trans. Aerosp. Electron.
        Syst.*, vol. AES-16, no. 1, pp. 115-118, 1980. (GO-CFAR.)
 .. [3] M. Weiss, "Analysis of some modified cell-averaging CFAR processors in
        multiple-target situations," *IEEE Trans. Aerosp. Electron. Syst.*,
        vol. AES-18, no. 1, pp. 102-114, 1982. (SO-CFAR.)
 .. [4] H. Rohling, "Radar CFAR thresholding in clutter and multiple target
        situations," *IEEE Trans. Aerosp. Electron. Syst.*, vol. AES-19, no. 4,
-       pp. 608-621, 1983. (OS-CFAR, eq. 8.)
+       pp. 608-621, 1983. (OS-CFAR, eq. 14; CFAR loss in Table IV.)
 .. [5] P. P. Gandhi and S. A. Kassam, "Analysis of CFAR processors in
        nonhomogeneous background," *IEEE Trans. Aerosp. Electron. Syst.*,
-       vol. 24, no. 4, pp. 427-445, 1988. (GO/SO closed forms, eqs. 12-13.)
+       vol. 24, no. 4, pp. 427-445, 1988. (GO/SO closed forms.)
 .. [6] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
        McGraw-Hill, 2014, §6.5.
 """
@@ -330,7 +330,7 @@ def cfar_probability_of_false_alarm(
     if variant == "os":
         k = default_os_rank(n_train) if rank is None else rank
         _validate_rank(k, n_ref)
-        # Product form of Rohling eq. 8; equals k * C(M, k) * B(M - k + 1 + alpha, k).
+        # Product form of Rohling eq. 14; equals k * C(M, k) * B(M - k + 1 + alpha, k).
         pfa = 1.0
         for i in range(k):
             pfa *= (n_ref - i) / (n_ref - i + alpha_linear)

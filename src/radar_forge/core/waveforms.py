@@ -14,11 +14,13 @@ are that mapping and its inverse.
 References
 ----------
 .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
-       McGraw-Hill, 2014, §4.4 (linear FM), §8.3 (pulse compression).
-.. [2] L. Harrison and G. Andrews, *Introduction to Radar Using Python and
-       MATLAB*, Artech House, 2020, ch. 4.
+       McGraw-Hill, 2014, §4.6.1 (linear frequency modulation), §4.6.5 (stretch
+       processing).
+.. [2] A. Harrison, *Introduction to Radar Using Python and MATLAB*, Artech
+       House, 2020, ch. 8 (pulse compression and linear FM).
 .. [3] G. L. Charvat, *Small and Short-Range Radar Systems*, CRC Press, 2014,
-       §2.5 (FMCW deramp and the beat-frequency relation).
+       ch. 3, "Mathematics of FMCW Radar" (FMCW deramp and the beat-frequency
+       relation).
 """
 
 from __future__ import annotations

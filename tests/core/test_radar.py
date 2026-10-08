@@ -1,7 +1,7 @@
 """Tests for the radar system value objects.
 
 The properties are checked against the numbers derived independently in
-spec/scenario-001-xband.md §4. That table and this module are the two
+spec/scenario-001-xband.md §3.4. That table and this module are the two
 halves of the same claim: if they ever disagree, one of them is wrong and the
 test is the one that decides.
 """
@@ -58,7 +58,7 @@ class TestTransmitter:
         np.testing.assert_allclose(S1_TRANSMITTER.wavelength_m, expected_m, rtol=1e-15)
 
     def test_fmcw_sweep_rate_is_two_ghz_per_second(self) -> None:
-        """2 MHz over 1 ms is 2.000 GHz/s, per spec §4 S1."""
+        """2 MHz over 1 ms is 2.000 GHz/s, per spec §3.4 S1."""
         np.testing.assert_allclose(S1_TRANSMITTER.sweep_rate_hzps, 2.0e9, rtol=1e-12)
 
     def test_fmcw_runs_at_full_duty(self) -> None:

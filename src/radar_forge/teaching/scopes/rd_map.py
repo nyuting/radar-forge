@@ -23,8 +23,9 @@ reader with a picture that looks unambiguous and is not.
 References
 ----------
 .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
-       McGraw-Hill, 2014, S5.3 (range-Doppler ambiguity and its display).
-.. [2] ``spec/scenario-001-xband.md``, S4.3 (the dsp seam) and S6
+       McGraw-Hill, 2014, §3.1.3 (Doppler and range ambiguities), §5.3 (pulse
+       Doppler processing: forming the range-Doppler map).
+.. [2] ``spec/scenario-001-xband.md``, §4.3 (the dsp seam) and §6
        (the acceptance criteria the markers exist to make visible).
 """
 

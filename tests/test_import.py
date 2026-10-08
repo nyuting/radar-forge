@@ -1,6 +1,6 @@
 """Smoke test: the package imports, reports a version, and needs no extras.
 
-The zero-extras guarantee is spec/structure.md B.3 rule 2 and is easy to break
+The zero-extras guarantee is spec/structure.md B.2 rule 2 and is easy to break
 by accident: one convenience import of radar_forge.teaching at the top of a
 package __init__ makes `import radar_forge` fail for anyone who installed the
 library without matplotlib. It is checked in a subprocess because by the time

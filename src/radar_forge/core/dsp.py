@@ -23,12 +23,13 @@ Sign convention, per ``spec/structure.md`` §D5: **closing velocity is positive*
 References
 ----------
 .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
-       McGraw-Hill, 2014, §8.3 (pulse compression), §14 (Doppler processing),
-       §17.3 (MTI pulse cancellers).
-.. [2] L. Harrison and G. Andrews, *Introduction to Radar Using Python and
-       MATLAB*, Artech House, 2020, ch. 4-5.
+       McGraw-Hill, 2014, §4.6 (frequency-modulated pulse compression), §5.3
+       (pulse Doppler processing), §5.2.1 (pulse cancellers).
+.. [2] A. Harrison, *Introduction to Radar Using Python and MATLAB*, Artech
+       House, 2020, ch. 8 (pulse compression).
 .. [3] G. L. Charvat, *Small and Short-Range Radar Systems*, CRC Press, 2014,
-       §2.5 (FMCW deramp and the beat-frequency relation).
+       ch. 3, "Mathematics of FMCW Radar" (FMCW deramp and the beat-frequency
+       relation).
 """
 
 from __future__ import annotations

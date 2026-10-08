@@ -152,7 +152,7 @@ class TestPropagationPathsValidation:
 
 class TestFmcwDerampBaseband:
     def test_cube_has_the_canonical_layout(self) -> None:
-        """(n_pulses, n_samples): slow time axis 0, per style.md S4."""
+        """(n_pulses, n_samples): slow time axis 0, per style.md §3.1."""
         paths = line_of_sight_paths(S1_RADAR, 10_000.0, 0.0, 10.0)
         cube = fmcw_deramp_baseband(paths, S1_RADAR, N_PULSES)
         assert cube.shape == (N_PULSES, 1000)
@@ -367,8 +367,8 @@ class TestThermalNoise:
 
 
 # A synthetic receiver site 0.2 deg due east of DUKE_SITE; baseline about
-# 18 km. The same 0.2 deg spanned 22 km before the translation of refactor-001
-# §3.3 -- an east-west degree shrinks as cos(latitude).
+# 18 km. The same 0.2 deg spanned 22 km before the translation onto Raleigh-Durham
+# (scripts/translate_flight_coordinates.py) -- an east-west degree shrinks as cos(latitude).
 RDU_SITE = (36.00250, -78.74100, 60.0)
 
 S1_PAIR = BistaticRadar(
@@ -473,7 +473,7 @@ class TestBistaticDoppler:
 
         The target sits on the perpendicular bisector of the baseline and closes
         along it, so delta = 0 and the textbook form reduces to the cosine of
-        half the bistatic angle (Willis §3.2).
+        half the bistatic angle (Willis §6.1).
         """
         half_baseline_m, offset_m = 11.0e3, 20.0e3
         # Sites at (-L/2, 0, 0) and (+L/2, 0, 0); target on the north bisector.

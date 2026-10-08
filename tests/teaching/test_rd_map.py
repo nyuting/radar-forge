@@ -21,7 +21,7 @@ N_RANGE_BINS = 64
 
 
 def _axes() -> tuple[np.ndarray, np.ndarray]:
-    """S1-like axes from the dsp helpers, per the scenario spec S7.1."""
+    """S1-like axes from the dsp helpers, per the scenario spec §4.3."""
     range_axis_m = range_bin_centers_m(N_RANGE_BINS, 2.0e6, 1.0e-3, 1.0e6)
     velocity_axis_mps = doppler_bin_centers_mps(N_DOPPLER_BINS, 1.0e-3, 0.030591)
     return range_axis_m, velocity_axis_mps

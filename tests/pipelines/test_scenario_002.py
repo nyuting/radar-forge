@@ -1,6 +1,6 @@
 """Acceptance tests for scenario 002: the bistatic range-Doppler peak against truth.
 
-The criteria of ``spec/scenario-002-bistatic.md`` §7. The first of
+The criteria of ``spec/scenario-002-bistatic.md`` §6. The first of
 them is the one that matters most: collapse the baseline to a metre and the
 bistatic pipeline must reproduce the monostatic scenario-001 map it replaces.
 Every factor of two and every sign in the delay, the propagation phase and the
@@ -215,7 +215,7 @@ class TestTheVelocityAxisCarriesTheBisectorRate:
 
 
 class TestRangeResolutionDegradesWithTheBistaticAngle:
-    """Spec §7 criterion 4: a mapping from space to range, not a peak width."""
+    """Spec §6 criterion A4: a mapping from space to range, not a peak width."""
 
     def test_a_separation_in_space_shrinks_in_mean_range(self) -> None:
         r"""Two targets `d` apart along the bisector are `d\cos(\beta/2)` apart in range.

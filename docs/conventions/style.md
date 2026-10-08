@@ -20,7 +20,7 @@ tagged **[review]** — which are the ones a tool genuinely cannot judge.
 | **[hook]** | `scripts/check_conventions.py` — runs at commit, push and in CI |
 | **[review]** | A human judgement call. Not automated, and honestly cannot be |
 
-`scripts/check_conventions.py` implements six rules:
+`scripts/check_conventions.py` implements seven rules:
 
 | Rule | Catches |
 | :--- | :--- |
@@ -30,6 +30,7 @@ tagged **[review]** — which are the ones a tool genuinely cannot judge.
 | R4 `constants` | Redefining a shared constant, or hardcoding its literal value |
 | R5 `units` | A parameter named `range`, `gain_tx`, `power`… with no unit suffix |
 | R6 `broadcast` | `np.tile`/`np.repeat`/`np.broadcast_to` without a justification comment |
+| R7 `anchor` | An in-file Markdown link `](#section)` with no matching heading (§12) |
 
 Each failure prints the rule, the offending line, the fix, and a pointer back here.
 
@@ -45,7 +46,7 @@ Concretely: name the intermediate quantities of a derivation after the symbols i
 reference, so a reader holding the textbook can follow along.
 
 ```python
-# Good — the reader can match this against Richards eq. 2.11.
+# Good — the reader can match this against Richards §2.2.1.
 numerator = transmit_power_w * gain_tx * gain_rx * wavelength_m**2 * rcs_m2
 denominator = (4 * np.pi) ** 3 * range_m**4 * loss
 return numerator / denominator
@@ -237,7 +238,7 @@ side.
 References
 ----------
 .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
-       McGraw-Hill, 2014, §2.2 (eq. 2.11).
+       McGraw-Hill, 2014, §2.2.1 (the simple point-target radar range equation).
 ```
 
 **Write out array shapes** **[review]**. Every array parameter and return states its shape using the

@@ -22,12 +22,13 @@ Names follow the unit-suffix convention in ``docs/conventions/style.md``.
 
 References
 ----------
-.. [1] CODATA 2018 recommended values, https://physics.nist.gov/cuu/Constants/
-.. [2] IEEE Std 686-2017, *IEEE Standard Radar Definitions*.
-.. [3] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
-       McGraw-Hill, 2014, §1.4, §2.3.
-.. [4] National Imagery and Mapping Agency, *Department of Defense World
-       Geodetic System 1984*, NIMA TR8350.2, 3rd ed., 2000.
+.. [1] CODATA 2018 recommended values,
+       https://physics.nist.gov/cuu/Constants/archive2018.html
+.. [2] M. I. Skolnik, *Introduction to Radar Systems*, 3rd ed., McGraw-Hill,
+       2001, §8.4 (atmospheric refraction: standard propagation).
+.. [3] National Imagery and Mapping Agency, *Department of Defense World
+       Geodetic System 1984*, NIMA TR8350.2, 3rd ed., Amendment 1, 2000, §3.2
+       and Table 3.1 (defining parameters), Table 3.3 (derived constants).
 """
 
 from __future__ import annotations
@@ -68,7 +69,8 @@ Thermal noise power in a bandwidth B is ``BOLTZMANN_JPK * T * B`` watts.
 STANDARD_NOISE_TEMPERATURE_K: Final[float] = 290.0
 """Reference noise temperature :math:`T_0`, K.
 
-The IEEE convention against which noise figure is defined [2]_. It is a
+The conventional reference temperature against which noise figure is
+defined. It is a
 convention, not a measurement: do not substitute the actual ambient
 temperature unless you are computing system noise temperature rather than
 noise figure.
@@ -82,7 +84,7 @@ FOUR_THIRDS_EARTH_RADIUS_M: Final[float] = 4.0 / 3.0 * EARTH_RADIUS_M
 
 The standard 4/3 approximation models atmospheric refraction bending rays
 towards the Earth, so the radar horizon sits further out than the geometric
-one [3]_. Valid for a standard atmosphere only; it does not model ducting.
+one [2]_. Valid for a standard atmosphere only; it does not model ducting.
 """
 
 
@@ -91,7 +93,7 @@ one [3]_. Valid for a standard atmosphere only; it does not model ducting.
 # --------------------------------------------------------------------------- #
 
 WGS84_SEMI_MAJOR_AXIS_M: Final[float] = 6_378_137.0
-"""WGS-84 ellipsoid semi-major axis :math:`a`, m. Defining constant of [4]_.
+"""WGS-84 ellipsoid semi-major axis :math:`a`, m. Defining constant of [3]_.
 
 This is the *equatorial* radius of the reference ellipsoid, not a mean radius.
 It is 7.1 km larger than :data:`EARTH_RADIUS_M`, and the two are not
@@ -103,9 +105,10 @@ is good enough (radar horizon, great-circle rules of thumb).
 WGS84_FLATTENING: Final[float] = 1.0 / 298.257_223_563
 """WGS-84 ellipsoid flattening :math:`f = (a - b) / a`, dimensionless.
 
-Defining constant of [4]_, given there as the inverse flattening
-:math:`1/f = 298.257223563`. The Earth is about 21 km shorter pole-to-pole than
-it is wide; ignoring that puts a position error of up to ~20 km into a
+Defining constant of [3]_, given there as the inverse flattening
+:math:`1/f = 298.257223563`. The polar radius is about 21 km shorter than the
+equatorial radius, so the Earth is about 43 km shorter pole-to-pole than it is
+wide; ignoring that puts a position error of up to ~20 km into a
 geodetic-to-Cartesian conversion.
 
 The first eccentricity squared follows as :math:`e^2 = f(2 - f)`; derive it

@@ -386,11 +386,13 @@ Encoded as `tests/pipelines/test_scenario_002.py`, marked `slow`, over a 5-frame
 
 ## References
 
-.. [1] N. J. Willis, *Bistatic Radar*, 2nd ed., SciTech Publishing, 2005. §1.3 (geometry and the
-       bistatic angle), §2.2 (the bistatic range equation and its ovals of Cassini), §4.2 (range
-       resolution), §6.2 (bistatic Doppler).
-.. [2] M. C. Jackson, *The geometry of bistatic radar systems*, IEE Proc. F, 133(7), 1986.
+.. [1] N. J. Willis, *Bistatic Radar*, 2nd ed., SciTech Publishing, 2005. §1.2 (definitions:
+       the baseline and the bistatic angle), ch. 3 (coordinate systems and geometry), §4.1 (the
+       bistatic range equation), §4.3 (ovals of Cassini), §7.1 (range resolution), §6.1 (target
+       Doppler).
+.. [2] M. C. Jackson, *The geometry of bistatic radar systems*, IEE Proc. F, 133(7),
+       pp. 604-612, 1986.
 .. [3] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed., McGraw-Hill, 2014,
-       §5.3 (pulse-Doppler ambiguity).
+       §3.1.3 (Doppler and range ambiguities).
 .. [4] National Imagery and Mapping Agency, *Department of Defense World Geodetic System 1984*,
-       NIMA TR8350.2, 3rd ed., 2000.
+       NIMA TR8350.2, 3rd ed., Amendment 1, 2000.

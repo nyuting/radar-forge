@@ -11,11 +11,6 @@ because it is a *display* concern. A floor is not a physical quantity; it is a
 choice about how much of the noise to show, and putting it next to the signal
 processing would invite someone to apply it before a detector, where the
 logarithm would distort the statistics the detector assumes.
-
-References
-----------
-.. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
-       McGraw-Hill, 2014, S1.4 (decibel conventions).
 """
 
 from __future__ import annotations

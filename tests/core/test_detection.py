@@ -169,7 +169,10 @@ def assert_rate_consistent_with_design(n_hit: int, n_tested: int, pfa: float) ->
 @pytest.mark.parametrize("n_train", [1, 2, 5, 16])
 @pytest.mark.parametrize("alpha_linear", [0.5, 2.0, 10.0])
 def test_greatest_and_smallest_of_partition_the_same_total(n_train, alpha_linear):
-    """GO and SO split 2 (1 + beta)^-N between them, per Gandhi & Kassam eqs. 12-13.
+    """GO and SO split 2 (1 + beta)^-N between them.
+
+    {max, min} = {X, Y} pointwise, so E[exp(-beta max)] + E[exp(-beta min)] =
+    E[exp(-beta X)] + E[exp(-beta Y)] = 2 (1 + beta)^-N.
 
     An independent identity: it constrains both expressions at once and would
     fail if either series were mis-indexed.

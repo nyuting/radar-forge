@@ -33,9 +33,10 @@ S4.2.
 References
 ----------
 .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
-       McGraw-Hill, 2014, S5.3 (pulse-Doppler ambiguity), S8.2.
-.. [2] ``spec/scenario-001-xband.md``, S4.1 (the three variants) and
-       S4.2 (the frame/CPI structure).
+       McGraw-Hill, 2014, §3.1.3 (Doppler and range ambiguities), §5.5.4
+       (ambiguity resolution).
+.. [2] ``spec/scenario-001-xband.md``, §4.1 (the three variants) and
+       §4.2 (the frame/CPI structure).
 """
 
 from __future__ import annotations

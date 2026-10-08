@@ -82,13 +82,12 @@ different path builder.
 References
 ----------
 .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
-       McGraw-Hill, 2014, §8.2 (the stop-and-hop model), §8.3, §14.2.
+       McGraw-Hill, 2014, §2.6.2 (the stop-and-hop approximation), §4.6.5
+       (stretch processing: the FMCW deramp).
 .. [2] G. L. Charvat, *Small and Short-Range Radar Systems*, CRC Press, 2014,
-       §2.5 (FMCW deramp).
-.. [3] A. G. Stove, "Linear FMCW radar techniques", *IEE Proceedings F*, vol. 139,
-       no. 5, pp. 343-350, 1992 (sweep direction and the range-Doppler sign lock).
-.. [4] N. J. Willis, *Bistatic Radar*, 2nd ed., SciTech Publishing, 2005, §3.2
-       (bistatic Doppler) and §1.3 (the range-sum ellipse).
+       ch. 3, "Mathematics of FMCW Radar" (FMCW deramp).
+.. [3] N. J. Willis, *Bistatic Radar*, 2nd ed., SciTech Publishing, 2005, §6.1
+       (target Doppler) and ch. 3 (the range-sum ellipse).
 """
 
 from __future__ import annotations
@@ -348,7 +347,7 @@ def bistatic_doppler_hz(
 ) -> NDArray[np.float64]:
     r"""Return the bistatic Doppler shift of moving point targets, in hertz.
 
-    The shift is the rate at which the total path length changes [4]_,
+    The shift is the rate at which the total path length changes [3]_,
 
     .. math::
 
@@ -656,7 +655,7 @@ def fmcw_deramp_baseband(
     numpy.ndarray
         Complex baseband of shape ``(n_pulses, n_samples)``, slow time along
         axis 0 and fast time along axis 1 — the canonical layout of
-        ``docs/conventions/style.md`` §4, so that
+        ``docs/conventions/style.md`` §3.1, so that
         :func:`radar_forge.core.dsp.range_doppler_map` needs no axis arguments.
 
     Raises

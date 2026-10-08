@@ -18,7 +18,7 @@ ENU
     The local tangent plane at a reference point: ``x`` east, ``y`` north,
     ``z`` up. This is the frame radar geometry is done in.
 
-Angle convention, matching the label schema in ``spec/structure.md`` D5:
+Angle convention, matching ``spec/data-001-formats.md`` DF2:
 **azimuth is zero at true north and increases clockwise** (north → east), which
 is the compass convention, *not* the mathematical one. Elevation is measured up
 from the local horizontal plane.
@@ -35,12 +35,11 @@ correction when that matters.
 References
 ----------
 .. [1] National Imagery and Mapping Agency, *Department of Defense World
-       Geodetic System 1984*, NIMA TR8350.2, 3rd ed., 2000, §4.
+       Geodetic System 1984*, NIMA TR8350.2, 3rd ed., Amendment 1, 2000, §3.2
+       (defining parameters) and §4.3, eqs. (4-14)-(4-15) (geodetic to ECEF).
 .. [2] P. Misra and P. Enge, *Global Positioning System: Signals, Measurements,
-       and Performance*, 2nd ed., Ganga-Jamuna Press, 2006, §4.A (geodetic to
-       ECEF, and the Bowring iteration for the inverse).
-.. [3] R. G. Brown and P. Y. C. Hwang, *Introduction to Random Signals and
-       Applied Kalman Filtering*, 4th ed., Wiley, 2012, app. B (ENU rotation).
+       and Performance*, 2nd ed., Ganga-Jamuna Press, 2006, app. 4.A
+       (coordinate conversion).
 """
 
 from __future__ import annotations
@@ -153,7 +152,7 @@ def ecef_to_enu_m(
     r"""Rotate ECEF coordinates into the local ENU frame at a reference point.
 
     The transform is a translation to the reference point followed by the
-    rotation [3]_
+    rotation [2]_
 
     .. math::
 
@@ -290,8 +289,8 @@ def enu_to_range_azimuth_elevation(
     Note the argument order of :func:`numpy.arctan2`: ``atan2(east, north)``,
     not the usual ``atan2(y, x)``. That is what puts zero azimuth at **true
     north** and makes it increase **clockwise** towards the east, which is the
-    compass convention used throughout the library and by the label schema in
-    ``spec/structure.md`` D5.
+    compass convention used throughout the library and by ``azimuth_deg`` in
+    ``spec/data-001-formats.md`` DF2.
 
     Parameters
     ----------
