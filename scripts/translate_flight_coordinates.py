@@ -26,11 +26,18 @@ coordinates from git rather than from the working tree::
 With no redirection it reads stdin and writes stdout, so it composes with the
 golden fixture the same way.
 
+The original track has the header ``timestamp,lat,lon``. The output uses the
+``spec/data-001-formats.md`` §6.3 names, ``time_s,latitude_deg,longitude_deg``,
+which is what :func:`radar_forge.pipelines.trajectories.load_flight_csv` reads.
+``time_s`` is seconds from the first fix, so the shipped track has no epoch. The
+original track's first fix was at ``2026-09-03T00:17:56Z``.
+
 References
 ----------
 .. [1] FAA NASR airport record, RDU: airport reference point
        35-52-39.5000N / 078-47-14.9000W (FAA data effective 1 Oct 2026). The
        anchor used here, 35-52-39N / 078-47-15W, is within about 16 m of it.
+.. [2] ``spec/data-001-formats.md`` §6.3, the trajectory columns written.
 """
 
 from __future__ import annotations
@@ -38,8 +45,10 @@ from __future__ import annotations
 import csv
 import sys
 from collections.abc import Iterable, Iterator
+from datetime import datetime
 
 __all__ = [
+    "COLUMNS",
     "DESTINATION_AIRPORT_LATITUDE_DEG",
     "DESTINATION_AIRPORT_LONGITUDE_DEG",
     "OFFSET_LATITUDE_DEG",
@@ -63,9 +72,21 @@ OFFSET_LATITUDE_DEG = DESTINATION_AIRPORT_LATITUDE_DEG - SOURCE_AIRPORT_LATITUDE
 OFFSET_LONGITUDE_DEG = DESTINATION_AIRPORT_LONGITUDE_DEG - SOURCE_AIRPORT_LONGITUDE_DEG
 
 
+#: The output header, per ``spec/data-001-formats.md`` §6.3.
+COLUMNS = ("time_s", "latitude_deg", "longitude_deg")
+
+
 def _format_degrees(degrees: float) -> str:
     """Render one coordinate to five decimal places, trailing zeros stripped."""
     return f"{degrees:.5f}".rstrip("0").rstrip(".")
+
+
+def _format_seconds(seconds: float) -> str:
+    """Render a time offset to three decimal places, trailing zeros stripped.
+
+    The source timestamps are whole seconds, so in practice this writes an integer.
+    """
+    return f"{seconds:.3f}".rstrip("0").rstrip(".")
 
 
 def translate_rows(rows: Iterable[dict[str, str]]) -> Iterator[dict[str, str]]:
@@ -74,14 +95,15 @@ def translate_rows(rows: Iterable[dict[str, str]]) -> Iterator[dict[str, str]]:
     Parameters
     ----------
     rows : iterable of dict of str to str
-        Rows as :class:`csv.DictReader` yields them, with ``timestamp``, ``lat``
-        and ``lon`` keys.
+        Rows of the original track as :class:`csv.DictReader` yields them, with
+        its ``timestamp``, ``lat`` and ``lon`` keys.
 
     Yields
     ------
     dict of str to str
-        The same rows with ``lat`` and ``lon`` shifted. ``timestamp`` is
-        untouched, so the inter-fix timing is exactly the timing that was flown.
+        The same fixes under the :data:`COLUMNS` names, with latitude and
+        longitude shifted. ``time_s`` is the time since the first fix, so the
+        inter-fix timing is exactly the timing that was flown.
 
     Notes
     -----
@@ -90,18 +112,23 @@ def translate_rows(rows: Iterable[dict[str, str]]) -> Iterator[dict[str, str]]:
     Keeping full binary precision would write digits the measurement never had
     and would make the file's noise floor look better than the sensor's.
     """
+    # A loop, not an array: the rows stream from stdin and stay strings throughout.
+    first_fix_utc: datetime | None = None
     for row in rows:
+        fix_utc = datetime.fromisoformat(row["timestamp"])
+        if first_fix_utc is None:
+            first_fix_utc = fix_utc
         yield {
-            "timestamp": row["timestamp"],
-            "lat": _format_degrees(float(row["lat"]) + OFFSET_LATITUDE_DEG),
-            "lon": _format_degrees(float(row["lon"]) + OFFSET_LONGITUDE_DEG),
+            "time_s": _format_seconds((fix_utc - first_fix_utc).total_seconds()),
+            "latitude_deg": _format_degrees(float(row["lat"]) + OFFSET_LATITUDE_DEG),
+            "longitude_deg": _format_degrees(float(row["lon"]) + OFFSET_LONGITUDE_DEG),
         }
 
 
 def main() -> int:
     """Translate a flight-coordinates CSV from stdin to stdout."""
     reader = csv.DictReader(sys.stdin)
-    writer = csv.DictWriter(sys.stdout, fieldnames=["timestamp", "lat", "lon"], lineterminator="\n")
+    writer = csv.DictWriter(sys.stdout, fieldnames=list(COLUMNS), lineterminator="\n")
     writer.writeheader()
     writer.writerows(translate_rows(reader))
     return 0
