@@ -8,7 +8,7 @@
 # 15.3 m/s, and the simulated target's range rate moves by up to 11 m/s
 # between frames, so track-aided unfolding mis-selects in a few per cent of
 # frames no matter how good the tracker is. Here the coprime 5:6 kHz pair
-# resolves velocity in the *waveform*, to +-191 m/s, and the whole of §5.3
+# resolves velocity in the *waveform*, to +-229 m/s, and the whole of §5.3
 # disappears: the measurement arrives already unfolded.
 #
 # So this is the variant that meets §12 criteria 3 and 4 as written, and S1 is
@@ -16,7 +16,7 @@
 
 [scenario]
 name = "scenario-003-tracking-dual-prf"
-description = "The scenario 003 tracker over the S3 dual-PRF waveform, where the coprime 5:6 kHz pair resolves velocity to +-191 m/s and no track-aided unfolding is needed."
+description = "The scenario 003 tracker over the S3 dual-PRF waveform, where the coprime 5:6 kHz pair resolves velocity to +-229 m/s and no track-aided unfolding is needed."
 seed = 20260911
 
 [radar]

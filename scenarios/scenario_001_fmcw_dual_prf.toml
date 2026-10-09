@@ -4,7 +4,7 @@
 
 [scenario]
 name = "scenario-001-fmcw-dual-prf"
-description = "S3: two FMCW bursts at 5 kHz and 6 kHz. Neither resolves the velocity alone, but the coprime 5:6 pair does, reaching +-191 m/s by a completely different mechanism from S2."
+description = "S3: two FMCW bursts at 5 kHz and 6 kHz. Neither resolves the velocity alone, but the coprime 5:6 pair does, reaching +-229 m/s, beyond S2's +-191 m/s, by a completely different mechanism."
 seed = 20260911
 
 [radar]

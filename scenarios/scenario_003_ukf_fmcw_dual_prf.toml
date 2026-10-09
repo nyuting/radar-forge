@@ -6,7 +6,7 @@
 
 [scenario]
 name = "scenario-003-ukf-fmcw-dual-prf"
-description = "The UKF tracker over scenario 001's S3. The coprime 5:6 kHz pair unfolds velocity to +-191 m/s, so range and range rate are both measured from a track's first frame."
+description = "The UKF tracker over scenario 001's S3. The coprime 5:6 kHz pair unfolds velocity to +-229 m/s, so range and range rate are both measured from a track's first frame."
 seed = 20260911
 
 [radar]

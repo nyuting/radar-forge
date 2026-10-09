@@ -180,7 +180,7 @@ class TestDualPrfMeasurements:
         error a caller wiring up a new scenario makes.
         """
         with pytest.raises(ValueError, match="exactly two bursts"):
-            dual_prf_measurements([None] * n_products, [1.0] * n_spans)
+            dual_prf_measurements([None] * n_products, [1.0] * n_spans, max_velocity_mps=100.0)
 
 
 class TestReplaceMeasurement:
@@ -487,6 +487,8 @@ def targets_product(
 
 # Scenario 001's S3: two FMCW bursts at 5 and 6 kHz.
 S3_SPANS_MPS = (76.47578, 91.77093)
+# The search bound: scenario_003_ukf_fmcw_dual_prf.toml's v_max_mps.
+S3_V_MAX_MPS = 100.0
 
 
 def dual_products(targets_a, targets_b, *, seed=7):
@@ -504,7 +506,9 @@ class TestDualPrfDetections:
         from radar_forge.pipelines.tracking import dual_prf_detections
 
         target = (15_000.0, -30.4)
-        records = dual_prf_detections(dual_products([target], [target]), S3_SPANS_MPS)
+        records = dual_prf_detections(
+            dual_products([target], [target]), S3_SPANS_MPS, max_velocity_mps=S3_V_MAX_MPS
+        )
         paired = [r for r in records if abs(r.range_m - 15_000.0) < 150.0]
 
         assert sorted(r.burst_index for r in paired) == [0, 1]
@@ -517,7 +521,9 @@ class TestDualPrfDetections:
     def test_a_target_in_one_burst_only_is_a_missing_pair(self):
         from radar_forge.pipelines.tracking import dual_prf_detections
 
-        records = dual_prf_detections(dual_products([(15_000.0, -30.4)], []), S3_SPANS_MPS)
+        records = dual_prf_detections(
+            dual_products([(15_000.0, -30.4)], []), S3_SPANS_MPS, max_velocity_mps=S3_V_MAX_MPS
+        )
         target = [r for r in records if abs(r.range_m - 15_000.0) < 150.0]
         assert [(r.burst_index, r.status, r.pair_id) for r in target] == [(0, "missing_pair", None)]
 
@@ -531,8 +537,12 @@ class TestDualPrfDetections:
         from radar_forge.pipelines.tracking import dual_prf_detections
 
         target = (15_000.0, -30.4)
-        beside = (15_000.0 + 2 * 74.9481145, 10.0)
-        records = dual_prf_detections(dual_products([target], [target, beside]), S3_SPANS_MPS)
+        # 1.5 range bins away: inside the default tolerance of two bins, and
+        # not on its edge, where float rounding of the centroid would decide.
+        beside = (15_000.0 + 1.5 * 74.9481145, 10.0)
+        records = dual_prf_detections(
+            dual_products([target], [target, beside]), S3_SPANS_MPS, max_velocity_mps=S3_V_MAX_MPS
+        )
         near = [r for r in records if abs(r.range_m - 15_000.0) < 300.0]
 
         accepted = [r for r in near if r.status == "accepted"]
@@ -543,9 +553,9 @@ class TestDualPrfDetections:
         from radar_forge.pipelines.tracking import dual_prf_detections
 
         # The same range, but folded velocities that no single true velocity
-        # within +-191 m/s produces in both bursts.
+        # within the search bound produces in both bursts.
         products = dual_products([(15_000.0, -30.4)], [(15_000.0, -30.4 + 20.0)])
-        records = dual_prf_detections(products, S3_SPANS_MPS)
+        records = dual_prf_detections(products, S3_SPANS_MPS, max_velocity_mps=S3_V_MAX_MPS)
         target = [r for r in records if abs(r.range_m - 15_000.0) < 150.0]
 
         assert {r.status for r in target} == {"unresolved_velocity"}
@@ -554,7 +564,9 @@ class TestDualPrfDetections:
 
     def test_only_the_first_bursts_accepted_detections_are_measurements(self):
         target = (15_000.0, -30.4)
-        measurements = dual_prf_measurements(dual_products([target], [target]), S3_SPANS_MPS)
+        measurements = dual_prf_measurements(
+            dual_products([target], [target]), S3_SPANS_MPS, max_velocity_mps=S3_V_MAX_MPS
+        )
         near = [m for m in measurements if abs(m.range_m - 15_000.0) < 150.0]
         assert [(m.burst_index, m.status) for m in near] == [(0, "accepted")]
 

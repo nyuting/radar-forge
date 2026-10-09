@@ -575,8 +575,8 @@ def dual_prf_detections(
     fold_spans_mps: Sequence[float],
     *,
     config: DetectionConfig | None = None,
-    max_velocity_mps: float = 191.0,
-    range_tolerance_m: float = 150.0,
+    max_velocity_mps: float,
+    range_tolerance_m: float | None = None,
     wrap_range: bool = False,
 ) -> list[Measurement]:
     r"""Detect in a coprime pair of bursts, pair the detections and unfold their velocity.
@@ -584,7 +584,8 @@ def dual_prf_detections(
     The dual-PRF alternative to §5.3. Two bursts at coprime pulse repetition
     frequencies fold the same true velocity differently, and the pair of folded
     values identifies it uniquely over a span far wider than either burst's
-    own -- 191 m/s for scenario 001's 5:6 kHz pair. The ambiguity is resolved in
+    own (:func:`~radar_forge.core.ambiguity.unfold_doppler_dual_prf`'s Notes
+    give the span). The ambiguity is resolved in
     the **waveform**, so the tracker is handed a true range rate from the very
     first frame and needs no bootstrap, no fold selector and no consistency
     monitor.
@@ -619,11 +620,16 @@ def dual_prf_detections(
         Each burst's fold span, ``2 * burst.unambiguous_velocity_mps``.
     config : DetectionConfig, optional
         CFAR settings, shared by both bursts.
-    max_velocity_mps : float, optional
-        The span the pair is asked to resolve over, default 191 m/s.
+    max_velocity_mps : float
+        The largest speed the target can have, in metres per second: the
+        search bound passed to ``unfold_doppler_dual_prf``. A claim about the
+        target, not about the pair, so it has no default. It should not exceed
+        the pair's own unambiguous span, beyond which a velocity aliases onto a
+        wrong one.
     range_tolerance_m : float, optional
-        How close two detections must be in range to be called the same target,
-        default 150 m, or about two of S3's range bins.
+        How close two detections must be in range to be called the same
+        target. By default two range bins of the coarser map, as the velocity
+        tolerance is two Doppler bins.
     wrap_range : bool, optional
         Passed to :func:`frame_detections` for both bursts.
 
@@ -658,6 +664,11 @@ def dual_prf_detections(
     tolerance_mps = 2.0 * max(
         span_a / products[0].rd_map.shape[0], span_b / products[1].rd_map.shape[0]
     )
+    if range_tolerance_m is None:
+        # The same rule in range: two bins of the coarser map.
+        range_tolerance_m = 2.0 * max(
+            abs(float(product.range_axis_m[1] - product.range_axis_m[0])) for product in products
+        )
 
     ranges_a_m = np.asarray([m.range_m for m in first], dtype=np.float64)
     ranges_b_m = np.asarray([m.range_m for m in second], dtype=np.float64)
@@ -726,8 +737,8 @@ def dual_prf_measurements(
     fold_spans_mps: Sequence[float],
     *,
     config: DetectionConfig | None = None,
-    max_velocity_mps: float = 191.0,
-    range_tolerance_m: float = 150.0,
+    max_velocity_mps: float,
+    range_tolerance_m: float | None = None,
 ) -> list[Measurement]:
     """Detect in a coprime pair of bursts and return the measurements to track.
 

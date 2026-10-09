@@ -922,7 +922,7 @@ false alarms too. The comment in `KalmanTracker.step` records the numbers.
 
 So `scenarios/scenario_003_tracking_dual_prf.toml` ships alongside, bringing
 §13.4's first row forward. Its coprime 5:6 kHz pair resolves velocity in the
-*waveform* to ±191 m/s, the whole of §5.3 becomes unnecessary, and it meets
+*waveform* to ±229 m/s, the whole of §5.3 becomes unnecessary, and it meets
 criteria 1 to 4 as originally written. Shipping both is the point: S1 shows why
 the problem is hard and S3 shows that the tracker is not what makes it hard.
 

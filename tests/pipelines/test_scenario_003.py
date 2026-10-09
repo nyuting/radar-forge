@@ -12,7 +12,7 @@ frames are therefore unresolvable by any selector, and criteria 3 and 4 are
 asserted at the measured values rather than the specification's original ones.
 
 `scenario_003_tracking_dual_prf.toml` runs the same tracker over S3, where the
-coprime 5:6 kHz pair resolves velocity in the waveform to +-191 m/s and §5.3
+coprime 5:6 kHz pair resolves velocity in the waveform to +-229 m/s and §5.3
 disappears. It meets criteria 1 to 4 as originally written, by a wide margin,
 which is what shows that S1's numbers are a property of its waveform and not a
 defect in the tracker.
