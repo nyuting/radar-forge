@@ -703,6 +703,13 @@ class TestConfigsFromScenario:
 class TestScenarioTrackerSettings:
     """What ScenarioTracker refuses to build, and what it builds."""
 
+    def test_an_unknown_cfar_variant_is_refused_before_any_frame(self):
+        with pytest.raises(ValueError, match="detection variant"):
+            ScenarioTracker(
+                bursts("fmcw_low_prf"),
+                detection=DetectionConfig(variant="xx"),  # type: ignore[arg-type]
+            )
+
     @pytest.mark.parametrize(
         ("tracking", "match"),
         [

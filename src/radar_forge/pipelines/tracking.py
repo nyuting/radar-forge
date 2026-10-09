@@ -66,13 +66,18 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field, fields, replace
-from typing import TYPE_CHECKING, Any, Literal, get_args, get_type_hints
+from typing import TYPE_CHECKING, Any, Literal, cast, get_args, get_type_hints
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from radar_forge.core.ambiguity import unfold_doppler_dual_prf
-from radar_forge.core.detection import CfarVariant, cfar_detect, cluster_detections
+from radar_forge.core.detection import (
+    CFAR_VARIANTS,
+    CfarVariant,
+    cfar_detect,
+    cluster_detections,
+)
 from radar_forge.core.tracking import (
     CartesianPosition,
     Coordinate,
@@ -1255,8 +1260,9 @@ class ScenarioTracker:
     ValueError
         If there are not one or two bursts; if two bursts share an unambiguous
         velocity, so their folds cannot be told apart, or ``tracking.v_max_mps``
-        does not exceed the smaller of the two; if ``tracking.estimator``
-        or ``tracking.unfolding_mode`` is not a known name; or if the ``"ukf"``
+        does not exceed the smaller of the two; if ``tracking.estimator``,
+        ``tracking.unfolding_mode`` or ``detection.variant`` is not a known
+        name; or if the ``"ukf"``
         estimator is asked for track-aided or oracle unfolding, or for a state
         model other than ``"range_1d"``.
 
@@ -1313,9 +1319,11 @@ class ScenarioTracker:
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
     tracker: KalmanTracker | Tracker = field(init=False)
     folding_layout: StateLayout = field(init=False)
-    min_unfold_frames: int | None = field(init=False)
     frames: list[FrameTracks] = field(default_factory=list, init=False)
+    # The "ukf" path only: how many components each measurement has.
     _n_measured: int = field(default=2, init=False)
+    # The "kalman" path only; they go with KalmanTracker (tracker-001 §13 step 6).
+    min_unfold_frames: int | None = field(init=False)
     _range_history: dict[int, list[float]] = field(default_factory=dict, init=False)
     _unfold_frame: dict[int, int] = field(default_factory=dict, init=False)
 
@@ -1336,28 +1344,7 @@ class ScenarioTracker:
             return
 
         self.folding_layout = StateLayout((Coordinate("range_m", "m"),), frame="radial")
-        model = state_model_matrices(
-            "range_1d",
-            self.frame_time_s,
-            sigma_accel_mps2=self.tracking.sigma_accel_mps2,
-            sigma_range_m=self.tracking.sigma_range_m,
-            sigma_velocity_mps=self.tracking.sigma_velocity_mps,
-        )
-        initial_covariance = np.diag(
-            np.asarray(
-                [self.tracking.sigma_range_m**2, self.tracking.v_max_mps**2],
-                dtype=np.float64,
-            )
-        )
-        self.tracker = KalmanTracker(
-            model=model,
-            initial_covariance=initial_covariance,
-            gate_probability=self.tracking.gate_probability,
-            n_confirm_hits=self.tracking.n_confirm_hits,
-            n_confirm_frames=self.tracking.n_confirm_frames,
-            n_delete_misses=self.tracking.n_delete_misses,
-            n_reacquire_frames=self.tracking.n_reacquire_frames,
-        )
+        self.tracker = self._build_kalman()
         self.min_unfold_frames = minimum_unfold_history_frames(
             self.tracking.sigma_range_m,
             self.fold_span_mps,
@@ -1379,14 +1366,17 @@ class ScenarioTracker:
                 f"an unambiguous velocity of {self.bursts[0].unambiguous_velocity_mps} m/s."
             )
             raise ValueError(msg)
-        if len(self.bursts) == 2 and self.tracking.v_max_mps <= min(
-            burst.unambiguous_velocity_mps for burst in self.bursts
-        ):
+        smallest_mps = min(burst.unambiguous_velocity_mps for burst in self.bursts)
+        if len(self.bursts) == 2 and self.tracking.v_max_mps <= smallest_mps:
             msg = (
                 "v_max_mps bounds the dual-PRF velocity search, so it must exceed the smaller "
-                "unambiguous velocity, "
-                f"{min(burst.unambiguous_velocity_mps for burst in self.bursts)} m/s; "
-                f"got {self.tracking.v_max_mps} m/s."
+                f"unambiguous velocity, {smallest_mps} m/s; got {self.tracking.v_max_mps} m/s."
+            )
+            raise ValueError(msg)
+        if self.detection.variant not in CFAR_VARIANTS:
+            msg = (
+                f"detection variant must be one of {list(CFAR_VARIANTS)}; "
+                f"got {self.detection.variant!r}."
             )
             raise ValueError(msg)
         if self.tracking.estimator not in ESTIMATORS:
@@ -1431,7 +1421,7 @@ class ScenarioTracker:
         # v_max_mps.
         prior = StateEstimate(
             np.zeros(2, dtype=np.float64),
-            np.diag([1.0, self.tracking.v_max_mps**2]),
+            np.diag(np.asarray([1.0, self.tracking.v_max_mps**2], dtype=np.float64)),
             0.0,
             motion.state_layout,
         )
@@ -1479,25 +1469,6 @@ class ScenarioTracker:
             detection=detection,
             tracking=tracking,
         )
-
-    @property
-    def fold_span_mps(self) -> float:
-        """Width of one Doppler fold of the first burst, ``2 * unambiguous_velocity_mps``."""
-        return 2.0 * self.bursts[0].unambiguous_velocity_mps
-
-    def is_unfoldable(self, track: Track[KalmanFilter]) -> bool:
-        """Whether this track has enough range history to select a Doppler fold."""
-        if self.min_unfold_frames is None:
-            return False
-        return len(self._range_history.get(track.track_id, ())) >= self.min_unfold_frames
-
-    def unfold_frame_of(self, track_id: int) -> int | None:
-        """Return the frame at which a track stepped from range-only to both components.
-
-        The specification calls this the most informative single diagnostic the
-        scenario produces, which is why it is recorded rather than recomputed.
-        """
-        return self._unfold_frame.get(track_id)
 
     def step(
         self,
@@ -1549,10 +1520,13 @@ class ScenarioTracker:
             )
             raise ValueError(msg)
 
-        # The UKF path measures range modulo the map's range axis, so it detects
-        # on that axis as the circle it is. The Kalman path treats range as
+        # __post_init__ built the tracker tracking.estimator names, so that
+        # field, not the tracker's class, says which path this is. The UKF path
+        # measures range modulo the map's range axis, so it detects on that
+        # axis as the circle it is. The Kalman path treats range as
         # unambiguous, as scenario 003 always has.
-        wrap_range = isinstance(self.tracker, Tracker)
+        is_ukf = self.tracking.estimator == "ukf"
+        wrap_range = is_ukf
         if len(self.bursts) == 2:
             spans_mps = [2.0 * burst.unambiguous_velocity_mps for burst in self.bursts]
             detections = dual_prf_detections(
@@ -1566,13 +1540,17 @@ class ScenarioTracker:
             detections = frame_detections(products[0], self.detection, wrap_range=wrap_range)
 
         reference_id: int | None = None
-        if isinstance(self.tracker, Tracker):
+        if is_ukf:
             detections, associations, records = self._track_ukf(
-                self.tracker, products[0], detections, time_s
+                cast(Tracker, self.tracker), products[0], detections, time_s
             )
         else:
             detections, associations, records, reference_id = self._track_kalman(
-                self.tracker, detections, frame_index, time_s, truth_velocity_mps
+                cast(KalmanTracker, self.tracker),
+                detections,
+                frame_index,
+                time_s,
+                truth_velocity_mps,
             )
 
         frame = FrameTracks(
@@ -1601,25 +1579,27 @@ class ScenarioTracker:
 
         sigma_range_m, sigma_velocity_mps = bin_quantisation_sigmas(product)
         n = self._n_measured
-        covariance = np.diag([sigma_range_m**2, sigma_velocity_mps**2])[:n, :n]
+        covariance = np.diag(
+            np.asarray([sigma_range_m**2, sigma_velocity_mps**2], dtype=np.float64)
+        )
+        covariance = covariance[:n, :n]
         accepted = [
             index
             for index, measurement in enumerate(detections)
             if measurement.burst_index == 0 and measurement.status == "accepted"
         ]
-        # An accepted measurement carries an unfolded velocity whenever velocity
-        # is measured; a NaN here would be rejected by the tracker, loudly.
+        # When velocity is measured, every accepted detection must carry an
+        # unfolded velocity: dual-PRF pairing or the fold-0 rule above set it.
+        unfolded_mps = [detections[index].velocity_unfolded_mps for index in accepted]
+        if n == 2 and None in unfolded_mps:
+            msg = "an accepted detection reached the UKF without an unfolded velocity."
+            raise RuntimeError(msg)
         values = [
             np.asarray(
-                [
-                    detections[index].range_m,
-                    detections[index].velocity_unfolded_mps
-                    if detections[index].velocity_unfolded_mps is not None
-                    else math.nan,
-                ][:n],
+                [detections[index].range_m, velocity_mps][:n],
                 dtype=np.float64,
             )
-            for index in accepted
+            for index, velocity_mps in zip(accepted, unfolded_mps, strict=True)
         ]
         batch = tracker.sensors[SENSOR_ID].batch(
             time_s, [(MEASUREMENT_MODEL_ID, value, covariance) for value in values]
@@ -1659,6 +1639,56 @@ class ScenarioTracker:
             if record.detection_index is not None and record.nis is not None
         }
         return detections, associations, records
+
+    # ------------------------------------------------------------------ #
+    # The "kalman" path only. Everything below goes with KalmanTracker
+    # when scenario 003 moves onto Tracker (spec/tracker-001.md §13 step 6),
+    # together with the else-branches of __post_init__ and step.
+    # ------------------------------------------------------------------ #
+
+    def _build_kalman(self) -> KalmanTracker:
+        """Build the Kalman tracker: range_1d, with the §5.3 bootstrap's settings."""
+        model = state_model_matrices(
+            "range_1d",
+            self.frame_time_s,
+            sigma_accel_mps2=self.tracking.sigma_accel_mps2,
+            sigma_range_m=self.tracking.sigma_range_m,
+            sigma_velocity_mps=self.tracking.sigma_velocity_mps,
+        )
+        initial_covariance = np.diag(
+            np.asarray(
+                [self.tracking.sigma_range_m**2, self.tracking.v_max_mps**2],
+                dtype=np.float64,
+            )
+        )
+        return KalmanTracker(
+            model=model,
+            initial_covariance=initial_covariance,
+            gate_probability=self.tracking.gate_probability,
+            n_confirm_hits=self.tracking.n_confirm_hits,
+            n_confirm_frames=self.tracking.n_confirm_frames,
+            n_delete_misses=self.tracking.n_delete_misses,
+            n_reacquire_frames=self.tracking.n_reacquire_frames,
+        )
+
+    @property
+    def fold_span_mps(self) -> float:
+        """Width of one Doppler fold of the first burst, ``2 * unambiguous_velocity_mps``."""
+        return 2.0 * self.bursts[0].unambiguous_velocity_mps
+
+    def is_unfoldable(self, track: Track[KalmanFilter]) -> bool:
+        """Whether this track has enough range history to select a Doppler fold."""
+        if self.min_unfold_frames is None:
+            return False
+        return len(self._range_history.get(track.track_id, ())) >= self.min_unfold_frames
+
+    def unfold_frame_of(self, track_id: int) -> int | None:
+        """Return the frame at which a track stepped from range-only to both components.
+
+        The specification calls this the most informative single diagnostic the
+        scenario produces, which is why it is recorded rather than recomputed.
+        """
+        return self._unfold_frame.get(track_id)
 
     def _track_kalman(
         self,
@@ -2032,8 +2062,8 @@ def score_primary_track(
         for track in frame.tracks
         if track.track_id == primary_id and track.is_confirmed
     ]
-    positions = np.asarray([position for position, _ in confirmed])
-    states = np.asarray([track.state for _, track in confirmed])
+    positions = np.asarray([position for position, _ in confirmed], dtype=np.intp)
+    states = np.asarray([track.state for _, track in confirmed], dtype=np.float64)
     range_error_m = folding_layout.residual(states[:, :1], range_m[positions, None])[:, 0]
     range_rate_error_mps = states[:, 1] - range_rate_mps[positions]
     nis = [track.nis for _, track in confirmed if track.nis is not None]
