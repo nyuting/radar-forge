@@ -195,10 +195,21 @@ answer, and the wrong number the PR returns.
 
 ### Design and API
 
+Check every function the PR adds or changes against this group, not only the ones with a
+numerical bug. A misleading name, an argument order that can be swapped without an error, or a
+return whose shape is undocumented is as much a defect as a wrong constant.
+
 - **Naming and units** [hook: R5 for units; review for the rest]. Units in names, family word
   first, `n_` for counts, main's existing names for existing ideas. Retired words ("leg") mustn't
   come back. No `General*`/`new_`/`v2` names. Keep the standard algorithm names (UKF, IMM, GNN)
   that textbooks use (§9 item 6).
+- **Signatures** [review]. No two adjacent arguments of the same type and unit that a caller
+  could swap without an error, such as `(range_m, altitude_m)`. Arguments after the leading
+  arrays and physical inputs are keyword-only (`*`). A default is given only where one value
+  suits most callers. Arrays come in as `ArrayLike`.
+- **Return contract** [review]. The docstring states the return's type, shape and units, and
+  they hold for every input. A function doesn't return a scalar for some inputs and an array for
+  others unless the docstring says so.
 - **Reuse `core`** [review]. For each new helper, search `core/` for an existing one, and search
   `main` before suggesting any new file or name. Anything with no caller outside tests is
   deferred to the PR whose scenario needs it.
@@ -217,6 +228,8 @@ answer, and the wrong number the PR returns.
   one column tuple, never two position-matched lists.
 - **Repetition inside the PR** [review]. Grep for the same literal compared many times (a variant
   label), the same wrap or formula written several ways, and one default declared in two places.
+  Also look for code that does nothing useful: a wrapper that returns its input unchanged, or a
+  constructor call that restates nine fields to change two.
   `git grep -nE '"S[123]"'`-style counts make it concrete.
 
 ### Docs and comments
