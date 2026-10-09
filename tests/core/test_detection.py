@@ -18,6 +18,7 @@ from scipy.stats import beta
 
 from radar_forge.core.detection import (
     CFAR_VARIANTS,
+    CFAR_VARIANTS_2D,
     Detection,
     cfar_detect,
     cfar_detect_2d,
@@ -824,6 +825,37 @@ def test_ring_false_alarm_rate_matches_design_pfa(rng, variant, pfa):
     assert_rate_consistent_with_design(n_hit, n_tested, pfa)
 
 
+@pytest.mark.parametrize("dimensions", [1, 2])
+def test_a_tapered_map_breaks_the_calibration_as_the_module_notes_say(rng, dimensions):
+    """Hann on both axes correlates neighbouring cells, so the rate exceeds pfa.
+
+    Pins the module docstring's warning; it is the converse of the rate tests
+    above, which draw independent cells. Measured at 1.6 to 1.7 times the design
+    rate over three seeds, for the window and the ring alike, so the lower end of
+    the 99.9% interval clears pfa by a wide margin.
+    """
+    n_pulses, n_samples, n_maps, pfa = 64, 256, 30, 1e-3
+    windows = {
+        "fast_time_window": taper("hann", n_samples),
+        "slow_time_window": taper("hann", n_pulses),
+    }
+    n_hit = n_tested = 0
+    for _ in range(n_maps):
+        noise = rng.normal(size=(2, n_pulses, n_samples))
+        power_w = np.abs(range_doppler_map(noise[0] + 1j * noise[1], **windows)) ** 2
+        if dimensions == 1:
+            mask = cfar_detect(power_w, pfa=pfa, n_train=16, n_guard=4)
+            valid = cfar_valid_mask(power_w.shape, n_train=16, n_guard=4)
+        else:
+            ring = {"n_train": RING_N_TRAIN, "n_guard": RING_N_GUARD, "wrap_axes": (0,)}
+            mask = cfar_detect_2d(power_w, pfa=pfa, **ring)
+            valid = cfar_valid_mask_2d(power_w.shape, **ring)
+        n_hit += int(np.count_nonzero(mask))
+        n_tested += int(np.count_nonzero(valid))
+    low, _ = clopper_pearson_interval(n_hit, n_tested)
+    assert low > pfa, f"measured {n_hit / n_tested:.3e}, interval from {low:.3e}"
+
+
 def test_order_statistic_ring_holds_detection_where_cell_averaging_loses_it():
     """Four strong interferers in the ring mask a target from CA but not from OS.
 
@@ -962,6 +994,11 @@ def test_a_target_on_the_doppler_wrap_gives_one_detection(rng):
 # --------------------------------------------------------------------------- #
 
 
+def test_the_ring_variants_are_the_one_dimensional_ones_without_half_windows():
+    """A 2-D variant must be one the 1-D calibration covers, since the ring borrows it."""
+    assert set(CFAR_VARIANTS_2D) == set(CFAR_VARIANTS) - {"go", "so"}
+
+
 @pytest.mark.parametrize("variant", ["go", "so"])
 def test_ring_rejects_the_half_window_variants(variant):
     with pytest.raises(ValueError, match="for a 2-D ring"):
@@ -978,6 +1015,40 @@ def test_ring_rejects_a_one_dimensional_map():
 def test_ring_rejects_a_repeated_axis():
     with pytest.raises(ValueError, match="two different axes"):
         cfar_noise_estimate_2d_w(np.ones((32, 64)), n_train=(2, 4), n_guard=(1, 1), axes=(1, -1))
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [
+        # Was accepted, and the third count silently dropped.
+        ("n_train", {"n_train": (2, 4, 6), "n_guard": (1, 1, 1)}),
+        # Was accepted, and int() silently truncated 2.5 to 2.
+        ("n_train", {"n_train": (2.5, 4), "n_guard": (1, 1)}),
+        # The 1-D habit of a bare count; was a TypeError about iterating an int.
+        ("n_train", {"n_train": 16, "n_guard": (1, 1)}),
+        # Was zip()'s own message, which names neither argument.
+        ("n_guard", {"n_train": (2, 4), "n_guard": (1, 1, 1)}),
+        # Was an unpacking error.
+        ("axes", {"n_train": (2, 4), "n_guard": (1, 1), "axes": (-1,)}),
+    ],
+)
+def test_ring_rejects_a_pair_that_is_not_two_integers(name, arguments):
+    """Each per-axis argument is exactly two integers, and the error names it."""
+    with pytest.raises(ValueError, match=f"{name} must be two integers"):
+        cfar_noise_estimate_2d_w(np.ones((32, 64)), **arguments)
+    with pytest.raises(ValueError, match=f"{name} must be two integers"):
+        cfar_valid_mask_2d((32, 64), **arguments)
+
+
+def test_ring_accepts_numpy_integer_counts():
+    """A pair read out of an array holds NumPy integers, and those are integers."""
+    estimate_w = cfar_noise_estimate_2d_w(
+        np.ones((32, 64)), n_train=tuple(np.array(RING_N_TRAIN)), n_guard=RING_N_GUARD
+    )
+    np.testing.assert_array_equal(
+        ~np.isnan(estimate_w),
+        cfar_valid_mask_2d((32, 64), n_train=RING_N_TRAIN, n_guard=RING_N_GUARD),
+    )
 
 
 def test_ring_rejects_a_wrap_axis_it_does_not_span():

@@ -28,11 +28,22 @@ so parts of the text below describe code that has since moved:
   in [`tracking.py`](#trackingpy) are kept as audited, with the current location noted there.
 - **Not covered by this audit:** the modules PR #2 added beside `kalman.py` — `coordinates`,
   `motion`, `measurement_models`, `estimation`, `ukf`, `association`, `initiation`, `tracks`,
-  `lifecycle` and `tracker` — and the 2-D CFAR functions PR #4 added to `detection.py`
-  (`cfar_valid_mask_2d`, `cfar_noise_estimate_2d_w`, `cfar_threshold_2d_w`, `cfar_detect_2d`).
-  They need their own pass.
+  `lifecycle` and `tracker`. They need their own pass. The 2-D CFAR functions PR #4 added to
+  `detection.py` were listed here too; they are now audited, see
+  [Status at 2026-10-09](#status-at-2026-10-09).
 - **`Detection` changed shape** (PR #4, `3652134`). `noise_power_w` is now
   `cfar_noise_estimate_w`, and `snr_db` is gone.
+
+## Status at 2026-10-09
+
+Audited against `main` at `20d4610`: the four 2-D CFAR functions, the `Detection` reshape and
+the rest of what PR #4 changed in `detection.py`. They are in
+[`detection.py` — 2-D CFAR](#detectionpy-2-d-cfar). That pass adds F6–F10 and R5–R7. Two of the
+findings are fixes to `detection.py` (F6, F7), one is documentation (F8), and two correct a spec
+(F9, F10). F8 also measured something that belongs to the pipelines stream. Scenario 003's
+pulsed TOML gets more false alarms than its `pfa`, 1.29 times design at `1e-4`, because S2's
+matched-filter output is oversampled. The tracking modules listed above are still not covered
+here: their audit is left to the `spec/tracker-001.md` workstream.
 
 ## Verdict key
 
@@ -54,6 +65,11 @@ Q4 conciseness · Q5 documentation · Q6 naming · Q7 inputs · Q8 outputs.
 | [F3](#f3-the-mti-canceller-copied-every-tap) | `dsp.mti_filter` | Q3, Q4 | Suboptimal — fixed, measured |
 | [F4](#f4-taper-names-were-a-bare-str-where-cfar-variants-are-a-literal) | `windows.taper` | Q6, Q7 | Inconsistent — fixed |
 | [F5](#f5-the-scenario-001-noise-bandwidth-was-stated-as-1-mhz) | `spec/scenario-001-xband.md` §3.2 | Conformance | **Spec** wrong — fixed |
+| [F6](#f6-a-2-d-cfar-pair-was-not-checked-to-be-two-integers) | `detection._ring`, so all four `_2d` functions | Q7 | Code wrong — fixed, red verified |
+| [F7](#f7-the-2-d-variants-were-an-inline-literal-and-a-private-tuple) | `detection.cfar_noise_estimate_2d_w`, `cfar_threshold_2d_w`, `cfar_detect_2d` | Q4, Q6, Q7 | Inconsistent — fixed |
+| [F8](#f8-the-calibrations-independence-assumption-did-not-name-tapering) | `detection` module notes, `cfar_threshold_2d_w` | Q1, Q5 | Docs incomplete — fixed, measured |
+| [F9](#f9-scenario-003-said-a-2-d-window-halves-the-cells-needed) | `spec/scenario-003-tracking.md` §13.2 | Conformance | **Spec** wrong — fixed |
+| [F10](#f10-data-001-called-a-thermal-noise-power-the-cfar-estimate) | `spec/data-001-formats.md` §6.8 | Conformance, Q8 | **Spec** wrong — fixed |
 
 Everything else audited below carries no finding. That is the expected result: the suite is
 strong, refactor-001 hardened it, and most of `core/` is already the best available form.
@@ -359,7 +375,8 @@ and derives them from `fftfreq` rather than by hand.
 ## `detection.py`
 
 The four `_2d` CFAR functions and the `Detection` field renames came after this audit; see
-[Status at 2026-10-08](#status-at-2026-10-08).
+[Status at 2026-10-08](#status-at-2026-10-08). They are audited in
+[`detection.py` — 2-D CFAR](#detectionpy-2-d-cfar).
 
 | Name | Q1 | Q2 | Q3 | Q4 | Q5 | Q6 | Q7 | Q8 |
 | :--- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
@@ -400,6 +417,117 @@ than relying on NaN comparisons being False, which keeps the error-on-warning te
 bisection cannot fail on a bracketed monotone function, where a derivative method over a
 many-decade range needs careful scaling. The bracket ceiling raises a message that names the
 real cause — the window is too small for the requested rate — rather than a numerical one.
+
+## `detection.py` — 2-D CFAR
+
+Audited at `20d4610`. It covers what PR #4 added (`8eb9b2e`) and reshaped (`3652134`): the four
+`_2d` functions, the variant names they take, and the `Detection` and `cluster_detections`
+renames.
+
+| Name | Q1 | Q2 | Q3 | Q4 | Q5 | Q6 | Q7 | Q8 |
+| :--- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| `CfarVariant2d`, `CFAR_VARIANTS_2D` (new) | ✓ | ✓ | — | [F7](#f7-the-2-d-variants-were-an-inline-literal-and-a-private-tuple) | ✓ | [F7](#f7-the-2-d-variants-were-an-inline-literal-and-a-private-tuple) | — | — |
+| `Detection` (`cfar_noise_estimate_w`, no `snr_db`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `cluster_detections` (`noise_estimate_w`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | [R5](#recommended-not-applied) | ✓ |
+| `cfar_valid_mask_2d` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | [F6](#f6-a-2-d-cfar-pair-was-not-checked-to-be-two-integers), [R5](#recommended-not-applied) | ✓ |
+| `cfar_noise_estimate_2d_w` | ✓ | ✓ | ✓ | ✓ | ✓ | [F7](#f7-the-2-d-variants-were-an-inline-literal-and-a-private-tuple) | [F6](#f6-a-2-d-cfar-pair-was-not-checked-to-be-two-integers), [R5](#recommended-not-applied) | ✓ |
+| `cfar_threshold_2d_w` | ✓ | ✓ | ✓ | ✓ | [F8](#f8-the-calibrations-independence-assumption-did-not-name-tapering) | [F7](#f7-the-2-d-variants-were-an-inline-literal-and-a-private-tuple) | [F6](#f6-a-2-d-cfar-pair-was-not-checked-to-be-two-integers), [R5](#recommended-not-applied) | ✓ |
+| `cfar_detect_2d` | ✓ | ✓ | ✓ | ✓ | ✓ | [F7](#f7-the-2-d-variants-were-an-inline-literal-and-a-private-tuple) | [F6](#f6-a-2-d-cfar-pair-was-not-checked-to-be-two-integers), [R5](#recommended-not-applied) | [R6](#recommended-not-applied) |
+
+**Conformance.** Scenario 003 §13.2's "Landed" paragraph is the specification, and the code
+matches each clause of it. `n_train` and `n_guard` are per axis, `axes` defaults to `(-2, -1)`,
+and `wrap_axes` exists. Only CA and OS are offered. A ring of M cells is calibrated as a 1-D
+window of M/2 per side, which is exact because M is always even: it is an odd product less an
+odd product. The default `axes` match data-001's `rd_layout = "frame,doppler,range"`, so a
+stack of frames works unchanged, and the rate test runs on just such a 3-D stack. The default
+OS rank is `default_os_rank(M // 2)`, which is Rohling's `3M/4` for the ring's own M. The
+threshold and the estimate compute it the same way, so they cannot disagree.
+`scipy.ndimage` is BSD-licensed, so D4 and R1.3.3 hold. The paragraph above that one was not
+right, and F9 corrects it.
+
+**Edge handling matches the 1-D sibling.** An incomplete ring gives `nan`, and the cell is
+never declared. `cfar_valid_mask_2d` agrees with `~isnan(estimate)` in all three wrap
+combinations, and a test asserts that. A circular axis is extended by one margin of wrapped
+cells at each end, then cut back. An axis, circular or not, that is shorter than one window
+leaves every cell untested. Wrapping a ring round a circle shorter than itself would count
+cells twice. The test for that is `test_valid_mask_2d_is_empty_when_an_axis_is_shorter_than_the_ring`.
+
+**Q1, roundoff from the box filters, measured.** CA is the outer box's total less the guard
+box's, each from `uniform_filter`. That filter is a running sum, so a strong cell leaves a
+roundoff residue along every line it passes through, including the line through the cell
+under test, whose own power sits in both boxes and cancels. The table below puts one target in a
+`(256, 1000)` unit-mean exponential map and compares the result with a ring summed term by term.
+The ring is `n_train = (4, 8)` and `n_guard = (1, 2)`, wrapping Doppler. Each entry is the worst
+relative error anywhere:
+
+| Target above floor | 60 dB | 80 dB | 100 dB | 120 dB | 140 dB |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| 2-D ring | 2.8e-12 | 5.4e-10 | 1.9e-8 | 3.1e-6 | 3.5e-4 |
+| 1-D window, `n_train = 16`, for comparison | — | — | 3.6e-7 | — | 2.3e-3 |
+
+Scenario 003's strongest return is about 69 dB, where the error is of order 1e-11. Even at
+140 dB it is 0.0015 dB of threshold. The 1-D cumulative sum, already audited ✓, is 7 to 19 times
+worse, because its prefix runs the whole axis. No change.
+
+**Q3, measured.** The CA docstring claims a cost that is independent of the ring's size. The
+OS docstring claims "substantially slower". On a `(256, 1000)` map (S1's cube) with Doppler
+wrapping, the best of 5 on an Apple M2:
+
+| `n_train`, `n_guard` | M | CA estimate | OS estimate |
+| :--- | ---: | ---: | ---: |
+| (1, 2), (1, 1) | 26 | 2.98 ms | 72 ms |
+| (2, 4), (1, 2) | 76 | 3.00 ms | 193 ms |
+| (4, 8), (1, 2) | 216 | 3.01 ms | 509 ms |
+| (8, 16), (2, 4) | 816 | 3.31 ms | 1871 ms |
+
+CA is flat in M, as claimed. OS is close to linear in M, at 2.3 to 2.8 ms per reference cell. Two
+alternatives were measured against the same map, and neither earns a change:
+
+- **PR #4's predecessor** (`8eb9b2e`: a hand-written summed-area table and a chunked ring
+  gather). It agrees with today's code to `rtol = 1e-12` and is slightly slower: CA 3.57
+  against 3.12 ms, OS 215 against 194 ms at M = 76. PR #4's simplification cost nothing.
+- **A sliding-window gather and `np.partition`**, the 1-D OS method, applied to the ring. It is
+  bit-identical, at 194 ms against `rank_filter`'s 194 ms. `rank_filter` is the shorter form.
+
+The OS threshold factor is a bisection over Rohling's product. At M = 816 it costs 1.6 ms, so it
+is never the bottleneck.
+
+**The 1-D/2-D pair, compared clause by clause.**
+
+| Aspect | 1-D | 2-D | Verdict |
+| :--- | :--- | :--- | :--- |
+| Names | `cfar_noise_estimate_w`, `cfar_threshold_w`, `cfar_detect`, `cfar_valid_mask` | Same, with `_2d` before the unit suffix | ✓ |
+| Guard and training | Per side; guard excluded; the cell under test sits in the guard band | Per side, per axis; the guard box holds the cell under test | ✓ |
+| Variant type | `CfarVariant`, `CFAR_VARIANTS = get_args(...)` | Inline `Literal`, private tuple | [F7](#f7-the-2-d-variants-were-an-inline-literal-and-a-private-tuple) |
+| Argument order | `power_w, *, pfa, n_train, n_guard, variant, rank, axis` | `power_w, *, pfa, n_train, n_guard, variant, rank, axes, wrap_axes` | ✓ |
+| Keyword-only | Everything after the map | Everything after the map | ✓ |
+| `n_guard` default | 1 | Required | ✓, deliberately — see [left alone](#what-was-deliberately-left-alone) |
+| Argument checks | Shared `_validate_window`, `_validate_rank`, `_as_power_w` | Same helpers; the pairs were not checked | [F6](#f6-a-2-d-cfar-pair-was-not-checked-to-be-two-integers) |
+| Return contract | Same shape; `nan` (estimate, threshold) or `False` (mask) where untested | Same | ✓ |
+| Error messages | `variant must be one of (...), got ...` | The same text plus "for a 2-D ring" and the reason | ✓ |
+
+**References.** The 2-D docstrings cite Finn & Johnson [1] for CA and Rohling [4] for OS. Both
+papers treat a 1-D window. What the ring borrows from them is the P_fa of M i.i.d. reference
+cells. That P_fa holds for any arrangement of the cells, because a sum and an order statistic do
+not depend on the order of their inputs. The docstrings claim no more than that, so the
+citations fit. The locators were checked against their sources in PR #11 (`c48aaf2`). This pass
+had no source to hand and did not re-check them, so it judges only whether each claim fits its
+citation. The module's own reference list is [R7](#recommended-not-applied).
+
+**The `Detection` reshape.** The rename is right on Q6 and Q8. `noise_power_w` means thermal
+noise in `Radar.noise_power_w` and in data-001's `bursts[].noise_power_w`. A per-cell CFAR
+estimate under the same name would let a caller compute `snr_db` against the wrong denominator
+without noticing. The keyword is `noise_estimate_w` rather than `cfar_noise_estimate_w`, so it
+does not shadow the function of that name, the hazard R2 records for
+`range_from_beat_frequency_m`. Removing `snr_db` is right as well: data-001 §6.5 defines it
+against the burst's thermal noise, and `scripts/run_scenario.py` now computes it that way, with a
+comment saying so. One place in the specs had not caught up. Data-001 §6.8 still described a
+`noise_power_w` dataset as "the noise estimate used by CFAR": F10.
+
+PR #4's two changes to the 1-D path were re-checked. CA's factor at scenario 003's `n_train = 16`
+and `pfa = 1e-5` is 13.856402247582809 by `expm1` and …807 by the textbook form, so 11.417 dB is
+unchanged. Rejecting non-finite power is the right Q7 call, and
+`test_rejects_power_that_is_not_finite` covers both paths.
 
 ## `tracking.py`
 
@@ -570,6 +698,126 @@ waveform-*independent* derived quantities, and the three variants sample at 1.0,
 used to say, so a reader who has the old number in their head can see what moved and what did
 not.
 
+## F6 — A 2-D CFAR pair was not checked to be two integers
+
+`n_train`, `n_guard` and `axes` are each typed `tuple[int, int]`, but `_ring` checked only
+the values, never the shape of the argument. The mistakes a caller could make went three ways.
+Two of them were silent and wrong:
+
+| Call | Before | After |
+| :--- | :--- | :--- |
+| `n_train=(2, 4, 6), n_guard=(1, 1, 1)` | Accepted. The third count was dropped | `ValueError` naming `n_train` |
+| `n_train=(2.5, 4)` | Accepted. `int()` truncated 2.5 to 2 | `ValueError` naming `n_train` |
+| `n_train=16` (the 1-D habit) | `TypeError: 'int' object is not iterable` | `ValueError` naming `n_train` |
+| `n_guard=(1, 1, 1)` against a 2-entry `n_train` | `zip()`'s message, naming neither argument | `ValueError` naming `n_guard` |
+| `axes=(-1,)` | "not enough values to unpack" | `ValueError` naming `axes` |
+
+`mypy --strict` catches all five in typed code. A pair read from a TOML file or built in a
+notebook is not typed code, and the first two return a detection map that looks plausible. The
+1-D sibling has no such hazard: a single `int` has nothing to truncate, and a float `n_train`
+fails there on slicing.
+
+**Fixed.** `_integer_pair` requires exactly two entries that pass `operator.index`, so NumPy
+integers are accepted and floats are refused, and its error names the argument. The `Raises`
+sections of `cfar_valid_mask_2d` and `cfar_noise_estimate_2d_w` say so.
+`test_ring_rejects_a_pair_that_is_not_two_integers` covers all five rows through both
+`cfar_noise_estimate_2d_w` and `cfar_valid_mask_2d`. Verified red: with the source change
+stashed, all five cases fail. Two fail with "DID NOT RAISE", one with the `TypeError`, and two
+with a non-matching message. `test_ring_accepts_numpy_integer_counts` guards the other side, and
+passes before and after.
+
+## F7 — The 2-D variants were an inline `Literal` and a private tuple
+
+This is F4's defect in the module F4 used as its model. The 1-D functions take `CfarVariant`,
+from which `CFAR_VARIANTS` is derived with `get_args`. The three 2-D functions each wrote
+`Literal["ca", "os"]` inline. The run-time check used `_CFAR_2D_VARIANTS = ("ca", "os")`, a
+hand-maintained private tuple, so the static set and the checked set could drift. A caller had
+no exported name to check a configured variant against.
+
+**Fixed.** `CfarVariant2d` is the `Literal`, `CFAR_VARIANTS_2D` is `get_args` of it, and both
+are exported from `detection` and `radar_forge.core` beside their 1-D counterparts. There is no
+run-time change: the same two names, the same order, and the same error message.
+`test_the_ring_variants_are_the_one_dimensional_ones_without_half_windows` pins the relation that
+justifies the subset: the ring borrows the 1-D calibration, so its variants must be among the 1-D
+ones.
+
+## F8 — The calibration's independence assumption did not name tapering
+
+Every closed form in the module assumes the reference cells are independent, and the module
+says "i.i.d.". Nothing said that the commonest step in a radar chain breaks it. A taper
+correlates neighbouring bins. For Hann, the complex amplitudes of adjacent bins have a
+correlation of magnitude `|Σw²e^{-j2πn/N}| / Σw²`, which computes to 0.675 at N = 64 and tends
+to 2/3. Zero-padding the FFT does the same, and so does sampling a compressed pulse faster than
+its bandwidth. Correlated cells give a noisier estimate than M independent ones, so the threshold
+factor is too low.
+
+Measured with the library's own chain: complex white noise through `range_doppler_map`, Hann on
+both axes, `(64, 256)` maps, 30 maps per seed, `pfa = 1e-3`:
+
+| Seed | 1-D window, `n_train = 16`, `n_guard = 4` | Ring, `(2, 4)`, `(1, 2)`, Doppler wrapping |
+| :--- | ---: | ---: |
+| 0 | 1.67 × pfa | 1.72 × pfa |
+| 1 | 1.62 × pfa | 1.58 × pfa |
+| 2 | 1.70 × pfa | 1.74 × pfa |
+| Untapered, for contrast | 1.01 × pfa | 0.97 × pfa |
+
+So a student who tapers, then measures, sees 60–70% too many false alarms and concludes that
+the detector is broken. The ring is no worse than the window, even though it draws from both
+correlated axes.
+
+None of the scenarios applies a taper, so the FMCW ones are unaffected: an untapered range FFT of
+deramped noise gives independent bins. **The pulsed one is affected.** S2 samples its 2 MHz
+chirp at 2.5 MHz, so after `matched_filter` neighbouring range cells correlate with magnitude
+0.27, and 0.20 at two cells apart. That is S2's chain as `form_range_doppler_map` builds it,
+measured with the 1-D CFAR that `scenario_003_ukf_pulsed_medium_prf.toml` configures:
+
+| `pfa` | Cells tested | Measured / design |
+| :--- | ---: | ---: |
+| 1e-3 | 921 600 | 1.17 |
+| 1e-4 | 6 144 000 | 1.29 |
+
+The excess grows as `pfa` falls. At that TOML's design `1e-5` it is larger still, though not
+measured here. No acceptance test measures that run's false-alarm rate, so nothing fails. But
+its `pfa` is not the rate it gets. Repairing that is a pipelines decision, not a `core/` one. It
+could calibrate against an effective number of independent cells, or decimate to the bandwidth
+before CFAR. It is recorded here and left to that stream.
+
+**Fixed, documentation only.** The module Notes now name the mechanism, its direction and the
+remedy. `cfar_threshold_2d_w`, whose Notes make the i.i.d. argument for the ring, points to them.
+`test_a_tapered_map_breaks_the_calibration_as_the_module_notes_say` pins the direction for both
+the window and the ring: the lower end of the 99.9% interval must clear `pfa`. There is no
+behaviour to verify red. The test pins a property of the noise, not of the code.
+
+## F9 — Scenario 003 said a 2-D window halves the cells needed
+
+Corrected under R1.3.4, because the **spec** was the wrong party. §13.2 said a 2-D reference
+window "would also roughly halve the number of training cells needed for the same `pfa`".
+Its own "Landed" paragraph says, correctly, that the `pfa` depends only on the number of
+reference cells M. So the same `pfa` at the same CFAR loss needs the same M in any shape. What
+a ring changes is the reach. It draws M cells from both axes, so it extends fewer cells along
+range for the same M. For the same reach it has more cells and a lower threshold factor, which
+is what `test_a_ring_has_less_cfar_loss_than_a_line_of_the_same_reach` asserts.
+
+The same section said the 1-D functions were "unchanged". Their calibration is, but PR #4 changed
+two things on the 1-D path, both re-checked above.
+
+**The spec is corrected and the code is unchanged.** A note in §13.2 records the old wording.
+
+## F10 — data-001 called a thermal noise power the CFAR estimate
+
+Corrected under R1.3.4. Data-001 §6.8 lists `rd/burst{k}/noise_power_w`, of shape
+`(n_frames,)`, as "the noise estimate used by CFAR". That contradicts the vocabulary PR #4
+renamed `Detection` to protect. `noise_power_w` is the thermal noise power in `Radar`, in the
+same spec's `bursts[].noise_power_w`, and as the denominator of its own `snr_db` in §6.5. It also
+contradicts the shape. This library's CFAR estimates the floor per cell, so no per-frame scalar
+can be "the estimate used by CFAR". A reader who took it at its word would compute an SNR
+against the wrong quantity, and would find no per-cell estimate anywhere in the file.
+
+**The spec is corrected.** The dataset is now the burst's thermal noise power, and a new bullet
+says how to recover the per-cell estimate: `threshold_w / α`. It also records the old wording.
+No `products.h5` writer exists yet (§1 lists what is written), so no file and no code moves, and
+the schema version stays where it is.
+
 ## Recommended, not applied
 
 Each of these is a real observation. None is unambiguous enough to justify an API break or the
@@ -601,6 +849,41 @@ observable error message in at least one module for no functional gain, and the 
 five lines of the most obvious code in the package. Recorded so that a fourth copy is a
 deliberate choice.
 
+**R5 — `wrap_axes=0` fails with "'int' object is not iterable".** F6's check covers the
+three pairs but not `wrap_axes`, which is a variable-length tuple in the four 2-D functions and
+in `cluster_detections`. Unlike F6's first two rows, this mistake is loud rather than silent:
+it raises at once, but with Python's message rather than one that names the argument. A shared
+check would be four lines. Not applied: it changes an exception type, from `TypeError` to
+`ValueError`, in a function the first pass already audited (`cluster_detections`), and nothing
+wrong is ever computed.
+
+**R6 — A caller who wants both the detections and their noise estimates computes the ring
+twice.** `cluster_detections(..., noise_estimate_w=...)` needs the estimate, which
+`cfar_detect_2d` computes internally and discards, so the caller must call
+`cfar_noise_estimate_2d_w` again. On S1's `(256, 1000)` map with a `(2, 4)`, `(1, 2)` ring,
+measured best of 5:
+
+| Variant | `cfar_detect_2d` | Plus `cfar_noise_estimate_2d_w` |
+| :--- | ---: | ---: |
+| CA | 3.3 ms | 7.1 ms |
+| OS | 204 ms | 396 ms |
+
+A form that returns the estimate with the mask, or that accepts a precomputed one, would halve
+the OS case. Not applied: it is new API, and it would need the same shape on the 1-D pair,
+which has the same double cost. Nothing in the repository calls the 2-D path yet. Scenario 003
+§13.2 leaves the switch to its pipeline, and that switch is the time to choose a shape from a
+real caller.
+
+**R7 — Three entries in the module's reference list have no citation marker.** Finn &
+Johnson [1] is cited by `cfar_noise_estimate_2d_w`, and Rohling [4] and Gandhi & Kassam [5] by
+the 1-D functions. Hansen & Sawyers [2] and Weiss [3] are attributed only by the parentheticals
+in the list itself. Richards [6] has been cited by nothing since PR #4 removed both of its
+markers, in the ring paragraph and in `cfar_noise_estimate_2d_w`'s references.
+`docs/conventions/style.md` §4.1 says an entry nothing cites is removed. Not applied: whether
+to cite Richards §6.5 again or drop it is a citation decision. Under §4.1 that needs the source
+in hand, and this pass did not have it. PR #11's verification of the record itself still
+stands.
+
 ## What was deliberately left alone
 
 - **`cfar_threshold_factor`'s bisection.** 200 iterations of a function that itself sums a
@@ -619,6 +902,18 @@ deliberate choice.
   depends on it.
 - **The `range_fft` / `doppler_fft` shift asymmetry.** It surprises every new reader and it is
   correct; the fix is the documentation it already has.
+- **The 2-D OS cost.** `rank_filter` is linear in the ring's size, at 72 ms for M = 26 and
+  1.9 s for M = 816 on S1's map. Both alternatives that were measured, the predecessor's
+  chunked gather and a sliding-window `np.partition`, are no faster (see
+  [`detection.py` — 2-D CFAR](#detectionpy-2-d-cfar)). Sub-linear running-rank algorithms
+  exist, but none is in NumPy or SciPy. The docstring already says "substantially slower".
+- **`n_guard` has a default in 1-D and none in 2-D.** The asymmetry is the right way round.
+  The 1-D default of one guard cell is documented against the range mainlobe. A 2-D default
+  would have to guess two mainlobes, one per axis, and a wrong guess along Doppler masks the
+  target silently. Removing the 1-D default would break every call that relies on it.
+- **The box-filter roundoff.** It is measured above at 1e-11 for scenario 003's strongest
+  return, and it is smaller than the 1-D cumulative sum's. An exact summed-area table would
+  buy digits nobody can use.
 - **The absolute bistatic delay.** `bistatic_line_of_sight_paths` carries `(R_t + R_r)/c` rather
   than the range sum minus the baseline that a synchronised receiver measures. The docstring
   explains that the absolute delay is what carries the correct carrier phase and that baseline

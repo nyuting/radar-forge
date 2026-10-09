@@ -28,7 +28,9 @@ from radar_forge.core.constants import (
 )
 from radar_forge.core.detection import (
     CFAR_VARIANTS,
+    CFAR_VARIANTS_2D,
     CfarVariant,
+    CfarVariant2d,
     Detection,
     cfar_detect,
     cfar_detect_2d,
@@ -118,6 +120,7 @@ from radar_forge.core.windows import (
 __all__ = [
     "BOLTZMANN_JPK",
     "CFAR_VARIANTS",
+    "CFAR_VARIANTS_2D",
     "EARTH_RADIUS_M",
     "FOUR_THIRDS_EARTH_RADIUS_M",
     "SPEED_OF_LIGHT_MPS",
@@ -129,6 +132,7 @@ __all__ = [
     "WGS84_SEMI_MAJOR_AXIS_M",
     "BistaticRadar",
     "CfarVariant",
+    "CfarVariant2d",
     "Detection",
     "FrameResult",
     "KalmanFilter",
