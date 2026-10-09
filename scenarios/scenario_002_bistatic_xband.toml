@@ -8,25 +8,6 @@ name = "scenario-002-bistatic-xband"
 description = "B1: 9.8 GHz over a 19.601 km baseline. Waveform identical to scenario-001 S1, so geometry is the only variable. Doppler folds at +-7.65 m/s."
 seed = 20260915
 
-# The receiving site. Unchanged from scenario 001; here it receives echoes
-# of a transmitter 19.6 km away rather than of one standing beside it.
-[radar]
-latitude_deg = 36.00250
-longitude_deg = -78.94100
-altitude_m = 60.0
-
-# The illuminator. Its presence is what makes this scenario bistatic; delete
-# this table and the same file is a monostatic scenario at the Duke Receiver.
-[transmitter_site]
-latitude_deg = 35.87750   # Raleigh-Durham Airport reference point
-longitude_deg = -78.78750
-altitude_m = 25.0         # assumed ATC antenna height; configurable
-
-[receiver_site]
-# The receive chain at the Duke Receiver site sited by [radar] above.
-gain_rx_dbi = 30.0
-noise_figure_db = 3.0
-
 [target]
 name = "light-aircraft"
 rcs_dbsm = 10.0        # bistatic RCS, held constant and angle-independent; see D8
@@ -41,6 +22,13 @@ start_time_s = 13329.0
 duration_s = 120.0
 frame_rate_hz = 1.0
 
+# The illuminator. Its presence is what makes this scenario bistatic; delete
+# this table and the same file is a monostatic scenario at the Duke Receiver.
+[transmitter_site]
+latitude_deg = 35.87750   # Raleigh-Durham Airport reference point
+longitude_deg = -78.78750
+altitude_m = 25.0         # assumed ATC antenna height; configurable
+
 # Identical in every parameter to scenario_001_fmcw_low_prf.toml.
 [[burst]]
 waveform = "fmcw"
@@ -52,3 +40,15 @@ chirp_duration_s = 1.0e-3
 prf_hz = 1.0e3
 sample_rate_hz = 1.0e6
 n_pulses = 256
+
+# The receiving site. Unchanged from scenario 001; here it receives echoes
+# of a transmitter 19.6 km away rather than of one standing beside it.
+[receiver_site]
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
+
+[receiver]
+# The receive chain at the Duke Receiver, sited by [receiver_site] above.
+gain_rx_dbi = 30.0
+noise_figure_db = 3.0

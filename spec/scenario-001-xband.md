@@ -458,8 +458,9 @@ begins.
 | 10 | `__init__.py` wiring | `import radar_forge` must still succeed with zero extras, so `viz` is **not** imported at top level. |
 
 Scenario configurations live in `scenarios/scenario_001_{fmcw_low_prf,pulsed_medium_prf,fmcw_dual_prf}.toml`,
-sharing `[radar]`, `[receiver]`, `[target]` and `[trajectory]` blocks and differing only in
-`[[burst]]`.
+sharing `[target]`, `[trajectory]`, `[receiver_site]` and `[receiver]` blocks and differing only in
+`[[burst]]`. The tables are named for what they hold and listed in signal-path order; the
+loader's module docstring (`pipelines/scenarios.py`) has the full layout.
 
 ### 5.1 Where the input data lives
 

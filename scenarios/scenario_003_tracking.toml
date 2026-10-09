@@ -22,16 +22,6 @@ name = "scenario-003-tracking"
 description = "CFAR detection, GNN association and Kalman tracking over the S1 X-band scenario, where Doppler folds five times and the tracker must unfold it."
 seed = 20260911
 
-[radar]
-# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna.
-latitude_deg = 36.00250
-longitude_deg = -78.94100
-altitude_m = 60.0
-
-[receiver]
-gain_rx_dbi = 30.0
-noise_figure_db = 3.0
-
 [target]
 name = "light-aircraft"
 rcs_dbsm = 10.0        # 10 m^2, Swerling 0 (non-fluctuating)
@@ -53,6 +43,16 @@ chirp_duration_s = 1.0e-3
 prf_hz = 1.0e3
 sample_rate_hz = 1.0e6
 n_pulses = 256
+
+[receiver_site]
+# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna.
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
+
+[receiver]
+gain_rx_dbi = 30.0
+noise_figure_db = 3.0
 
 # Cell-averaging CFAR along range. 245,760 of the 256,000 cells carry a
 # complete reference window, so pfa = 1e-5 puts about 2.46 false alarms in

@@ -5,6 +5,28 @@ The split matters: the radar, the target and the window are *data*, so that
 changing a waveform is an edit to a text file rather than to the library, and
 the three variants of scenario 001 differ only in their ``[[burst]]`` tables.
 
+Tables
+------
+Each table is named for what it holds, and a scenario file lists them in
+signal-path order: what is being run, the truth, the transmit end, the receive
+end, then processing. TOML does not care about the order; a reader does.
+
+======================  ==============================================
+``[scenario]``          name, description, seed
+``[target]``            RCS and altitude
+``[trajectory]``        the ADS-B track and the window played from it
+``[transmitter_site]``  where the illuminator stands -- bistatic only
+``[[burst]]``           one waveform and CPI, shared by both ends
+``[receiver_site]``     where the receiver stands
+``[receiver]``          the receive chain: gain and noise figure
+``[detection]``         CFAR settings -- optional
+``[tracking]``          tracker settings -- optional
+======================  ==============================================
+
+Without ``[transmitter_site]`` the scenario is monostatic and transmits from
+``[receiver_site]``. A burst is not a transmitter table: it also carries
+``sample_rate_hz`` and ``n_pulses``, which are receive-side quantities.
+
 Bursts
 ------
 A scenario has one or more **bursts**, each a fully specified
@@ -96,9 +118,6 @@ __all__ = [
 ]
 
 _SITE_KEYS = frozenset({"latitude_deg", "longitude_deg", "altitude_m"})
-# [radar] is the site that *receives*. A monostatic scenario transmits from
-# there too; a bistatic one adds [transmitter_site] and moves the illuminator.
-_RADAR_KEYS = _SITE_KEYS
 _RECEIVER_KEYS = frozenset({"gain_rx_dbi", "noise_figure_db"})
 _TARGET_KEYS = frozenset({"rcs_dbsm", "altitude_m", "name"})
 _TRAJECTORY_KEYS = frozenset({"path", "start_time_s", "duration_s", "frame_rate_hz"})
@@ -354,13 +373,13 @@ def _require_keys(table: dict[str, Any], allowed: frozenset[str], name: str) -> 
 
 def _burst_radar(
     burst: dict[str, Any],
-    radar: dict[str, Any],
+    receiver_site: dict[str, Any],
     receiver: dict[str, Any],
     transmitter_site: dict[str, Any] | None,
 ) -> RadarLike:
     """Build one burst's radar, letting its own validation report bad physics.
 
-    ``radar`` is the **receiving** site. When ``transmitter_site`` is given the
+    When ``transmitter_site`` is given the
     illuminator stands elsewhere and the result is a
     :class:`~radar_forge.core.radar.BistaticRadar`; otherwise one site does both
     jobs and the result is a :class:`~radar_forge.core.radar.Radar`.
@@ -384,9 +403,9 @@ def _burst_radar(
         return Radar(
             transmitter=transmitter,
             receiver=receive_chain,
-            latitude_deg=float(radar["latitude_deg"]),
-            longitude_deg=float(radar["longitude_deg"]),
-            altitude_m=float(radar["altitude_m"]),
+            latitude_deg=float(receiver_site["latitude_deg"]),
+            longitude_deg=float(receiver_site["longitude_deg"]),
+            altitude_m=float(receiver_site["altitude_m"]),
         )
     return BistaticRadar(
         transmitter=transmitter,
@@ -394,9 +413,9 @@ def _burst_radar(
         transmitter_latitude_deg=float(transmitter_site["latitude_deg"]),
         transmitter_longitude_deg=float(transmitter_site["longitude_deg"]),
         transmitter_altitude_m=float(transmitter_site["altitude_m"]),
-        receiver_latitude_deg=float(radar["latitude_deg"]),
-        receiver_longitude_deg=float(radar["longitude_deg"]),
-        receiver_altitude_m=float(radar["altitude_m"]),
+        receiver_latitude_deg=float(receiver_site["latitude_deg"]),
+        receiver_longitude_deg=float(receiver_site["longitude_deg"]),
+        receiver_altitude_m=float(receiver_site["altitude_m"]),
     )
 
 
@@ -418,7 +437,8 @@ def load_scenario(path: Path | str) -> Scenario:
     ------
     ValueError
         If a required table or key is missing, if a table carries an unknown
-        key, or if no ``[[burst]]`` is defined. Bad *physics* -- a duty cycle
+        key, if the file still uses the retired ``[radar]`` table, or if no
+        ``[[burst]]`` is defined. Bad *physics* -- a duty cycle
         above one, a negative power -- is reported by ``Radar`` itself, so the
         message names the quantity rather than the file.
 
@@ -445,33 +465,32 @@ def load_scenario(path: Path | str) -> Scenario:
     with toml_path.open("rb") as handle:
         document = tomllib.load(handle)
 
-    for table_name in ("scenario", "radar", "target", "trajectory"):
+    # [radar] held the receiving site's coordinates, and in scenario 002
+    # [receiver_site] held the receive chain. Both names said the wrong thing.
+    # An old file fails here, by name, rather than on a confusing key error.
+    if "radar" in document:
+        msg = (
+            f"{toml_path} has a [radar] table; the receiving site is now "
+            "[receiver_site] (coordinates) and the receive chain is [receiver]."
+        )
+        raise ValueError(msg)
+    for table_name in ("scenario", "target", "trajectory", "receiver_site", "receiver"):
         if table_name not in document:
             msg = f"{toml_path} is missing the required [{table_name}] table."
             raise ValueError(msg)
-    # The receive chain is [receiver_site] -- the spelling scenario 002 uses, so
-    # that it sits beside [transmitter_site] and the two ends of the bistatic
-    # pair read as a pair. [receiver] is the older spelling and is still read.
-    receiver_table_name = "receiver_site" if "receiver_site" in document else "receiver"
-    if receiver_table_name not in document:
-        msg = f"{toml_path} is missing the required [receiver_site] table."
-        raise ValueError(msg)
-    if "receiver_site" in document and "receiver" in document:
-        msg = f"{toml_path} defines both [receiver_site] and [receiver]; keep one."
-        raise ValueError(msg)
     if "burst" not in document or not document["burst"]:
         msg = f"{toml_path} defines no [[burst]]; a scenario needs at least one."
         raise ValueError(msg)
 
     scenario_table = document["scenario"]
-    radar_table = document["radar"]
-    receiver_table = document[receiver_table_name]
+    receiver_site_table = document["receiver_site"]
+    receiver_table = document["receiver"]
     target_table = document["target"]
     trajectory_table = document["trajectory"]
 
     _require_keys(scenario_table, _SCENARIO_KEYS, "scenario")
-    _require_keys(radar_table, _RADAR_KEYS, "radar")
-    _require_keys(receiver_table, _RECEIVER_KEYS, receiver_table_name)
+    _require_keys(receiver_site_table, _SITE_KEYS, "receiver_site")
+    _require_keys(receiver_table, _RECEIVER_KEYS, "receiver")
     _require_keys(target_table, _TARGET_KEYS, "target")
     _require_keys(trajectory_table, _TRAJECTORY_KEYS, "trajectory")
     transmitter_site_table = document.get("transmitter_site")
@@ -488,7 +507,7 @@ def load_scenario(path: Path | str) -> Scenario:
         _require_keys(tracking_table, _TRACKING_KEYS, "tracking")
 
     bursts = tuple(
-        _burst_radar(burst, radar_table, receiver_table, transmitter_site_table)
+        _burst_radar(burst, receiver_site_table, receiver_table, transmitter_site_table)
         for burst in document["burst"]
     )
     n_pulses = tuple(int(burst["n_pulses"]) for burst in document["burst"])

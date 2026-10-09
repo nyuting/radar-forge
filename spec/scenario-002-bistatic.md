@@ -72,7 +72,7 @@ The processing chain is scenario 001's unchanged. Only the geometry block differ
 
 ```
   data/flight_coordinates.csv       scenarios/scenario_002_bistatic_*.toml
-            |                          [radar] + [transmitter_site] + [receiver_site]
+            |                          [transmitter_site] + [receiver_site]
             v                                        |
   pipelines/trajectories.py                          |
      to_bistatic_radar_frame  <------------------ BistaticRadar
@@ -181,7 +181,7 @@ Scenario 001 §3.5 holds unchanged. What is added or reinterpreted:
 | `BistaticTargetTrack` | `(n_frames,)` float64 per field: `range_tx_m`, `range_rx_m`, `bistatic_angle_rad`, `bisector_velocity_mps`, and tx/rx azimuth and elevation in degrees |
 | Coordinate frames | **Two** local ENU tangent planes, one per site. Transmit angles are angles of departure; receive angles are angles of arrival. They genuinely differ — that is what makes the geometry bistatic |
 | Type alias | `RadarLike = Radar \| BistaticRadar`; consumers widen to it rather than growing `bistatic_*` twins |
-| TOML layout | `[scenario] [radar] [transmitter_site] [receiver_site] [target] [trajectory] [[burst]]` — `[transmitter_site]` and `[receiver_site]` adjacent, matching `scenario_003_tracking.toml` |
+| TOML layout | `[scenario] [target] [trajectory] [transmitter_site] [[burst]] [receiver_site] [receiver]` — signal-path order: the truth, the transmit end, the receive end. Each table is named for what it holds: `[receiver_site]` is coordinates, `[receiver]` the receive chain. A burst is not a transmitter table, because it also carries `sample_rate_hz` and `n_pulses`. Every scenario TOML uses this layout |
 
 Selecting the siting is data, not an argument: `pipelines/scenarios.py` builds a `BistaticRadar`
 when a `[transmitter_site]` table is present, so a monostatic scenario file is unchanged by the
@@ -335,7 +335,7 @@ geometry alongside the first.
              |
              v
   5. pipelines/scenarios.py      [transmitter_site] present -> BistaticRadar
-             |                    [receiver] -> [receiver_site], moved adjacent
+             |                    [receiver_site] coordinates, [receiver] chain
              v
   6. scenarios/scenario_002_bistatic_{xband,sband}.toml
              |
@@ -352,7 +352,7 @@ geometry alongside the first.
 | 2 | `core/radar_equation.py` *(edit)* | `bistatic_received_power_w`. Additive; `received_power_w` is unchanged and remains the monostatic special case. |
 | 3 | `core/signal.py` *(widen)* | `bistatic_line_of_sight_paths` producing the same `PropagationPaths`; `fmcw_deramp_baseband` and `pulsed_baseband` widen to `RadarLike`. |
 | 4 | `pipelines/trajectories.py` *(edit)* | `BistaticTargetTrack` and `to_bistatic_radar_frame`. No `radial_velocity_mps` field: a bistatic target has two radial velocities and the Doppler shift measures neither. |
-| 5 | `pipelines/scenarios.py` *(edit)* | Siting selected by the presence of `[transmitter_site]`. `[receiver]` becomes `[receiver_site]`, placed directly after `[transmitter_site]` (refactor-001 §3.1). |
+| 5 | `pipelines/scenarios.py` *(edit)* | Siting selected by the presence of `[transmitter_site]`. The receiving site's coordinates are `[receiver_site]` and its chain `[receiver]`; the TOML layout row of §3 gives the order. |
 | 6 | `scenarios/*.toml` *(new)* | Two files differing in `[[burst]].f0_hz` alone. |
 | 7 | `viz/scopes/rd_map.py` *(edit)* | Axis label only. The array is the same array. |
 | 8 | `tests/pipelines/test_scenario_002.py` *(new)* | Build the degeneracy test first; everything else is meaningless until it passes. |

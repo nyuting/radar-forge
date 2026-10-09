@@ -7,16 +7,6 @@ name = "scenario-001-fmcw-low-prf"
 description = "S1: FMCW at 1 kHz PRF. Range is unambiguous to 37.5 km; Doppler folds at +-7.65 m/s, so an 80 m/s aircraft aliases about five times."
 seed = 20260911
 
-[radar]
-# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna.
-latitude_deg = 36.00250
-longitude_deg = -78.94100
-altitude_m = 60.0
-
-[receiver]
-gain_rx_dbi = 30.0
-noise_figure_db = 3.0
-
 [target]
 name = "light-aircraft"
 rcs_dbsm = 10.0        # 10 m^2, Swerling 0 (non-fluctuating)
@@ -40,3 +30,13 @@ chirp_duration_s = 1.0e-3
 prf_hz = 1.0e3
 sample_rate_hz = 1.0e6
 n_pulses = 256
+
+[receiver_site]
+# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna.
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
+
+[receiver]
+gain_rx_dbi = 30.0
+noise_figure_db = 3.0
