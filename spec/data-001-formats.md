@@ -122,7 +122,7 @@ its predecessor plus the metadata.
 | L1 | Raw baseband IQ, `data_ftst` | `iq.h5` | `pipelines/scenarios.py` (`Frame.iq`) |
 | L2 | Processed arrays: `data_rfst`, `data_rv`, CFAR threshold, noise | `products.h5` | `pipelines/scenarios.py` (`RangeDopplerProduct`), `core/detection.py` |
 | L3 | Detections (plots) | `detections.csv` | `pipelines/tracking.py` (`Measurement`) |
-| L4 | Tracks | `tracks.csv` | `core/tracking.py` via `pipelines/tracking.py` (`FrameTracks`) |
+| L4 | Tracks | `tracks.csv` | `core/tracking/` via `pipelines/tracking.py` (`FrameTracks`) |
 | — | Ground truth | `truth.csv` | `pipelines/trajectories.py` (`TargetTrack`, `BistaticTargetTrack`) |
 | — | Performance metrics | `metrics.csv` | acceptance tests, later a metrics module |
 | — | Exports | `exports/coco.json` | `pipelines/exporters/` (design only) |
@@ -160,7 +160,7 @@ original scenario file has been edited.
 | **Frame index** | `frame` is a zero-based integer. Together with `time_s` it is the join key across every file of a run |
 | **Coordinate frames** | Geodetic WGS-84 (`latitude_deg`, `longitude_deg`, `altitude_m` above the **ellipsoid**) → ECEF → local **ENU** tangent plane at the reference site, per `core/geodesy.py`. The reference site is the receiver for bistatic runs, and `metadata.json` names it (§6.1). ENU columns are `east_m`, `north_m`, `up_m` |
 | **Angles** | `azimuth_deg` is measured from **true north, increasing clockwise** (a compass bearing). `elevation_deg` is measured up from the local horizontal. Both are seen from the reference site. Radians inside `core/`, degrees in every file (DF6). The name `azimuth_boresight_deg` is reserved for antenna-frame angles when `array/` lands (DF2) |
-| **Velocity sign** | **Closing is positive, in every file**, per `spec/structure.md` D5 and `core/tracking.py`. That covers `radial_velocity_mps` (truth), `velocity_*_mps` (detections, the RD axis) and `range_rate_mps` (tracks). Stone Soup and ASTERIX use opening-positive range rate, so readers negate at that boundary (§7.4, DF7). ENU rates (`east_rate_mps`, …) are ordinary time derivatives, with no sign convention to choose |
+| **Velocity sign** | **Closing is positive, in every file**, per `spec/structure.md` D5 and `core/tracking/`. That covers `radial_velocity_mps` (truth), `velocity_*_mps` (detections, the RD axis) and `range_rate_mps` (tracks). Stone Soup and ASTERIX use opening-positive range rate, so readers negate at that boundary (§7.4, DF7). ENU rates (`east_rate_mps`, …) are ordinary time derivatives, with no sign convention to choose |
 | **Bistatic reading** | `range_m` is the bistatic mean range `(R_t + R_r)/2`, and `radial_velocity_mps` is the bisector rate, per `spec/structure.md` D6. The individual legs appear only in the columns that name them |
 | **Units** | The `style.md` §2 suffix table, applied to every column and dataset name. Compound units follow the pattern already in use: `_m2` (m²), `_m2ps2` (m²/s²), `_mps2` (m/s²). An off-diagonal covariance column takes its unit from `metadata.json` (§6.6) |
 | **Identifiers** | `target_id`, `track_id`, `sensor_id`: strings or integers, stable for the whole run, never reused. `detection_id` is an integer that is unique **within a frame**, so `(frame, detection_id)` is the detection key |
@@ -580,7 +580,7 @@ file. It is converted at write time, as `truth.csv`'s `bistatic_angle_deg` alrea
 
 ### DF7 — Closing-positive velocity everywhere on disk
 
-`core/tracking.py` states that range rate is positive closing, per D5, and `range_rate_mps` in
+`core/tracking/` states that range rate is positive closing, per D5, and `range_rate_mps` in
 `tracks.csv` inherits it. Stone Soup and ASTERIX use opening-positive range rate. We keep one sign
 across every file and flip at the external boundary (§7.4), rather than giving the tracker's output
 a different sign from its input. The `conventions.velocity_sign` string lets a reader check it.

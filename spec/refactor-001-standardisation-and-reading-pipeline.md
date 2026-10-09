@@ -79,7 +79,7 @@ Current order is `[scenario] [radar] [transmitter_site] [receiver] [target] [tra
 In `scenarios/scenario_003_tracking.toml` and `scenario_003_tracking_dual_prf.toml`, restore the
 missing `enu_2d` parameters alongside `range_1d` under `state_model`. Both files currently pin
 `state_model = "range_1d"` and carry only that model's `sigma_*` values, even though
-`core/tracking.py` ships `range_1d`, `enu_2d` and `enu_3d`.
+`core/tracking/kalman.py` ships `range_1d`, `enu_2d` and `enu_3d`.
 
 ## 4. Specification overhaul and documentation architecture
 
