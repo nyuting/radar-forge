@@ -1,11 +1,10 @@
-# `core/` audit — refactor-002 §1.2 and §1.3
+# `core/` audit — code against spec
 
 Scope: every public name in `src/radar_forge/core/`. `pipelines/`, `viz/` (then `teaching/`) and `scripts/`
 are a separate stream and are untouched here, as are `docs/conventions/style.md` and
 `scripts/check_conventions.py`.
 
-The audit has two halves, per `spec/refactor-002-spec-first-audit.md` §1.2 as reframed by its
-§4.1. **Conformance**: does the code compute what the specs say, to the accuracy they claim,
+The audit has two halves, per the [audit method](README.md#1-auditing-code-against-the-spec). **Conformance**: does the code compute what the specs say, to the accuracy they claim,
 with the contract they document, under `structure.md`'s decisions D1–D8? **Quality**: is this
 the best available form, across all eight Q dimensions, whether or not conformance holds?
 
@@ -152,7 +151,7 @@ own §3.2 sidebar derives and which `Radar.__post_init__` enforces only for the 
 | `processing_loss_db` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 The window shapes come from `scipy.signal.windows` rather than being reimplemented, which is
-both the right dependency call and R1.3.3-clean. Two details are better than the usual textbook
+both the right dependency call and clean under audit rule C3. Two details are better than the usual textbook
 treatment and are worth naming. The Taylor `nbar` is *derived* from the requested sidelobe
 level, `nbar ≥ 2A² + 1/2`; fixing it at a small constant, which is the common shortcut, silently
 returns a window that does not achieve the level it was asked for. And the Chebyshev design is
@@ -443,7 +442,7 @@ odd product. The default `axes` match data-001's `rd_layout = "frame,doppler,ran
 stack of frames works unchanged, and the rate test runs on just such a 3-D stack. The default
 OS rank is `default_os_rank(M // 2)`, which is Rohling's `3M/4` for the ring's own M. The
 threshold and the estimate compute it the same way, so they cannot disagree.
-`scipy.ndimage` is BSD-licensed, so D4 and R1.3.3 hold. The paragraph above that one was not
+`scipy.ndimage` is BSD-licensed, so D4 and audit rule C3 hold. The paragraph above that one was not
 right, and F9 corrects it.
 
 **Edge handling matches the 1-D sibling.** An incomplete ring gives `nan`, and the cell is
@@ -652,7 +651,7 @@ accumulator seed — a `zeros_like` of a further `np.take` — was a third copy,
 coefficient's term serves instead.
 
 Output is **bit-identical**, checked with `np.array_equal` for both canceller orders, so there is
-no behaviour to test under R1.3.1; the existing tests cover the result. Measured on this machine,
+no behaviour to test under audit rule C1; the existing tests cover the result. Measured on this machine,
 best of 5 repeats of 20 calls:
 
 | Case | Before | After | Speedup |
@@ -682,7 +681,7 @@ still gets the good error rather than a type error it cannot act on.
 
 ## F5 — The scenario 001 noise bandwidth was stated as 1 MHz
 
-This is the one divergence where the **spec** was the wrong party, handled under R1.3.4.
+This is the one divergence where the **spec** was the wrong party, handled under audit rule C4.
 
 `spec/scenario-001-xband.md` §3.2 gave the thermal noise power as
 "1.598e-14 W (kT₀·B·F at B = 1 MHz, F = 3 dB)". The *value* is right and `Radar.noise_power_w`
@@ -791,7 +790,7 @@ behaviour to verify red. The test pins a property of the noise, not of the code.
 
 ## F9 — Scenario 003 said a 2-D window halves the cells needed
 
-Corrected under R1.3.4, because the **spec** was the wrong party. §13.2 said a 2-D reference
+Corrected under audit rule C4, because the **spec** was the wrong party. §13.2 said a 2-D reference
 window "would also roughly halve the number of training cells needed for the same `pfa`".
 Its own "Landed" paragraph says, correctly, that the `pfa` depends only on the number of
 reference cells M. So the same `pfa` at the same CFAR loss needs the same M in any shape. What
@@ -806,7 +805,7 @@ two things on the 1-D path, both re-checked above.
 
 ## F10 — data-001 called a thermal noise power the CFAR estimate
 
-Corrected under R1.3.4. Data-001 §6.8 lists `rd/burst{k}/noise_power_w`, of shape
+Corrected under audit rule C4. Data-001 §6.8 lists `rd/burst{k}/noise_power_w`, of shape
 `(n_frames,)`, as "the noise estimate used by CFAR". That contradicts the vocabulary PR #4
 renamed `Detection` to protect. `noise_power_w` is the thermal noise power in `Radar`, in the
 same spec's `bursts[].noise_power_w`, and as the denominator of its own `snr_db` in §6.5. It also

@@ -1,4 +1,4 @@
-# Test audit — refactor-002 §2
+# Test audit
 
 Two parts, audited in parallel against the same rules. **Part 1** covers the eleven `tests/core/`
 modules that test the signal chain. **[Part 2](#part-2--pipelines-viz-tools-scripts-and-top-level)**
@@ -29,8 +29,8 @@ untouched. This stream changed no
 (`refactor/audit-cfar-2d`, "Stream A"), whose four new `test_detection.py` tests are classified
 below with the rest.
 
-Every test was judged against `spec/refactor-002-spec-first-audit.md` §2.1–§2.3 and against
-`docs/conventions/testing.md` §10.1 items 1–4: it names a plausible bug, it is the cheapest test
+Every test was judged by the [audit method](README.md#3-auditing-tests): `docs/conventions/testing.md`
+§10.1 item 5 for physical sense, and items 1–4: it names a plausible bug, it is the cheapest test
 that catches that bug, it tests our code rather than NumPy's or SciPy's, and it fits the time
 budget. The floor of testing.md §8 holds for every public function in the modules these files
 test: at least one test against known-correct values, every documented `Raises` triggered, and
@@ -38,8 +38,9 @@ every `Notes` edge case tested.
 
 ## Change of aim
 
-Spec §2.4 said no test is deleted for redundancy. On 2026-10-09 the user reversed that, and §2.4
-now records the reversal and the rules pruning is held to (R2.4.1–R2.4.6): "please
+The audit was first specified to classify tests without deleting any for redundancy. On
+2026-10-09 the user reversed that, and the rules pruning is held to are now
+[testing.md §10.10](../conventions/testing.md#1010-pruning-a-suite-review), P1–P6: "please
 del tests for being redundant. try to reduce the total number of tests. only keep the insightful
 and necessary ones." This audit therefore deletes as well as fixes. Every deletion names its
 survivor, the kept test that catches the same bug. No tolerance was loosened.
@@ -232,7 +233,7 @@ regime. quad agrees with the series to 2e-15; the assertion is rtol 1e-10.
 `spec/scenario-003-tracking.md` §12 attributed "245 760 cells; alpha = 11.417 dB" to
 `tests/core/test_detection.py`, and its §3 says the implementation must re-derive the valid-cell
 count and assert it in a test. No test asserted either number, here or in `tests/pipelines/`.
-Under refactor-002 R1.3.4 the figure is worth pinning: it is the operating point the scenario's
+Under audit rule [C4](README.md#2-changes-an-audit-makes) the spec could have been corrected instead, but the figure is worth pinning: it is the operating point the scenario's
 whole false-alarm budget is derived from. So it gets a test rather than a spec correction.
 
 `test_scenario_003_calibration_matches_its_specification` reads the operating point from
@@ -725,8 +726,8 @@ Scope: `tests/pipelines/test_scenario_001.py`, `test_scenario_002.py`, `test_sce
 Nothing in `src/`, `scripts/` or `tools/` was changed.
 
 The user asked for a smaller suite: "del tests for being redundant … only keep the insightful and
-necessary ones". That overrides the line in `spec/refactor-002-spec-first-audit.md` §2.4 that no test
-is deleted for redundancy. Each collected item (a parametrize case counts as one) gets one class:
+necessary ones". That overrode the audit's first instruction, that no test is deleted for redundancy;
+[testing.md §10.10](../conventions/testing.md#1010-pruning-a-suite-review) now holds the rule. Each collected item (a parametrize case counts as one) gets one class:
 
 | Class | Meaning | Action |
 | :--- | :--- | :--- |
@@ -748,9 +749,9 @@ whole tests or whole parametrize cases were deleted, and no surviving test body 
 PR #20 rewrote (`test_rejects_a_file_with_no_burst`, `test_rejects_a_file_missing_a_table`, all of
 `TestReceiveEndTables`, `test_deleting_the_table_makes_the_same_file_monostatic`) were left alone.
 
-For the viz, tools, scripts and top-level files, §2.1 (radar physics) and §2.2 (signal processing)
-of the refactor-002 spec do not apply: these tests check structure, not radar behaviour. They are
-judged on §2.3 and §10.1 alone.
+For the viz, tools, scripts and top-level files, the radar-physics and signal-processing checks of
+testing.md §10.1 item 5 do not apply: these tests check structure, not radar behaviour. They are
+judged on §10.1 items 1–4 and on whether their assertions are readable and test true invariants.
 
 ## tests/pipelines/test_scenario_001.py
 
@@ -1053,7 +1054,7 @@ only. Scenario 002 does not assert power, by its own D8. Nothing here was delete
 
 **Note on `spec/scenario-002-bistatic.md` §5.** That section says `test_scenario_001.py` is "read,
 never edited". It is a build-order rule for the scenario-002 slice: the monostatic path must not move
-while the bistatic one is built. This audit edits the file under refactor-002's remit. Every A1–A5
+while the bistatic one is built. This audit edits the file; that build is done. Every A1–A5
 check is still in the file and green.
 
 ## Result — pipelines, viz, tools, scripts

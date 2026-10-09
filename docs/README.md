@@ -17,6 +17,11 @@ These are the rules the git hooks and CI enforce. Read them before your first co
   the work is done in, its layout, how a finding and a check are phrased, the voice, and what to
   review against.
 
+## Audits
+
+- [**audits/**](audits/README.md): how code is audited against the spec and how the test suite
+  is pruned, with the reports for `core/`, the pipelines and the tests.
+
 ## Getting started
 
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — setup, the development loop, what each hook does.

@@ -1,11 +1,11 @@
-# Pipelines audit — refactor-002 §1.2 and §1.3
+# Pipelines audit — code against spec
 
 Scope: `src/radar_forge/pipelines/`, `src/radar_forge/viz/` (audited as `teaching/`, before PR #16
 renamed it) and
 `scripts/run_scenario.py`. `src/radar_forge/core/` belongs to a parallel stream and is not
 touched here; neither is `docs/conventions/style.md` or `scripts/check_conventions.py`.
 
-Read `spec/refactor-002-spec-first-audit.md` §4.1 first. `spec/` carries no prototype
+The [audit method](README.md#1-auditing-code-against-the-spec) applies. `spec/` carries no prototype
 implementation — one 8-line dataclass sketch and no other `def`, `import`, `return` or `np.`
 in any fenced block — so there is no rival code to diff against. "Reference" here means the
 **specified behaviour**: the build sequences and acceptance matrices of
@@ -20,7 +20,7 @@ the better implementation available. An honest "no change, here is why" is a res
 
 - **`teaching/` is now `viz/`** (PR #16). Paths in this audit say which name they were audited
   under.
-- **The tests behind this audit were pruned** in refactor-002 §2: see
+- **The tests behind this audit were pruned** under [testing.md §10.10](../conventions/testing.md#1010-pruning-a-suite-review): see
   [`tests-audit.md`](tests-audit.md). No finding here depended on a deleted test.
 
 ## Status at 2026-10-08
@@ -307,7 +307,7 @@ every point it drew.
 Here the specification was the party that was wrong. `spec/scenario-003-tracking.md` §9 and
 `spec/structure.md` both call it a plan view and the implementation inherited the term.
 Renamed to `render_range_time_history`, with every call site, test, docstring and specification
-reference moved in the same commit, and recorded in §14.8 per R1.3.4.
+reference moved in the same commit, and recorded in §14.8 per audit rule C4.
 
 ### F6 — Three more names that did not say what they meant
 
@@ -431,7 +431,7 @@ for a benefit that is purely consistency. Recommended, not applied.
 **`peak_range_velocity`'s bare tuple, and `build_tracker`'s bare `bool`.** Both are weak return
 contracts. Both have one call site, both are documented, and neither has been misused.
 
-**No test tolerance was touched**, and no number in any test moved. R1.3.2 did not come up: the
+**No test tolerance was touched**, and no number in any test moved. Audit rule C2 did not come up: the
 one figure that moved is a docstring claim about a measurement, re-derived by re-running the
 measurement, and it is recorded in [F3](#f3--the-sigma_accel_mps2-margin-no-longer-exists).
 

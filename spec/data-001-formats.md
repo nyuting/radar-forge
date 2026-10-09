@@ -389,7 +389,7 @@ the range-Doppler stage runs (DF5).
   divided by the threshold factor α. An earlier draft described this dataset as "the noise
   estimate used by CFAR", which contradicted both the name, which means thermal noise everywhere
   else in this spec and in `core/`, and the shape. No file had been written to this layout, so
-  the correction moves no data (refactor-002 audit, `docs/audits/core-audit.md` F10).
+  the correction moves no data (`docs/audits/core-audit.md` F10).
 - A future range-Doppler-azimuth cube goes in `/rda/burst{k}/data`,
   `(n_frames, n_doppler_bins, n_range_bins, n_azimuth_bins)`, following the channel-last rule.
   Its azimuth scale is `azimuth_boresight_deg` (DF2).

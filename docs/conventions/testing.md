@@ -253,7 +253,8 @@ Every test runs on every push, so a domain test must clear all five:
    A test that fails this check is either **weak**, meaning it passes for an unconvincing
    reason, or **wrong**, meaning it asserts something untrue or unphysical. Rewrite a weak
    test's setup or assertion. Fix a wrong one, and say in the commit what it was hiding.
-   Labelling the test isn't enough.
+   Labelling the test isn't enough. A test that fails items 2 or 3 is **redundant**: §10.10
+   says when it is deleted.
 
 Not tests:
 
@@ -359,3 +360,37 @@ A statistical test fails 0.1 % of the time by design at 99.9 %. With a fixed see
 either always passes or always fails, so a new failure means the code changed. Changing the
 seed until it passes is loosening a tolerance (§2). Raising the confidence level needs the
 same justification in the commit body.
+
+### 10.10 Pruning a suite **[review]**
+
+Every test runs on every push, so a test that catches no bug a kept test doesn't already catch
+costs reading time and run time and buys nothing. When a suite or a file is audited, each
+collected test gets one class:
+
+| Class | Meaning | Action |
+| :--- | :--- | :--- |
+| **Sound** | Passes §10.1 | Keep |
+| **Redundant** | Fails §10.1 item 2 or 3: a kept test already catches its bug, or it tests NumPy's code | Delete |
+| **Weak** | Aims at a real bug, but its setup or assertion doesn't convince (§10.1 item 5) | Rewrite, or delete if a kept test already catches the bug |
+| **Wrong** | Asserts something untrue or unphysical | Fix, and say what it was hiding |
+
+Typical redundant tests are:
+- a pipeline test re-checking what a unit test pins down;
+- a shape or dtype assertion that a value assertion already implies;
+- a parametrize case that adds no new regime;
+- two tests of one invariant from the same angle.
+
+Pruning is held to these rules:
+
+| Rule | Statement |
+| :--- | :--- |
+| P1 | After pruning, §8's floor holds for every public function: a test against known-correct values, one for each documented `Raises`, and one for each edge case its `Notes` names |
+| P2 | A live regression test (§9) is kept, and so is a test a spec or audit cites by name, unless the citation moves with it |
+| P3 | Every deletion names its survivor: the kept test that catches the same bug |
+| P4 | Line and branch coverage of `src/` do not drop. Compare `pytest --cov --cov-branch` before and after, per file. A line pruning uncovers is covered again, or the reason is written down |
+| P5 | Counts are of collected items, so a parametrize case is a test. Folding tests into one parametrized test is not a reduction |
+| P6 | A sample of deletions is checked by mutation: break what the deleted test guarded, and its survivor fails |
+
+A rewrite keeps or tightens its bound (§2). Deleting a test is not loosening a tolerance, but a
+rewritten assertion is held to the same rule. Record the audit in `docs/audits/tests-audit.md`
+([`docs/audits/README.md`](../audits/README.md) gives the layout).
