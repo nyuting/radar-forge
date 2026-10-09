@@ -1,6 +1,10 @@
 # Refactor 002 — Spec-first reference comparison, qualitative test evaluation, anchor invariant
 
-Status: **specified, partially blocked**. Three items: a function-by-function audit of `src/`
+Status: **implemented, except tracking**, which is deferred to tracker-001 (§4.5). The results
+are in [`docs/audits/core-audit.md`](../docs/audits/core-audit.md) and
+[`pipelines-audit.md`](../docs/audits/pipelines-audit.md) (§1), and
+[`tests-audit.md`](../docs/audits/tests-audit.md) (§2: 926 tests in scope cut to 660, the whole
+suite 1563 to 1297). §5 gives each criterion's status. Three items: a function-by-function audit of `src/`
 against the specifications that predate it, a qualitative (rather than structural) audit of the
 test suite, and a navigational invariant for Markdown summary tables.
 
@@ -224,14 +228,14 @@ once step 7 has merged and is checked by its AC11.
 
 ## 5. Acceptance criteria
 
-| # | Criterion | Verified by |
-| :--- | :--- | :--- |
-| A1 | `make check` passes | CI, `pre-push` |
-| A2 | Every public function in `src/` has an audit verdict recorded | Audit document |
-| A3 | Every Q3 performance claim carries a benchmark | Review |
-| A4 | Every behavioural change has a test that fails without it | `git diff`, review |
-| A5 | No tolerance weakened without a documented first-principles derivation | Review |
-| A6 | Every test classified sound / redundant / weak / wrong; redundant deleted, weak and wrong addressed, R2.4.1–R2.4.6 held | Audit document |
-| A7 | Every navigational table row carries a resolving anchor | Link check |
-| A8 | The anchor invariant is stated in `docs/conventions/style.md` | `grep` |
-| A9 | Spec-vs-code divergences resolved on whichever side was wrong, and recorded | Review |
+| # | Criterion | Verified by | Status |
+| :--- | :--- | :--- | :--- |
+| A1 | `make check` passes | CI, `pre-push` | Met |
+| A2 | Every public function in `src/` has an audit verdict recorded | Audit document | Met outside tracking; tracking deferred (§4.5) |
+| A3 | Every Q3 performance claim carries a benchmark | Review | Met: core-audit F3 and the 2-D CFAR section, pipelines-audit F10 |
+| A4 | Every behavioural change has a test that fails without it | `git diff`, review | Met: core-audit F6 is the one behavioural change, red-checked |
+| A5 | No tolerance weakened without a documented first-principles derivation | Review | Met: none weakened; every moved bound is tightened and derived in tests-audit |
+| A6 | Every test classified sound / redundant / weak / wrong; redundant deleted, weak and wrong addressed, R2.4.1–R2.4.6 held | Audit document | Met outside tracking; tracking deferred (§4.5) |
+| A7 | Every navigational table row carries a resolving anchor | Link check | Met. R7 had modelled GitHub's slugs wrongly, collapsing the two hyphens a dash leaves; it now follows GitHub, and 58 links were corrected |
+| A8 | The anchor invariant is stated in `docs/conventions/style.md` | `grep` | Met: style.md §12 |
+| A9 | Spec-vs-code divergences resolved on whichever side was wrong, and recorded | Review | Met: core-audit F5, F9 and F10 corrected the spec; tests-audit W20 added the test the spec cited |
