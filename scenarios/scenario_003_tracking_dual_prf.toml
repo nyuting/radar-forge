@@ -19,16 +19,6 @@ name = "scenario-003-tracking-dual-prf"
 description = "The scenario 003 tracker over the S3 dual-PRF waveform, where the coprime 5:6 kHz pair resolves velocity to +-229 m/s and no track-aided unfolding is needed."
 seed = 20260911
 
-[radar]
-# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna.
-latitude_deg = 36.00250
-longitude_deg = -78.94100
-altitude_m = 60.0
-
-[receiver]
-gain_rx_dbi = 30.0
-noise_figure_db = 3.0
-
 [target]
 name = "light-aircraft"
 rcs_dbsm = 10.0
@@ -66,6 +56,16 @@ chirp_duration_s = 1.6666666666666667e-4
 prf_hz = 6.0e3
 sample_rate_hz = 4.0e6
 n_pulses = 128
+
+[receiver_site]
+# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna.
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
+
+[receiver]
+gain_rx_dbi = 30.0
+noise_figure_db = 3.0
 
 # Cell-averaging CFAR along range. 245,760 of the 256,000 cells carry a
 # complete reference window, so pfa = 1e-5 puts about 2.46 false alarms in

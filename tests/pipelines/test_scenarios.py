@@ -83,7 +83,7 @@ class TestLoadScenario:
         bare = tmp_path / "no_burst.toml"
         bare.write_text(
             '[scenario]\nname = "x"\nseed = 1\n'
-            "[radar]\nlatitude_deg = 0.0\nlongitude_deg = 0.0\naltitude_m = 0.0\n"
+            "[receiver_site]\nlatitude_deg = 0.0\nlongitude_deg = 0.0\naltitude_m = 0.0\n"
             "[receiver]\ngain_rx_dbi = 30.0\nnoise_figure_db = 3.0\n"
             "[target]\nrcs_dbsm = 10.0\naltitude_m = 1500.0\n"
             '[trajectory]\npath = "t.csv"\nstart_time_s = 0.0\n'
@@ -93,9 +93,9 @@ class TestLoadScenario:
             load_scenario(bare)
 
     def test_rejects_a_file_missing_a_table(self, tmp_path: Path) -> None:
-        bare = tmp_path / "no_radar.toml"
+        bare = tmp_path / "no_target.toml"
         bare.write_text('[scenario]\nname = "x"\nseed = 1\n')
-        with pytest.raises(ValueError, match=r"missing the required \[radar\] table"):
+        with pytest.raises(ValueError, match=r"missing the required \[target\] table"):
             load_scenario(bare)
 
     def test_bad_physics_is_reported_by_the_radar_not_the_loader(self, tmp_path: Path) -> None:
@@ -312,44 +312,44 @@ class TestDegenerateWindows:
             list(iterate_frames(degenerate))
 
 
-class TestReceiverTableSpelling:
-    """[receiver_site] is the current spelling and [receiver] the older one."""
+class TestReceiveEndTables:
+    """[receiver_site] is where the receiver stands; [receiver] is its chain."""
 
-    def test_rejects_a_file_with_neither_receiver_table(self, tmp_path: Path) -> None:
+    def test_rejects_a_file_with_no_receive_chain(self, tmp_path: Path) -> None:
         """A radar with no receive chain cannot be defaulted into existence."""
         broken = tmp_path / "no_receiver.toml"
         broken.write_text(S1_TOML.read_text().replace("[receiver]", "[receiver_chain]"))
-        with pytest.raises(ValueError, match=r"missing the required \[receiver_site\] table"):
+        with pytest.raises(ValueError, match=r"missing the required \[receiver\] table"):
             load_scenario(broken)
 
-    def test_rejects_a_file_carrying_both_spellings(self, tmp_path: Path) -> None:
-        """Two receive chains in one file: whichever wins, the other is ignored.
+    def test_rejects_the_retired_radar_table_by_name(self, tmp_path: Path) -> None:
+        """An old file must say what to rename, not fail on a stray key.
 
-        Silently preferring one would let an edit to the wrong table have no
-        effect, which is the least debuggable kind of configuration error.
+        Before the rename, scenario 002's [receiver_site] held the receive
+        chain. Read under the new names it would fail on ``gain_rx_dbi`` as an
+        unknown key, which is true but points at the wrong fix.
         """
-        original = S1_TOML.read_text()
-        both = tmp_path / "both.toml"
-        both.write_text(
-            original.replace(
-                "[receiver]",
-                "[receiver_site]\ngain_rx_dbi = 30.0\nnoise_figure_db = 3.0\n"
-                "sample_rate_hz = 1.0e6\n\n[receiver]",
-            )
-        )
-        with pytest.raises(ValueError, match="keep one"):
-            load_scenario(both)
+        old = tmp_path / "old.toml"
+        old.write_text(S1_TOML.read_text().replace("[receiver_site]", "[radar]"))
+        with pytest.raises(ValueError, match=r"now \[receiver_site\]"):
+            load_scenario(old)
 
-    def test_the_two_spellings_describe_the_same_radar(self, tmp_path: Path) -> None:
-        """Renaming the table must not change one number of the resulting radar.
+    def test_the_receiver_site_is_the_receiving_coordinates(self) -> None:
+        """Monostatic, the one site does both jobs; bistatic, it is the receiver."""
+        monostatic = load_scenario(S1_TOML).bursts[0]
+        bistatic = load_scenario(B1_TOML).bursts[0]
+        assert isinstance(monostatic, Radar)
+        assert isinstance(bistatic, BistaticRadar)
+        assert monostatic.latitude_deg == bistatic.receiver_latitude_deg == 36.00250
+        assert monostatic.longitude_deg == bistatic.receiver_longitude_deg == -78.94100
 
-        The rename in refactor-001 S3.1 is presentational; this is the test that
-        says so, and it would fail if the newer spelling were parsed by a
-        different code path with different defaults.
-        """
-        renamed = tmp_path / "renamed.toml"
-        renamed.write_text(S1_TOML.read_text().replace("[receiver]", "[receiver_site]"))
-        assert load_scenario(renamed).bursts[0] == load_scenario(S1_TOML).bursts[0]
+    def test_table_order_does_not_change_the_radar(self, tmp_path: Path) -> None:
+        """The signal-path order is for the reader; the loader must not depend on it."""
+        text = S1_TOML.read_text()
+        receive_end = text.index("[receiver_site]")
+        reordered = tmp_path / "reordered.toml"
+        reordered.write_text(text[receive_end:] + "\n" + text[:receive_end])
+        assert load_scenario(reordered).bursts == load_scenario(S1_TOML).bursts
 
 
 class TestBurstRangeDoppler:
@@ -495,7 +495,7 @@ class TestBistaticScenarios:
         """The table's presence is the whole switch; nothing else selects siting."""
         text = B1_TOML.read_text()
         start = text.index("[transmitter_site]")
-        end = text.index("[receiver_site]")
+        end = text.index("\n\n", start)
         monostatic = tmp_path / "monostatic.toml"
         monostatic.write_text(text[:start] + text[end:])
         # The trajectory path is resolved relative to the TOML, so it moves too.

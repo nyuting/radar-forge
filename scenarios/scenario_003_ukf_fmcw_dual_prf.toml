@@ -9,16 +9,6 @@ name = "scenario-003-ukf-fmcw-dual-prf"
 description = "The UKF tracker over scenario 001's S3. The coprime 5:6 kHz pair unfolds velocity to +-229 m/s, so range and range rate are both measured from a track's first frame."
 seed = 20260911
 
-[radar]
-# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna.
-latitude_deg = 36.00250
-longitude_deg = -78.94100
-altitude_m = 60.0
-
-[receiver]
-gain_rx_dbi = 30.0
-noise_figure_db = 3.0
-
 [target]
 name = "light-aircraft"
 rcs_dbsm = 10.0        # 10 m^2, Swerling 0 (non-fluctuating)
@@ -60,6 +50,16 @@ chirp_duration_s = 1.6666666666666667e-4
 prf_hz = 6.0e3
 sample_rate_hz = 4.0e6
 n_pulses = 128
+
+[receiver_site]
+# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna.
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
+
+[receiver]
+gain_rx_dbi = 30.0
+noise_figure_db = 3.0
 
 # Cell-averaging CFAR along range, as in scenario_003_tracking.toml, so the
 # two trackers are compared on the same detections.
