@@ -116,9 +116,14 @@ class TestTheBaselineCollapsesToScenario001:
 class TestTheRangeAxisCarriesTheMeanRange:
     """Not R_t, not R_r, and not their sum: their half-sum. Spec D6."""
 
-    def test_the_peak_lands_at_the_bistatic_mean_range(self) -> None:
-        """A2 on B1. The range axis does not depend on the carrier, so B2 adds nothing here."""
-        scenario = _short(B1_TOML)
+    @pytest.mark.parametrize("toml_path", [B1_TOML, B2_TOML], ids=["b1-xband", "b2-sband"])
+    def test_the_peak_lands_at_the_bistatic_mean_range(self, toml_path: Path) -> None:
+        """A2, on both variants as the spec's matrix asks.
+
+        The range axis is the same for both, but the FMCW beat frequency also
+        carries the Doppler shift, and that differs by the carrier ratio of 3.5.
+        """
+        scenario = _short(toml_path)
         burst = scenario.bursts[0]
         for frame in iterate_frames(scenario):
             product = form_range_doppler_map(frame.iq[0], burst)
