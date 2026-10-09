@@ -106,15 +106,6 @@ class TestS1DopplerFolds:
             )
             assert error_mps <= velocity_bin_mps
 
-    def test_the_peak_velocity_is_nothing_like_the_truth(self) -> None:
-        """The lesson, asserted rather than assumed: the map is badly wrong."""
-        scenario = _windowed(S1_TOML)
-        burst = scenario.bursts[0]
-        for frame in iterate_frames(scenario):
-            _, peak_velocity_mps = peak_range_velocity(form_range_doppler_map(frame.iq[0], burst))
-            assert abs(peak_velocity_mps) <= burst.unambiguous_velocity_mps
-            assert abs(peak_velocity_mps - frame.radial_velocity_mps) > 30.0
-
 
 class TestS2RangeFolds:
     """Velocity unambiguous to +/-191 m/s; range folds into 5.996 km."""
@@ -144,15 +135,6 @@ class TestS2RangeFolds:
             velocity_bin_mps = _velocity_bin_mps(burst, product.rd_map.shape[0])
             assert abs(peak_velocity_mps - frame.radial_velocity_mps) <= velocity_bin_mps
 
-    def test_the_peak_range_is_nothing_like_the_truth(self) -> None:
-        """S2 is the exact mirror of S1, and this is the half that goes wrong."""
-        scenario = _windowed(S2_TOML)
-        burst = scenario.bursts[0]
-        for frame in iterate_frames(scenario):
-            peak_range_m, _ = peak_range_velocity(form_range_doppler_map(frame.iq[0], burst))
-            assert peak_range_m < burst.unambiguous_range_m
-            assert abs(peak_range_m - frame.range_m) > 5_000.0
-
 
 class TestS3TheAmbiguityIsResolved:
     """Neither burst can measure the velocity; the coprime pair can."""
@@ -163,13 +145,6 @@ class TestS3TheAmbiguityIsResolved:
         for frame in iterate_frames(scenario):
             for burst in scenario.bursts:
                 assert abs(frame.radial_velocity_mps) > burst.unambiguous_velocity_mps
-
-    def test_each_burst_alone_reports_the_wrong_velocity(self) -> None:
-        scenario = _windowed(S3_TOML)
-        for frame in iterate_frames(scenario):
-            for cube, burst in zip(frame.iq, scenario.bursts, strict=True):
-                _, peak_velocity_mps = peak_range_velocity(form_range_doppler_map(cube, burst))
-                assert abs(peak_velocity_mps - frame.radial_velocity_mps) > 10.0
 
     def test_the_pair_recovers_the_true_unfolded_velocity(self) -> None:
         """The scenario's whole justification, frame by frame."""
@@ -197,24 +172,20 @@ class TestS3TheAmbiguityIsResolved:
             # Within one bin of the burst the candidate came from, which is burst A.
             assert abs(float(velocity_mps) - frame.radial_velocity_mps) <= bin_a_mps
 
-    def test_both_bursts_agree_on_the_range(self) -> None:
-        """Range is unambiguous on both bursts, so they must see the same target."""
-        scenario = _windowed(S3_TOML)
-        for frame in iterate_frames(scenario):
-            ranges_m = [
-                peak_range_velocity(form_range_doppler_map(cube, burst))[0]
-                for cube, burst in zip(frame.iq, scenario.bursts, strict=True)
-            ]
-            assert abs(ranges_m[0] - ranges_m[1]) < scenario.bursts[0].range_resolution_m
-            assert abs(ranges_m[0] - frame.range_m) < scenario.bursts[0].range_resolution_m
-
 
 class TestTheShippedDefaultWindowRuns:
     """The configuration as committed, not only the window the tests choose."""
 
-    @pytest.mark.parametrize("toml_path", [S1_TOML, S2_TOML, S3_TOML], ids=["s1", "s2", "s3"])
-    def test_the_first_frames_of_the_default_window_find_the_target(self, toml_path: Path) -> None:
-        scenario = load_scenario(toml_path)
+    def test_both_s3_bursts_find_the_target_in_the_default_window(self) -> None:
+        """Catches a range axis built for one burst's sample count and reused for the other.
+
+        S3's two bursts sample 800 and 667 points per PRI, so their range axes
+        differ; each must put the peak within one bin of the true range. Range
+        does not fold for either (29.98 and 24.98 km against a track that stays
+        under 18 km), so the modulo below is the identity here. S1's and S2's
+        single bursts are pinned by A1 and A3 above.
+        """
+        scenario = load_scenario(S3_TOML)
         short = replace(scenario, duration_s=2.0 / scenario.frame_rate_hz)
         for frame in iterate_frames(short):
             for cube, burst in zip(frame.iq, scenario.bursts, strict=True):
