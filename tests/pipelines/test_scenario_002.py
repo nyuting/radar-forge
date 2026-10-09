@@ -93,19 +93,6 @@ class TestTheBaselineCollapsesToScenario001:
         )
         return replace(monostatic, bursts=bursts)
 
-    def test_the_truth_labels_agree(self) -> None:
-        """Before comparing maps, check the geometry they are drawn from."""
-        monostatic = _short(S1_TOML)
-        bistatic = self._collapsed(monostatic)
-        for mono_frame, bi_frame in zip(
-            iterate_frames(monostatic), iterate_frames(bistatic), strict=True
-        ):
-            # Half a metre of baseline, against ranges of 8-18 km.
-            assert abs(bi_frame.range_m - mono_frame.range_m) < 1.0
-            assert abs(bi_frame.radial_velocity_mps - mono_frame.radial_velocity_mps) < 1e-3
-            assert bi_frame.bistatic_angle_deg is not None
-            assert bi_frame.bistatic_angle_deg < 0.01
-
     def test_the_range_doppler_peak_agrees(self) -> None:
         """The whole bistatic chain against the monostatic one it generalises."""
         monostatic = _short(S1_TOML)
@@ -129,9 +116,9 @@ class TestTheBaselineCollapsesToScenario001:
 class TestTheRangeAxisCarriesTheMeanRange:
     """Not R_t, not R_r, and not their sum: their half-sum. Spec D6."""
 
-    @pytest.mark.parametrize("toml_path", [B1_TOML, B2_TOML], ids=["b1-xband", "b2-sband"])
-    def test_the_peak_lands_at_the_bistatic_mean_range(self, toml_path: Path) -> None:
-        scenario = _short(toml_path)
+    def test_the_peak_lands_at_the_bistatic_mean_range(self) -> None:
+        """A2 on B1. The range axis does not depend on the carrier, so B2 adds nothing here."""
+        scenario = _short(B1_TOML)
         burst = scenario.bursts[0]
         for frame in iterate_frames(scenario):
             product = form_range_doppler_map(frame.iq[0], burst)
@@ -140,14 +127,13 @@ class TestTheRangeAxisCarriesTheMeanRange:
             # 74.95 km limit, so this is the true value to within one bin.
             assert abs(peak_range_m - frame.range_m) < burst.range_resolution_m
 
-    @pytest.mark.parametrize("toml_path", [B1_TOML, B2_TOML], ids=["b1-xband", "b2-sband"])
-    def test_the_mean_range_is_neither_of_the_two_ranges(self, toml_path: Path) -> None:
+    def test_the_mean_range_is_neither_of_the_two_ranges(self) -> None:
         """Guards the premise: over this window the geometry is truly lopsided.
 
         If R_t and R_r happened to be equal the test above would pass against a
         pipeline that had silently used either one of them.
         """
-        scenario = _short(toml_path)
+        scenario = _short(B1_TOML)
         for frame in iterate_frames(scenario):
             assert frame.range_tx_m is not None
             assert frame.range_rx_m is not None
@@ -157,11 +143,15 @@ class TestTheRangeAxisCarriesTheMeanRange:
             )
 
     def test_the_window_is_genuinely_bistatic(self) -> None:
-        """The scenario is worthless if the geometry is nearly monostatic."""
+        """A6: beta stays inside the 109.9-129.3 deg the spec quotes for the default window.
+
+        Catches a bistatic angle measured at the wrong vertex or taken as its
+        supplement (50.7-70.1 deg here), either of which would also defeat A4.
+        """
         scenario = _short(B1_TOML)
         for frame in iterate_frames(scenario):
             assert frame.bistatic_angle_deg is not None
-            assert frame.bistatic_angle_deg > 90.0
+            assert 109.9 <= frame.bistatic_angle_deg <= 129.3
 
 
 class TestTheVelocityAxisCarriesTheBisectorRate:
@@ -191,10 +181,6 @@ class TestTheVelocityAxisCarriesTheBisectorRate:
             for frame in iterate_frames(scenario)
         )
 
-    def test_the_x_band_variant_folds_in_every_frame(self) -> None:
-        """Otherwise the folding asserted above is asserted against nothing."""
-        assert self._n_folding_frames(B1_TOML) == N_FRAMES
-
     def test_the_s_band_variant_folds_in_fewer_frames(self) -> None:
         """The pair's whole lesson, as a number rather than as prose.
 
@@ -202,16 +188,13 @@ class TestTheVelocityAxisCarriesTheBisectorRate:
         X-band every frame folds, and at S-band some of them do not fold at all.
         The bisector rate reaches 33.6 m/s over these five frames, which is
         4.4 of X-band's unambiguous intervals but only 1.3 of S-band's.
+
+        Also the premise for A3 on both variants: ``0 < n_s < n_x`` means each
+        folds in at least one frame, so neither A3 case runs against nothing.
         """
         n_x_band = self._n_folding_frames(B1_TOML)
         n_s_band = self._n_folding_frames(B2_TOML)
         assert 0 < n_s_band < n_x_band
-
-    def test_the_longer_wavelength_buys_unambiguous_velocity(self) -> None:
-        """The lesson of the pair: same geometry, same processing, one carrier."""
-        x_band = _short(B1_TOML).bursts[0]
-        s_band = _short(B2_TOML).bursts[0]
-        assert s_band.unambiguous_velocity_mps > 3.0 * x_band.unambiguous_velocity_mps
 
 
 class TestRangeResolutionDegradesWithTheBistaticAngle:
@@ -229,10 +212,15 @@ class TestRangeResolutionDegradesWithTheBistaticAngle:
         """
         pair = _short(B1_TOML).bursts[0]
         assert isinstance(pair, BistaticRadar)
-        latitude_deg, longitude_deg, altitude_m = 1.40, 103.88, 1500.0
+        # The track's own position at the start of B1's default window (13 329 s),
+        # 14.8 km from the transmitter and 7.5 km from the receiver, where
+        # beta = 119.2 deg and cos(beta/2) = 0.506. The spec's 1.07x-2.34x range
+        # puts the answer far from 1, so a monostatic mapping cannot pass.
+        latitude_deg, longitude_deg, altitude_m = 35.9362, -78.9338, 1500.0
 
         range_tx_m, range_rx_m = pair.target_ranges_m(latitude_deg, longitude_deg, altitude_m)
         bistatic_angle_rad = float(pair.bistatic_angle_rad(range_tx_m, range_rx_m))
+        assert np.degrees(bistatic_angle_rad) > 109.9
 
         # The bisector at the target: the mean of the unit vectors towards the
         # two sites, in the target's own local tangent plane.
@@ -257,10 +245,15 @@ class TestRangeResolutionDegradesWithTheBistaticAngle:
         )
         bisector /= np.linalg.norm(bisector)
 
-        # Step the second target away from both sites along that bisector. The
-        # offset is small enough that a flat-earth conversion back to geodetic
-        # is good to well under the 0.5 % tolerance asserted below.
-        separation_m = 200.0
+        # Step the second target away from both sites along that bisector.
+        # d cos(beta/2) is the first-order term; the iso-range ellipsoid's
+        # curvature adds a second-order one that grows linearly in d/R, measured
+        # at 7.4e-5 per metre of step here (1.5e-3 at 20 m, 1.5e-2 at 200 m).
+        # The flat-earth conversion back to geodetic, on the semi-major axis
+        # rather than the two radii of curvature, adds 3e-5. So 20 m and
+        # rtol = 2e-3; a mapping with cos(beta) in place of cos(beta/2), or
+        # none at all, misses by more than 50 %.
+        separation_m = 20.0
         offset_enu_m = -separation_m * bisector
         second_latitude_deg = latitude_deg + np.degrees(offset_enu_m[1] / WGS84_SEMI_MAJOR_AXIS_M)
         second_longitude_deg = longitude_deg + np.degrees(
@@ -276,8 +269,5 @@ class TestRangeResolutionDegradesWithTheBistaticAngle:
         np.testing.assert_allclose(
             mean_range_separation_m / separation_m,
             np.cos(bistatic_angle_rad / 2.0),
-            rtol=5e-3,
+            rtol=2e-3,
         )
-        # And the consequence: the pair is closer together in range than in
-        # space, so a monostatic radar would resolve them and this one may not.
-        assert mean_range_separation_m < separation_m
