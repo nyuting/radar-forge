@@ -62,7 +62,7 @@ to understand and to test; if a step is hard to test on its own, split it. The f
 | `docs/conventions/commits.md` | Commit and branch conventions |
 | `docs/conventions/testing.md` | Test layout, tolerances, golden data, markers |
 | `docs/conventions/review.md` | Doing and writing a PR review: procedure, layout, findings, checks, voice, what to check against |
-| `docs/audits/README.md` | Auditing code against the spec and pruning tests: Q1–Q8, rules C1–C4, the reports |
+| `docs/conventions/audit.md` | Auditing code against the spec and pruning tests: Q1–Q8, rules C1–C4, the reports |
 | `src/radar_forge/core/constants.py` | Every physical constant, defined once |
 | `.githooks/` | pre-commit, commit-msg, pre-push |
 | `scripts/check_conventions.py` | Rules R1–R8: TOML config, layout, docstrings, constants, units, broadcasting, Markdown anchors, comment banners |

@@ -138,6 +138,7 @@ failure, not avoided it.
 | [conventions/style.md](docs/conventions/style.md) | Writing library code — naming, **units**, docstrings, typing |
 | [conventions/testing.md](docs/conventions/testing.md) | Writing tests — tolerances, ground truth, golden data, markers |
 | [conventions/review.md](docs/conventions/review.md) | Reviewing a PR — procedure, layout, findings, checks, voice |
+| [conventions/audit.md](docs/conventions/audit.md) | Auditing existing code or tests against the spec |
 | [spec/data-001-formats.md](spec/data-001-formats.md) | Writing or reading a run's output files — formats, columns, units |
 | [CLAUDE.md](CLAUDE.md) | Directing an AI agent at this repo |
 

@@ -29,7 +29,7 @@ untouched. This stream changed no
 (`refactor/audit-cfar-2d`, "Stream A"), whose four new `test_detection.py` tests are classified
 below with the rest.
 
-Every test was judged by the [audit method](README.md#3-auditing-tests): `docs/conventions/testing.md`
+Every test was judged by the [audit method](../conventions/audit.md#3-auditing-tests): `docs/conventions/testing.md`
 §10.1 item 5 for physical sense, and items 1–4: it names a plausible bug, it is the cheapest test
 that catches that bug, it tests our code rather than NumPy's or SciPy's, and it fits the time
 budget. The floor of testing.md §8 holds for every public function in the modules these files
@@ -233,7 +233,7 @@ regime. quad agrees with the series to 2e-15; the assertion is rtol 1e-10.
 `spec/scenario-003-tracking.md` §12 attributed "245 760 cells; alpha = 11.417 dB" to
 `tests/core/test_detection.py`, and its §3 says the implementation must re-derive the valid-cell
 count and assert it in a test. No test asserted either number, here or in `tests/pipelines/`.
-Under audit rule [C4](README.md#2-changes-an-audit-makes) the spec could have been corrected instead, but the figure is worth pinning: it is the operating point the scenario's
+Under audit rule [C4](../conventions/audit.md#2-changes-an-audit-makes) the spec could have been corrected instead, but the figure is worth pinning: it is the operating point the scenario's
 whole false-alarm budget is derived from. So it gets a test rather than a spec correction.
 
 `test_scenario_003_calibration_matches_its_specification` reads the operating point from

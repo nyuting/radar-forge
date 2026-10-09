@@ -1,14 +1,14 @@
 # Audits
 
-An audit checks code or tests that already exist, where a [review](../conventions/review.md)
+An audit checks code or tests that already exist, where a [review](review.md)
 checks a change. Its output is as much a set of findings as a set of diffs. An honest "no change,
 here is why" is a valid result for anything audited.
 
 | Report | Covers |
 | :--- | :--- |
-| [`core-audit.md`](core-audit.md) | `src/radar_forge/core/`, code against spec |
-| [`pipelines-audit.md`](pipelines-audit.md) | `pipelines/`, `viz/` and `scripts/run_scenario.py`, code against spec |
-| [`tests-audit.md`](tests-audit.md) | The test suite, classified and pruned |
+| [`core-audit.md`](../audits/core-audit.md) | `src/radar_forge/core/`, code against spec |
+| [`pipelines-audit.md`](../audits/pipelines-audit.md) | `pipelines/`, `viz/` and `scripts/run_scenario.py`, code against spec |
+| [`tests-audit.md`](../audits/tests-audit.md) | The test suite, classified and pruned |
 
 Not yet audited: the tracking package and its tests. That audit waits for the tracker migration,
 and is [`tracker-001` §13](../../spec/tracker-001.md#13-migration-from-todays-code) step 9.
@@ -59,8 +59,8 @@ whose shape is undocumented is as much a defect as a wrong constant.
 Each collected test is classified **Sound**, **Redundant**, **Weak** or **Wrong**, and acted on:
 Redundant ones are deleted, Weak ones rewritten, Wrong ones fixed. The classes, the floor that
 pruning may not go below and the checks it must pass are
-[`testing.md` §10.10](../conventions/testing.md#1010-pruning-a-suite-review). Judge each test's
-setup against [§10.1](../conventions/testing.md#101-what-earns-a-place-review) item 5 as well:
+[`testing.md` §10.10](testing.md#1010-pruning-a-suite-review). Judge each test's
+setup against [§10.1](testing.md#101-what-earns-a-place-review) item 5 as well:
 a test can pass and still describe a scenario no radar would meet.
 
 ## 4. Writing the report
@@ -69,7 +69,7 @@ One file per area, in this directory. Each has:
 
 1. **Scope**: what was audited, at which commit, and what was left out and why.
 2. **A verdict key** and a **findings index**: one linked row per finding, so a reader jumps to
-   the detail ([style.md §12](../conventions/style.md#12-summary-tables-link-to-their-sections-hook-r7)).
+   the detail ([style.md §12](style.md#12-summary-tables-link-to-their-sections-hook-r7)).
 3. **One verdict table per module or test file.**
 4. **The findings in detail**: what was wrong, what it was hiding, and the evidence. For code
    that means the red test (C1) or the measurement (Q3). For tests it means the counterexample.

@@ -4,7 +4,7 @@ Scope: every public name in `src/radar_forge/core/`. `pipelines/`, `viz/` (then 
 are a separate stream and are untouched here, as are `docs/conventions/style.md` and
 `scripts/check_conventions.py`.
 
-The audit has two halves, per the [audit method](README.md#1-auditing-code-against-the-spec). **Conformance**: does the code compute what the specs say, to the accuracy they claim,
+The audit has two halves, per the [audit method](../conventions/audit.md#1-auditing-code-against-the-spec). **Conformance**: does the code compute what the specs say, to the accuracy they claim,
 with the contract they document, under `structure.md`'s decisions D1–D8? **Quality**: is this
 the best available form, across all eight Q dimensions, whether or not conformance holds?
 
