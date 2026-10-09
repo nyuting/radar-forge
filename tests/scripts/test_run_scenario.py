@@ -97,17 +97,33 @@ class TestCell:
     def test_booleans_are_zero_or_one(self, value, cell):
         assert runner._cell(value) == cell
 
-    @pytest.mark.parametrize("value", [0.1, 1.0 / 3.0, 21.635652855125496, 1e-300, -0.0])
+    @pytest.mark.parametrize(
+        "value", [21.635652855125496, 1e-300, -0.0], ids=["17-digit", "tiny", "neg-zero"]
+    )
     def test_a_float_reads_back_exactly(self, value):
+        """Each case catches a different wrong format.
+
+        21.635652855125496 needs all 17 significant digits (``%.16g`` reads back
+        as a different float; 1/3 needs only 16, so it is not used). 1e-300
+        catches fixed-point notation. -0.0 catches a dropped sign, or a falsy
+        test that sends 0.0 to the empty not-applicable cell.
+        """
         assert float(runner._cell(value)) == value
 
     def test_a_float_is_not_padded_to_a_fixed_precision(self):
-        assert runner._cell(0.5) == "0.5"
+        """Shortest round-trip, not 17 significant digits.
+
+        0.1 is the case that tells them apart: ``%.17g`` writes
+        0.10000000000000001, which reads back exactly and so passes the
+        round-trip test above. 0.5 is exact in every format but ``%f``.
+        """
+        assert runner._cell(0.1) == "0.1"
 
 
 @pytest.mark.parametrize(
     "name",
-    ["scenario_003_tracking", "scenario_003_tracking_dual_prf", "scenario_003_ukf_fmcw_dual_prf"],
+    # One TOML per estimator path; the dual-PRF Kalman TOML has the same keys as S1's.
+    ["scenario_003_tracking", "scenario_003_ukf_fmcw_dual_prf"],
 )
 def test_metadata_tracking_keeps_every_key_of_the_toml_table(name):
     """data-001 §6.1: ``tracking`` is the [tracking] table as written, plus additions.

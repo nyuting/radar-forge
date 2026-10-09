@@ -24,25 +24,23 @@ def test_the_public_api_is_what_it_re_exports():
 
 
 def test_importing_the_package_does_not_pull_in_the_viz_extra():
-    """viz needs matplotlib, so importing it at top level costs everyone."""
+    """viz needs matplotlib, so importing it at top level costs everyone.
+
+    The same fresh interpreter also checks that ``import radar_forge`` binds
+    ``pipelines``: scenario-001 A8 and spec/structure.md B.2 rule 2 both ask
+    for the pipelines without extras, and a second subprocess cost 0.7 s for
+    that one attribute.
+    """
     result = subprocess.run(
         [
             sys.executable,
             "-c",
+            # pipelines is reached first, so it too is held to the no-viz rule.
             "import sys, radar_forge; "
+            "radar_forge.pipelines.load_scenario; "
             "assert 'radar_forge.viz' not in sys.modules, 'viz imported'; "
             "assert 'matplotlib' not in sys.modules, 'matplotlib imported'",
         ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-
-
-def test_the_pipelines_subpackage_is_available_without_extras():
-    result = subprocess.run(
-        [sys.executable, "-c", "import radar_forge; radar_forge.pipelines.load_scenario"],
         capture_output=True,
         text=True,
         check=False,

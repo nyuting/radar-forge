@@ -20,8 +20,12 @@ N_FRAMES = 20
 
 
 def truth():
-    """A target opening steadily, so the truth line has an unmistakable slope."""
-    time_s = np.arange(N_FRAMES, dtype=np.float64)
+    """A target opening steadily, so the truth line has an unmistakable slope.
+
+    Two-second frames starting at 100 s, so a time axis that plotted the frame
+    index instead of the time could not pass for one.
+    """
+    time_s = 100.0 + 2.0 * np.arange(N_FRAMES, dtype=np.float64)
     range_m = 15_000.0 + 20.0 * time_s
     return time_s, range_m
 
@@ -35,29 +39,19 @@ def close(figure):
 class TestRendering:
     """What the figure contains."""
 
-    def test_truth_alone_renders(self):
-        time_s, range_m = truth()
-        figure = render_range_time_history(time_s, range_m)
-        (axes,) = figure.axes
-        assert len(axes.lines) >= 1
-        close(figure)
+    def test_the_truth_is_drawn_in_seconds_and_kilometres(self):
+        """Ranges are metres in, kilometres out; a factor of 1000 is easy to lose.
 
-    def test_the_y_axis_is_kilometres(self):
-        """Ranges are metres in, kilometres out; a factor of 1000 is easy to lose."""
-        time_s, range_m = truth()
-        figure = render_range_time_history(time_s, range_m)
-        (axes,) = figure.axes
-        plotted = axes.lines[0].get_ydata()
-        np.testing.assert_allclose(plotted, range_m * 1e-3, rtol=1e-12)
-        assert "km" in axes.get_ylabel()
-        close(figure)
-
-    def test_the_x_axis_is_seconds(self):
+        Also the only-truth case: one panel, no range-rate axes, and the line
+        drawn whole, since no range period was given to break it at.
+        """
         time_s, range_m = truth()
         figure = render_range_time_history(time_s, range_m)
         (axes,) = figure.axes
         np.testing.assert_allclose(axes.lines[0].get_xdata(), time_s, rtol=1e-12)
+        np.testing.assert_allclose(axes.lines[0].get_ydata(), range_m * 1e-3, rtol=1e-12)
         assert "Time" in axes.get_xlabel()
+        assert "km" in axes.get_ylabel()
         close(figure)
 
     def test_detections_are_drawn_as_a_scatter(self):
@@ -69,7 +63,11 @@ class TestRendering:
             detection_range_m=range_m + 30.0,
         )
         (axes,) = figure.axes
-        assert len(axes.collections) >= 1
+        (scatter,) = axes.collections
+        # The detections go through the same metres-to-kilometres step as the truth.
+        np.testing.assert_allclose(
+            scatter.get_offsets(), np.column_stack([time_s, (range_m + 30.0) * 1e-3]), rtol=1e-12
+        )
         close(figure)
 
     def test_the_track_is_a_second_line(self):
@@ -78,10 +76,9 @@ class TestRendering:
             time_s, range_m, track_time_s=time_s, track_range_m=range_m - 10.0
         )
         (axes,) = figure.axes
-        assert len(axes.lines) >= 2
-        labels = [line.get_label() for line in axes.lines]
-        assert "truth" in labels
-        assert "track" in labels
+        lines = {line.get_label(): line for line in axes.lines}
+        assert "truth" in lines
+        np.testing.assert_allclose(lines["track"].get_ydata(), (range_m - 10.0) * 1e-3, rtol=1e-12)
         close(figure)
 
     def test_the_uncertainty_band_follows_the_track_not_the_truth(self):
@@ -105,10 +102,10 @@ class TestRendering:
 
     def test_the_current_frame_is_marked(self):
         time_s, range_m = truth()
-        figure = render_range_time_history(time_s, range_m, current_time_s=7.0)
+        figure = render_range_time_history(time_s, range_m, current_time_s=114.0)
         (axes,) = figure.axes
-        verticals = [line for line in axes.lines if line.get_linestyle() == ":"]
-        assert verticals
+        (vertical,) = [line for line in axes.lines if line.get_linestyle() == ":"]
+        np.testing.assert_allclose(vertical.get_xdata(), [114.0, 114.0], rtol=1e-12)
         close(figure)
 
     def test_the_title_is_used(self):
@@ -178,12 +175,6 @@ class TestRangeRatePanel:
         assert rates == [-20.0, -19.0]
         close(figure)
 
-    def test_without_a_truth_range_rate_there_is_one_panel(self):
-        time_s, range_m = truth()
-        figure = render_range_time_history(time_s, range_m)
-        assert len(figure.axes) == 1
-        close(figure)
-
     def test_rejects_a_track_range_rate_without_the_truth(self):
         time_s, range_m = truth()
         with pytest.raises(ValueError, match="truth_range_rate_mps"):
@@ -205,17 +196,17 @@ class TestFoldedRange:
         assert "modulo 6.000 km" in axes.get_ylabel()
         close(figure)
 
-    @pytest.mark.parametrize(
-        ("period_m", "gaps"), [(PERIOD_M, [False, False, True, False]), (None, [False] * 4)]
-    )
-    def test_a_line_is_broken_where_it_wraps(self, period_m, gaps):
+    def test_a_line_is_broken_where_it_wraps(self):
         """The point after the wrap is left out, so no line crosses the plot.
 
-        Without a period nothing is a wrap, and the line is drawn whole.
+        Without a period nothing is a wrap, and the line is drawn whole; the
+        rendering tests above draw their truth with no period and check it whole.
         """
         time_s = np.arange(4, dtype=np.float64)
         wrapped_m = np.array([5_900.0, 5_990.0, 80.0, 170.0])
-        figure = render_range_time_history(time_s, wrapped_m, range_period_m=period_m)
+        figure = render_range_time_history(time_s, wrapped_m, range_period_m=self.PERIOD_M)
         (truth_line,) = [line for line in figure.axes[0].get_lines() if line.get_label() == "truth"]
-        np.testing.assert_array_equal(np.isnan(np.asarray(truth_line.get_ydata())), gaps)
+        np.testing.assert_array_equal(
+            np.isnan(np.asarray(truth_line.get_ydata())), [False, False, True, False]
+        )
         close(figure)
