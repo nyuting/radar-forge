@@ -56,7 +56,8 @@ Q4 conciseness · Q5 documentation · Q6 naming · Q7 inputs · Q8 outputs.
 | [F5](#f5-the-scenario-001-noise-bandwidth-was-stated-as-1-mhz) | `spec/scenario-001-xband.md` §3.2 | Conformance | **Spec** wrong — fixed |
 
 Everything else audited below carries no finding. That is the expected result: the suite is
-strong, refactor-001 hardened it, and most of `core/` is already the best available form.
+strong, the earlier standardisation pass hardened it, and most of `core/` is already the best
+available form.
 
 ## `constants.py`
 

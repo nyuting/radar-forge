@@ -6,7 +6,7 @@
 # downstream of the range-Doppler map.
 #
 # The window starts at 663 s rather than 0 s. Radial velocity is a property of
-# the site-to-track geometry, and refactor-001 §3.3 moved the site: from 0 s
+# the site-to-track geometry, and the site has since moved: from 0 s
 # the target's range rate now swings 22 m/s inside the ten frames the unfolding
 # bootstrap needs, which no fold selector can survive. 663 s is the earliest
 # window that still crosses a fold boundary -- the thing this scenario exists to
