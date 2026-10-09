@@ -76,12 +76,13 @@ those cells alone.
 The closed forms also assume the reference cells are *independent*, which holds
 for an untapered, unpadded FFT of white noise and fails for a tapered one. A
 taper correlates neighbouring bins — after a Hann window the complex amplitudes
-of adjacent bins have a correlation of magnitude about 2/3 — and zero-padding
-the FFT does the same. Correlated cells carry less information than as many
-independent ones, so the noise estimate is noisier than the calibration assumed
-and the false-alarm rate comes out above ``pfa``. This applies to the 1-D window
-and the ring alike: check a calibration by measurement on an untapered map, or
-expect the measured rate to be high.
+of adjacent bins have a correlation of magnitude about 2/3 — and so do
+zero-padding the FFT and sampling a compressed pulse faster than its bandwidth.
+Correlated cells carry less information than as many independent ones, so the
+noise estimate is noisier than the calibration assumed and the false-alarm rate
+comes out above ``pfa``. This applies to the 1-D window and the ring alike:
+check a calibration by measurement on independent cells, or expect the measured
+rate to be high.
 
 References
 ----------
