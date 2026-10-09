@@ -61,7 +61,7 @@ to understand and to test; if a step is hard to test on its own, split it. The f
 | `docs/conventions/style.md` | Naming, units, data layout, docstrings, typing, API surface |
 | `docs/conventions/commits.md` | Commit and branch conventions |
 | `docs/conventions/testing.md` | Test layout, tolerances, golden data, markers |
-| `docs/conventions/review.md` | Writing a PR review: layout, findings, checks, voice, what to check against |
+| `docs/conventions/review.md` | Doing and writing a PR review: procedure, layout, findings, checks, voice, what to check against |
 | `src/radar_forge/core/constants.py` | Every physical constant, defined once |
 | `.githooks/` | pre-commit, commit-msg, pre-push |
 | `scripts/check_conventions.py` | Rules R1–R7: TOML config, layout, docstrings, constants, units, broadcasting, Markdown anchors |
