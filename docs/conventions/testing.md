@@ -393,4 +393,4 @@ Pruning is held to these rules:
 
 A rewrite keeps or tightens its bound (§2). Deleting a test is not loosening a tolerance, but a
 rewritten assertion is held to the same rule. Record the audit in `docs/audits/tests-audit.md`
-([`docs/audits/README.md`](../audits/README.md) gives the layout).
+([`audit.md`](audit.md) gives the layout).

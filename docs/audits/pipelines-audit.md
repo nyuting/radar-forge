@@ -5,7 +5,7 @@ renamed it) and
 `scripts/run_scenario.py`. `src/radar_forge/core/` belongs to a parallel stream and is not
 touched here; neither is `docs/conventions/style.md` or `scripts/check_conventions.py`.
 
-The [audit method](README.md#1-auditing-code-against-the-spec) applies. `spec/` carries no prototype
+The [audit method](../conventions/audit.md#1-auditing-code-against-the-spec) applies. `spec/` carries no prototype
 implementation — one 8-line dataclass sketch and no other `def`, `import`, `return` or `np.`
 in any fenced block — so there is no rival code to diff against. "Reference" here means the
 **specified behaviour**: the build sequences and acceptance matrices of

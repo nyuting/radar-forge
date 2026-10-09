@@ -184,7 +184,7 @@ These are properties of the input, not defects in the simulation.
 > 1.598e-14 W was always the 2 MHz figure (1 MHz would give 7.989e-15 W), and only the
 > parenthetical was wrong. It has to be the transmitted bandwidth for this quantity to sit
 > in §3.2 at all: the three variants sample at 1.0, 2.5 and 4.0 MHz, so a sample-rate-based
-> noise power would not be waveform-independent. Corrected by the `core/` audit (`docs/audits/core-audit.md` F5).
+> noise power would not be waveform-independent. Corrected by the `core/` audit (PR #24).
 
 ### 3.3 Derived geometry, computed from the CSV against the radar site
 

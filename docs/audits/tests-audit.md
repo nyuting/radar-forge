@@ -29,7 +29,7 @@ untouched. This stream changed no
 (`refactor/audit-cfar-2d`, "Stream A"), whose four new `test_detection.py` tests are classified
 below with the rest.
 
-Every test was judged by the [audit method](README.md#3-auditing-tests): `docs/conventions/testing.md`
+Every test was judged by the [audit method](../conventions/audit.md#3-auditing-tests): `docs/conventions/testing.md`
 §10.1 item 5 for physical sense, and items 1–4: it names a plausible bug, it is the cheapest test
 that catches that bug, it tests our code rather than NumPy's or SciPy's, and it fits the time
 budget. The floor of testing.md §8 holds for every public function in the modules these files
@@ -233,7 +233,7 @@ regime. quad agrees with the series to 2e-15; the assertion is rtol 1e-10.
 `spec/scenario-003-tracking.md` §12 attributed "245 760 cells; alpha = 11.417 dB" to
 `tests/core/test_detection.py`, and its §3 says the implementation must re-derive the valid-cell
 count and assert it in a test. No test asserted either number, here or in `tests/pipelines/`.
-Under audit rule [C4](README.md#2-changes-an-audit-makes) the spec could have been corrected instead, but the figure is worth pinning: it is the operating point the scenario's
+Under audit rule [C4](../conventions/audit.md#2-changes-an-audit-makes) the spec could have been corrected instead, but the figure is worth pinning: it is the operating point the scenario's
 whole false-alarm budget is derived from. So it gets a test rather than a spec correction.
 
 `test_scenario_003_calibration_matches_its_specification` reads the operating point from
@@ -261,7 +261,7 @@ parametrize cases were held. After the merge, each was re-checked against the me
   one (mutation M21). Calling it held was a mistake.
 
 `test_a_ring_has_less_cfar_loss_than_a_line_of_the_same_reach` was deleted on the pre-merge base.
-After the merge, Stream A's F9 correction (scenario-003 §13.2, core-audit F9) cites it by name as
+After the merge, Stream A's correction to scenario-003 §13.2 cites it by name as
 the evidence for the reach claim, so it is restored and reclassified Sound. No other deleted test
 name appears anywhere in `spec/`, `docs/` (outside `testing.md`'s illustrative examples), `src/`,
 `scripts/` or the rest of `tests/`.
@@ -618,7 +618,7 @@ A); see [Coordination with Stream A](#coordination-with-stream-a).
 | `test_ring_follows_its_axes_when_the_map_is_transposed` [2] | Sound | `uniform_filter` and `rank_filter` paths | |
 | `cfar_valid_mask_2d` tests [3] | Sound | Wrapped, unwrapped, defined-where, too short | |
 | `test_ring_threshold_factor_satisfies_the_cell_averaging_closed_form` | Sound | Pins M | |
-| `test_a_ring_has_less_cfar_loss_than_a_line_of_the_same_reach` | Sound | Cited by scenario-003 §13.2 and core-audit F9 as the evidence for the reach claim. The survivors pin its two halves separately, but not the comparison. Deleted before the merge, restored after | |
+| `test_a_ring_has_less_cfar_loss_than_a_line_of_the_same_reach` | Sound | Cited by scenario-003 §13.2 as the evidence for the reach claim. The survivors pin its two halves separately, but not the comparison. Deleted before the merge, restored after | |
 | `test_ring_false_alarm_rate_matches_design_pfa` [2] | Sound | OS ring needs it; CA kept at Stream A's request | |
 | A `test_a_tapered_map_breaks_the_calibration_as_the_module_notes_say` [2] | Sound | Module Notes: a taper correlates cells and the rate exceeds pfa. The 1-D window and the ring are separate code paths | |
 | `test_order_statistic_ring_holds_detection_where_cell_averaging_loses_it` | Sound | 2-D masking | |
