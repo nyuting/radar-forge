@@ -609,18 +609,29 @@ first.
 
 `core/detection.py` slides a 1-D window. Applied along range, in one-target thermal noise, it is
 correct — but it is the wrong detector the moment there is Doppler-spread clutter or a second
-target, and a 2-D reference window would also roughly halve the number of training cells needed
-for the same `pfa`. This is a change to `core/detection.py` and belongs to that module's
+target, and a 2-D reference window would also collect its reference cells within a much shorter
+reach along range. This is a change to `core/detection.py` and belongs to that module's
 workstream, not to this scenario (§10.1); it lands as a new `axis`-pair argument or a sibling
 function, not as a rewrite, so that this scenario's `pfa` calibration stays valid.
 
 **Landed as sibling functions:** `cfar_valid_mask_2d`, `cfar_noise_estimate_2d_w`,
 `cfar_threshold_2d_w` and `cfar_detect_2d`, with per-axis `n_train` and `n_guard`, `axes` (default
-`(-2, -1)`) and `wrap_axes`. The 1-D functions are unchanged, so this scenario's calibration
-(α = 11.417 dB) is too. Only CA and OS are offered in 2-D: their `pfa` depends only on the number
-of reference cells M, so a ring is calibrated as a 1-D window of M/2 cells per side. GO and SO
-compare two half-windows, which a ring does not have. Switching this scenario's pipeline over is a
-pipeline change, not part of this one.
+`(-2, -1)`) and `wrap_axes`. This scenario's 1-D calibration is unchanged (α = 11.417 dB). Only
+CA and OS are offered in 2-D: their `pfa` depends only on the number of reference cells M, so a
+ring is calibrated as a 1-D window of M/2 cells per side. GO and SO compare two half-windows, which
+a ring does not have. Switching this scenario's pipeline over is a pipeline change, not part of
+this one.
+
+> **Corrected by the `core/` audit** (`docs/audits/core-audit.md`, F9). An earlier draft said
+> a 2-D window would "roughly halve the number of training cells needed for the same `pfa`". It
+> cannot: the threshold factor, and with it the CFAR loss, depends on the number of reference cells
+> M alone, as the paragraph above says, so the same `pfa` at the same loss needs the same M in any
+> shape. What a ring changes is the *reach*: it draws M cells from both axes, so it extends fewer
+> cells along range for the same M, and for the same reach it has more cells and less loss
+> (`test_a_ring_has_less_cfar_loss_than_a_line_of_the_same_reach`). The draft also said the 1-D
+> functions were unchanged. Their calibration is, but PR #4 made two changes that reach the 1-D path:
+> the CA threshold factor uses `expm1`, which moves only its last bits, and power that is not finite
+> is now rejected.
 
 ### 13.3 Multiple targets — a note only
 
@@ -785,7 +796,7 @@ what was measured against it.
 | 8 | The pictures exist | `track_00000.png`, `rd_00000.png` with markers, `tracks.csv`, `detections.csv` | `tests/viz/test_track_plot.py`, `tests/pipelines/test_scenario_003.py` |
 | — | `gate_threshold` matches the tabulated chi^2 quantile at each `dim` | 6.635 / 9.210 / 11.345 / 13.277 | `tests/core/test_tracking.py` |
 | — | EKF Jacobians match a central-difference derivative of `h` | 1e-8 | same |
-| — | `cfar_valid_mask` cell count and `cfar_threshold_factor` | 245 760 cells; alpha = 11.417 dB | `tests/core/test_detection.py` |
+| — | `cfar_valid_mask` cell count and `cfar_threshold_factor`, at the shipped TOML's operating point | 245 760 cells; alpha = 13.856 = 11.417 dB | `tests/core/test_detection.py::test_scenario_003_calibration_matches_its_specification` |
 
 Run over **20 frames** rather than §12's 15: the bootstrap holds a track range-only for ten frames
 and S1's first fold change is at frame 17. Criterion 1 is measured from the first confirmation,
@@ -881,8 +892,8 @@ mis-unfold, which is what makes retention insensitive to `sigma_accel_mps2`
 here, and it is the mechanism §14.7 credits with the 6-ids-to-2 improvement. The
 default stays at 5.0 — nothing measured argues for moving it — but it is no
 longer carried by the number quoted for it, and picking between 5.0 and 2.0 on
-fold selection needs a wider window than this one. Found by the refactor-002
-§1.2 audit; the code's own docstring had drifted to a third figure, 95%.
+fold selection needs a wider window than this one. Found by the pipelines
+audit (`docs/audits/pipelines-audit.md`); the code's own docstring had drifted to a third figure, 95%.
 
 ### 14.7 Criteria 3 and 4 are not achievable on S1, and that is the finding
 
@@ -939,7 +950,7 @@ before its fourth hit and those frames are 15% of a 20-frame window.
   range and range rate and nothing else, so an east-north plot would have to invent a bearing
   for every point. What is drawn is range against time, which is what the radar knows. Renamed
   `render_track_plan_view` -> `render_range_time_history`, and the wording corrected in both
-  specifications (refactor-002 §1.2, Q6).
+  specifications (`docs/audits/pipelines-audit.md`, Q6).
 - `FrameTracks` stores *snapshots* of its tracks. A `Track` is mutable by
   design, so holding references made every recorded frame show the final state
   of every track, and anything built from the history — a plot, a CSV — was

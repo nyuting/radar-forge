@@ -402,13 +402,30 @@ INLINE_CODE_RE = re.compile(r"`[^`]*`")
 def heading_slug(heading: str) -> str:
     """Slugify a Markdown heading the way GitHub does.
 
-    Lowercase, backticks and punctuation dropped, whitespace to hyphens. This is
-    GitHub's documented behaviour for heading anchors; it is what a reader's
-    browser will resolve, so it is what the rule has to model.
+    Lowercase, backticks and punctuation dropped, then **each** space becomes a
+    hyphen. Runs are not collapsed: GitHub turns ``F1 — Title`` into
+    ``f1--title``, because the dash goes and both spaces around it stay. This is
+    what a reader's browser resolves, so it is what the rule has to model.
     """
     text = heading.strip().lower().replace("`", "")
     text = re.sub(r"[^\w\s-]", "", text)
-    return re.sub(r"\s+", "-", text).strip("-")
+    return text.replace(" ", "-")
+
+
+def heading_slugs(headings: list[str]) -> set[str]:
+    """Every anchor GitHub gives a file's headings, in document order.
+
+    A repeated heading gets ``-1``, ``-2`` and so on, so the second ``Notes``
+    in a file is reached as ``#notes-1``.
+    """
+    seen: dict[str, int] = {}
+    slugs: set[str] = set()
+    for heading in headings:
+        slug = heading_slug(heading)
+        count = seen.get(slug, 0)
+        seen[slug] = count + 1
+        slugs.add(slug if count == 0 else f"{slug}-{count}")
+    return slugs
 
 
 def check_markdown_anchors(rel: Path) -> list[Problem]:
@@ -423,14 +440,15 @@ def check_markdown_anchors(rel: Path) -> list[Problem]:
         return []
     lines = abs_path.read_text(encoding="utf-8").splitlines()
 
-    slugs: set[str] = set()
+    headings: list[str] = []
     in_fence = False
     for line in lines:
         if FENCE_RE.match(line):
             in_fence = not in_fence
             continue
         if not in_fence and line.startswith("#"):
-            slugs.add(heading_slug(re.sub(r"^#+\s*", "", line)))
+            headings.append(re.sub(r"^#+\s*", "", line))
+    slugs = heading_slugs(headings)
 
     problems: list[Problem] = []
     in_fence = False

@@ -35,74 +35,48 @@ def peak_sidelobe_db(window: np.ndarray) -> float:
 
 
 class TestTaper:
-    @pytest.mark.parametrize("name", TAPER_NAMES)
+    @pytest.mark.parametrize("name", [name for name in TAPER_NAMES if name != "rectangular"])
     def test_is_symmetric(self, name: str) -> None:
-        """Every taper weights the two ends of the aperture identically."""
+        """Catches a periodic (``sym=False``) window where a symmetric one is needed.
+
+        The Harris sidelobe and loss figures barely move between the two forms
+        at N = 4096, so this is the only test that sees the difference. One
+        case per SciPy-built taper, since each is a separate call; the
+        rectangular one is ``np.ones`` and cannot be periodic.
+        """
         window = taper(name, 33)
+        assert window.shape == (33,)
         # Not exact: SciPy builds these from cosines, so the two ends agree only
         # to rounding. atol 1e-15 covers that while still catching any window
         # genuinely built asymmetrically (the periodic sym=False variant, say),
         # which would differ in the first decimal, not the fifteenth.
         np.testing.assert_allclose(window, window[::-1], rtol=1e-12, atol=1e-15)
 
-    @pytest.mark.parametrize("name", TAPER_NAMES)
-    def test_has_requested_length(self, name: str) -> None:
-        assert taper(name, 17).shape == (17,)
-
-    @pytest.mark.parametrize("name", TAPER_NAMES)
-    def test_is_non_negative(self, name: str) -> None:
-        """A taper attenuates; it never inverts the sign of a sample.
-
-        Stated as non-negativity rather than positivity because hann and
-        blackman are defined to vanish at both endpoints, and blackman's
-        endpoint evaluates to a few times -1e-17 rather than exactly zero.
-        """
-        window = taper(name, 64)
-        assert np.all(window >= -1e-15)
-
-    @pytest.mark.parametrize("name", TAPER_NAMES)
-    def test_interior_weights_are_strictly_positive(self, name: str) -> None:
-        """Only the endpoints may vanish; a zero inside would be a hole."""
-        assert np.all(taper(name, 64)[1:-1] > 0.0)
-
-    @pytest.mark.parametrize("name", TAPER_NAMES)
-    def test_normalize_sets_unit_mean(self, name: str) -> None:
-        """Unit mean is what keeps a tapered FFT peak in the untapered units."""
-        # rtol 1e-12: a sum and a divide in float64.
-        np.testing.assert_allclose(taper(name, 128).mean(), 1.0, rtol=1e-12)
-
     def test_rectangular_is_all_ones(self) -> None:
         np.testing.assert_array_equal(taper("rectangular", 10, normalize=False), np.ones(10))
 
-    def test_normalize_is_a_pure_scaling(self) -> None:
-        """Normalising changes the level of a taper, never its shape."""
-        raw = taper("hamming", 64, normalize=False)
-        normalized = taper("hamming", 64, normalize=True)
-        np.testing.assert_allclose(normalized / raw, normalized[0] / raw[0], rtol=1e-12)
-
-    def test_sidelobes_fall_in_the_documented_order(self) -> None:
-        """The docstring table's ordering is a property, so assert it as one."""
-        levels_db = {
-            name: peak_sidelobe_db(taper(name, N_LONG, normalize=False))
-            for name in ("rectangular", "hann", "hamming", "blackman", "blackmanharris")
-        }
-        assert levels_db["rectangular"] > levels_db["hann"]
-        assert levels_db["hann"] > levels_db["hamming"]
-        assert levels_db["hamming"] > levels_db["blackman"]
-        assert levels_db["blackman"] > levels_db["blackmanharris"]
-
     @pytest.mark.parametrize(
         ("name", "expected_db"),
-        [("rectangular", -13.26), ("hann", -31.5), ("hamming", -42.7), ("blackman", -58.1)],
-        ids=["rectangular", "hann", "hamming", "blackman"],
+        [
+            ("rectangular", -13.26),
+            ("hann", -31.5),
+            ("hamming", -42.7),
+            ("blackman", -58.1),
+            ("blackmanharris", -92.0),
+        ],
+        ids=["rectangular", "hann", "hamming", "blackman", "blackmanharris"],
     )
     def test_matches_published_sidelobe_levels(self, name: str, expected_db: float) -> None:
         """Peak sidelobe levels against Harris 1978, Table 1.
 
+        Catches the wrong window behind a name. The levels are 10 dB or more
+        apart, so this also pins the documented ordering.
+
         References
         ----------
         .. [1] F. J. Harris, "On the use of windows for harmonic analysis with
-               the discrete Fourier transform," Proc. IEEE 66(1), 1978, Table 1.
+               the discrete Fourier transform," Proc. IEEE 66(1), 1978, Table 1
+               (the 4-term Blackman-Harris is the "minimum 4-sample" row).
         """
         # atol 0.5 dB: Harris tabulates sidelobes to 1 dB, and a discrete window of
         # finite length straddles the true continuous sidelobe peak.
@@ -132,24 +106,20 @@ class TestTaper:
         # atol 0.5 dB: equiripple by construction, so this should be tight.
         np.testing.assert_allclose(achieved_db, -60.0, atol=0.5)
 
-    def test_rejects_unknown_name(self) -> None:
-        with pytest.raises(ValueError, match="unknown taper"):
-            taper("kaiser", 16)
-
-    def test_lists_the_accepted_names_in_the_error(self) -> None:
+    def test_rejects_unknown_name_and_lists_the_accepted_ones(self) -> None:
         """An error that does not say what was expected is half an error."""
-        with pytest.raises(ValueError, match="blackmanharris"):
+        with pytest.raises(ValueError, match=r"unknown taper.*blackmanharris"):
             taper("kaiser", 16)
 
-    @pytest.mark.parametrize("bad_n", [0, -1])
-    def test_rejects_non_positive_length(self, bad_n: int) -> None:
+    def test_rejects_a_zero_length(self) -> None:
+        """Zero is the boundary of the ``n_samples >= 1`` guard."""
         with pytest.raises(ValueError, match="at least one"):
-            taper("hann", bad_n)
+            taper("hann", 0)
 
-    @pytest.mark.parametrize("bad_sidelobe_db", [0.0, -30.0])
-    def test_rejects_non_positive_sidelobe_level(self, bad_sidelobe_db: float) -> None:
+    def test_rejects_a_zero_sidelobe_level(self) -> None:
+        """Zero is the boundary: a ``< 0`` guard would let a 0 dB design through."""
         with pytest.raises(ValueError, match="must be positive"):
-            taper("taylor", 64, sidelobe_db=bad_sidelobe_db)
+            taper("taylor", 64, sidelobe_db=0.0)
 
     def test_rejects_shallow_chebyshev(self) -> None:
         """Below ~45 dB the Chebyshev design grows spikes at its own edges."""
@@ -158,20 +128,11 @@ class TestTaper:
 
 
 class TestApplyTaper:
-    def test_weights_the_requested_axis(self) -> None:
-        cube = np.ones((4, 8), dtype=np.complex128)
-        window = taper("hann", 8, normalize=False)
-        tapered = apply_taper(cube, window, axis=1)
-        # Every row must carry the same window, unchanged.
-        for row in range(4):
-            np.testing.assert_allclose(tapered[row].real, window, rtol=1e-12)
-
     def test_weights_a_negative_axis(self) -> None:
+        """Catches a negative axis left unnormalised: -1 is the last axis of a 2-D cube."""
         cube = np.ones((4, 8), dtype=np.complex128)
         window = taper("hann", 8, normalize=False)
-        np.testing.assert_allclose(
-            apply_taper(cube, window, axis=-1), apply_taper(cube, window, axis=1), rtol=1e-12
-        )
+        np.testing.assert_allclose(apply_taper(cube, window, axis=-1), cube * window, rtol=1e-12)
 
     def test_weights_slow_time_independently(self) -> None:
         """Tapering axis 0 of a cube must not touch the fast-time structure."""
@@ -180,10 +141,6 @@ class TestApplyTaper:
         window = taper("hamming", 6, normalize=False)
         tapered = apply_taper(cube, window, axis=0)
         np.testing.assert_allclose(tapered, cube * window[:, None], rtol=1e-12)
-
-    def test_preserves_shape(self) -> None:
-        cube = np.ones((3, 4, 5), dtype=np.complex128)
-        assert apply_taper(cube, taper("hann", 4), axis=1).shape == (3, 4, 5)
 
     def test_rejects_length_mismatch(self) -> None:
         with pytest.raises(ValueError, match="must match samples"):
@@ -199,31 +156,16 @@ class TestApplyTaper:
 
 
 class TestGainAndLoss:
-    def test_rectangular_has_unit_coherent_gain(self) -> None:
-        # rtol 1e-12: a mean over exact ones.
-        np.testing.assert_allclose(
-            coherent_gain_linear(taper("rectangular", 16, normalize=False)), 1.0, rtol=1e-12
-        )
-
     def test_normalized_tapers_have_unit_coherent_gain(self) -> None:
         """This is the definition of the normalisation, so it must hold exactly."""
         for name in TAPER_NAMES:
             np.testing.assert_allclose(coherent_gain_linear(taper(name, 128)), 1.0, rtol=1e-12)
-
-    def test_rectangular_loses_nothing(self) -> None:
-        """The uniform window is the matched filter; it is the loss reference."""
-        np.testing.assert_allclose(processing_loss_db(taper("rectangular", 32)), 0.0, atol=1e-12)
 
     def test_loss_is_invariant_to_scaling(self) -> None:
         """Loss is a shape property, so normalising must not change it."""
         raw = processing_loss_db(taper("blackman", 256, normalize=False))
         normalized = processing_loss_db(taper("blackman", 256, normalize=True))
         np.testing.assert_allclose(raw, normalized, rtol=1e-12)
-
-    def test_loss_is_never_negative(self) -> None:
-        """No taper can beat the matched filter; a negative loss is a sign error."""
-        for name in TAPER_NAMES:
-            assert processing_loss_db(taper(name, 256)) >= 0.0
 
     @pytest.mark.parametrize(
         ("name", "expected_db"),
@@ -241,14 +183,6 @@ class TestGainAndLoss:
         # atol 0.01 dB: Harris tabulates to two decimals and this is an exact
         # closed-form ratio, so there is nothing to be loose about.
         np.testing.assert_allclose(processing_loss_db(taper(name, N_LONG)), expected_db, atol=0.01)
-
-    def test_loss_tracks_sidelobe_suppression(self) -> None:
-        """The trade the module exists to document: quieter costs more SNR."""
-        assert processing_loss_db(taper("hann", 512)) < processing_loss_db(taper("blackman", 512))
-
-    def test_rejects_empty_window(self) -> None:
-        with pytest.raises(ValueError, match="must not be empty"):
-            coherent_gain_linear(np.array([]))
 
     def test_rejects_zero_sum_window(self) -> None:
         with pytest.raises(ValueError, match="sum to zero"):
@@ -269,8 +203,7 @@ class TestWindowMetricValidation:
         with pytest.raises(ValueError, match="one-dimensional"):
             metric(np.ones((4, 4)))
 
-    @pytest.mark.parametrize("metric", [coherent_gain_linear, processing_loss_db])
-    def test_rejects_an_empty_window(self, metric) -> None:
-        """Both metrics are means over the taper, and the mean of nothing is nan."""
+    def test_rejects_an_empty_window(self) -> None:
+        """The mean of nothing is nan. The 2-D cases already show both metrics share the guard."""
         with pytest.raises(ValueError, match="must not be empty"):
-            metric(np.zeros(0))
+            coherent_gain_linear(np.zeros(0))

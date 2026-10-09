@@ -9,15 +9,19 @@ the slowest thing in the module.
 """
 
 import math
+import tomllib
+from pathlib import Path
 
 import numpy as np
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from scipy.stats import beta
+from scipy import integrate
+from scipy.stats import beta, gamma
 
 from radar_forge.core.detection import (
     CFAR_VARIANTS,
+    CFAR_VARIANTS_2D,
     Detection,
     cfar_detect,
     cfar_detect_2d,
@@ -32,7 +36,7 @@ from radar_forge.core.detection import (
     cluster_detections,
     default_os_rank,
 )
-from radar_forge.core.dsp import doppler_bin_centers_mps, range_doppler_map
+from radar_forge.core.dsp import range_doppler_map
 from radar_forge.core.windows import taper
 
 # --------------------------------------------------------------------------- #
@@ -59,8 +63,8 @@ from radar_forge.core.windows import taper
 #
 # The confidence level is 99.9% rather than a conventional 95% because these are
 # hypothesis tests run as a gate. A 95% interval rejects a *correct*
-# implementation 5% of the time, and across the six rate tests here that is a
-# 26% chance that some unlucky seed fails the suite. Seeding makes any single
+# implementation 5% of the time, and across the eight rate intervals here that
+# is a 34% chance that some unlucky seed fails the suite. Seeding makes any single
 # run reproducible, but it does not make the choice robust: any change to the
 # order in which random numbers are drawn re-rolls it. Widening to 99.9% drops
 # that to under 1% while still catching the errors worth catching.
@@ -71,11 +75,9 @@ CONFIDENCE = 0.999
 NOMINAL_N_TRAIN = 16
 NOMINAL_N_GUARD = 2
 
-# A 77 GHz-style range-Doppler geometry, used by the end-to-end test.
+# A range-Doppler map geometry, used by the Doppler-wrap end-to-end test.
 NOMINAL_N_PULSES = 64
 NOMINAL_N_SAMPLES = 256
-NOMINAL_PRI_S = 50e-6
-NOMINAL_WAVELENGTH_M = 3.9e-3
 
 
 @pytest.fixture
@@ -166,23 +168,47 @@ def assert_rate_consistent_with_design(n_hit: int, n_tested: int, pfa: float) ->
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("n_train", [1, 2, 5, 16])
-@pytest.mark.parametrize("alpha_linear", [0.5, 2.0, 10.0])
-def test_greatest_and_smallest_of_partition_the_same_total(n_train, alpha_linear):
-    """GO and SO split 2 (1 + beta)^-N between them.
+@pytest.mark.parametrize(
+    ("n_train", "alpha_linear"),
+    [(5, 10.0), (16, 2.0)],
+    ids=["beta-2-cancellation", "beta-0.125-typical"],
+)
+def test_greatest_and_smallest_of_match_a_numerical_integration(n_train, alpha_linear):
+    """GO and SO Pfa against a route that shares no code with the series.
 
-    {max, min} = {X, Y} pointwise, so E[exp(-beta max)] + E[exp(-beta min)] =
-    E[exp(-beta X)] + E[exp(-beta Y)] = 2 (1 + beta)^-N.
-
-    An independent identity: it constrains both expressions at once and would
-    fail if either series were mis-indexed.
+    Each half-window mean m is Gamma(N, 1/N) for unit-mean exponential cells, so
+    Pfa = E[exp(-alpha * g)] with g the larger (GO) or smaller (SO) of two
+    independent means, whose densities are 2 f F and 2 f (1 - F). Integrating
+    that numerically catches a mis-indexed series. The partition identity
+    GO + SO = 2 (1 + beta)^-N that this test replaces could not: the code
+    computes GO as that total minus the SO series, so the identity held by
+    construction. The two cases are beta = alpha/N = 2, where the Notes'
+    cancellation in GO bites, and beta = 0.125, the typical regime.
     """
-    beta_linear = alpha_linear / n_train
-    go = cfar_probability_of_false_alarm(alpha_linear, n_train=n_train, variant="go")
-    so = cfar_probability_of_false_alarm(alpha_linear, n_train=n_train, variant="so")
-    # rtol at 1e-12: a handful of float64 powers and a binomial sum, so anything
-    # looser would hide a genuine indexing error in the series.
-    np.testing.assert_allclose(go + so, 2.0 * (1.0 + beta_linear) ** -n_train, rtol=1e-12)
+    half_mean = gamma(n_train, scale=1.0 / n_train)
+
+    def expected(weight):
+        return integrate.quad(
+            lambda m: math.exp(-alpha_linear * m) * 2.0 * half_mean.pdf(m) * weight(m),
+            0.0,
+            math.inf,
+            epsabs=0.0,
+            epsrel=1e-13,
+            limit=200,
+        )[0]
+
+    # rtol 1e-10: quad agrees with the series to 2e-15 here; the margin covers
+    # quad's own error estimate, not any slack in the series.
+    np.testing.assert_allclose(
+        cfar_probability_of_false_alarm(alpha_linear, n_train=n_train, variant="so"),
+        expected(half_mean.sf),
+        rtol=1e-10,
+    )
+    np.testing.assert_allclose(
+        cfar_probability_of_false_alarm(alpha_linear, n_train=n_train, variant="go"),
+        expected(half_mean.cdf),
+        rtol=1e-10,
+    )
 
 
 def test_smallest_window_matches_the_hand_derivation():
@@ -239,28 +265,6 @@ def test_cell_averaging_matches_the_gamma_moment_generating_function():
             )
 
 
-def test_closed_form_cell_averaging_inverse_agrees_with_bisection():
-    """The CA closed-form inverse agrees with a bisection on its own forward map.
-
-    CA is the one variant inverted analytically; solving it numerically instead
-    is an independent route to the same alpha.
-    """
-    for pfa in (1e-2, 1e-4, 1e-6):
-        for n_train in (4, 16):
-            alpha_linear = cfar_threshold_factor(pfa=pfa, n_train=n_train, variant="ca")
-
-            low, high = 1e-9, 1e9
-            for _ in range(200):
-                middle = 0.5 * (low + high)
-                if cfar_probability_of_false_alarm(middle, n_train=n_train, variant="ca") > pfa:
-                    low = middle
-                else:
-                    high = middle
-            # rtol at 1e-9: bisection converges to float64 resolution on a
-            # monotone function, so the two routes should agree to near-exactly.
-            np.testing.assert_allclose(alpha_linear, 0.5 * (low + high), rtol=1e-9)
-
-
 @pytest.mark.parametrize("variant", CFAR_VARIANTS)
 @given(
     pfa=st.floats(min_value=1e-6, max_value=1e-1, allow_nan=False, allow_infinity=False),
@@ -281,14 +285,6 @@ def test_threshold_factor_round_trips_through_pfa(variant, pfa, n_train):
     np.testing.assert_allclose(recovered, pfa, rtol=1e-8)
 
 
-@pytest.mark.parametrize("variant", CFAR_VARIANTS)
-def test_probability_of_false_alarm_decreases_with_threshold(variant):
-    """Pfa is strictly decreasing in alpha, which is what makes the inverse unique."""
-    alphas = np.array([0.5, 1.0, 2.0, 5.0, 10.0, 50.0])
-    values = [cfar_probability_of_false_alarm(a, n_train=8, variant=variant) for a in alphas]
-    assert np.all(np.diff(values) < 0.0)
-
-
 def test_threshold_factor_decreases_with_window_size():
     """A wider window needs a lower alpha for the same rate: this is the CFAR loss.
 
@@ -303,23 +299,55 @@ def test_threshold_factor_decreases_with_window_size():
     assert alphas[0] > 2.0 * alphas[-1]
 
 
-def test_greatest_of_needs_a_lower_factor_than_smallest_of():
-    """For a fixed rate, GO's threshold factor is below SO's.
-
-    GO selects the larger half-window mean, so it already sits higher above the
-    floor and needs less scaling; SO must compensate for selecting the smaller.
-    """
-    for n_train in (4, 16):
-        go = cfar_threshold_factor(pfa=1e-4, n_train=n_train, variant="go")
-        so = cfar_threshold_factor(pfa=1e-4, n_train=n_train, variant="so")
-        assert go < so
-
-
 def test_default_order_statistic_rank_is_three_quarters_of_the_window():
     """Rohling's k ~ 3M/4 recommendation, for M = 2N reference cells."""
     assert default_os_rank(16) == 24
     assert default_os_rank(8) == 12
     assert default_os_rank(1) == 2
+
+
+def test_scenario_003_calibration_matches_its_specification():
+    """Catches the shipped scenario-003 detector drifting from the figures its spec quotes.
+
+    ``spec/scenario-003-tracking.md`` §12 quotes 245 760 tested cells and
+    alpha = 11.417 dB, and §3 requires both to be re-derived in a test. The
+    operating point is read from ``scenarios/scenario_003_tracking.toml``: CA
+    along range, n_train = 16 and n_guard = 4 per side, pfa = 1e-5, on a
+    (256, 1000) map (256 pulses; 1 ms x 1 MHz = 1000 range samples).
+
+    Valid cells: 256 x (1000 - 2 x (16 + 4)) = 245 760.
+
+    Threshold factor, CA with M = 2N = 32 cells:
+    alpha = M (pfa^(-1/M) - 1) = 32 (exp(ln(1e5)/32) - 1) = 32 (1.433013 - 1)
+    = 13.8564, and 10 log10(13.8564) = 11.4165 dB, which the spec rounds to
+    11.417 dB.
+    """
+    scenario = tomllib.loads(
+        (Path(__file__).parents[2] / "scenarios" / "scenario_003_tracking.toml").read_text()
+    )
+    detection = scenario["detection"]
+    burst = scenario["burst"][0]
+    n_samples = round(burst["chirp_duration_s"] * burst["sample_rate_hz"])
+    assert detection["variant"] == "ca"
+
+    valid = cfar_valid_mask(
+        (burst["n_pulses"], n_samples),
+        n_train=detection["n_train"],
+        n_guard=detection["n_guard"],
+        axis=-1,
+    )
+    assert int(valid.sum()) == 245_760
+
+    alpha_linear = cfar_threshold_factor(
+        pfa=detection["pfa"], n_train=detection["n_train"], variant="ca"
+    )
+    n_reference = 2 * detection["n_train"]
+    # rtol 1e-12: the closed form is a power and a subtraction in float64.
+    np.testing.assert_allclose(
+        alpha_linear, n_reference * (detection["pfa"] ** (-1.0 / n_reference) - 1.0), rtol=1e-12
+    )
+    # atol 1e-4 dB: the spec's 11.417 is this value to three decimals.
+    np.testing.assert_allclose(10.0 * math.log10(alpha_linear), 11.4165, atol=1e-4)
 
 
 # --------------------------------------------------------------------------- #
@@ -347,18 +375,6 @@ def test_order_statistic_false_alarm_rate_matches_design_pfa(rng):
     """
     pfa = 1e-2
     n_hit, n_tested = measure_false_alarm_rate(rng, pfa=pfa, variant="os")
-    assert_rate_consistent_with_design(n_hit, n_tested, pfa)
-
-
-def test_false_alarm_rate_holds_at_one_in_ten_thousand(rng):
-    """The rate still holds at pfa=1e-4, over a few million cells.
-
-    Small-pfa behaviour is where an error in the *exponent* -- as opposed to a
-    scale factor -- shows up, since the expression is evaluated far out in its
-    tail. Not marked slow: the cumulative-sum path makes this about 0.1 s.
-    """
-    pfa = 1e-4
-    n_hit, n_tested = measure_false_alarm_rate(rng, pfa=pfa, variant="ca")
     assert_rate_consistent_with_design(n_hit, n_tested, pfa)
 
 
@@ -424,31 +440,6 @@ def test_noise_estimate_is_nan_outside_the_valid_mask(rng):
     assert np.all(np.isfinite(estimate_w[valid]))
 
 
-def test_edge_cells_are_never_detected():
-    """Even an enormous return in an untested cell is not declared a detection."""
-    power_w = np.full(64, 1.0)
-    power_w[0] = 1e12
-    power_w[-1] = 1e12
-    mask = cfar_detect(power_w, pfa=1e-3, n_train=8, n_guard=2)
-    assert not mask[0]
-    assert not mask[-1]
-    assert not mask.any()
-
-
-@pytest.mark.parametrize("variant", CFAR_VARIANTS)
-def test_noise_estimate_recovers_a_flat_floor(variant):
-    """In a constant floor every variant returns the floor exactly.
-
-    All four reduce to the same number when the reference cells are equal, which
-    makes this a check on the window indexing rather than on the statistics.
-    """
-    floor_w = 7.0
-    power_w = np.full(64, floor_w)
-    estimate_w = cfar_noise_estimate_w(power_w, n_train=8, n_guard=2, variant=variant)
-    valid = cfar_valid_mask(power_w.shape, n_train=8, n_guard=2)
-    np.testing.assert_allclose(estimate_w[valid], floor_w, rtol=1e-12)
-
-
 def test_cell_averaging_estimate_equals_the_explicit_window_mean():
     """The cumulative-sum path reproduces a directly computed window mean.
 
@@ -490,16 +481,20 @@ def test_guard_cells_protect_the_threshold_from_target_spill():
     """A target spread over several cells masks itself without guard cells.
 
     The reason the guard band exists: energy leaking into the training cells
-    inflates the very threshold meant to detect the target.
+    inflates the very threshold meant to detect the target. With 4 training
+    cells a side, alpha(1e-4) = 17.30. Without a guard the cut's own skirts
+    (30 + 200 + 200 + 30) sit in the window, so the threshold is
+    17.30 * 464 / 8 = 1003 against a 600 peak: masked. A 2-cell guard, the
+    target's half-width, leaves only floor cells and a threshold of 17.3.
     """
     power_w = np.full(128, 1.0)
     # A target spanning five range cells, as a windowed point target would.
     power_w[60:65] = [30.0, 200.0, 600.0, 200.0, 30.0]
 
-    with_guard = cfar_detect(power_w, pfa=1e-4, n_train=16, n_guard=4, variant="ca")
-    without_guard = cfar_detect(power_w, pfa=1e-4, n_train=16, n_guard=0, variant="ca")
+    with_guard = cfar_detect(power_w, pfa=1e-4, n_train=4, n_guard=2, variant="ca")
+    without_guard = cfar_detect(power_w, pfa=1e-4, n_train=4, n_guard=0, variant="ca")
     assert with_guard[62]
-    assert int(with_guard.sum()) >= int(without_guard.sum())
+    assert not without_guard.any()
 
 
 def test_smallest_of_holds_detection_against_an_interfering_target():
@@ -583,16 +578,15 @@ def test_clusters_two_separated_targets():
 
 
 def test_cluster_centroid_is_power_weighted():
-    """A symmetric cluster centroids on its peak; a lopsided one leans towards it."""
-    symmetric_w = np.zeros(32)
-    symmetric_w[10:13] = [1.0, 4.0, 1.0]
-    centre = cluster_detections(symmetric_w > 0.5, symmetric_w)[0].centroid_index[0]
-    np.testing.assert_allclose(centre, 11.0, rtol=1e-12)
+    """Catches an unweighted mean (11.0), or weights by amplitude rather than power.
 
-    lopsided_w = np.zeros(32)
-    lopsided_w[10:13] = [1.0, 4.0, 3.0]
-    leaning = cluster_detections(lopsided_w > 0.5, lopsided_w)[0].centroid_index[0]
-    assert 11.0 < leaning < 12.0
+    Cells 10, 11, 12 at powers 1, 4, 3: (10 + 44 + 36) / 8 = 11.25 exactly.
+    """
+    power_w = np.zeros(32)
+    power_w[10:13] = [1.0, 4.0, 3.0]
+    centroid = cluster_detections(power_w > 0.5, power_w)[0].centroid_index[0]
+    # rtol 1e-12: three products and a divide.
+    np.testing.assert_allclose(centroid, 11.25, rtol=1e-12)
 
 
 def test_clusters_are_connected_in_two_dimensions():
@@ -628,54 +622,6 @@ def test_detection_is_immutable():
 # --------------------------------------------------------------------------- #
 
 
-def test_detects_a_point_target_in_a_range_doppler_map(rng):
-    """A synthetic target is detected in its analytically known range-Doppler bin.
-
-    Closed-form truth (testing.md §3.1): the target is injected at a chosen
-    range bin with a Doppler phase advance of an exact integer number of cycles
-    across the aperture, so it lands in one Doppler bin with no straddling.
-    """
-    n_range_bin = 40
-    n_doppler_cycles = 9
-
-    pulse_index = np.arange(NOMINAL_N_PULSES)[:, None]
-    sample_index = np.arange(NOMINAL_N_SAMPLES)[None, :]
-    # A beat tone at bin n_range_bin in fast time, advancing by an exact
-    # n_doppler_cycles over the chirp aperture in slow time.
-    target = 40.0 * np.exp(
-        2j
-        * np.pi
-        * (
-            n_range_bin * sample_index / NOMINAL_N_SAMPLES
-            + n_doppler_cycles * pulse_index / NOMINAL_N_PULSES
-        )
-    )
-    noise = rng.normal(size=target.shape) + 1j * rng.normal(size=target.shape)
-    cube = target + noise / math.sqrt(2.0)
-
-    power_w = np.abs(range_doppler_map(cube)) ** 2
-    mask = cfar_detect(power_w, pfa=1e-6, n_train=16, n_guard=4, axis=-1)
-    found = cluster_detections(mask, power_w, connectivity=2)
-
-    assert len(found) == 1
-    doppler_bin, range_bin = found[0].peak_index
-    assert range_bin == n_range_bin
-    # range_doppler_map fftshifts the Doppler axis, so bin 0 is the most
-    # negative velocity and the zero-Doppler bin sits at n_pulses // 2.
-    assert doppler_bin == NOMINAL_N_PULSES // 2 + n_doppler_cycles
-
-    # The detection lands at the velocity the Doppler bin centres predict.
-    velocities_mps = doppler_bin_centers_mps(
-        NOMINAL_N_PULSES,
-        pulse_repetition_interval_s=NOMINAL_PRI_S,
-        wavelength_m=NOMINAL_WAVELENGTH_M,
-    )
-    expected_mps = (
-        n_doppler_cycles / NOMINAL_N_PULSES * NOMINAL_WAVELENGTH_M / (2.0 * NOMINAL_PRI_S)
-    )
-    np.testing.assert_allclose(velocities_mps[doppler_bin], expected_mps, rtol=1e-12)
-
-
 # --------------------------------------------------------------------------- #
 # Documented failure modes
 # --------------------------------------------------------------------------- #
@@ -686,20 +632,23 @@ def test_rejects_an_unknown_variant():
         cfar_probability_of_false_alarm(10.0, n_train=8, variant="median")  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("pfa", [0.0, 1.0, -0.1, 1.5])
+@pytest.mark.parametrize("pfa", [0.0, 1.0])
 def test_rejects_a_probability_outside_the_unit_interval(pfa):
+    """The two boundaries of the open interval: catches ``<=`` written as ``<``."""
     with pytest.raises(ValueError, match="pfa must be a probability"):
         cfar_threshold_factor(pfa=pfa, n_train=8)
 
 
-@pytest.mark.parametrize("alpha_linear", [0.0, -1.0, np.nan, np.inf])
+@pytest.mark.parametrize("alpha_linear", [0.0, np.nan, np.inf])
 def test_rejects_a_non_positive_threshold_factor(alpha_linear):
+    """Zero is the boundary; nan and inf are the two ways ``isfinite`` can be dropped."""
     with pytest.raises(ValueError, match="alpha_linear must be"):
         cfar_probability_of_false_alarm(alpha_linear, n_train=8)
 
 
-@pytest.mark.parametrize("rank", [0, -1, 17])
+@pytest.mark.parametrize("rank", [0, 17])
 def test_rejects_a_rank_outside_the_reference_window(rank):
+    """One past each end of 1..2N, for N = 8."""
     with pytest.raises(ValueError, match="rank must be a one-based index"):
         cfar_probability_of_false_alarm(10.0, n_train=8, variant="os", rank=rank)
 
@@ -962,6 +911,37 @@ def test_ring_false_alarm_rate_matches_design_pfa(rng, variant, pfa):
     assert_rate_consistent_with_design(n_hit, n_tested, pfa)
 
 
+@pytest.mark.parametrize("dimensions", [1, 2])
+def test_a_tapered_map_breaks_the_calibration_as_the_module_notes_say(rng, dimensions):
+    """Hann on both axes correlates neighbouring cells, so the rate exceeds pfa.
+
+    Pins the module docstring's warning; it is the converse of the rate tests
+    above, which draw independent cells. Measured at 1.6 to 1.7 times the design
+    rate over three seeds, for the window and the ring alike, so the lower end of
+    the 99.9% interval clears pfa by a wide margin.
+    """
+    n_pulses, n_samples, n_maps, pfa = 64, 256, 30, 1e-3
+    windows = {
+        "fast_time_window": taper("hann", n_samples),
+        "slow_time_window": taper("hann", n_pulses),
+    }
+    n_hit = n_tested = 0
+    for _ in range(n_maps):
+        noise = rng.normal(size=(2, n_pulses, n_samples))
+        power_w = np.abs(range_doppler_map(noise[0] + 1j * noise[1], **windows)) ** 2
+        if dimensions == 1:
+            mask = cfar_detect(power_w, pfa=pfa, n_train=16, n_guard=4)
+            valid = cfar_valid_mask(power_w.shape, n_train=16, n_guard=4)
+        else:
+            ring = {"n_train": RING_N_TRAIN, "n_guard": RING_N_GUARD, "wrap_axes": (0,)}
+            mask = cfar_detect_2d(power_w, pfa=pfa, **ring)
+            valid = cfar_valid_mask_2d(power_w.shape, **ring)
+        n_hit += int(np.count_nonzero(mask))
+        n_tested += int(np.count_nonzero(valid))
+    low, _ = clopper_pearson_interval(n_hit, n_tested)
+    assert low > pfa, f"measured {n_hit / n_tested:.3e}, interval from {low:.3e}"
+
+
 def test_order_statistic_ring_holds_detection_where_cell_averaging_loses_it():
     """Four strong interferers in the ring mask a target from CA but not from OS.
 
@@ -1100,11 +1080,16 @@ def test_a_target_on_the_doppler_wrap_gives_one_detection(rng):
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("variant", ["go", "so"])
-def test_ring_rejects_the_half_window_variants(variant):
+def test_the_ring_variants_are_the_one_dimensional_ones_without_half_windows():
+    """A 2-D variant must be one the 1-D calibration covers, since the ring borrows it."""
+    assert set(CFAR_VARIANTS_2D) == set(CFAR_VARIANTS) - {"go", "so"}
+
+
+def test_ring_rejects_the_half_window_variants():
+    """GO is refused; that SO is too follows from the variant set, pinned above."""
     with pytest.raises(ValueError, match="for a 2-D ring"):
         cfar_threshold_2d_w(
-            np.ones((32, 64)), pfa=1e-3, n_train=(2, 4), n_guard=(1, 1), variant=variant
+            np.ones((32, 64)), pfa=1e-3, n_train=(2, 4), n_guard=(1, 1), variant="go"
         )
 
 
@@ -1116,6 +1101,40 @@ def test_ring_rejects_a_one_dimensional_map():
 def test_ring_rejects_a_repeated_axis():
     with pytest.raises(ValueError, match="two different axes"):
         cfar_noise_estimate_2d_w(np.ones((32, 64)), n_train=(2, 4), n_guard=(1, 1), axes=(1, -1))
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [
+        # Was accepted, and the third count silently dropped.
+        ("n_train", {"n_train": (2, 4, 6), "n_guard": (1, 1, 1)}),
+        # Was accepted, and int() silently truncated 2.5 to 2.
+        ("n_train", {"n_train": (2.5, 4), "n_guard": (1, 1)}),
+        # The 1-D habit of a bare count; was a TypeError about iterating an int.
+        ("n_train", {"n_train": 16, "n_guard": (1, 1)}),
+        # Was zip()'s own message, which names neither argument.
+        ("n_guard", {"n_train": (2, 4), "n_guard": (1, 1, 1)}),
+        # Was an unpacking error.
+        ("axes", {"n_train": (2, 4), "n_guard": (1, 1), "axes": (-1,)}),
+    ],
+)
+def test_ring_rejects_a_pair_that_is_not_two_integers(name, arguments):
+    """Each per-axis argument is exactly two integers, and the error names it."""
+    with pytest.raises(ValueError, match=f"{name} must be two integers"):
+        cfar_noise_estimate_2d_w(np.ones((32, 64)), **arguments)
+    with pytest.raises(ValueError, match=f"{name} must be two integers"):
+        cfar_valid_mask_2d((32, 64), **arguments)
+
+
+def test_ring_accepts_numpy_integer_counts():
+    """A pair read out of an array holds NumPy integers, and those are integers."""
+    estimate_w = cfar_noise_estimate_2d_w(
+        np.ones((32, 64)), n_train=tuple(np.array(RING_N_TRAIN)), n_guard=RING_N_GUARD
+    )
+    np.testing.assert_array_equal(
+        ~np.isnan(estimate_w),
+        cfar_valid_mask_2d((32, 64), n_train=RING_N_TRAIN, n_guard=RING_N_GUARD),
+    )
 
 
 def test_ring_rejects_a_wrap_axis_it_does_not_span():

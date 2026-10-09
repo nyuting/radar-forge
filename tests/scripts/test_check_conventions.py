@@ -1,4 +1,4 @@
-"""Tests for scripts/check_conventions.py, rule R8 (comment style)."""
+"""Tests for scripts/check_conventions.py: R7 heading slugs and R8 comment style."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "check_conventions.py"
@@ -76,3 +78,21 @@ def test_every_tracked_python_file_passes_r8() -> None:
         if problem.rule == "R8 comments"
     ]
     assert problems == []
+
+
+@pytest.mark.parametrize(
+    ("heading", "slug"),
+    [
+        # Each space becomes a hyphen, so the two around a dropped dash give two hyphens.
+        ("F1 — `FrameResult` was returned", "f1--frameresult-was-returned"),
+        ("13. Migration from today's code", "13-migration-from-todays-code"),
+    ],
+)
+def test_a_heading_slugs_the_way_github_does(heading: str, slug: str) -> None:
+    """Catches a slug that collapses space runs, so R7 passes links GitHub cannot follow."""
+    assert checker.heading_slug(heading) == slug
+
+
+def test_a_repeated_heading_is_reached_with_a_numbered_suffix() -> None:
+    """Catches R7 rejecting ``#notes-1``, GitHub's anchor for a file's second ``Notes``."""
+    assert checker.heading_slugs(["Notes", "Notes", "Notes"]) == {"notes", "notes-1", "notes-2"}

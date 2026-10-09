@@ -73,6 +73,17 @@ detections. :func:`cfar_valid_mask` and :func:`cfar_valid_mask_2d` report which
 cells were actually tested, and any measured false-alarm rate must be taken over
 those cells alone.
 
+The closed forms also assume the reference cells are *independent*, which holds
+for an untapered, unpadded FFT of white noise and fails for a tapered one. A
+taper correlates neighbouring bins — after a Hann window the complex amplitudes
+of adjacent bins have a correlation of magnitude about 2/3 — and so do
+zero-padding the FFT and sampling a compressed pulse faster than its bandwidth.
+Correlated cells carry less information than as many independent ones, so the
+noise estimate is noisier than the calibration assumed and the false-alarm rate
+comes out above ``pfa``. This applies to the 1-D window and the ring alike:
+check a calibration by measurement on independent cells, or expect the measured
+rate to be high.
+
 References
 ----------
 .. [1] H. M. Finn and R. S. Johnson, "Adaptive detection mode with threshold
@@ -97,6 +108,7 @@ References
 from __future__ import annotations
 
 import math
+import operator
 from dataclasses import dataclass
 from typing import Literal, get_args
 
@@ -107,7 +119,9 @@ from scipy.sparse import csgraph
 
 __all__ = [
     "CFAR_VARIANTS",
+    "CFAR_VARIANTS_2D",
     "CfarVariant",
+    "CfarVariant2d",
     "Detection",
     "cfar_detect",
     "cfar_detect_2d",
@@ -127,6 +141,12 @@ CfarVariant = Literal["ca", "go", "so", "os"]
 
 CFAR_VARIANTS: tuple[CfarVariant, ...] = get_args(CfarVariant)
 
+# GO and SO compare two half-windows, which a 2-D ring does not have (see the
+# module docstring), so the 2-D functions offer only these two.
+CfarVariant2d = Literal["ca", "os"]
+
+CFAR_VARIANTS_2D: tuple[CfarVariant2d, ...] = get_args(CfarVariant2d)
+
 # Upper bound for the threshold-factor bracket search. Pfa(alpha) falls at least
 # geometrically in alpha, so a design Pfa small enough to need alpha > 1e12 is a
 # sign of a mis-specified window rather than a bracket that needs widening.
@@ -135,10 +155,6 @@ _MAX_ALPHA_LINEAR = 1.0e12
 # OS-CFAR needs every reference cell, not a running sum, so it materialises a
 # sliding window. This caps that temporary at roughly a few hundred megabytes.
 _OS_MAX_WINDOW_ELEMENTS = 1 << 24
-
-# GO and SO compare two half-windows, which a 2-D ring does not have (see the
-# module docstring), so the 2-D functions offer only these two.
-_CFAR_2D_VARIANTS = ("ca", "os")
 
 
 @dataclass(frozen=True)
@@ -779,8 +795,9 @@ def cfar_valid_mask_2d(
     Raises
     ------
     ValueError
-        If the map has fewer than two dimensions, a count is invalid, the axes
-        are out of bounds or repeated, or ``wrap_axes`` names an axis not in
+        If the map has fewer than two dimensions, ``n_train``, ``n_guard`` or
+        ``axes`` is not exactly two integers, a count is invalid, the axes are
+        out of bounds or repeated, or ``wrap_axes`` names an axis not in
         ``axes``.
 
     Examples
@@ -803,7 +820,7 @@ def cfar_noise_estimate_2d_w(
     *,
     n_train: tuple[int, int],
     n_guard: tuple[int, int],
-    variant: Literal["ca", "os"] = "ca",
+    variant: CfarVariant2d = "ca",
     rank: int | None = None,
     axes: tuple[int, int] = (-2, -1),
     wrap_axes: tuple[int, ...] = (),
@@ -854,7 +871,8 @@ def cfar_noise_estimate_2d_w(
     Raises
     ------
     ValueError
-        If ``variant`` is not ``'ca'`` or ``'os'``, a count or ``rank`` is out of
+        If ``variant`` is not ``'ca'`` or ``'os'``, ``n_train``, ``n_guard`` or
+        ``axes`` is not exactly two integers, a count or ``rank`` is out of
         range, ``axes`` or ``wrap_axes`` are invalid, or ``power_w`` has fewer
         than two dimensions or holds negative or non-finite values.
 
@@ -912,7 +930,7 @@ def cfar_threshold_2d_w(
     pfa: float,
     n_train: tuple[int, int],
     n_guard: tuple[int, int],
-    variant: Literal["ca", "os"] = "ca",
+    variant: CfarVariant2d = "ca",
     rank: int | None = None,
     axes: tuple[int, int] = (-2, -1),
     wrap_axes: tuple[int, ...] = (),
@@ -949,7 +967,8 @@ def cfar_threshold_2d_w(
     -----
     Under the noise model the reference cells are i.i.d., and neither CA nor OS
     depends on where they lie, so a ring of :math:`M` cells takes the threshold
-    factor of a window of :math:`M/2` cells per side.
+    factor of a window of :math:`M/2` cells per side. A taper along either axis
+    breaks the independence; see the module notes.
 
     Examples
     --------
@@ -984,7 +1003,7 @@ def cfar_detect_2d(
     pfa: float,
     n_train: tuple[int, int],
     n_guard: tuple[int, int],
-    variant: Literal["ca", "os"] = "ca",
+    variant: CfarVariant2d = "ca",
     rank: int | None = None,
     axes: tuple[int, int] = (-2, -1),
     wrap_axes: tuple[int, ...] = (),
@@ -1304,9 +1323,9 @@ def _order_statistic(
 
 def _validate_variant_2d(variant: str) -> None:
     """Reject a variant that the 2-D ring does not offer."""
-    if variant not in _CFAR_2D_VARIANTS:
+    if variant not in CFAR_VARIANTS_2D:
         msg = (
-            f"variant must be one of {_CFAR_2D_VARIANTS!r} for a 2-D ring, got {variant!r}. "
+            f"variant must be one of {CFAR_VARIANTS_2D!r} for a 2-D ring, got {variant!r}. "
             "'go' and 'so' compare two half-windows, which a ring does not have."
         )
         raise ValueError(msg)
@@ -1392,9 +1411,11 @@ def _ring(
     if ndim < 2:
         msg = f"a 2-D ring needs a map with at least two dimensions, got {ndim}."
         raise ValueError(msg)
+    n_train = _integer_pair("n_train", n_train)
+    n_guard = _integer_pair("n_guard", n_guard)
     for train, guard in zip(n_train, n_guard, strict=True):
         _validate_window(n_train=train, n_guard=guard)
-    first, second = (_normalize_axis(axis, ndim) for axis in axes)
+    first, second = (_normalize_axis(axis, ndim) for axis in _integer_pair("axes", axes))
     if first == second:
         msg = f"axes must name two different axes, got {axes!r}."
         raise ValueError(msg)
@@ -1404,10 +1425,28 @@ def _ring(
         raise ValueError(msg)
     return _Ring(
         axes=(first, second),
-        n_train=(int(n_train[0]), int(n_train[1])),
-        n_guard=(int(n_guard[0]), int(n_guard[1])),
+        n_train=n_train,
+        n_guard=n_guard,
         wraps=(first in circular, second in circular),
     )
+
+
+def _integer_pair(name: str, value: tuple[int, int]) -> tuple[int, int]:
+    """Return ``value`` as two Python ints, or raise naming the argument.
+
+    The ring takes one count per axis, so anything but exactly two integers is a
+    mistake: a third entry would otherwise be dropped, a fractional count
+    truncated, and the 1-D habit of a bare ``n_train=16`` fail on iteration.
+    ``operator.index`` accepts NumPy integers and refuses floats.
+    """
+    try:
+        entries = tuple(operator.index(entry) for entry in value)
+    except TypeError:
+        entries = ()
+    if len(entries) != 2:
+        msg = f"{name} must be two integers, one for each of the ring's axes, got {value!r}."
+        raise ValueError(msg)
+    return entries[0], entries[1]
 
 
 def _ring_mean_w(padded_w: NDArray[np.float64], ring: _Ring) -> NDArray[np.float64]:

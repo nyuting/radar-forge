@@ -20,7 +20,8 @@
 **Status: specified, partially implemented.** Most of the pieces in §3 exist in
 `src/radar_forge/core/tracking/`. What does not yet hold is the "one tracker" end state of §4,
 and §13 lists the steps to it. Where this spec and the code disagree, the code is behind and
-this spec is the target, except where §14 says otherwise.
+this spec is the target, except where §14 says otherwise. Step 9 of §13 also holds the audit of this package, deferred until the migration
+is done.
 
 This spec covers `core/tracking/`: filters, motion and measurement models, gating, association,
 track initiation and track lifecycle, and the interface they offer the pipelines. How to run the
@@ -585,6 +586,23 @@ it would be later. The names and module moves are TD13's.
    Also fix `kalman.py`'s module docstring if it survives: it says "a linear Kalman filter",
    but the ENU models make it an extended one (`:138`, `:479`).
 8. **Covariance-based deletion** (§8.2). Independent of the rest; any time after step 2.
+9. **Audit the finished package.** The audits of the rest of the library
+   ([`docs/audits/`](../docs/audits/README.md)) left tracking out, because steps 0–7 replace most
+   of it. Once step 7 has merged, run both audits over the tracking code as it then stands:
+   - **Code against spec**, Q1–Q8 ([method](../docs/audits/README.md#1-auditing-code-against-the-spec)), over `src/radar_forge/core/tracking/**`. The reference
+     is this spec and [`docs/tracking/README.md`](../docs/tracking/README.md). Record the result
+     as a `core/tracking/` section of `docs/audits/core-audit.md`, numbering findings on from the
+     last F and R there.
+   - **Test audit and pruning**, Sound / Redundant / Weak / Wrong, over
+     `tests/core/tracking/**`, `tests/core/test_tracking.py` (or what survives it),
+     `tests/pipelines/test_tracking.py` and `tests/pipelines/test_scenario_003.py`. Delete the
+     Redundant ones; rewrite or fix the Weak and Wrong ones. The rules are
+     [`testing.md` §10.10](../docs/conventions/testing.md#1010-pruning-a-suite-review), P1–P6:
+     the §8 floor holds, every deletion names the test that still
+     catches its bug, and `src/` line and branch coverage do not drop. Record it in
+     `docs/audits/tests-audit.md`.
+
+   *Check:* AC11.
 
 ## 14. Decisions
 
@@ -725,6 +743,7 @@ message naming the new one, rather than being silently ignored.
 | AC8 | Scenario 003's end-to-end criteria (`spec/scenario-003-tracking.md` §12) pass on `Tracker`, and every number that differs from `KalmanTracker`'s is explained in the commit that moved it (§12; §7.2's cost change may move some) | [test] |
 | AC9 | `core/tracking/` imports nothing from `pipelines/` | [review] |
 | AC10 | This spec passes `scripts/check_conventions.py` R7 | [hook] |
+| AC11 | Step 9 is done: `docs/audits/core-audit.md` has a verdict for every public name in `core/tracking/`, and `docs/audits/tests-audit.md` classifies every tracking test, with the coverage comparison (`docs/audits/README.md`, `testing.md` §10.10) | [review] |
 
 ## 16. Limitations
 

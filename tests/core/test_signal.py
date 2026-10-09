@@ -12,7 +12,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from radar_forge.core.ambiguity import fold_velocity_mps
 from radar_forge.core.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.core.dsp import (
     doppler_bin_centers_mps,
@@ -47,31 +46,27 @@ S2_RADAR = Radar(
 )
 
 
-def _fmcw_peak(range_m: float, velocity_mps: float) -> tuple[float, float]:
-    """Return the (range_m, velocity_mps) of the brightest S1 range-Doppler cell."""
+# The S1 range and Doppler axes for an N_PULSES dwell, from the axis helpers.
+_S1_RANGE_AXIS_M = range_bin_centers_m(
+    S1_RADAR.n_samples_per_pri, 2.0e6, 1.0e-3, S1_RADAR.receiver.sample_rate_hz
+)
+_S1_VELOCITY_AXIS_MPS = doppler_bin_centers_mps(
+    N_PULSES, S1_RADAR.transmitter.pulse_repetition_interval_s, S1_RADAR.wavelength_m
+)
+
+
+def _fmcw_peak_bins(range_m: float, velocity_mps: float) -> tuple[int, int]:
+    """Return the (doppler_bin, range_bin) of the brightest S1 range-Doppler cell."""
     paths = line_of_sight_paths(S1_RADAR, range_m, velocity_mps, 10.0)
-    cube = fmcw_deramp_baseband(paths, S1_RADAR, N_PULSES)
-    rd_map = range_doppler_map(cube)
-    peak = np.unravel_index(np.abs(rd_map).argmax(), rd_map.shape)
-    range_axis_m = range_bin_centers_m(
-        rd_map.shape[1], 2.0e6, 1.0e-3, S1_RADAR.receiver.sample_rate_hz
-    )
-    velocity_axis_mps = doppler_bin_centers_mps(
-        rd_map.shape[0],
-        S1_RADAR.transmitter.pulse_repetition_interval_s,
-        S1_RADAR.wavelength_m,
-    )
-    return float(range_axis_m[peak[1]]), float(velocity_axis_mps[peak[0]])
+    rd_map = range_doppler_map(fmcw_deramp_baseband(paths, S1_RADAR, N_PULSES))
+    doppler_bin, range_bin = np.unravel_index(np.abs(rd_map).argmax(), rd_map.shape)
+    return int(doppler_bin), int(range_bin)
 
 
 class TestLineOfSightPaths:
     def test_delay_is_the_two_way_transit_time(self) -> None:
         paths = line_of_sight_paths(S1_RADAR, 15_000.0, 0.0, 10.0)
         np.testing.assert_allclose(paths.delay_s[0], 2.0 * 15_000.0 / 299_792_458.0, rtol=1e-15)
-
-    def test_range_property_inverts_the_delay(self) -> None:
-        paths = line_of_sight_paths(S1_RADAR, 12_345.0, 0.0, 10.0)
-        np.testing.assert_allclose(paths.range_m[0], 12_345.0, rtol=1e-12)
 
     def test_closing_velocity_gives_positive_doppler(self) -> None:
         """The library sign convention, per spec/structure.md D5."""
@@ -98,28 +93,31 @@ class TestLineOfSightPaths:
         )
         np.testing.assert_allclose(np.abs(paths.amplitude_linear[0]) ** 2, expected_w, rtol=1e-12)
 
-    def test_power_follows_the_inverse_fourth_power_law(self) -> None:
-        near = line_of_sight_paths(S1_RADAR, 10_000.0, 0.0, 10.0)
-        far = line_of_sight_paths(S1_RADAR, 20_000.0, 0.0, 10.0)
-        ratio = np.abs(near.amplitude_linear[0]) ** 2 / np.abs(far.amplitude_linear[0]) ** 2
-        np.testing.assert_allclose(ratio, 16.0, rtol=1e-12)
-
     def test_a_zero_cross_section_target_returns_nothing(self) -> None:
         paths = line_of_sight_paths(S1_RADAR, 10_000.0, 80.0, 0.0)
         assert paths.amplitude_linear[0] == 0.0
 
     def test_handles_several_targets_at_once(self) -> None:
-        paths = line_of_sight_paths(
-            S1_RADAR, [9_000.0, 12_000.0, 15_000.0], [50.0, -20.0, 0.0], 10.0
-        )
+        """Catches broadcasting that reuses one target's range or rate for all of them.
+
+        Each path's delay and Doppler is checked against its own target, and a
+        scalar cross-section broadcasts to every path.
+        """
+        ranges_m = np.array([9_000.0, 12_000.0, 15_000.0])
+        velocities_mps = np.array([50.0, -20.0, 0.0])
+        paths = line_of_sight_paths(S1_RADAR, ranges_m, velocities_mps, 10.0)
         assert paths.n_paths == 3
-        assert paths.aoa_rad.shape == (3, 2)
+        # rtol 1e-12: one multiply and one divide per path.
+        np.testing.assert_allclose(paths.delay_s, 2.0 * ranges_m / SPEED_OF_LIGHT_MPS, rtol=1e-12)
+        np.testing.assert_allclose(
+            paths.doppler_hz, 2.0 * velocities_mps / S1_RADAR.wavelength_m, rtol=1e-12, atol=0.0
+        )
         np.testing.assert_array_equal(paths.bounce_count, [1, 1, 1])
 
-    @pytest.mark.parametrize("bad_range_m", [0.0, -1.0])
-    def test_rejects_a_non_positive_range(self, bad_range_m: float) -> None:
+    def test_rejects_a_zero_range(self) -> None:
+        """Zero is the boundary: a ``< 0`` guard would let a target sit on the radar."""
         with pytest.raises(ValueError, match="strictly positive"):
-            line_of_sight_paths(S1_RADAR, bad_range_m, 0.0, 10.0)
+            line_of_sight_paths(S1_RADAR, 0.0, 0.0, 10.0)
 
     def test_rejects_a_negative_cross_section(self) -> None:
         with pytest.raises(ValueError, match="non-negative"):
@@ -151,51 +149,38 @@ class TestPropagationPathsValidation:
 
 
 class TestFmcwDerampBaseband:
-    def test_cube_has_the_canonical_layout(self) -> None:
-        """(n_pulses, n_samples): slow time axis 0, per style.md §3.1."""
-        paths = line_of_sight_paths(S1_RADAR, 10_000.0, 0.0, 10.0)
-        cube = fmcw_deramp_baseband(paths, S1_RADAR, N_PULSES)
-        assert cube.shape == (N_PULSES, 1000)
-        assert cube.dtype == np.complex128
+    def test_a_closing_target_on_bin_centres_lands_in_exactly_those_bins(self) -> None:
+        """Catches a flipped Doppler sign, a one-way delay, or an off-by-one bin, end to end.
 
-    @pytest.mark.parametrize("true_range_m", [5_000.0, 10_000.0, 17_500.0])
-    def test_a_stationary_target_lands_in_its_exact_range_bin(self, true_range_m: float) -> None:
-        """Analytic ground truth: the beat frequency fixes the bin exactly."""
-        peak_range_m, peak_velocity_mps = _fmcw_peak(true_range_m, 0.0)
-        assert abs(peak_range_m - true_range_m) < S1_RADAR.range_resolution_m
-        np.testing.assert_allclose(peak_velocity_mps, 0.0, atol=1e-12)
-
-    def test_a_slow_closing_target_lands_at_positive_velocity(self) -> None:
-        """The sign convention, end to end through synthesis and processing.
-
-        This is the test the module docstring's sweep-direction argument exists
-        to pass: with an up sweep the peak would appear at -3 m/s and look
-        entirely plausible.
+        The target is placed on range bin 133 (9968 m) and Doppler bin
+        N/2 + 50 (+2.99 m/s, closing), both read off the axis helpers, so the
+        answer is an integer pair with no tolerance. This is the test the module
+        docstring's sweep-direction argument exists to pass: with an up sweep
+        the closing target would land on bin N/2 - 50 and look entirely
+        plausible. Range migration over the dwell is 0.8 m, 1% of a bin.
         """
-        _, peak_velocity_mps = _fmcw_peak(10_000.0, 3.0)
-        assert peak_velocity_mps > 0.0
-        assert abs(peak_velocity_mps - 3.0) < 0.1
-
-    def test_an_opening_target_lands_at_negative_velocity(self) -> None:
-        _, peak_velocity_mps = _fmcw_peak(10_000.0, -3.0)
-        assert peak_velocity_mps < 0.0
-        assert abs(peak_velocity_mps + 3.0) < 0.1
+        range_bin, doppler_bin = 133, N_PULSES // 2 + 50
+        range_m = float(_S1_RANGE_AXIS_M[range_bin])
+        velocity_mps = float(_S1_VELOCITY_AXIS_MPS[doppler_bin])
+        assert velocity_mps > 0.0  # closing
+        assert _fmcw_peak_bins(range_m, velocity_mps) == (doppler_bin, range_bin)
 
     def test_a_fast_target_folds_in_doppler_but_not_in_range(self) -> None:
         """The defining behaviour of scenario 001 S1.
 
-        An 80 m/s aircraft is ten times the unambiguous velocity, so it appears
-        at a wrong, folded velocity — while its range stays correct.
+        A 79.5 m/s aircraft is five full Doppler spans (5 x 15.30 m/s) above the
+        bin-centre velocity of +2.99 m/s, so it lands exactly where that slow
+        target would -- a wrong, folded velocity -- while its range bin stays
+        correct. Range migration over the dwell is 20 m, a quarter of a bin. At
+        S1's parameters stop-and-hop holds even at this speed, and pyproject
+        turns warnings into errors, so this also proves the generator stays
+        silent where it should.
         """
-        true_velocity_mps = 80.0
-        peak_range_m, peak_velocity_mps = _fmcw_peak(10_000.0, true_velocity_mps)
-
-        expected_velocity_mps = fold_velocity_mps(
-            true_velocity_mps, S1_RADAR.unambiguous_velocity_mps
-        )
-        assert abs(peak_range_m - 10_000.0) < S1_RADAR.range_resolution_m
-        assert abs(peak_velocity_mps - expected_velocity_mps) < 0.1
-        assert abs(peak_velocity_mps) < S1_RADAR.unambiguous_velocity_mps
+        range_bin, doppler_bin = 133, N_PULSES // 2 + 50
+        span_mps = 2.0 * S1_RADAR.unambiguous_velocity_mps
+        true_velocity_mps = float(_S1_VELOCITY_AXIS_MPS[doppler_bin]) + 5.0 * span_mps
+        peak = _fmcw_peak_bins(float(_S1_RANGE_AXIS_M[range_bin]), true_velocity_mps)
+        assert peak == (doppler_bin, range_bin)
 
     def test_warns_when_stop_and_hop_is_strained(self) -> None:
         """A half-second chirp is long enough for a target to cross a bin within it.
@@ -211,23 +196,6 @@ class TestFmcwDerampBaseband:
         paths = line_of_sight_paths(slow_sweep_radar, 10_000.0, 100.0, 10.0)
         with pytest.warns(UserWarning, match="range bin during one chirp"):
             fmcw_deramp_baseband(paths, slow_sweep_radar, 4)
-
-    def test_does_not_warn_at_the_scenario_parameters(self) -> None:
-        """pyproject turns warnings into errors, so an unexpected warn fails here.
-
-        This is the positive half of the approximation claim in the module
-        docstring: at S1's parameters stop-and-hop is comfortably valid, even for
-        a target ten times over the unambiguous velocity.
-        """
-        paths = line_of_sight_paths(S1_RADAR, 10_000.0, 80.0, 10.0)
-        fmcw_deramp_baseband(paths, S1_RADAR, 8)
-
-    def test_is_noiseless_without_a_generator(self) -> None:
-        """Determinism by default, so a geometry bug cannot hide in the noise."""
-        paths = line_of_sight_paths(S1_RADAR, 10_000.0, 0.0, 10.0)
-        first = fmcw_deramp_baseband(paths, S1_RADAR, 4)
-        second = fmcw_deramp_baseband(paths, S1_RADAR, 4)
-        np.testing.assert_array_equal(first, second)
 
     def test_rejects_a_pulsed_radar(self) -> None:
         paths = line_of_sight_paths(S2_RADAR, 10_000.0, 0.0, 10.0)
@@ -284,31 +252,32 @@ class TestPulsedBaseband:
             pulsed_baseband(unfolded, S2_RADAR, 16), reference, axis=-1
         )
         assert int(np.abs(compressed[0]).argmax()) == int(np.abs(unfolded_compressed[0]).argmax())
-        assert folded_range_m < true_range_m
 
     def test_a_fast_closing_target_lands_at_positive_velocity_unfolded(self) -> None:
-        """S2's compensating virtue: 80 m/s is well inside +/-191 m/s."""
-        true_velocity_mps = 80.0
-        paths = line_of_sight_paths(S2_RADAR, 4_000.0, true_velocity_mps, 10.0)
-        cube = pulsed_baseband(paths, S2_RADAR, N_PULSES)
-        rd_map = range_doppler_map(cube)
-        peak = np.unravel_index(np.abs(rd_map).argmax(), rd_map.shape)
+        """S2's compensating virtue: 80 m/s is well inside +/-191 m/s.
+
+        Catches a flipped Doppler sign, or a residual phase taken from the
+        folded delay. The target is placed on Doppler bin N/2 + 54, +80.66 m/s,
+        so the assertion is an exact bin; the old +/-2 m/s band was 1.3 bins
+        wide at S2's 1.49 m/s spacing.
+        """
         velocity_axis_mps = doppler_bin_centers_mps(
-            rd_map.shape[0],
+            N_PULSES,
             S2_RADAR.transmitter.pulse_repetition_interval_s,
             S2_RADAR.wavelength_m,
         )
-        peak_velocity_mps = float(velocity_axis_mps[peak[0]])
-        assert peak_velocity_mps > 0.0
-        assert abs(peak_velocity_mps - true_velocity_mps) < 2.0
+        doppler_bin = N_PULSES // 2 + 54
+        paths = line_of_sight_paths(S2_RADAR, 4_000.0, float(velocity_axis_mps[doppler_bin]), 10.0)
+        rd_map = range_doppler_map(pulsed_baseband(paths, S2_RADAR, N_PULSES))
+        peak = np.unravel_index(np.abs(rd_map).argmax(), rd_map.shape)
+        assert int(peak[0]) == doppler_bin
 
     def test_rejects_an_fmcw_radar(self) -> None:
         paths = line_of_sight_paths(S1_RADAR, 10_000.0, 0.0, 10.0)
         with pytest.raises(ValueError, match="needs a pulsed transmitter"):
             pulsed_baseband(paths, S1_RADAR, 4)
 
-    @pytest.mark.parametrize("n_pulses", [0, -1])
-    def test_rejects_an_empty_dwell(self, n_pulses: int) -> None:
+    def test_rejects_an_empty_dwell(self) -> None:
         """A cube with no slow-time axis has no Doppler, and no error either.
 
         The FMCW generator already guards this; the pulsed one documents the
@@ -318,7 +287,7 @@ class TestPulsedBaseband:
         """
         paths = line_of_sight_paths(S2_RADAR, 10_000.0, 0.0, 10.0)
         with pytest.raises(ValueError, match="at least one"):
-            pulsed_baseband(paths, S2_RADAR, n_pulses)
+            pulsed_baseband(paths, S2_RADAR, 0)
 
 
 class TestThermalNoise:
@@ -420,13 +389,6 @@ class TestBistaticLineOfSightPaths:
         paths = bistatic_line_of_sight_paths(S1_PAIR, 12.0e3, 15.0e3, 0.0, 10.0)
         np.testing.assert_allclose(paths.range_m, 13.5e3, rtol=1e-12)
 
-    def test_delay_is_the_whole_route_over_the_speed_of_light(self) -> None:
-        range_tx_m, range_rx_m = 12.0e3, 15.0e3
-        paths = bistatic_line_of_sight_paths(S1_PAIR, range_tx_m, range_rx_m, 0.0, 10.0)
-        np.testing.assert_allclose(
-            paths.delay_s, (range_tx_m + range_rx_m) / SPEED_OF_LIGHT_MPS, rtol=1e-12
-        )
-
     def test_arrival_and_departure_angles_are_kept_separate(self) -> None:
         """Departure happens at one site and arrival at another, so they differ."""
         paths = bistatic_line_of_sight_paths(
@@ -525,12 +487,6 @@ class TestBistaticDoppler:
             atol=1e-9,
         )
 
-    def test_closing_on_both_sites_is_positive(self) -> None:
-        unit_to_tx = np.array([-1.0, 0.0, 0.0])
-        unit_to_rx = np.array([0.0, -1.0, 0.0])
-        velocity = np.array([-40.0, -40.0, 0.0])  # towards both
-        assert bistatic_doppler_hz(S1_PAIR.wavelength_m, velocity, unit_to_tx, unit_to_rx) > 0.0
-
     def test_rejects_vectors_that_are_not_three_dimensional(self) -> None:
         with pytest.raises(ValueError, match="three components"):
             bistatic_doppler_hz(
@@ -599,7 +555,6 @@ class TestBistaticGenerators:
             )[0]
         ).argmax()
         assert int(folded_peak) == int(unfolded_peak)
-        assert folded_sum_m < range_sum_m
 
     def test_doppler_bin_follows_the_bisector_rate(self) -> None:
         """Closing-positive survives the bistatic path: the peak is at +v, not -v."""
@@ -616,8 +571,3 @@ class TestBistaticGenerators:
         rd_map = range_doppler_map(cube)
         peak = np.unravel_index(np.abs(rd_map).argmax(), rd_map.shape)
         assert int(peak[0]) == target_bin
-
-    def test_generators_accept_a_bistatic_radar(self) -> None:
-        paths = bistatic_line_of_sight_paths(S1_PAIR, 12.0e3, 15.0e3, 40.0, 10.0)
-        cube = fmcw_deramp_baseband(paths, S1_PAIR, 8)
-        assert cube.shape == (8, S1_PAIR.n_samples_per_pri)

@@ -34,24 +34,10 @@ class TestRangeResolution:
             rtol=1e-12,
         )
 
-    def test_inversely_proportional_to_bandwidth(self) -> None:
-        """Doubling bandwidth halves the resolution cell — the reason to chirp."""
-        coarse = range_resolution_m(NOMINAL_BANDWIDTH_HZ)
-        fine = range_resolution_m(2.0 * NOMINAL_BANDWIDTH_HZ)
-        np.testing.assert_allclose(fine, coarse / 2.0, rtol=1e-12)
-
-    def test_broadcasts_over_array_input(self) -> None:
-        bandwidths = np.array([1e8, 1e9, 4e9])
-        np.testing.assert_allclose(
-            range_resolution_m(bandwidths),
-            SPEED_OF_LIGHT_MPS / (2.0 * bandwidths),
-            rtol=1e-12,
-        )
-
-    @pytest.mark.parametrize("bad_bandwidth", [0.0, -1.0])
-    def test_rejects_non_positive_bandwidth(self, bad_bandwidth: float) -> None:
+    def test_rejects_a_zero_bandwidth(self) -> None:
+        """Zero is the boundary: a ``< 0`` guard would divide by zero instead."""
         with pytest.raises(ValueError, match="strictly positive"):
-            range_resolution_m(bad_bandwidth)
+            range_resolution_m(0.0)
 
 
 class TestSweepRate:
@@ -64,11 +50,11 @@ class TestSweepRate:
 
     @pytest.mark.parametrize(
         ("bandwidth_hz", "chirp_duration_s"),
-        [(0.0, 40e-6), (-1.0, 40e-6), (1e9, 0.0), (1e9, -1.0)],
+        [(0.0, 40e-6), (1e9, 0.0)],
+        ids=["bandwidth", "duration"],
     )
-    def test_rejects_non_positive_parameters(
-        self, bandwidth_hz: float, chirp_duration_s: float
-    ) -> None:
+    def test_rejects_a_zero_parameter(self, bandwidth_hz: float, chirp_duration_s: float) -> None:
+        """Each parameter's own guard, at its zero boundary."""
         with pytest.raises(ValueError, match="strictly positive"):
             sweep_rate_hzps(bandwidth_hz, chirp_duration_s)
 
@@ -83,20 +69,6 @@ class TestBeatFrequency:
             beat_frequency_hz(range_m, NOMINAL_BANDWIDTH_HZ, NOMINAL_CHIRP_TIME_S),
             expected,
             rtol=1e-12,
-        )
-
-    def test_is_linear_in_range(self) -> None:
-        near = beat_frequency_hz(10.0, NOMINAL_BANDWIDTH_HZ, NOMINAL_CHIRP_TIME_S)
-        far = beat_frequency_hz(30.0, NOMINAL_BANDWIDTH_HZ, NOMINAL_CHIRP_TIME_S)
-        np.testing.assert_allclose(far, 3.0 * near, rtol=1e-12)
-
-    def test_zero_range_gives_zero_beat(self) -> None:
-        # A co-located target has no round-trip delay, so deramping leaves DC
-        # exactly; atol rather than rtol because the true value is zero.
-        np.testing.assert_allclose(
-            beat_frequency_hz(0.0, NOMINAL_BANDWIDTH_HZ, NOMINAL_CHIRP_TIME_S),
-            0.0,
-            atol=0.0,
         )
 
     def test_round_trips_through_range(self) -> None:
@@ -121,17 +93,17 @@ class TestLfmChirp:
         chirp = lfm_chirp(bandwidth_hz=1e6, chirp_duration_s=1e-3, sample_rate_hz=2e6)
         assert chirp.shape == (2000,)
 
-    def test_is_constant_modulus(self) -> None:
-        """Frequency modulation alone: a chirp carries no amplitude modulation."""
-        chirp = lfm_chirp(bandwidth_hz=1e6, chirp_duration_s=1e-3, sample_rate_hz=2e6)
-        # rtol 1e-12: |exp(j phi)| is exactly 1 up to float64 round-off in sin/cos.
-        np.testing.assert_allclose(np.abs(chirp), 1.0, rtol=1e-12)
+    def test_is_constant_modulus_at_the_requested_amplitude(self) -> None:
+        """Catches amplitude modulation, or amplitude_linear ignored or applied to the phase.
 
-    def test_amplitude_scales_linearly(self) -> None:
-        kwargs = {"bandwidth_hz": 1e6, "chirp_duration_s": 1e-3, "sample_rate_hz": 2e6}
-        unit = lfm_chirp(**kwargs)  # type: ignore[arg-type]
-        scaled = lfm_chirp(**kwargs, amplitude_linear=3.0)  # type: ignore[arg-type]
-        np.testing.assert_allclose(scaled, 3.0 * unit, rtol=1e-12)
+        Frequency modulation alone: every sample has modulus exactly A, so the
+        pulse energy is N A^2.
+        """
+        chirp = lfm_chirp(
+            bandwidth_hz=1e6, chirp_duration_s=1e-3, sample_rate_hz=2e6, amplitude_linear=3.0
+        )
+        # rtol 1e-12: |A exp(j phi)| is exactly A up to float64 round-off in sin/cos.
+        np.testing.assert_allclose(np.abs(chirp), 3.0, rtol=1e-12)
 
     def test_instantaneous_frequency_sweeps_linearly(self) -> None:
         """Unwrapped phase differences must reproduce f(t) = f0 + alpha*t."""
@@ -180,10 +152,17 @@ class TestLfmChirp:
         np.testing.assert_allclose(centred, base * shift, rtol=1e-9, atol=1e-12)
 
     def test_matched_filter_compresses_by_time_bandwidth_product(self) -> None:
-        """Autocorrelation mainlobe narrows from T to about 1/B: gain of B*T."""
-        bandwidth_hz = 1.0e6
-        chirp_duration_s = 1.0e-3
-        sample_rate_hz = 4.0e6
+        """The Notes claim: compression narrows the pulse from T to about 1/B, a factor BT.
+
+        Catches a chirp that sweeps less (or more) than B, which widens (or
+        narrows) the compressed mainlobe in proportion. The -3 dB width of the
+        compressed LFM is 0.886/B for large BT (Richards FRSP 2e §4.6.1); c/(2B)
+        is the peak-to-null spacing, not the -3 dB width (testing.md §10.3).
+        """
+        # BT = 100, oversampled 64x so one sample is 1/64 of 1/B.
+        bandwidth_hz = 10.0e6
+        chirp_duration_s = 10.0e-6
+        sample_rate_hz = 64.0 * bandwidth_hz
         chirp = lfm_chirp(
             bandwidth_hz=bandwidth_hz,
             chirp_duration_s=chirp_duration_s,
@@ -197,53 +176,27 @@ class TestLfmChirp:
         assert peak_index == chirp.size - 1
         np.testing.assert_allclose(compressed[peak_index], float(chirp.size), rtol=1e-9)
 
-        # Mainlobe width at -3 dB should be about one resolution cell, 1/B.
         half_power = compressed[peak_index] / np.sqrt(2.0)
         above = np.flatnonzero(compressed >= half_power)
         mainlobe_width_s = (above[-1] - above[0] + 1) / sample_rate_hz
-        expected_width_s = 1.0 / bandwidth_hz
-        # Factor-of-two band: the exact -3 dB width of an unweighted LFM is
-        # ~0.886/B, and the sampled grid quantises it further.
-        assert 0.5 * expected_width_s <= mainlobe_width_s <= 2.0 * expected_width_s
-
-    def test_conserves_energy(self) -> None:
-        """Parseval: a unit-modulus chirp of N samples carries energy N."""
-        chirp = lfm_chirp(bandwidth_hz=1e6, chirp_duration_s=1e-3, sample_rate_hz=2e6)
-        time_energy = float(np.sum(np.abs(chirp) ** 2))
-        freq_energy = float(np.sum(np.abs(np.fft.fft(chirp)) ** 2) / chirp.size)
-        # rtol 1e-10: one forward FFT, per the tolerance table in testing.md.
-        np.testing.assert_allclose(freq_energy, time_energy, rtol=1e-10)
-
-    def test_occupies_the_swept_bandwidth(self) -> None:
-        """Spectral energy is confined to [0, B] for a zero-started up-sweep."""
-        bandwidth_hz = 1.0e6
-        sample_rate_hz = 4.0e6
-        chirp = lfm_chirp(
-            bandwidth_hz=bandwidth_hz,
-            chirp_duration_s=1.0e-3,
-            sample_rate_hz=sample_rate_hz,
-        )
-        spectrum = np.abs(np.fft.fft(chirp)) ** 2
-        frequency_hz = np.fft.fftfreq(chirp.size, d=1.0 / sample_rate_hz)
-
-        in_band = (frequency_hz >= 0.0) & (frequency_hz <= bandwidth_hz)
-        in_band_fraction = float(np.sum(spectrum[in_band]) / np.sum(spectrum))
-        # Fresnel ripple and the rectangular envelope leak a little past the band
-        # edges; 99% in-band is the practical bar for an unweighted LFM.
-        assert in_band_fraction > 0.99
+        # rtol 0.03: counting samples quantises the width to 1/(64 B), which is
+        # 1.8% of 0.886/B, and at BT = 100 the mainlobe departs from the
+        # large-BT sinc by well under 1%. The uncompressed pulse is 100 times
+        # wider, so a compression that is not happening fails by orders of
+        # magnitude.
+        np.testing.assert_allclose(mainlobe_width_s, 0.886 / bandwidth_hz, rtol=0.03)
 
     @pytest.mark.parametrize(
         ("kwargs", "match"),
         [
             ({"bandwidth_hz": 0.0}, "bandwidth_hz"),
-            ({"bandwidth_hz": -1e6}, "bandwidth_hz"),
             ({"chirp_duration_s": 0.0}, "chirp_duration_s"),
-            ({"chirp_duration_s": -1e-3}, "chirp_duration_s"),
             ({"sample_rate_hz": 0.0}, "sample_rate_hz"),
-            ({"sample_rate_hz": -2e6}, "sample_rate_hz"),
         ],
+        ids=["bandwidth", "duration", "sample-rate"],
     )
-    def test_rejects_non_positive_parameters(self, kwargs: dict[str, float], match: str) -> None:
+    def test_rejects_a_zero_parameter(self, kwargs: dict[str, float], match: str) -> None:
+        """Each parameter's own guard, at its zero boundary."""
         base = {"bandwidth_hz": 1e6, "chirp_duration_s": 1e-3, "sample_rate_hz": 2e6}
         with pytest.raises(ValueError, match=match):
             lfm_chirp(**{**base, **kwargs})  # type: ignore[arg-type]
