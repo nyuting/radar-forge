@@ -11,6 +11,7 @@ import csv
 import importlib.util
 import json
 import re
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 
@@ -32,6 +33,11 @@ def load_runner() -> ModuleType:
 
 
 runner = load_runner()
+
+
+def without_time_utc(columns):
+    """A column tuple as written for a run with no absolute epoch."""
+    return tuple(column for column in columns if column != "time_utc")
 
 
 def spec_columns(section: str) -> list[tuple[str, str]]:
@@ -138,10 +144,11 @@ def test_a_ukf_run_writes_the_data_001_files(tmp_path):
         with (out_dir / name).open(newline="", encoding="utf-8") as handle:
             return tuple(next(csv.reader(handle)))
 
-    # The trajectory has an absolute epoch, so time_utc is written.
-    assert header("detections.csv") == runner.DETECTION_COLUMNS
-    assert header("tracks.csv") == runner.TRACK_COLUMNS
-    assert header("metrics.csv") == runner.METRIC_COLUMNS
+    # The shipped track counts time_s from its first fix and has no absolute
+    # epoch, so time_utc is left out of every table (data-001 §5).
+    assert header("detections.csv") == without_time_utc(runner.DETECTION_COLUMNS)
+    assert header("tracks.csv") == without_time_utc(runner.TRACK_COLUMNS)
+    assert header("metrics.csv") == without_time_utc(runner.METRIC_COLUMNS)
 
     metadata = json.loads((out_dir / "metadata.json").read_text(encoding="utf-8"))
     assert metadata["schema_version"] == runner.SCHEMA_VERSION
@@ -149,10 +156,58 @@ def test_a_ukf_run_writes_the_data_001_files(tmp_path):
     assert len(metadata["bursts"]) == 2
     assert metadata["tracking"]["state_fields"] == ["range_m", "range_rate_mps"]
     assert metadata["tracking"]["estimator"] == "ukf"
-    assert metadata["epoch_utc"].endswith("Z")
+    assert metadata["epoch_utc"] is None
     assert metadata["reference_site"]["role"] == "monostatic"
 
     with (out_dir / "detections.csv").open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     assert {row["sensor_id"] for row in rows} == {"rx0"}
     assert {row["burst_index"] for row in rows} == {"0", "1"}
+
+
+@pytest.mark.slow
+def test_a_trajectory_with_an_epoch_writes_time_utc(tmp_path):
+    """data-001 §5: with an absolute epoch, every table carries ``time_utc``.
+
+    The shipped track has none, so this runs one frame on a copy of it whose
+    first column is ``time_utc``. The epoch is data-001 §5's own example.
+    """
+    epoch_utc = datetime(2026, 9, 3, 0, 17, 56, tzinfo=UTC)
+    with (ROOT / "data" / "flight_coordinates.csv").open(newline="", encoding="utf-8") as handle:
+        fixes = list(csv.DictReader(handle))
+    track_path = tmp_path / "track_utc.csv"
+    with track_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["time_utc", "latitude_deg", "longitude_deg"])
+        for fix in fixes:
+            instant = epoch_utc + timedelta(seconds=float(fix["time_s"]))
+            writer.writerow(
+                [instant.strftime("%Y-%m-%dT%H:%M:%SZ"), fix["latitude_deg"], fix["longitude_deg"]]
+            )
+    toml_text = (ROOT / "scenarios" / "scenario_003_ukf_fmcw_dual_prf.toml").read_text(
+        encoding="utf-8"
+    )
+    toml_text, n_replaced = re.subn(
+        r'^path = "[^"]*"', f"path = {json.dumps(str(track_path))}", toml_text, flags=re.MULTILINE
+    )
+    assert n_replaced == 1
+    toml_path = tmp_path / "scenario.toml"
+    toml_path.write_text(toml_text, encoding="utf-8")
+
+    out_dir = tmp_path / "run"
+    status = runner.main(
+        [str(toml_path), "--out", str(out_dir), "--frames", "1", "--no-iq", "--no-plots"]
+    )
+    assert status == 0
+
+    # truth.csv is left out: its time_utc is data-001 §8's later, additive
+    # migration, not yet written.
+    for name, columns in [
+        ("detections.csv", runner.DETECTION_COLUMNS),
+        ("tracks.csv", runner.TRACK_COLUMNS),
+        ("metrics.csv", runner.METRIC_COLUMNS),
+    ]:
+        with (out_dir / name).open(newline="", encoding="utf-8") as handle:
+            assert tuple(next(csv.reader(handle))) == columns, name
+    metadata = json.loads((out_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["epoch_utc"] == "2026-09-03T00:17:56.000000Z"
