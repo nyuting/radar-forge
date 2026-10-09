@@ -814,6 +814,18 @@ def test_ring_threshold_factor_satisfies_the_cell_averaging_closed_form():
     )
 
 
+def test_a_ring_has_less_cfar_loss_than_a_line_of_the_same_reach():
+    """The reason for a 2-D window: more reference cells for the same reach in range.
+
+    Both windows reach 10 cells along range; the ring also draws on two Doppler
+    rows each side, so its estimate is less noisy and its threshold factor lower.
+    """
+    floor_w = np.ones((32, 64))
+    line_w = cfar_threshold_w(floor_w, pfa=1e-4, n_train=8, n_guard=2)
+    ring_w = cfar_threshold_2d_w(floor_w, pfa=1e-4, n_train=(2, 8), n_guard=(1, 2))
+    assert np.nanmax(ring_w) < np.nanmax(line_w)
+
+
 @pytest.mark.parametrize(("variant", "pfa"), [("ca", 1e-3), ("os", 1e-2)])
 def test_ring_false_alarm_rate_matches_design_pfa(rng, variant, pfa):
     """The measured false-alarm rate of the ring is consistent with the design pfa.
