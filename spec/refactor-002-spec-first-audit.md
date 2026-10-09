@@ -122,8 +122,9 @@ Findings are recorded per test or per group, each classified:
 
 | Class | Meaning |
 | :--- | :--- |
-| **Sound** | Intuitive in all three domains; no action |
-| **Weak** | Passes, but for an unconvincing reason; rewrite the setup or the assertion |
+| **Sound** | Intuitive in all three domains, and earns its place; keep |
+| **Redundant** | Catches no bug that a kept test does not already catch; delete |
+| **Weak** | Passes, but for an unconvincing reason; rewrite the setup or the assertion, or delete it if a kept test already catches its bug |
 | **Wrong** | Asserts something untrue or unphysical; fix, and say what it was hiding |
 
 **Decision: fix weak and wrong, not merely classify them.** An unconvincing setup or assertion is
@@ -131,8 +132,23 @@ rewritten so that it convinces; a test asserting something untrue or unphysical 
 the report says what it was hiding. No tolerance is weakened in the process — every rewrite keeps
 or tightens the bound it had, and any moved number is re-derived from first principles.
 
-No test is deleted merely for being redundant; redundancy is cheap and a second angle on the same
-invariant is not a defect.
+**Decision: prune the suite to the tests that are insightful and necessary.** This reverses
+the rule first written here, that no test is deleted merely for being redundant
+(changed 2026-10-09). Every test runs on every push, and a test that catches no bug a kept test
+does not already catch costs reading time and run time and buys nothing. A test earns its place
+by `docs/conventions/testing.md` §10.1 items 1–4: it names a plausible bug it catches, it is the
+cheapest test that catches that bug, it tests this library rather than NumPy or SciPy, and it
+fits the time budget. One that fails item 2 or 3 is **Redundant** and is deleted. Pruning is
+held to a floor and checked:
+
+| Rule | Statement |
+| :--- | :--- |
+| R2.4.1 | The `testing.md` §8 floor holds for every public function after pruning: a test against known-correct values, a test for every documented `Raises`, and a test for every edge case its `Notes` names |
+| R2.4.2 | A live regression test (`testing.md` §9) is kept |
+| R2.4.3 | Every deletion names its survivor, the kept test that catches the same bug |
+| R2.4.4 | Line and branch coverage of `src/` do not drop; a line pruning uncovers is either covered again or explained |
+| R2.4.5 | Counts are of collected items, so a parametrize case is a test; folding tests into one parametrized test is not a reduction |
+| R2.4.6 | A sample of deletions is checked by mutation: break what the deleted test guarded, and its survivor fails |
 
 ## 3. Summary-table hyperlink invariant
 
@@ -196,6 +212,16 @@ The request names `spec/scenario-001.md`, `-002`, `-003`. Those files are
 `spec/scenario-001-xband.md`, `spec/scenario-002-bistatic.md` and
 `spec/scenario-003-tracking.md`.
 
+### 4.5 Tracking is deferred to tracker-001
+
+The tracking code is out of scope for this refactor: `src/radar_forge/core/tracking/**` for §1,
+and `tests/core/tracking/**`, `tests/core/test_tracking.py`, `tests/pipelines/test_tracking.py`
+and `tests/pipelines/test_scenario_003.py` for §2. The migration in
+[`tracker-001` §13](tracker-001.md#13-migration-from-todays-code) renames, merges or deletes
+most of that code, and rewrites `pipelines/tracking.py`. An audit taken now would mostly
+describe code about to go. Both audits are deferred to tracker-001 §13 step 9, which runs them
+once step 7 has merged and is checked by its AC11.
+
 ## 5. Acceptance criteria
 
 | # | Criterion | Verified by |
@@ -205,7 +231,7 @@ The request names `spec/scenario-001.md`, `-002`, `-003`. Those files are
 | A3 | Every Q3 performance claim carries a benchmark | Review |
 | A4 | Every behavioural change has a test that fails without it | `git diff`, review |
 | A5 | No tolerance weakened without a documented first-principles derivation | Review |
-| A6 | Every test classified sound / weak / wrong, with weak and wrong addressed | Audit document |
+| A6 | Every test classified sound / redundant / weak / wrong; redundant deleted, weak and wrong addressed, R2.4.1–R2.4.6 held | Audit document |
 | A7 | Every navigational table row carries a resolving anchor | Link check |
 | A8 | The anchor invariant is stated in `docs/conventions/style.md` | `grep` |
 | A9 | Spec-vs-code divergences resolved on whichever side was wrong, and recorded | Review |
