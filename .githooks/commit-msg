@@ -24,7 +24,7 @@ if ! printf '%s' "$SUBJECT" | grep -qE "$PATTERN"; then
          "" \
          "  form: <type>(<scope>)?: <summary>     (summary ≤ 72 chars, no trailing period)" \
          "  type: ${TYPES//|/, }" \
-         "  scope: core, array, raytracing, pipelines, teaching, docs, ci, deps, hooks" \
+         "  scope: core, array, raytracing, pipelines, viz, docs, ci, deps, hooks" \
          "" \
          "  good: feat(array): add Taylor tapering for planar arrays" \
          "  good: fix(core): correct 1/R^4 term in the range equation" \

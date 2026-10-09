@@ -14,8 +14,8 @@ raytracing
     A single scene abstraction over pluggable ray-tracing backends.
 pipelines
     Scenario generation and machine-learning dataset synthesis.
-teaching
-    Interactive scopes and notebooks for intern onboarding.
+viz
+    Plots and scopes (range-Doppler maps, track histories) for reading results.
 """
 
 from __future__ import annotations

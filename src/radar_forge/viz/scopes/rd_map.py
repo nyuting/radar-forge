@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from numpy.typing import ArrayLike
 
-from radar_forge.teaching.plotting import magnitude_db, require_pyplot
+from radar_forge.viz.plotting import magnitude_db, require_pyplot
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -110,12 +110,12 @@ def render_range_doppler(
     -------
     matplotlib.figure.Figure
         The rendered figure. The caller owns it and must close it;
-        :func:`radar_forge.teaching.plotting.save_figure` does both.
+        :func:`radar_forge.viz.plotting.save_figure` does both.
 
     Raises
     ------
     ImportError
-        If ``matplotlib`` is not installed; the message names the ``teaching``
+        If ``matplotlib`` is not installed; the message names the ``viz``
         extra.
     ValueError
         If the axes do not match the map's shape, or if

@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from radar_forge.core.dsp import doppler_bin_centers_mps, range_bin_centers_m
-from radar_forge.teaching.scopes.rd_map import render_range_doppler
+from radar_forge.viz.scopes.rd_map import render_range_doppler
 
 pytest.importorskip("matplotlib")
 

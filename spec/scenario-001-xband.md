@@ -75,7 +75,7 @@ The DSP path this scenario builds, end to end:
                +---> core/ambiguity.py  unfold_doppler_dual_prf   (S3 only)
                |
                v
-  teaching/scopes/rd_map.py -> rd_{frame}.png,  truth.csv,  metadata.json
+  viz/scopes/rd_map.py -> rd_{frame}.png,  truth.csv,  metadata.json
 ```
 
 ### 2.1 The three waveforms at a glance
@@ -346,7 +346,7 @@ why each is load-bearing.
   and increasing. If `core/signal.py` generates the opposite sign, closing targets will appear to
   open — a bug that looks like a plausible picture, so §6's acceptance check must catch it rather
   than the eye.
-- **Range unshifted, Doppler shifted.** `teaching/scopes/rd_map.py` must label axes with
+- **Range unshifted, Doppler shifted.** `viz/scopes/rd_map.py` must label axes with
   `range_bin_centers_m` and `doppler_bin_centers_mps` rather than deriving them, since those helpers
   already encode this asymmetry and the unambiguous limits.
 
@@ -379,8 +379,8 @@ data/flight_coordinates.csv                    scenarios/scenario_001_*.toml
 scripts/run_scenario.py                        spec/scenario-001-xband.md
 src/radar_forge/core/{geodesy,radar,targets,signal,ambiguity}.py
 src/radar_forge/pipelines/{__init__,trajectories,scenarios}.py
-src/radar_forge/teaching/{__init__,plotting}.py
-src/radar_forge/teaching/scopes/rd_map.py
+src/radar_forge/viz/{__init__,plotting}.py
+src/radar_forge/viz/scopes/rd_map.py
 ```
 
 `src/radar_forge/core/constants.py` and `scripts/check_conventions.py` are **shared**: this slice
@@ -394,7 +394,7 @@ and are **consumed, never edited**, by this scenario.
 
 Everything else in `spec/structure.md` — `array/`, `raytracing/`, `core/{propagation, detection,
 clutter, tracking}.py`, `pipelines/{generate, datasets}.py`, `pipelines/exporters/`, and the other
-`teaching/scopes/` — is outside this scenario.
+`viz/scopes/` — is outside this scenario.
 
 ---
 
@@ -430,7 +430,7 @@ begins.
   7. pipelines/scenarios.py     TOML -> Scenario; iterate_frames() is a generator
              |
              v
-  8. teaching/plotting.py, teaching/scopes/rd_map.py   (matplotlib, lazily imported)
+  8. viz/plotting.py, viz/scopes/rd_map.py   (matplotlib, lazily imported)
              |
              v
   9. scripts/run_scenario.py    thin CLI; all logic stays in pipelines/
@@ -450,9 +450,9 @@ begins.
 | 5a | `core/ambiguity.py` *(new)* | `unfold_doppler_dual_prf`, needed only by S3. Kept out of `core/dsp.py` because that module belongs to the other workstream and is already near the 400-line guidance of `docs/conventions/style.md` §9. |
 | 6 | `pipelines/trajectories.py` | CSV load, resample to the frame grid, transform to the radar frame. |
 | 7 | `pipelines/scenarios.py` | Scenario TOML (`tomllib`, stdlib) → `Scenario`; `iterate_frames` is a **generator**, not a list. |
-| 8 | `teaching/plotting.py`, `teaching/scopes/rd_map.py` | `matplotlib` lazily imported; `ImportError` names the `teaching` extra. |
+| 8 | `viz/plotting.py`, `viz/scopes/rd_map.py` | `matplotlib` lazily imported; `ImportError` names the `viz` extra. |
 | 9 | `scripts/run_scenario.py` | Thin CLI; all logic stays in `pipelines/`. |
-| 10 | `__init__.py` wiring | `import radar_forge` must still succeed with zero extras, so `teaching` is **not** imported at top level. |
+| 10 | `__init__.py` wiring | `import radar_forge` must still succeed with zero extras, so `viz` is **not** imported at top level. |
 
 Scenario configurations live in `scenarios/scenario_001_{fmcw_low_prf,pulsed_medium_prf,fmcw_dual_prf}.toml`,
 sharing `[radar]`, `[receiver]`, `[target]` and `[trajectory]` blocks and differing only in

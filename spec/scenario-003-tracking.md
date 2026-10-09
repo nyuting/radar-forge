@@ -100,7 +100,7 @@ begins at the map.
             |
             v
   FrameTracks snapshots -> tracks.csv, detections.csv,
-            teaching/scopes/{rd_map,track_plot}.py -> rd_*.png, track_*.png
+            viz/scopes/{rd_map,track_plot}.py -> rd_*.png, track_*.png
 ```
 
 And the lifecycle a single track moves through, which is the other half of what this scenario
@@ -676,8 +676,8 @@ begins.
 | 0a | — | Build `range_1d` end to end first, with the linear update. The EKF path lands only once §12's criteria 1–6 pass on `range_1d`, so that a Jacobian bug cannot hide behind a tracker bug. |
 | 1 | `pipelines/tracking.py` *(new)* | `frame_detections(product, ...) -> list[Measurement]` via §5.1's bin-centre helpers; §5.3's unfolding and its bootstrap; the simulated angle measurement of §6.3; then drives `TrackManager` frame by frame. Kept out of `pipelines/scenarios.py`, which is near the 400-line guidance of `docs/conventions/style.md` §9. |
 | 2 | `scenarios/scenario_003_tracking.toml` *(new)* | S1's blocks verbatim, `[scenario].name = "scenario-003-tracking"`, plus new `[detection]` and `[tracking]` blocks. `_require_keys` in `pipelines/scenarios.py` is extended **additively**, both blocks optional, so the three scenario-001 TOMLs keep loading byte-identically. |
-| 3 | `teaching/scopes/rd_map.py` *(edit)* | Additive keyword-only `detections=`, `track_estimate=`, `gate_extent=`, all defaulting to `None`. Follow the existing private `_mark_truth` helper; do not restructure it. |
-| 4 | `teaching/scopes/track_plot.py` *(new)* | `render_range_time_history(...)`. `matplotlib` lazily imported through the existing `teaching.plotting.require_pyplot`. |
+| 3 | `viz/scopes/rd_map.py` *(edit)* | Additive keyword-only `detections=`, `track_estimate=`, `gate_extent=`, all defaulting to `None`. Follow the existing private `_mark_truth` helper; do not restructure it. |
+| 4 | `viz/scopes/track_plot.py` *(new)* | `render_range_time_history(...)`. `matplotlib` lazily imported through the existing `viz.plotting.require_pyplot`. |
 | 5 | `scripts/run_scenario.py` *(edit)* | Track when the TOML carries `[tracking]`; write the §9 files; extend `clear_previous_frames`; add `--no-tracking`; warn when §6.3's simulated angles are active. |
 | 6 | Docs | `README.md`, `spec/starter.md`, `spec/structure.md`, `docs/README.md` — §11. |
 
@@ -696,13 +696,13 @@ This scenario claims, and another workstream should not plan:
 ```text
 spec/scenario-003-tracking.md        scenarios/scenario_003_tracking.toml
 src/radar_forge/core/tracking.py               src/radar_forge/pipelines/tracking.py
-src/radar_forge/teaching/scopes/track_plot.py
+src/radar_forge/viz/scopes/track_plot.py
 tests/core/test_tracking.py                    tests/pipelines/test_tracking.py
-tests/pipelines/test_scenario_003.py           tests/teaching/test_track_plot.py
+tests/pipelines/test_scenario_003.py           tests/viz/test_track_plot.py
 ```
 
 `scripts/run_scenario.py`, `src/radar_forge/pipelines/scenarios.py` and
-`src/radar_forge/teaching/scopes/rd_map.py` are **shared with both scenario 001 and scenario 002**
+`src/radar_forge/viz/scopes/rd_map.py` are **shared with both scenario 001 and scenario 002**
 — `spec/scenario-002-bistatic.md` §4.7 claims two of them. This slice makes only
 the additive edits in steps 2, 3 and 5, and every existing call site and TOML must keep working
 unchanged. Coordinate before touching them: scenario 002 is in flight at the time of writing, and
@@ -782,7 +782,7 @@ what was measured against it.
 | 5 | Consistency | mean NIS inside the 95 % CI of a chi^2(`dim`) mean, `dim` per frame | same |
 | 6 | False alarms | measured rate inside `pfa`'s Poisson CI; expected false confirmed tracks <= 0.003 over 120 frames | same |
 | 7 | State models agree (`enu_2d` vs `range_1d`) | within `0.1 * sigma_range_m` = 2.164 m and `0.1 * sigma_velocity_mps` = 0.001725 m/s | unit level only; see §14.9 |
-| 8 | The pictures exist | `track_00000.png`, `rd_00000.png` with markers, `tracks.csv`, `detections.csv` | `tests/teaching/test_track_plot.py`, `tests/pipelines/test_scenario_003.py` |
+| 8 | The pictures exist | `track_00000.png`, `rd_00000.png` with markers, `tracks.csv`, `detections.csv` | `tests/viz/test_track_plot.py`, `tests/pipelines/test_scenario_003.py` |
 | — | `gate_threshold` matches the tabulated chi^2 quantile at each `dim` | 6.635 / 9.210 / 11.345 / 13.277 | `tests/core/test_tracking.py` |
 | — | EKF Jacobians match a central-difference derivative of `h` | 1e-8 | same |
 | — | `cfar_valid_mask` cell count and `cfar_threshold_factor` | 245 760 cells; alpha = 11.417 dB | `tests/core/test_detection.py` |

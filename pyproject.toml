@@ -32,7 +32,8 @@ dependencies = ["numpy>=1.26", "scipy>=1.11"]
 [project.optional-dependencies]
 raytracing = ["mitsuba>=3.5"]
 ml = ["torch>=2.2", "pillow>=10.0"]
-teaching = ["matplotlib>=3.8", "PySide6>=6.6", "jupyterlab>=4.0"]
+viz = ["matplotlib>=3.8"]
+notebooks = ["jupyterlab>=4.0"]
 dev = [
     "ruff>=0.6",
     "mypy>=1.11",

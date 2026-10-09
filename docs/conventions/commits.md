@@ -39,7 +39,7 @@ free, which matters once the package is on PyPI and users need to know what brok
 
 ### Scopes
 
-`core`, `array`, `raytracing`, `pipelines`, `teaching`, `docs`, `ci`, `deps`, `hooks`.
+`core`, `array`, `raytracing`, `pipelines`, `viz`, `docs`, `ci`, `deps`, `hooks`.
 These mirror the package layout. The scope is optional but nearly always worth adding; the
 hook checks its *shape* (lowercase, hyphens) rather than its membership in this list, so a
 new subpackage does not require a hook change.

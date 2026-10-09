@@ -38,11 +38,11 @@ from radar_forge.core import (
 
 
 def _module_names() -> list[str]:
-    """Every importable module in the package, teaching extras excluded."""
+    """Every importable module in the package, viz extra excluded."""
     return sorted(
         info.name
         for info in pkgutil.walk_packages(radar_forge.__path__, prefix="radar_forge.")
-        if not info.name.startswith("radar_forge.teaching")
+        if not info.name.startswith("radar_forge.viz")
     )
 
 
