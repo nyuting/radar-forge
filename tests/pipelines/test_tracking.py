@@ -562,6 +562,26 @@ class TestDualPrfDetections:
         assert len({r.pair_id for r in target}) == 1
         assert all(r.velocity_unfolded_mps is None for r in target)
 
+    def test_a_target_at_the_wrap_edge_pairs_on_a_circular_axis(self):
+        """One burst shows the target just below the span, the other just past zero.
+
+        On the circular axis the two are 60 m apart, inside the two-bin
+        tolerance, so they pair. Measured straight, they would be a whole span
+        apart.
+        """
+        from radar_forge.pipelines.tracking import dual_prf_detections
+
+        span_m = dual_products([], [])[0].range_axis_m.size * 74.9481145
+        products = dual_products([(span_m - 30.0, -30.4)], [(span_m + 30.0, -30.4)])
+        records = dual_prf_detections(
+            products, S3_SPANS_MPS, max_velocity_mps=S3_V_MAX_MPS, wrap_range=True
+        )
+        edge = [r for r in records if min(r.range_m, span_m - r.range_m) < 300.0]
+
+        assert sorted(r.burst_index for r in edge) == [0, 1]
+        assert {r.status for r in edge} == {"accepted"}
+        assert len({r.pair_id for r in edge}) == 1
+
     def test_only_the_first_bursts_accepted_detections_are_measurements(self):
         target = (15_000.0, -30.4)
         measurements = dual_prf_measurements(

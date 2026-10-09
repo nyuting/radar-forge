@@ -591,8 +591,10 @@ def dual_prf_detections(
     monitor.
 
     Two detections, one from each burst, are compatible when their ranges
-    differ by at most ``range_tolerance_m``. Range is unambiguous in both
-    bursts, so a target's two detections are compatible. They are paired when
+    differ by at most ``range_tolerance_m``, the shorter way round when
+    ``wrap_range`` is set. This assumes that the target's range is inside the
+    span of both bursts' maps, so that both measure the same range: nothing
+    here can check it, and :class:`ScenarioTracker`'s Notes say where it holds. They are paired when
     each is the other's nearest in range (mutual nearest neighbours), so no
     detection is used twice. A strong target's two detections pair even with a
     one-cell false alarm or sidelobe close by in one burst, and the false alarm
@@ -631,7 +633,9 @@ def dual_prf_detections(
         target. By default two range bins of the coarser map, as the velocity
         tolerance is two Doppler bins.
     wrap_range : bool, optional
-        Passed to :func:`frame_detections` for both bursts.
+        Passed to :func:`frame_detections` for both bursts. When set, range
+        gaps are also measured round the circle of the smaller map's range
+        axis, so a target at its wrap edge still pairs.
 
     Returns
     -------
@@ -645,6 +649,11 @@ def dual_prf_detections(
     ------
     ValueError
         If ``products`` and ``fold_spans_mps`` are not both of length two.
+
+    References
+    ----------
+    .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
+           McGraw-Hill, 2014, §5.5.4 (resolving ambiguities with multiple PRFs).
     """
     if len(products) != 2 or len(fold_spans_mps) != 2:
         msg = (
@@ -672,9 +681,23 @@ def dual_prf_detections(
 
     ranges_a_m = np.asarray([m.range_m for m in first], dtype=np.float64)
     ranges_b_m = np.asarray([m.range_m for m in second], dtype=np.float64)
-    # distance_m[i, j]: range gap between first-burst detection i and
-    # second-burst detection j. Shape (n_first, n_second).
-    distance_m = np.abs(ranges_a_m[:, None] - ranges_b_m[None, :])
+    # gap_m[i, j]: range gap between first-burst detection i and second-burst
+    # detection j. Shape (n_first, n_second).
+    gap_m = ranges_a_m[:, None] - ranges_b_m[None, :]
+    if wrap_range:
+        # Each map's range axis is a circle, so the gap takes the shorter way
+        # round, with the one wrap rule (StateLayout.wrap). The two circles may
+        # differ (60 km and 50 km for S3), and the smaller is used: a target
+        # inside both reads the same on both, except at the smaller circle's
+        # edge, where one map shows it near zero and the other near the span.
+        period_m = min(
+            product.range_axis_m.size
+            * abs(float(product.range_axis_m[1] - product.range_axis_m[0]))
+            for product in products
+        )
+        layout = StateLayout((Coordinate("range_m", "m", period=period_m),), frame="radial")
+        gap_m = layout.wrap(gap_m.reshape(-1, 1)).reshape(gap_m.shape)
+    distance_m = np.abs(gap_m)
     compatible = distance_m <= range_tolerance_m
     # i and j are mutually nearest when j is strictly the nearest to i among
     # the second burst's detections, and i strictly the nearest to j among the
@@ -1218,10 +1241,16 @@ class ScenarioTracker:
       ``spec/scenario-003-tracking.md`` §14.11). The filter's range state is
       left unwrapped. It sits on whichever fold the first detection gave it,
       and only its value modulo the period means anything, which is why the
-      exported range is wrapped. Over scenario 001's window this matters only
-      for the pulsed burst (S2), whose span is 6.0 km against a target at 16-22
-      km. For the FMCW bursts, whose spans are 50 km and more, the wrap changes
-      nothing. The ``"kalman"`` path treats range as unambiguous.
+      exported range is wrapped. Whether a target crosses the wrap depends on
+      the scenario's window, so each run's figures are in
+      ``spec/scenario-003-tracking.md`` §14.11, beside the window they hold
+      for. The ``"kalman"`` path treats range as unambiguous.
+    - Two bursts: their maps may span different ranges, and
+      :func:`dual_prf_detections` pairs their detections on the assumption
+      that the target is inside both spans, so that both measure the same
+      range. The tracker cannot check that, since it does not know the truth.
+      ``tests/pipelines/test_scenario_003.py`` checks it over each shipped
+      scenario's window.
     - Range rate: with two bursts it is unfolded by
       :func:`dual_prf_detections` and measured. With one burst on the
       ``"ukf"`` path it is measured only if the burst's unambiguous velocity

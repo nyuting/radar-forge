@@ -34,7 +34,8 @@ from radar_forge.pipelines.scenarios import (
     iterate_frames,
     load_scenario,
 )
-from radar_forge.pipelines.tracking import ScenarioTracker
+from radar_forge.pipelines.tracking import ScenarioTracker, range_layout
+from radar_forge.pipelines.trajectories import load_flight_csv, resample, to_radar_frame
 
 pytestmark = pytest.mark.slow
 
@@ -300,3 +301,23 @@ class TestDualPrf:
             if confirmed:
                 assert primary(confirmed, frame).measurement_dim == 2
                 break
+
+
+@pytest.mark.parametrize(
+    "name", ["scenario_003_tracking_dual_prf", "scenario_003_ukf_fmcw_dual_prf"]
+)
+def test_the_target_stays_inside_both_dual_prf_maps(name):
+    """dual_prf_detections pairs on the assumption that both maps see the true range.
+
+    The two bursts' range axes span different ranges, and a target beyond the
+    shorter would read differently on each and never pair. Nothing checks this
+    at run time, so it is checked here, from the truth, over each window.
+    """
+    scenario = load_scenario(SCENARIOS_DIR / f"{name}.toml")
+    trajectory = load_flight_csv(scenario.trajectory_path, altitude_m=scenario.target_altitude_m)
+    truth_m = to_radar_frame(
+        resample(trajectory, scenario.frame_times_s), scenario.bursts[0]
+    ).range_m
+    spans_m = [range_layout(burst).coordinates[0].period for burst in scenario.bursts]
+    assert None not in spans_m
+    assert float(np.max(truth_m)) < min(span_m for span_m in spans_m if span_m is not None)
