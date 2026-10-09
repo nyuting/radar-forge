@@ -371,7 +371,7 @@ the range-Doppler stage runs (DF5).
 │   ├── velocity_mps                (n_doppler_bins,)  float64, fftshifted: zero at n // 2,
 │   │                                                  closing-positive; attr fftshifted = 1
 │   ├── frame, frame_time_s         (n_frames,)
-│   └── noise_power_w               (n_frames,)        float64, the noise estimate used by CFAR
+│   └── noise_power_w               (n_frames,)        float64, the burst's thermal noise power
 ├── rt/burst{k}/data                (n_frames, n_pulses, n_range_bins)  complex128, data_rfst
 ├── cfar/burst{k}/threshold_w       (n_frames, n_doppler_bins, n_range_bins)  float64
 └── cfar/burst{k}/mask              (n_frames, n_doppler_bins, n_range_bins)  uint8
@@ -383,6 +383,13 @@ the range-Doppler stage runs (DF5).
 - The `data` attributes are as in §6.7, with `domain = "rv"` or `"rfst"`, plus `produced_by`: the
   qualified name of the function that produced the array, and the window it applied. Scaling is
   whatever that function returns. The spec does not renormalise.
+- `/rd/burst{k}/noise_power_w` is the burst's thermal noise power, the `bursts[].noise_power_w`
+  of §6.1 and the reference `snr_db` is defined against (§6.5). It is not a CFAR estimate: CFAR
+  estimates the floor per cell, not per frame, and that estimate is `cfar/burst{k}/threshold_w`
+  divided by the threshold factor α. An earlier draft described this dataset as "the noise
+  estimate used by CFAR", which contradicted both the name, which means thermal noise everywhere
+  else in this spec and in `core/`, and the shape. No file had been written to this layout, so
+  the correction moves no data (refactor-002 audit, `docs/audits/core-audit.md` F10).
 - A future range-Doppler-azimuth cube goes in `/rda/burst{k}/data`,
   `(n_frames, n_doppler_bins, n_range_bins, n_azimuth_bins)`, following the channel-last rule.
   Its azimuth scale is `azimuth_boresight_deg` (DF2).
