@@ -9,6 +9,8 @@ the slowest thing in the module.
 """
 
 import math
+import tomllib
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -302,6 +304,50 @@ def test_default_order_statistic_rank_is_three_quarters_of_the_window():
     assert default_os_rank(16) == 24
     assert default_os_rank(8) == 12
     assert default_os_rank(1) == 2
+
+
+def test_scenario_003_calibration_matches_its_specification():
+    """Catches the shipped scenario-003 detector drifting from the figures its spec quotes.
+
+    ``spec/scenario-003-tracking.md`` §12 quotes 245 760 tested cells and
+    alpha = 11.417 dB, and §3 requires both to be re-derived in a test. The
+    operating point is read from ``scenarios/scenario_003_tracking.toml``: CA
+    along range, n_train = 16 and n_guard = 4 per side, pfa = 1e-5, on a
+    (256, 1000) map (256 pulses; 1 ms x 1 MHz = 1000 range samples).
+
+    Valid cells: 256 x (1000 - 2 x (16 + 4)) = 245 760.
+
+    Threshold factor, CA with M = 2N = 32 cells:
+    alpha = M (pfa^(-1/M) - 1) = 32 (exp(ln(1e5)/32) - 1) = 32 (1.433013 - 1)
+    = 13.8564, and 10 log10(13.8564) = 11.4165 dB, which the spec rounds to
+    11.417 dB.
+    """
+    scenario = tomllib.loads(
+        (Path(__file__).parents[2] / "scenarios" / "scenario_003_tracking.toml").read_text()
+    )
+    detection = scenario["detection"]
+    burst = scenario["burst"][0]
+    n_samples = round(burst["chirp_duration_s"] * burst["sample_rate_hz"])
+    assert detection["variant"] == "ca"
+
+    valid = cfar_valid_mask(
+        (burst["n_pulses"], n_samples),
+        n_train=detection["n_train"],
+        n_guard=detection["n_guard"],
+        axis=-1,
+    )
+    assert int(valid.sum()) == 245_760
+
+    alpha_linear = cfar_threshold_factor(
+        pfa=detection["pfa"], n_train=detection["n_train"], variant="ca"
+    )
+    n_reference = 2 * detection["n_train"]
+    # rtol 1e-12: the closed form is a power and a subtraction in float64.
+    np.testing.assert_allclose(
+        alpha_linear, n_reference * (detection["pfa"] ** (-1.0 / n_reference) - 1.0), rtol=1e-12
+    )
+    # atol 1e-4 dB: the spec's 11.417 is this value to three decimals.
+    np.testing.assert_allclose(10.0 * math.log10(alpha_linear), 11.4165, atol=1e-4)
 
 
 # --------------------------------------------------------------------------- #
