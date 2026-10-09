@@ -14,6 +14,26 @@ interface sketch and nothing else — so "reference" throughout means the *speci
 the governing equation as written or cited, the numerical bounds the specs fix, the documented
 array shapes, frames, signs and units, and D1–D8.
 
+## Status at 2026-10-08
+
+Re-checked against `main` at `8a9e579`. Every fix (F1–F5) is still in place, and every
+recommendation (R1–R4) is still unapplied. Two later merges changed `core/` under this audit,
+so parts of the text below describe code that has since moved:
+
+- **`tracking.py` is now the package `core/tracking/`** (PR #2, `91a3454`). The audited module
+  survives as `core/tracking/kalman.py`, with the same filter mathematics. What `TrackManager`
+  did is now `KalmanTracker` (`kalman.py`). The name `TrackManager` belongs to a different,
+  smaller class in `lifecycle.py` that has no `step`. `Track`, `TrackStatus` and
+  `TRACK_STATUSES` moved to `tracks.py`, and `Track` is now generic over its filter. The rows
+  in [`tracking.py`](#trackingpy) are kept as audited, with the current location noted there.
+- **Not covered by this audit:** the modules PR #2 added beside `kalman.py` — `coordinates`,
+  `motion`, `measurement_models`, `estimation`, `ukf`, `association`, `initiation`, `tracks`,
+  `lifecycle` and `tracker` — and the 2-D CFAR functions PR #4 added to `detection.py`
+  (`cfar_valid_mask_2d`, `cfar_noise_estimate_2d_w`, `cfar_threshold_2d_w`, `cfar_detect_2d`).
+  They need their own pass.
+- **`Detection` changed shape** (PR #4, `3652134`). `noise_power_w` is now
+  `cfar_noise_estimate_w`, and `snr_db` is gone.
+
 ## Verdict key
 
 | Mark | Meaning |
@@ -29,7 +49,7 @@ Q4 conciseness · Q5 documentation · Q6 naming · Q7 inputs · Q8 outputs.
 
 | # | Where | Dimension | Verdict |
 | :--- | :--- | :--- | :--- |
-| [F1](#f1-frameresult-was-returned-but-never-exported) | `tracking.TrackManager.step` | Q8 | Code wrong — fixed |
+| [F1](#f1-frameresult-was-returned-but-never-exported) | `tracking.TrackManager.step` (now `tracking.kalman.KalmanTracker.step`) | Q8 | Code wrong — fixed |
 | [F2](#f2-three-docstrings-that-misdescribe-their-code) | `tracking.state_model_matrices`, `radar.BistaticRadar.range_resolution_at_bistatic_angle_m`, `signal.PropagationPaths` | Q5 | Docs wrong — fixed |
 | [F3](#f3-the-mti-canceller-copied-every-tap) | `dsp.mti_filter` | Q3, Q4 | Suboptimal — fixed, measured |
 | [F4](#f4-taper-names-were-a-bare-str-where-cfar-variants-are-a-literal) | `windows.taper` | Q6, Q7 | Inconsistent — fixed |
@@ -338,6 +358,9 @@ and derives them from `fftfreq` rather than by hand.
 
 ## `detection.py`
 
+The four `_2d` CFAR functions and the `Detection` field renames came after this audit; see
+[Status at 2026-10-08](#status-at-2026-10-08).
+
 | Name | Q1 | Q2 | Q3 | Q4 | Q5 | Q6 | Q7 | Q8 |
 | :--- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
 | `CfarVariant`, `CFAR_VARIANTS` | ✓ | ✓ | — | ✓ | ✓ | ✓ | — | — |
@@ -379,6 +402,10 @@ many-decade range needs careful scaling. The bracket ceiling raises a message th
 real cause — the window is too small for the requested rate — rather than a numerical one.
 
 ## `tracking.py`
+
+Now `core/tracking/kalman.py`; see [Status at 2026-10-08](#status-at-2026-10-08). The
+`TrackManager` rows below describe what is now `KalmanTracker`, and `Track` with its status
+names now lives in `tracks.py`.
 
 | Name | Q1 | Q2 | Q3 | Q4 | Q5 | Q6 | Q7 | Q8 |
 | :--- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
@@ -429,7 +456,11 @@ same `R` conditioning, with an explicit symmetrisation to stop drift over a long
 
 `_FORBIDDEN_COST` is a large finite number rather than `inf` because `scipy` rejects `inf` in a
 cost matrix, and the comment says so — the kind of one-line note that saves the next reader a
-confused half hour.
+confused half hour. The newer `core/tracking/association.py` uses `+inf` for a gated-out pair,
+which looks like a second convention but is the layer above this one: its
+`GlobalNearestNeighbour` passes the `+inf` costs to `associate_gnn`, which substitutes
+`_FORBIDDEN_COST` only for the solver call. `+inf` at the interface, a finite stand-in at the
+solver, is the right split and needs no reconciling.
 
 The velocity-gate fallback in `step` (a pair that fails the full gate may still pass a
 range-only one) and `_forget_rate` both carry their reasoning *and their measured alternative*:
@@ -441,8 +472,8 @@ is the standard this audit asks for on Q3 claims, applied to a design claim.
 
 ## F1 — `FrameResult` was returned but never exported
 
-`TrackManager.step` is documented as returning `FrameResult`, and it does. But
-`tracking.__all__` did not name it and `radar_forge/core/__init__.py` did not import it, so the
+`TrackManager.step` (now `KalmanTracker.step` in `core/tracking/kalman.py`) is documented as
+returning `FrameResult`, and it does. But `tracking.__all__` did not name it and `radar_forge/core/__init__.py` did not import it, so the
 type was absent from both `from radar_forge.core.tracking import *` and `radar_forge.core`. A
 caller who wanted to annotate the result, or to write an `isinstance` check, had to reach past
 the declared surface for a type the contract already promised.
