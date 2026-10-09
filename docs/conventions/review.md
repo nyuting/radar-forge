@@ -374,6 +374,7 @@ def received_power(power, gain_tx, wavelength, range):  # what the PR has
 
 ```python
 def received_power_w(
+    *,
     transmit_power_w: ArrayLike,
     gain_tx_linear: ArrayLike,
     gain_rx_linear: ArrayLike,
