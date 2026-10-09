@@ -591,8 +591,7 @@ it would be later. The names and module moves are TD13's.
    of it. Once step 7 has merged, run both audits over the tracking code as it then stands:
    - **Code against spec**, Q1–Q8 ([method](../docs/conventions/audit.md#1-auditing-code-against-the-spec)), over `src/radar_forge/core/tracking/**`. The reference
      is this spec and [`docs/tracking/README.md`](../docs/tracking/README.md). Record the result
-     as a `core/tracking/` section of `docs/audits/core-audit.md`, numbering findings on from the
-     last F and R there.
+     in a new `docs/audits/tracking-audit.md`, numbering findings from F1 and R1.
    - **Test audit and pruning**, Sound / Redundant / Weak / Wrong, over
      `tests/core/tracking/**`, `tests/core/test_tracking.py` (or what survives it),
      `tests/pipelines/test_tracking.py` and `tests/pipelines/test_scenario_003.py`. Delete the
@@ -743,7 +742,7 @@ message naming the new one, rather than being silently ignored.
 | AC8 | Scenario 003's end-to-end criteria (`spec/scenario-003-tracking.md` §12) pass on `Tracker`, and every number that differs from `KalmanTracker`'s is explained in the commit that moved it (§12; §7.2's cost change may move some) | [test] |
 | AC9 | `core/tracking/` imports nothing from `pipelines/` | [review] |
 | AC10 | This spec passes `scripts/check_conventions.py` R7 | [hook] |
-| AC11 | Step 9 is done: `docs/audits/core-audit.md` has a verdict for every public name in `core/tracking/`, and `docs/audits/tests-audit.md` classifies every tracking test, with the coverage comparison (`docs/conventions/audit.md`, `testing.md` §10.10) | [review] |
+| AC11 | Step 9 is done: `docs/audits/tracking-audit.md` has a verdict for every public name in `core/tracking/`, and `docs/audits/tests-audit.md` classifies every tracking test, with the coverage comparison (`docs/conventions/audit.md`, `testing.md` §10.10) | [review] |
 
 ## 16. Limitations
 

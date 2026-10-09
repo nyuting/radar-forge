@@ -622,7 +622,7 @@ ring is calibrated as a 1-D window of M/2 cells per side. GO and SO compare two 
 a ring does not have. Switching this scenario's pipeline over is a pipeline change, not part of
 this one.
 
-> **Corrected by the `core/` audit** (`docs/audits/core-audit.md`, F9). An earlier draft said
+> **Corrected by the `core/` audit** (PR #24). An earlier draft said
 > a 2-D window would "roughly halve the number of training cells needed for the same `pfa`". It
 > cannot: the threshold factor, and with it the CFAR loss, depends on the number of reference cells
 > M alone, as the paragraph above says, so the same `pfa` at the same loss needs the same M in any
