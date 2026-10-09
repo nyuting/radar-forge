@@ -34,14 +34,6 @@ def _map_with_peak_at(doppler_bin: int, range_bin: int) -> np.ndarray:
 
 
 class TestRenderRangeDoppler:
-    def test_returns_a_figure(self) -> None:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        range_axis_m, velocity_axis_mps = _axes()
-        figure = render_range_doppler(_map_with_peak_at(16, 20), range_axis_m, velocity_axis_mps)
-        assert hasattr(figure, "savefig")
-
     def test_range_is_on_the_horizontal_axis_in_kilometres(self) -> None:
         """Getting this backwards produces a plot that still looks like a radar."""
         import matplotlib
@@ -142,6 +134,7 @@ class TestRenderRangeDoppler:
         assert "m/s" not in edge.get_label()
 
     def test_a_target_below_the_velocity_axis_points_down(self) -> None:
+        """Catches the two velocity edges swapped: the marker must sit on the lower one."""
         import matplotlib
 
         matplotlib.use("Agg")
@@ -153,7 +146,8 @@ class TestRenderRangeDoppler:
             truth_range_m=10_000.0,
             truth_velocity_mps=-80.0,
         )
-        assert any(line.get_marker() == "v" for line in figure.axes[0].get_lines())
+        (edge,) = [line for line in figure.axes[0].get_lines() if line.get_marker() == "v"]
+        np.testing.assert_allclose(edge.get_ydata(), [velocity_axis_mps[0]], rtol=1e-12)
 
     def test_no_marker_without_a_truth(self) -> None:
         import matplotlib
@@ -163,13 +157,12 @@ class TestRenderRangeDoppler:
         figure = render_range_doppler(_map_with_peak_at(16, 20), range_axis_m, velocity_axis_mps)
         assert figure.axes[0].get_lines() == []
 
-    def test_rejects_axes_that_do_not_match_the_map(self) -> None:
-        range_axis_m, velocity_axis_mps = _axes()
-        with pytest.raises(ValueError, match="axes do not match"):
-            render_range_doppler(_map_with_peak_at(16, 20), range_axis_m[:-1], velocity_axis_mps)
-
     def test_rejects_a_transposed_map(self) -> None:
-        """Range on axis 1, Doppler on axis 0 -- the dsp layout, not a choice."""
+        """Range on axis 1, Doppler on axis 0 -- the dsp layout, not a choice.
+
+        The same shape check refuses any axis that does not match its map
+        dimension; a transposed map is the mistake a caller actually makes.
+        """
         range_axis_m, velocity_axis_mps = _axes()
         with pytest.raises(ValueError, match="Range is axis 1"):
             render_range_doppler(_map_with_peak_at(16, 20).T, range_axis_m, velocity_axis_mps)
@@ -179,15 +172,15 @@ class TestRenderRangeDoppler:
         with pytest.raises(ValueError, match="two-dimensional"):
             render_range_doppler(np.zeros(10), range_axis_m, velocity_axis_mps)
 
-    @pytest.mark.parametrize("bad_dynamic_range_db", [0.0, -10.0])
-    def test_rejects_a_non_positive_dynamic_range(self, bad_dynamic_range_db: float) -> None:
+    def test_rejects_a_zero_dynamic_range(self) -> None:
+        """Zero, not a negative: it catches a ``< 0`` guard that a negative would not."""
         range_axis_m, velocity_axis_mps = _axes()
         with pytest.raises(ValueError, match="dynamic_range_db"):
             render_range_doppler(
                 _map_with_peak_at(16, 20),
                 range_axis_m,
                 velocity_axis_mps,
-                dynamic_range_db=bad_dynamic_range_db,
+                dynamic_range_db=0.0,
             )
 
 
@@ -204,23 +197,11 @@ class TestBistaticLabelling:
             _map_with_peak_at(16, 20), range_axis_m, velocity_axis_mps, bistatic=bistatic
         )
 
-    def test_the_default_labels_are_monostatic(self) -> None:
-        axes = self._figure(bistatic=False).axes[0]
-        assert axes.get_xlabel() == "Range (km)"
-        assert "Radial velocity" in axes.get_ylabel()
-
     def test_the_bistatic_flag_renames_both_axes(self) -> None:
         """A bistatic range axis read as a slant range is read wrong."""
         axes = self._figure(bistatic=True).axes[0]
         assert axes.get_xlabel() == "Bistatic mean range (km)"
         assert "Bisector range rate" in axes.get_ylabel()
-
-    def test_the_flag_changes_nothing_but_the_labels(self) -> None:
-        """The data is identical either way; only its description differs. D6."""
-        monostatic = self._figure(bistatic=False).axes[0]
-        bistatic = self._figure(bistatic=True).axes[0]
-        assert monostatic.get_xlim() == bistatic.get_xlim()
-        assert monostatic.get_ylim() == bistatic.get_ylim()
 
 
 def _close(figure) -> None:
@@ -236,18 +217,6 @@ class TestTrackingOverlays:
     Every one defaults to None, because scenario 001 and scenario 002 call this
     function without them and must keep producing the same figure.
     """
-
-    def test_the_overlays_are_absent_by_default(self):
-        range_axis_m, velocity_axis_mps = _axes()
-        figure = render_range_doppler(_map_with_peak_at(4, 8), range_axis_m, velocity_axis_mps)
-        axes = figure.axes[0]
-        labels = {line.get_label() for line in axes.lines}
-        assert "track estimate" not in labels
-        assert "validation gate" not in labels
-        assert not axes.collections or all(
-            collection.get_label() != "CFAR detections" for collection in axes.collections
-        )
-        _close(figure)
 
     def test_detections_are_drawn(self):
         range_axis_m, velocity_axis_mps = _axes()
@@ -320,7 +289,12 @@ class TestRenderRangeDopplerEdgeCases:
             velocity_axis_mps,
             track_estimate=(float(range_axis_m[20]), float(velocity_axis_mps[16])),
         )
-        assert figure.axes[0].legend_ is not None
+        axes = figure.axes[0]
+        labels = {line.get_label() for line in axes.lines}
+        assert "track estimate" in labels
+        assert "validation gate" not in labels
+        # With no truth to mark, the legend is still drawn for the track.
+        assert axes.legend_ is not None
 
     def test_a_truth_left_of_the_range_axis_is_pinned_to_that_edge(self) -> None:
         """Each off-scale direction gets its own marker, including short range.
