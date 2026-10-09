@@ -1206,4 +1206,4 @@ Then rerun S1–S3 and compare them with #8's table. Go down the re-review check
 
 ## After this review
 
-Update [`docs/skills/reviews/SKILL.md`](../skills/reviews/SKILL.md) with anything new this round taught: checks, mistakes, workflow. It's what Claude Code loads as `/pr-review`. Ignore Claude Code's built-in review skills; this one is ours.
+Update [`docs/conventions/review.md`](../conventions/review.md) with anything new this round taught: checks, mistakes, workflow. It's what Claude Code loads as `/pr-review`. It runs Claude Code's built-in `/code-review` and `/security-review` alongside, and adds what they can't know: the spec, the conventions and the teaching voice (§10).
