@@ -75,10 +75,6 @@ def sample_tree(minimised_sample: str) -> ast.Module:
     return ast.parse(minimised_sample)
 
 
-def test_sample_output_is_valid_python(sample_tree: ast.Module) -> None:
-    assert isinstance(sample_tree, ast.Module)
-
-
 def test_docstrings_are_stripped(sample_tree: ast.Module) -> None:
     for node in ast.walk(sample_tree):
         if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef):
@@ -217,9 +213,19 @@ def test_module_page_escapes_html_and_links_home() -> None:
 
 
 def test_main_writes_the_tree(tmp_path: Path) -> None:
+    """The command line reaches generate() with --src and --out the right way round.
+
+    Run on a one-module tree rather than the package: the package-wide output
+    is checked above through the shared fixture, and regenerating it here cost
+    0.9 s for no further check.
+    """
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "sample.py").write_text(SAMPLE, encoding="utf-8")
     out = tmp_path / "view"
-    assert tool.main(["--src", str(PACKAGE_ROOT), "--out", str(out)]) == 0
+    assert tool.main(["--src", str(source), "--out", str(out)]) == 0
     assert (out / "index.html").is_file()
+    assert "def scaled_range_m" in (out / "sample.py").read_text(encoding="utf-8")
 
 
 def test_main_rejects_a_missing_source(tmp_path: Path) -> None:
