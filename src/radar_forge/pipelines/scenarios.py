@@ -690,11 +690,30 @@ def range_axis_m(burst: RadarLike) -> NDArray[np.float64]:
     -----
     The axis is circular: a return beyond its last bin lands back near its
     first. For the pulsed burst it spans one repetition interval of delay,
-    :math:`c/2\,\mathrm{PRF}`, which is :attr:`Radar.unambiguous_range_m`.
+    :math:`c/2\,\mathrm{PRF}` [1]_, which is :attr:`Radar.unambiguous_range_m`.
     For an FMCW burst it spans the beat frequencies a *complex* sample rate
-    :math:`f_s` represents, :math:`[0, f_s)`, which is twice the
-    :attr:`Radar.unambiguous_range_m` the real-sampling limit :math:`f_s/2`
-    gives.
+    :math:`f_s` represents, :math:`[0, f_s)`, so its span is
+    :math:`c f_s / (2\alpha)` for sweep rate :math:`\alpha`. That is derived
+    here, from the deramped beat :math:`f_b = \alpha\tau` and the fact that
+    complex samples at :math:`f_s` tell apart every frequency in a band
+    :math:`f_s` wide, where real samples tell apart only :math:`f_s/2`.
+
+    So :attr:`Radar.unambiguous_range_m`, which takes the real-sampling limit
+    :math:`f_s/2`, is **half of every FMCW map's span**. It is not the range of
+    a real radar either. A sawtooth sweep also needs the echo's delay shorter
+    than the chirp, :math:`\tau < T`, which caps range at :math:`cT/2`, and the
+    simulator does not model that limit. For S1, :math:`cT/2` is 150 km, the
+    map spans 74.9 km, and the property's 37.5 km understates what a real
+    radar could reach. For S3, which samples at :math:`f_s = 2B`, :math:`cT/2`
+    is half of each map's span, so the property happens to match hardware, and
+    the far half of each map is wider than hardware allows. The FMCW figure
+    that matches a real radar is :math:`\min(c f_s/(2\alpha), cT/2)`; correcting
+    the property is a follow-up (``spec/scenario-003-tracking.md`` §14.11).
+
+    References
+    ----------
+    .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
+           McGraw-Hill, 2014, §5.5.4 (range ambiguity and its resolution).
     """
     n_range_bins = burst.n_samples_per_pri
     if burst.transmitter.waveform == "pulsed":

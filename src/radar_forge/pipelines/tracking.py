@@ -32,17 +32,18 @@ model", and where a measurement came from is not its business.
 Two departures from the specification as written, both recorded in its §14.2 and
 §14.4 and both found by running it:
 
-**The Doppler axis is circular and clustering is not.**
-:func:`~radar_forge.core.detection.cluster_detections` labels with a
-non-circular structure, so a target whose response straddles the
+**The Doppler axis is circular, and clustering here does not yet treat it so.**
+Clustered as a straight line, a target whose response straddles the
 :math:`\pm v_{\text{unamb}}` wrap is returned as *two* clusters at opposite
 ends of the axis, and a centroid over the pair is meaningless. In scenario
 001's S1 at frame 0 the split is 58 cells at +7.493 m/s and 37 cells at
 -7.511 m/s, against a true folded velocity of +7.502 m/s.
 :func:`frame_detections` rolls the map so the array edge falls on the quietest
-Doppler row before clustering, and maps the indices back afterwards. The clean
-fix is a ``wrap_axes`` option on ``cluster_detections`` itself, which belongs to
-that module's own workstream (§10.1), not to this one.
+Doppler row before clustering, and maps the indices back afterwards.
+:func:`~radar_forge.core.detection.cluster_detections` has since gained a
+``wrap_axes`` option (§13.5), which :func:`frame_detections` already uses for
+the range axis when ``wrap_range`` is set. The roll stays until the Doppler
+axis adopts ``wrap_axes`` too.
 
 **A track's readiness to unfold is a batch statistic, not the filter's
 covariance.** §5.3 gives the ten-frame crossing in terms of the standard
@@ -153,8 +154,8 @@ DetectionStatus = Literal["accepted", "missing_pair", "ambiguous_pair", "unresol
     tolerance, but the two are not each other's nearest, so pairing them would
     be a guess, and it is not made.
 ``"unresolved_velocity"``
-    Dual-PRF only: the pair is one-to-one, but no velocity in the search span
-    agrees with both folded values.
+    Dual-PRF only: the two detections are mutually nearest, but no velocity in
+    the search span agrees with both folded values.
 """
 DETECTION_STATUSES: tuple[DetectionStatus, ...] = get_args(DetectionStatus)
 
@@ -302,7 +303,8 @@ class TrackingConfig:
       (:func:`~radar_forge.core.tracking.process_noise_dwna`). The ``"ukf"``
       path uses :class:`~radar_forge.core.tracking.RadialMotion`, which adds
       ``acceleration_correlation_time_s``: continuous white noise of density
-      :math:`q = 2\sigma_a^2\tau`, the white-noise limit of Singer's model.
+      :math:`q = 2\sigma_a^2\tau`, the white-noise limit of Singer's model
+      [1]_.
     - ``sigma_range_m`` and ``sigma_velocity_mps`` are read by the
       ``"kalman"`` path only. The ``"ukf"`` path computes its measurement
       noise from each frame's own map, one bin over :math:`\sqrt{12}`
@@ -318,6 +320,13 @@ class TrackingConfig:
     - ``unfolding_mode`` must be ``"none"`` on the ``"ukf"`` path, which has no
       track-aided unfolding: it unfolds by dual PRF or not at all.
     - ``state_model`` must be ``"range_1d"`` on the ``"ukf"`` path.
+
+    References
+    ----------
+    .. [1] R. A. Singer, "Estimating optimal tracking filter performance for
+           manned maneuvering targets," *IEEE Trans. Aerospace and Electronic
+           Systems*, vol. AES-6, no. 4, pp. 473-483, 1970 (the exponentially
+           correlated acceleration model).
     """
 
     sigma_range_m: float = 21.635652855125496
@@ -445,8 +454,10 @@ def frame_detections(
     quietest Doppler row, clustered there, and the indices mapped back. Without
     this a target straddling the velocity wrap is split into two clusters at
     opposite ends of the axis and neither centroid is the target's velocity.
-    The Doppler axis is circular; ``cluster_detections`` is not, and teaching it
-    to be belongs to ``core/detection.py``'s workstream, not to this one.
+    ``cluster_detections`` can join clusters across a circular axis
+    (``wrap_axes``), and the range axis uses it when ``wrap_range`` is set. The
+    Doppler axis does not yet, so the roll stays until it does (scenario 003
+    §13.5).
 
     Detections within ``merge_range_bins`` of a stronger one are then discarded.
     Scenario 001 applies no Doppler taper, so a target at the 45-69 dB
@@ -569,6 +580,11 @@ def configs_from_scenario(scenario: Scenario) -> tuple[DetectionConfig, Tracking
     * ``simulated_angles`` is a ``pipelines`` concern belonging to the ENU state
       models of §6.3 and is not part of the filter's settings, so it is dropped
       here and read from the scenario directly by whoever needs it.
+
+    Every value is type-checked against its field, and none is coerced. That
+    is a deliberate departure from Stone Soup, whose ``Property`` declares a
+    type but is "not used for any type checking": a TOML typo here stops the
+    run, rather than reaching a filter as a string.
 
     Parameters
     ----------
@@ -797,7 +813,7 @@ def dual_prf_measurements(
 
     The accepted detections of :func:`dual_prf_detections` from the first
     burst, one per resolved pair, carrying ``velocity_unfolded_mps``. A
-    detection with no one-to-one partner is dropped: with nothing to pair
+    detection with no mutually nearest partner is dropped: with nothing to pair
     against, its velocity cannot be resolved, and passing it on folded would be
     the §5.2 failure by another route.
 
@@ -854,6 +870,18 @@ def bin_quantisation_sigmas(product: RangeDopplerProduct) -> tuple[float, float]
     ------
     ValueError
         If either axis has fewer than two bins.
+
+    Notes
+    -----
+    :math:`\Delta/\sqrt{12}` is a floor set by quantisation alone. It leaves
+    out the thermal-noise term, which grows as SNR falls, and it treats a
+    detection as known only to its cell, whereas :func:`frame_detections`
+    returns a power-weighted centroid, which at high SNR is better than a cell.
+    So it may overstate the error at high SNR and understate it at low SNR. A
+    mean NIS well below the measurement dimension at high SNR, or above it at
+    low SNR, is therefore expected, not a bug. Stone Soup's
+    ``RangeRangeRateBinning`` measurement model is the nearest analogue: it
+    too treats a measurement as a bin.
 
     References
     ----------
@@ -1986,13 +2014,20 @@ def score_primary_track(
     the frames in which it is confirmed or coasting:
 
     - ``n_confirmed_frames``: how many such frames there are;
-    - ``confirmation_latency_s``: from the run's first frame to its first;
+    - ``confirmation_latency_s``: from the frame the track was born in to the
+      first in which it is confirmed. A track born late in the run, as S2's
+      are after each loss, is not charged for the frames before it existed;
     - ``range_rmse_m`` and ``range_rate_rmse_mps``: root-mean-square error
-      against the truth. Range errors take the shorter way round when range
-      folds (``folding_layout.residual``);
-    - ``mean_nis``: the mean normalised innovation squared over the frames in
-      which it took a measurement. It should be near the measurement
-      dimension when the filter's noise settings are right [1]_.
+      against the truth. When range folds, range errors take the shorter way
+      round (``folding_layout.residual``), so ``range_rmse_m`` is an error
+      *modulo the range period*, not an absolute range accuracy: a track on
+      the wrong fold would score as well as one on the right fold;
+    - ``mean_nis_dim<k>``: the mean normalised innovation squared over the
+      frames in which the track took a measurement of ``k`` components, one
+      row per ``k`` that occurs. Its expected value is ``k`` when the filter's
+      noise settings are right [1]_, so NIS of different dimensions are not
+      averaged together: the Kalman path's range-only bootstrap (``k = 1``)
+      would otherwise pull a 2-D mean towards 1.
 
     Run-level metrics: ``n_tracked_frames``, the frames with any confirmed
     track; ``n_confirmed_tracks``, the distinct track IDs ever confirmed, which
@@ -2025,8 +2060,8 @@ def score_primary_track(
     References
     ----------
     .. [1] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with
-           Applications to Tracking and Navigation*, Wiley, 2001, §5.4 (filter
-           consistency: NIS and NEES).
+           Applications to Tracking and Navigation*, Wiley, 2001, §5.4.2 (the
+           NIS test of filter consistency).
     """
     range_m = np.asarray(truth_range_m, dtype=np.float64)
     range_rate_mps = np.asarray(truth_range_rate_mps, dtype=np.float64)
@@ -2066,14 +2101,27 @@ def score_primary_track(
     states = np.asarray([track.state for _, track in confirmed], dtype=np.float64)
     range_error_m = folding_layout.residual(states[:, :1], range_m[positions, None])[:, 0]
     range_rate_error_mps = states[:, 1] - range_rate_mps[positions]
-    nis = [track.nis for _, track in confirmed if track.nis is not None]
-    latency_s = frames[int(positions[0])].time_s - frames[0].time_s
+    # nis_by_dim[k]: the NIS of every update of k components. A loop: it groups
+    # one value per frame by a key, which NumPy has no direct way to do.
+    nis_by_dim: dict[int, list[float]] = {}
+    for _, track in confirmed:
+        if track.nis is not None:
+            nis_by_dim.setdefault(track.measurement_dim, []).append(track.nis)
+    born = next(
+        frame.time_s
+        for frame in frames
+        if any(track.track_id == primary_id for track in frame.tracks)
+    )
+    latency_s = frames[int(positions[0])].time_s - born
     scored = [
         ("n_confirmed_frames", float(len(confirmed))),
         ("confirmation_latency_s", latency_s),
         ("range_rmse_m", float(np.sqrt(np.mean(range_error_m**2)))),
         ("range_rate_rmse_mps", float(np.sqrt(np.mean(range_rate_error_mps**2)))),
-        ("mean_nis", float(np.mean(nis)) if nis else math.nan),
+        *(
+            (f"mean_nis_dim{dim}", float(np.mean(values)))
+            for dim, values in sorted(nis_by_dim.items())
+        ),
     ]
     rows += [
         MetricRow(metric, value, start, end, primary_id, target_id) for metric, value in scored

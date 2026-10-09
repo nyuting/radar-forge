@@ -1001,23 +1001,43 @@ docstring has the rules; in short:
   range alone, and S2 and S3 measure both. There is no track-aided unfolding on this path.
 - **Measurement noise** is one bin over √12, from each frame's own axes.
 
-Measured over the 120 frames with the shipped TOMLs:
+Over this window, 0–119 s, the target is at 16.6–18.4 km. Scenario 003's own window, 663–782 s
+(§14.10), puts it at 18.2–21.5 km. Only S2's 6.0 km range span is crossed in either; the FMCW
+maps span 50 km and more.
 
-| Waveform | Frames with a confirmed track | Confirmed track IDs | Primary track's confirmed frames | Range RMSE | Range-rate RMSE |
-| :--- | ---: | ---: | ---: | ---: | ---: |
-| S1, FMCW 1 kHz | 118 | 1 | 118 | 7.5 m | 6.01 m/s |
-| S2, pulsed 25 kHz | 109 | 6 | 59 | 1.4 m | 0.40 m/s |
-| S3, FMCW 5 + 6 kHz | 118 | 1 | 118 | 2.5 m | 0.07 m/s |
+Measured over the 120 frames with the shipped TOMLs. The **primary track** is the track confirmed
+in the most frames (`primary_track_id`), and C4 counts its confirmed frames. Each waveform's C4
+target is pinned by `test_the_ukf_meets_c4_over_the_whole_window`.
+
+| Waveform | Frames with a confirmed track | Confirmed track IDs | Primary track's confirmed frames (C4 target) | Range RMSE | Range-rate RMSE | Mean NIS (dimension) |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| S1, FMCW 1 kHz | 118 | 1 | 118 (118) | 7.5 m | 6.01 m/s | 0.24 (1) |
+| S2, pulsed 25 kHz | 109 | 6 | 59 (13) | 1.4 m, modulo 6.0 km | 0.40 m/s | 0.23 (2) |
+| S3, FMCW 5 + 6 kHz | 118 | 1 | 118 (94) | 2.5 m | 0.07 m/s | 0.90 (2) |
 
 S1's range-rate error is that of a range-only track, which infers range rate from the change in
-range.
+range. S2's range error is measured modulo its 6.0 km period (`StateLayout.residual`), so it says
+how well the track follows the folded range, not how well it knows the absolute range. Every
+primary track is confirmed 2 s after it is born.
+
+**The NIS is below its dimension on all three, so the measurement noise is pessimistic.** The
+settings are PR A's, derived from scenario 001's truth and not tuned here. A mean NIS well under
+the measurement dimension means the filter expects larger innovations than it gets. The likely
+cause is the measurement noise, one bin over √12 (`bin_quantisation_sigmas`), which is a
+quantisation-only figure for a detection known only to its cell. At these SNRs,
+`frame_detections`' power-weighted centroid is better than a cell. S3's 0.90 is nearest
+consistency. The tracks are unharmed, since an overstated noise only widens the gate, but a
+filter tuned on these runs would want a smaller measurement noise, or one that falls with SNR.
 
 **S2 loses the target near the end of every repetition interval.** Its 10 µs pulse fills a quarter
-of the 40 µs interval. An echo that arrives in the interval's last 10 µs is cut off by the end of
-the interval. The receive chain keeps exactly one interval of compressed output (`form_range_doppler_map`
-in `pipelines/scenarios.py`), so a target whose folded range is within about 200 m of 5996 m leaves too little energy to detect, and
-one further inside is detected weak and biased short. This is eclipsing by the next transmitted
-pulse, the pulsed waveform's blind zone, not a fault of the tracker. Over the window the folded
+of the 40 µs interval. The receive chain keeps exactly one interval of compressed output
+(`form_range_doppler_map` in `pipelines/scenarios.py`), so a target whose folded range is within
+about 200 m of 5996 m leaves too little energy to detect, and one further inside is detected weak
+and biased short. The simulated receive window truncates an echo that starts in the interval's
+last 10 µs, which reproduces the trailing half of eclipsing. The leading half, the start of an
+echo that arrives while the next pulse is being transmitted, is not modelled (see
+`pulsed_baseband`'s Notes), so a real radar's blind zone would be about twice as wide. Either
+way it is the pulsed waveform's blind zone, not a fault of the tracker. Over the window the folded
 range crosses the wrap twice, near frames 13 and 75, and each time the target is undetected for
 about 7 frames, longer than `n_delete_misses = 5`. So the track is deleted and a new one starts
 after the gap. The settings are left as they are: lengthening the coast to bridge a blind zone
@@ -1027,10 +1047,22 @@ would hide it.
 frequencies over all of `[0, f_s)` are distinct, not only `[0, f_s/2)`. `Radar.unambiguous_range_m`
 gives `c f_s / 4α`, the real-sampling limit. The map's own axis wraps at twice that, 74.9 km for S1
 and 60.0 and 50.0 km for S3's bursts, and the UKF's range period follows the axis. For the pulsed
-burst the two agree. Whether `Radar.unambiguous_range_m` should say so is left to `core/radar.py`.
+burst the two agree.
+
+Neither figure is a real radar's. A sawtooth sweep also needs the echo's delay shorter than the
+chirp, τ < T, which caps range at `c T / 2`, and the simulator does not model it. For S1 that cap
+is 150 km, so the property's 37.5 km understates what a real radar could reach. S3 samples at
+`f_s = 2B`, so `c T / 2` is half of each map's span, 30.0 and 25.0 km. The property happens to
+match hardware for S3, and the far half of each S3 map is more than hardware allows. The FMCW
+figure that matches a real radar is `min(c f_s / 2α, c T / 2)`. The target stays inside every limit
+(18.4 km at most in this window, against 25.0 km at the tightest), so none of the numbers above
+change. Correcting `Radar.unambiguous_range_m` is a follow-up in `core/radar.py`.
 
 **Dual-PRF pairing, both trackers.** Two detections, one per burst, are paired when they are within
-the range tolerance and each is the other's nearest in range. Every detection is written with a
+the range tolerance and each is the other's nearest in range. On the UKF path the range gap is
+taken the short way round the smaller map's circle, so a target at its wrap edge still pairs. The
+two bursts' maps span different ranges, 60.0 and 50.0 km, so pairing assumes the target is inside
+both; `test_the_target_stays_inside_both_dual_prf_maps` checks it over each shipped window. Every detection is written with a
 `status` and the pair's `pair_id` (`spec/data-001-formats.md` §6.5). An earlier draft required
 each detection to have exactly one detection of the other burst within the tolerance. On the S3
 scenario-003 run that refused the target's pair in two of the first five frames, because a

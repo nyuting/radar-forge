@@ -395,7 +395,7 @@ could disagree with it.
 
 | Column | dtype | Req. | Meaning |
 | :--- | :--- | :--- | :--- |
-| `metric` | string | R | Name with unit suffix: `range_rmse_m`, `range_rate_rmse_mps`, `mean_nis`, `ospa_m`, `track_breaks` |
+| `metric` | string | R | Name with unit suffix: `range_rmse_m`, `range_rate_rmse_mps`, `mean_nis_dim2`, `ospa_m`, `track_breaks`. NIS is averaged per measurement dimension, `mean_nis_dim<k>`, because its expected value is `k` |
 | `track_id` | string | O | Empty for a run-level metric |
 | `target_id` | string | O | |
 | `frame_start`, `frame_end` | int | R | The inclusive frame window the metric covers |

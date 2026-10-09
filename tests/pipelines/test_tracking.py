@@ -12,6 +12,7 @@ downstream notices: the tracker still produces a track, and the plot still
 looks like a plot.
 """
 
+from dataclasses import replace
 from functools import cache
 from pathlib import Path
 
@@ -966,8 +967,11 @@ class TestScorePrimaryTrack:
     """Scoring against truth: closed-form answers on hand-built frames."""
 
     @staticmethod
-    def _frames(states, *, status="confirmed", nis=1.0):
+    def _frames(states, *, status="confirmed", nis=1.0, statuses=None, dims=None):
         from radar_forge.pipelines.tracking import FrameTracks, TrackRecord
+
+        statuses = statuses or [status] * len(states)
+        dims = dims or [2] * len(states)
 
         return [
             FrameTracks(
@@ -980,10 +984,10 @@ class TestScorePrimaryTrack:
                 else (
                     TrackRecord(
                         track_id=7,
-                        status=status,
+                        status=statuses[index],
                         state=np.asarray(state, dtype=np.float64),
                         covariance=np.eye(2),
-                        measurement_dim=2,
+                        measurement_dim=dims[index],
                         n_hits=index + 1,
                         n_misses=0,
                         nis=nis,
@@ -1011,12 +1015,42 @@ class TestScorePrimaryTrack:
         assert values["n_tracked_frames"] == 2
         assert values["n_confirmed_tracks"] == 1
         assert values["n_confirmed_frames"] == 2
-        assert values["confirmation_latency_s"] == 1.0
+        # Born confirmed in frame 1, so no latency; frame 0 predates it.
+        assert values["confirmation_latency_s"] == 0.0
         np.testing.assert_allclose(values["range_rmse_m"], np.sqrt((9 + 16) / 2), rtol=1e-12)
         np.testing.assert_allclose(values["range_rate_rmse_mps"], np.sqrt(9 / 2), rtol=1e-12)
-        assert values["mean_nis"] == 1.0
+        assert values["mean_nis_dim2"] == 1.0
+        assert "mean_nis_dim1" not in values
         assert {(row.frame_start, row.frame_end) for row in rows} == {(0, 2)}
         assert {row.track_id for row in rows if row.metric == "range_rmse_m"} == {7}
+
+    def test_latency_runs_from_the_tracks_birth_not_the_runs_start(self):
+        from radar_forge.pipelines.tracking import score_primary_track
+
+        frames = self._frames(
+            [None, None, [1000.0, 10.0], [1000.0, 10.0], [1000.0, 10.0]],
+            statuses=["tentative"] * 3 + ["confirmed"] * 2,
+        )
+        rows = score_primary_track(frames, [1000.0] * 5, [10.0] * 5, folding_layout=self._layout())
+        values = {row.metric: row.value for row in rows}
+        # Born at 2 s, confirmed at 3 s.
+        assert values["confirmation_latency_s"] == 1.0
+
+    def test_nis_is_averaged_per_measurement_dimension(self):
+        """A 1-D NIS averages 1 and a 2-D NIS 2, so one mean of both is neither."""
+        from radar_forge.pipelines.tracking import score_primary_track
+
+        frames = [
+            replace(frame, tracks=(replace(frame.tracks[0], nis=nis),))
+            for frame, nis in zip(
+                self._frames([[1000.0, 10.0]] * 4, dims=[1, 1, 2, 2]),
+                [0.5, 1.5, 1.0, 3.0],
+                strict=True,
+            )
+        ]
+        rows = score_primary_track(frames, [1000.0] * 4, [10.0] * 4, folding_layout=self._layout())
+        values = {row.metric: row.value for row in rows}
+        assert (values["mean_nis_dim1"], values["mean_nis_dim2"]) == (1.0, 2.0)
 
     def test_a_range_error_across_the_wrap_takes_the_short_way(self):
         from radar_forge.pipelines.tracking import score_primary_track
