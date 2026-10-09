@@ -1,6 +1,7 @@
 # Pipelines audit — refactor-002 §1.2 and §1.3
 
-Scope: `src/radar_forge/pipelines/`, `src/radar_forge/teaching/` and
+Scope: `src/radar_forge/pipelines/`, `src/radar_forge/viz/` (audited as `teaching/`, before PR #16
+renamed it) and
 `scripts/run_scenario.py`. `src/radar_forge/core/` belongs to a parallel stream and is not
 touched here; neither is `docs/conventions/style.md` or `scripts/check_conventions.py`.
 
@@ -15,10 +16,17 @@ sign conventions, units; and `spec/structure.md`'s decisions D1–D8.
 Each public function is judged on both halves: does it compute what the spec says, and is it
 the better implementation available. An honest "no change, here is why" is a result.
 
+## Status at 2026-10-09
+
+- **`teaching/` is now `viz/`** (PR #16). Paths in this audit say which name they were audited
+  under.
+- **The tests behind this audit were pruned** in refactor-002 §2: see
+  [`tests-audit.md`](tests-audit.md). No finding here depended on a deleted test.
+
 ## Status at 2026-10-08
 
 Re-checked against `main` at `8a9e579`. Every fix (F1–F9) is still in place, and every item left
-alone in [F11](#f11-left-alone-deliberately) and the verdict notes is still unchanged. No public
+alone in [F11](#f11--left-alone-deliberately) and the verdict notes is still unchanged. No public
 name in scope has been added or removed.
 
 What has moved since:
@@ -27,11 +35,11 @@ What has moved since:
   `core.tracking.KalmanTracker` and holds it as `.tracker`, where this audit says `.manager`.
   `pipelines/tracking.py` grew to about 1080 lines in that migration. It does not yet run on the
   unified `core.tracking.Tracker`. Steps 6–7 of `spec/tracker-001.md` would move it there, delete
-  `KalmanTracker`, and retire `sigma_accel_mps2`. When that lands, [F3](#f3-the-sigma_accel_mps2-margin-no-longer-exists)
+  `KalmanTracker`, and retire `sigma_accel_mps2`. When that lands, [F3](#f3--the-sigma_accel_mps2-margin-no-longer-exists)
   describes a setting that no longer exists.
 - **Two old-style citations survive.** `pipelines/scenarios.py` cites "S4.2" in its module
   docstring and "S4.3" in `form_range_doppler_map`. Both name the right section of
-  `spec/scenario-001-xband.md`, but in the form [F2](#f2-four-citations-pointed-at-a-section-that-does-not-exist)
+  `spec/scenario-001-xband.md`, but in the form [F2](#f2--four-citations-pointed-at-a-section-that-does-not-exist)
   replaced everywhere else.
 - **The quoted target SNR disagrees.** `frame_detections`' docstring and
   `spec/scenario-003-tracking.md` say 45–69 dB, which PR #2 changed. Both
@@ -41,17 +49,17 @@ What has moved since:
 
 | # | Finding | Q | Side that was wrong | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| [F1](#f1-two-form-feed-characters-ate-the-bisector-velocity-equation) | Two form-feed characters ate the bisector-velocity equation | Q5 | code | fixed |
-| [F2](#f2-four-citations-pointed-at-a-section-that-does-not-exist) | Four citations pointed at a section that does not exist | Q5 | code | fixed |
-| [F3](#f3-the-sigma_accel_mps2-margin-no-longer-exists) | The `sigma_accel_mps2` margin no longer exists | Q1 | both | re-measured, recorded |
-| [F4](#f4-the-pulsed-range-axis-is-re-derived-and-the-docstring-denied-it) | The pulsed range axis is re-derived, and the docstring denied it | Q5 | code | fixed |
-| [F5](#f5-the-track-scope-was-never-a-plan-view) | The track scope was never a plan view | Q6 | spec | renamed both sides |
-| [F6](#f6-three-more-names-that-did-not-say-what-they-meant) | Three more names that did not say what they meant | Q6 | code | renamed |
-| [F7](#f7-replace_measurement-restated-nine-fields-to-change-two) | `replace_measurement` restated nine fields to change two | Q4 | code | fixed |
-| [F8](#f8-a-fold-that-was-the-identity-function) | A fold that was the identity function | Q4 | code | removed |
-| [F9](#f9-two-contracts-a-caller-could-not-see) | Two contracts a caller could not see | Q7, Q8 | code | fixed |
-| [F10](#f10-what-was-measured-and-not-changed) | What was measured and not changed | Q3 | — | no change |
-| [F11](#f11-left-alone-deliberately) | Left alone deliberately | — | — | recommended only |
+| [F1](#f1--two-form-feed-characters-ate-the-bisector-velocity-equation) | Two form-feed characters ate the bisector-velocity equation | Q5 | code | fixed |
+| [F2](#f2--four-citations-pointed-at-a-section-that-does-not-exist) | Four citations pointed at a section that does not exist | Q5 | code | fixed |
+| [F3](#f3--the-sigma_accel_mps2-margin-no-longer-exists) | The `sigma_accel_mps2` margin no longer exists | Q1 | both | re-measured, recorded |
+| [F4](#f4--the-pulsed-range-axis-is-re-derived-and-the-docstring-denied-it) | The pulsed range axis is re-derived, and the docstring denied it | Q5 | code | fixed |
+| [F5](#f5--the-track-scope-was-never-a-plan-view) | The track scope was never a plan view | Q6 | spec | renamed both sides |
+| [F6](#f6--three-more-names-that-did-not-say-what-they-meant) | Three more names that did not say what they meant | Q6 | code | renamed |
+| [F7](#f7--replace_measurement-restated-nine-fields-to-change-two) | `replace_measurement` restated nine fields to change two | Q4 | code | fixed |
+| [F8](#f8--a-fold-that-was-the-identity-function) | A fold that was the identity function | Q4 | code | removed |
+| [F9](#f9--two-contracts-a-caller-could-not-see) | Two contracts a caller could not see | Q7, Q8 | code | fixed |
+| [F10](#f10--what-was-measured-and-not-changed) | What was measured and not changed | Q3 | — | no change |
+| [F11](#f11--left-alone-deliberately) | Left alone deliberately | — | — | recommended only |
 
 ## Verdicts
 
@@ -82,7 +90,7 @@ a raise would reject a window a reader may legitimately want to round.
 `peak_range_velocity` returns a bare `tuple[float, float]`. The order is documented and both
 call sites unpack it immediately, so a `NamedTuple` would buy attribute access at the cost of
 a type change in a return contract nothing has misused. Recorded under
-[F11](#f11-left-alone-deliberately).
+[F11](#f11--left-alone-deliberately).
 
 ### `pipelines/trajectories.py`
 
@@ -105,7 +113,7 @@ This module came out of the audit best. The sign convention is D5's throughout a
 every boundary; `BistaticTargetTrack`'s deliberate *absence* of a `radial_velocity_mps` field,
 with a Notes paragraph saying why, is the single best piece of Q8 design in scope — it makes
 the wrong quantity unavailable rather than merely discouraged. The one defect was
-typographic, and it destroyed the module's only equation: [F1](#f1-two-form-feed-characters-ate-the-bisector-velocity-equation).
+typographic, and it destroyed the module's only equation: [F1](#f1--two-form-feed-characters-ate-the-bisector-velocity-equation).
 
 The velocity in both transforms is a central difference of an *interpolated* range, so it is a
 mean rate over the several seconds between real fixes, not an instantaneous Doppler. The
@@ -140,7 +148,7 @@ length is prose: the module docstring, the fold-consistency comment inside `_unf
 the `TrackingConfig` docstring together run to about 90 lines and every one of them records a
 measurement or a failure mode that a reader would otherwise rediscover the hard way. That is
 the brief — "plain, documented, and cites its source" — not padding. The one genuinely
-redundant block was `replace_measurement`'s body, [F7](#f7-replace_measurement-restated-nine-fields-to-change-two).
+redundant block was `replace_measurement`'s body, [F7](#f7--replace_measurement-restated-nine-fields-to-change-two).
 
 Conformance against `spec/scenario-003-tracking.md` is close. §14 already documents the seven
 known departures, and each is implemented as §14 describes it: the Doppler roll before
@@ -148,14 +156,14 @@ clustering (§14.2), the per-range-cell sidelobe merge (§14.3), the batch range
 rather than the filter covariance (§14.4), the range-only seeding of a new track (§14.5).
 `range_slope_sigma_mps` reproduces §5.3's quoted 6.84 m/s at N=5 and 3.34 m/s at N=8, and
 `minimum_unfold_history_frames` returns §5.3's ten frames, both pinned by doctests. The one
-figure that did not survive re-measurement is [F3](#f3-the-sigma_accel_mps2-margin-no-longer-exists).
+figure that did not survive re-measurement is [F3](#f3--the-sigma_accel_mps2-margin-no-longer-exists).
 
 D2 — tracking stays in `core/` until a second association strategy or a fusion layer appears —
 is not at risk from this module. `pipelines/tracking.py` is the *pipeline* half and holds no
 filter mathematics; it owns detection-to-measurement conversion, unfolding and the frame loop,
 and calls into `core.tracking` for everything else. Nothing here moves the promotion trigger.
 
-### `teaching/`
+### `viz/` (audited as `teaching/`)
 
 | Symbol | Q1 | Q2 | Q3 | Q4 | Q5 | Q6 | Q7 | Q8 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -204,7 +212,7 @@ one, which is the kind of failure that produces a movie nobody questions.
 `build_tracker` returns `tuple[ScenarioTracker, bool]`, and the bare `bool` is the weakest
 return contract in scope — the caller has to read the docstring to learn it means
 "simulated_angles". One call site, and the alternative is a second dataclass for one flag.
-Recorded under [F11](#f11-left-alone-deliberately).
+Recorded under [F11](#f11--left-alone-deliberately).
 
 `render_frame` takes six positional parameters, of which `dynamic_range_db` and `record` want
 to be keyword-only. One call site; recorded, not changed.
@@ -232,7 +240,7 @@ character, so this was a single event rather than a pattern.
 ### F2 — Four citations pointed at a section that does not exist
 
 `spec/scenario-001-xband.md` has six sections. `pipelines/scenarios.py` and
-`teaching/scopes/rd_map.py` both cited an "S7.1" of it for the `dsp` axis seam; that material
+`teaching/scopes/rd_map.py` (now `viz/scopes/rd_map.py`) both cited an "S7.1" of it for the `dsp` axis seam; that material
 is §4.3. `scenarios.py` also cited §5 — the build sequence — for the frame/CPI structure, which
 is §4.2, and §4–§5 for the three variants, which is §4.1.
 
@@ -394,7 +402,7 @@ re-derive it.
 
 For reference, the tracking run itself takes 2.12 s of that 3.29 s, reproducible to 0.01 s
 across repeats, and is identical at `sigma_accel_mps2` of 5.0 and 2.0 — see
-[F3](#f3-the-sigma_accel_mps2-margin-no-longer-exists).
+[F3](#f3--the-sigma_accel_mps2-margin-no-longer-exists).
 
 ### F11 — Left alone deliberately
 
@@ -425,7 +433,7 @@ contracts. Both have one call site, both are documented, and neither has been mi
 
 **No test tolerance was touched**, and no number in any test moved. R1.3.2 did not come up: the
 one figure that moved is a docstring claim about a measurement, re-derived by re-running the
-measurement, and it is recorded in [F3](#f3-the-sigma_accel_mps2-margin-no-longer-exists).
+measurement, and it is recorded in [F3](#f3--the-sigma_accel_mps2-margin-no-longer-exists).
 
 ## Result
 

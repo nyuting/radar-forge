@@ -1,6 +1,6 @@
 # `core/` audit — refactor-002 §1.2 and §1.3
 
-Scope: every public name in `src/radar_forge/core/`. `pipelines/`, `teaching/` and `scripts/`
+Scope: every public name in `src/radar_forge/core/`. `pipelines/`, `viz/` (then `teaching/`) and `scripts/`
 are a separate stream and are untouched here, as are `docs/conventions/style.md` and
 `scripts/check_conventions.py`.
 
@@ -38,7 +38,7 @@ so parts of the text below describe code that has since moved:
 
 Audited against `main` at `20d4610`: the four 2-D CFAR functions, the `Detection` reshape and
 the rest of what PR #4 changed in `detection.py`. They are in
-[`detection.py` — 2-D CFAR](#detectionpy-2-d-cfar). That pass adds F6–F10 and R5–R7. Two of the
+[`detection.py` — 2-D CFAR](#detectionpy--2-d-cfar). That pass adds F6–F10 and R5–R7. Two of the
 findings are fixes to `detection.py` (F6, F7), one is documentation (F8), and two correct a spec
 (F9, F10). F8 also measured something that belongs to the pipelines stream. Scenario 003's
 pulsed TOML gets more false alarms than its `pfa`, 1.29 times design at `1e-4`, because S2's
@@ -60,16 +60,16 @@ Q4 conciseness · Q5 documentation · Q6 naming · Q7 inputs · Q8 outputs.
 
 | # | Where | Dimension | Verdict |
 | :--- | :--- | :--- | :--- |
-| [F1](#f1-frameresult-was-returned-but-never-exported) | `tracking.TrackManager.step` (now `tracking.kalman.KalmanTracker.step`) | Q8 | Code wrong — fixed |
-| [F2](#f2-three-docstrings-that-misdescribe-their-code) | `tracking.state_model_matrices`, `radar.BistaticRadar.range_resolution_at_bistatic_angle_m`, `signal.PropagationPaths` | Q5 | Docs wrong — fixed |
-| [F3](#f3-the-mti-canceller-copied-every-tap) | `dsp.mti_filter` | Q3, Q4 | Suboptimal — fixed, measured |
-| [F4](#f4-taper-names-were-a-bare-str-where-cfar-variants-are-a-literal) | `windows.taper` | Q6, Q7 | Inconsistent — fixed |
-| [F5](#f5-the-scenario-001-noise-bandwidth-was-stated-as-1-mhz) | `spec/scenario-001-xband.md` §3.2 | Conformance | **Spec** wrong — fixed |
-| [F6](#f6-a-2-d-cfar-pair-was-not-checked-to-be-two-integers) | `detection._ring`, so all four `_2d` functions | Q7 | Code wrong — fixed, red verified |
-| [F7](#f7-the-2-d-variants-were-an-inline-literal-and-a-private-tuple) | `detection.cfar_noise_estimate_2d_w`, `cfar_threshold_2d_w`, `cfar_detect_2d` | Q4, Q6, Q7 | Inconsistent — fixed |
-| [F8](#f8-the-calibrations-independence-assumption-did-not-name-tapering) | `detection` module notes, `cfar_threshold_2d_w` | Q1, Q5 | Docs incomplete — fixed, measured |
-| [F9](#f9-scenario-003-said-a-2-d-window-halves-the-cells-needed) | `spec/scenario-003-tracking.md` §13.2 | Conformance | **Spec** wrong — fixed |
-| [F10](#f10-data-001-called-a-thermal-noise-power-the-cfar-estimate) | `spec/data-001-formats.md` §6.8 | Conformance, Q8 | **Spec** wrong — fixed |
+| [F1](#f1--frameresult-was-returned-but-never-exported) | `tracking.TrackManager.step` (now `tracking.kalman.KalmanTracker.step`) | Q8 | Code wrong — fixed |
+| [F2](#f2--three-docstrings-that-misdescribe-their-code) | `tracking.state_model_matrices`, `radar.BistaticRadar.range_resolution_at_bistatic_angle_m`, `signal.PropagationPaths` | Q5 | Docs wrong — fixed |
+| [F3](#f3--the-mti-canceller-copied-every-tap) | `dsp.mti_filter` | Q3, Q4 | Suboptimal — fixed, measured |
+| [F4](#f4--taper-names-were-a-bare-str-where-cfar-variants-are-a-literal) | `windows.taper` | Q6, Q7 | Inconsistent — fixed |
+| [F5](#f5--the-scenario-001-noise-bandwidth-was-stated-as-1-mhz) | `spec/scenario-001-xband.md` §3.2 | Conformance | **Spec** wrong — fixed |
+| [F6](#f6--a-2-d-cfar-pair-was-not-checked-to-be-two-integers) | `detection._ring`, so all four `_2d` functions | Q7 | Code wrong — fixed, red verified |
+| [F7](#f7--the-2-d-variants-were-an-inline-literal-and-a-private-tuple) | `detection.cfar_noise_estimate_2d_w`, `cfar_threshold_2d_w`, `cfar_detect_2d` | Q4, Q6, Q7 | Inconsistent — fixed |
+| [F8](#f8--the-calibrations-independence-assumption-did-not-name-tapering) | `detection` module notes, `cfar_threshold_2d_w` | Q1, Q5 | Docs incomplete — fixed, measured |
+| [F9](#f9--scenario-003-said-a-2-d-window-halves-the-cells-needed) | `spec/scenario-003-tracking.md` §13.2 | Conformance | **Spec** wrong — fixed |
+| [F10](#f10--data-001-called-a-thermal-noise-power-the-cfar-estimate) | `spec/data-001-formats.md` §6.8 | Conformance, Q8 | **Spec** wrong — fixed |
 
 Everything else audited below carries no finding. That is the expected result: the suite is
 strong, refactor-001 hardened it, and most of `core/` is already the best available form.
@@ -144,8 +144,8 @@ own §3.2 sidebar derives and which `Radar.__post_init__` enforces only for the 
 
 | Name | Q1 | Q2 | Q3 | Q4 | Q5 | Q6 | Q7 | Q8 |
 | :--- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| `TaperName`, `TAPER_NAMES` | ✓ | ✓ | ✓ | [F4](#f4-taper-names-were-a-bare-str-where-cfar-variants-are-a-literal) | ✓ | [F4](#f4-taper-names-were-a-bare-str-where-cfar-variants-are-a-literal) | — | — |
-| `taper` | ✓ | ✓ | ✓ | ✓ | ✓ | [F4](#f4-taper-names-were-a-bare-str-where-cfar-variants-are-a-literal) | [F4](#f4-taper-names-were-a-bare-str-where-cfar-variants-are-a-literal) | ✓ |
+| `TaperName`, `TAPER_NAMES` | ✓ | ✓ | ✓ | [F4](#f4--taper-names-were-a-bare-str-where-cfar-variants-are-a-literal) | ✓ | [F4](#f4--taper-names-were-a-bare-str-where-cfar-variants-are-a-literal) | — | — |
+| `taper` | ✓ | ✓ | ✓ | ✓ | ✓ | [F4](#f4--taper-names-were-a-bare-str-where-cfar-variants-are-a-literal) | [F4](#f4--taper-names-were-a-bare-str-where-cfar-variants-are-a-literal) | ✓ |
 | `apply_taper` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `coherent_gain_linear` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `processing_loss_db` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -230,7 +230,7 @@ saying why.
 | `Radar.range_resolution_m` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `Radar.unambiguous_range_m` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `Radar.unambiguous_velocity_mps` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `Radar.noise_power_w` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | [F5](#f5-the-scenario-001-noise-bandwidth-was-stated-as-1-mhz) |
+| `Radar.noise_power_w` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | [F5](#f5--the-scenario-001-noise-bandwidth-was-stated-as-1-mhz) |
 | `Radar.n_samples_per_chirp` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `Radar.n_samples_per_pri` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `BistaticRadar` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -244,7 +244,7 @@ saying why.
 | `BistaticRadar.n_samples_per_chirp` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `BistaticRadar.n_samples_per_pri` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `BistaticRadar.bistatic_angle_rad` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `BistaticRadar.range_resolution_at_bistatic_angle_m` | ✓ | ✓ | ✓ | ✓ | [F2](#f2-three-docstrings-that-misdescribe-their-code) | ✓ | ✓ | ✓ |
+| `BistaticRadar.range_resolution_at_bistatic_angle_m` | ✓ | ✓ | ✓ | ✓ | [F2](#f2--three-docstrings-that-misdescribe-their-code) | ✓ | ✓ | ✓ |
 | `BistaticRadar.target_ranges_m` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 **Conformance, re-derived rather than read across.** Every ambiguity figure in scenario 001 §3.1
@@ -287,7 +287,7 @@ range is measured to*, consistent with `gain_tx_linear` / `gain_rx_linear`, with
 
 | Name | Q1 | Q2 | Q3 | Q4 | Q5 | Q6 | Q7 | Q8 |
 | :--- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| `PropagationPaths` | ✓ | ✓ | ✓ | ✓ | [F2](#f2-three-docstrings-that-misdescribe-their-code) | ✓ | ✓ | ✓ |
+| `PropagationPaths` | ✓ | ✓ | ✓ | ✓ | [F2](#f2--three-docstrings-that-misdescribe-their-code) | ✓ | ✓ | ✓ |
 | `PropagationPaths.n_paths` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `PropagationPaths.range_m` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `line_of_sight_paths` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -345,7 +345,7 @@ documented way to build a noise-only scenario.
 | `range_doppler_map` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `range_bin_centers_m` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `doppler_bin_centers_mps` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `mti_filter` | ✓ | ✓ | [F3](#f3-the-mti-canceller-copied-every-tap) | [F3](#f3-the-mti-canceller-copied-every-tap) | ✓ | ✓ | ✓ | ✓ |
+| `mti_filter` | ✓ | ✓ | [F3](#f3--the-mti-canceller-copied-every-tap) | [F3](#f3--the-mti-canceller-copied-every-tap) | ✓ | ✓ | ✓ | ✓ |
 
 The axis-agnostic design — every function takes an explicit `axis` rather than assuming a
 layout — is the right Q7 call for a module that must accept cubes from any simulator, and the
@@ -376,7 +376,7 @@ and derives them from `fftfreq` rather than by hand.
 
 The four `_2d` CFAR functions and the `Detection` field renames came after this audit; see
 [Status at 2026-10-08](#status-at-2026-10-08). They are audited in
-[`detection.py` — 2-D CFAR](#detectionpy-2-d-cfar).
+[`detection.py` — 2-D CFAR](#detectionpy--2-d-cfar).
 
 | Name | Q1 | Q2 | Q3 | Q4 | Q5 | Q6 | Q7 | Q8 |
 | :--- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
@@ -426,13 +426,13 @@ renames.
 
 | Name | Q1 | Q2 | Q3 | Q4 | Q5 | Q6 | Q7 | Q8 |
 | :--- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| `CfarVariant2d`, `CFAR_VARIANTS_2D` (new) | ✓ | ✓ | — | [F7](#f7-the-2-d-variants-were-an-inline-literal-and-a-private-tuple) | ✓ | [F7](#f7-the-2-d-variants-were-an-inline-literal-and-a-private-tuple) | — | — |
+| `CfarVariant2d`, `CFAR_VARIANTS_2D` (new) | ✓ | ✓ | — | [F7](#f7--the-2-d-variants-were-an-inline-literal-and-a-private-tuple) | ✓ | [F7](#f7--the-2-d-variants-were-an-inline-literal-and-a-private-tuple) | — | — |
 | `Detection` (`cfar_noise_estimate_w`, no `snr_db`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `cluster_detections` (`noise_estimate_w`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | [R5](#recommended-not-applied) | ✓ |
-| `cfar_valid_mask_2d` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | [F6](#f6-a-2-d-cfar-pair-was-not-checked-to-be-two-integers), [R5](#recommended-not-applied) | ✓ |
-| `cfar_noise_estimate_2d_w` | ✓ | ✓ | ✓ | ✓ | ✓ | [F7](#f7-the-2-d-variants-were-an-inline-literal-and-a-private-tuple) | [F6](#f6-a-2-d-cfar-pair-was-not-checked-to-be-two-integers), [R5](#recommended-not-applied) | ✓ |
-| `cfar_threshold_2d_w` | ✓ | ✓ | ✓ | ✓ | [F8](#f8-the-calibrations-independence-assumption-did-not-name-tapering) | [F7](#f7-the-2-d-variants-were-an-inline-literal-and-a-private-tuple) | [F6](#f6-a-2-d-cfar-pair-was-not-checked-to-be-two-integers), [R5](#recommended-not-applied) | ✓ |
-| `cfar_detect_2d` | ✓ | ✓ | ✓ | ✓ | ✓ | [F7](#f7-the-2-d-variants-were-an-inline-literal-and-a-private-tuple) | [F6](#f6-a-2-d-cfar-pair-was-not-checked-to-be-two-integers), [R5](#recommended-not-applied) | [R6](#recommended-not-applied) |
+| `cfar_valid_mask_2d` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | [F6](#f6--a-2-d-cfar-pair-was-not-checked-to-be-two-integers), [R5](#recommended-not-applied) | ✓ |
+| `cfar_noise_estimate_2d_w` | ✓ | ✓ | ✓ | ✓ | ✓ | [F7](#f7--the-2-d-variants-were-an-inline-literal-and-a-private-tuple) | [F6](#f6--a-2-d-cfar-pair-was-not-checked-to-be-two-integers), [R5](#recommended-not-applied) | ✓ |
+| `cfar_threshold_2d_w` | ✓ | ✓ | ✓ | ✓ | [F8](#f8--the-calibrations-independence-assumption-did-not-name-tapering) | [F7](#f7--the-2-d-variants-were-an-inline-literal-and-a-private-tuple) | [F6](#f6--a-2-d-cfar-pair-was-not-checked-to-be-two-integers), [R5](#recommended-not-applied) | ✓ |
+| `cfar_detect_2d` | ✓ | ✓ | ✓ | ✓ | ✓ | [F7](#f7--the-2-d-variants-were-an-inline-literal-and-a-private-tuple) | [F6](#f6--a-2-d-cfar-pair-was-not-checked-to-be-two-integers), [R5](#recommended-not-applied) | [R6](#recommended-not-applied) |
 
 **Conformance.** Scenario 003 §13.2's "Landed" paragraph is the specification, and the code
 matches each clause of it. `n_train` and `n_guard` are per axis, `axes` defaults to `(-2, -1)`,
@@ -498,11 +498,11 @@ is never the bottleneck.
 | :--- | :--- | :--- | :--- |
 | Names | `cfar_noise_estimate_w`, `cfar_threshold_w`, `cfar_detect`, `cfar_valid_mask` | Same, with `_2d` before the unit suffix | ✓ |
 | Guard and training | Per side; guard excluded; the cell under test sits in the guard band | Per side, per axis; the guard box holds the cell under test | ✓ |
-| Variant type | `CfarVariant`, `CFAR_VARIANTS = get_args(...)` | Inline `Literal`, private tuple | [F7](#f7-the-2-d-variants-were-an-inline-literal-and-a-private-tuple) |
+| Variant type | `CfarVariant`, `CFAR_VARIANTS = get_args(...)` | Inline `Literal`, private tuple | [F7](#f7--the-2-d-variants-were-an-inline-literal-and-a-private-tuple) |
 | Argument order | `power_w, *, pfa, n_train, n_guard, variant, rank, axis` | `power_w, *, pfa, n_train, n_guard, variant, rank, axes, wrap_axes` | ✓ |
 | Keyword-only | Everything after the map | Everything after the map | ✓ |
 | `n_guard` default | 1 | Required | ✓, deliberately — see [left alone](#what-was-deliberately-left-alone) |
-| Argument checks | Shared `_validate_window`, `_validate_rank`, `_as_power_w` | Same helpers; the pairs were not checked | [F6](#f6-a-2-d-cfar-pair-was-not-checked-to-be-two-integers) |
+| Argument checks | Shared `_validate_window`, `_validate_rank`, `_as_power_w` | Same helpers; the pairs were not checked | [F6](#f6--a-2-d-cfar-pair-was-not-checked-to-be-two-integers) |
 | Return contract | Same shape; `nan` (estimate, threshold) or `False` (mask) where untested | Same | ✓ |
 | Error messages | `variant must be one of (...), got ...` | The same text plus "for a 2-D ring" and the reason | ✓ |
 
@@ -544,11 +544,11 @@ names now lives in `tracks.py`.
 | `TrackModel` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `TrackModel.restricted` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `UpdateResult` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `FrameResult` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | [F1](#f1-frameresult-was-returned-but-never-exported) |
+| `FrameResult` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | [F1](#f1--frameresult-was-returned-but-never-exported) |
 | `Track` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `Track.is_alive`, `Track.is_confirmed` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `process_noise_dwna` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `state_model_matrices` | ✓ | ✓ | ✓ | ✓ | [F2](#f2-three-docstrings-that-misdescribe-their-code) | ✓ | ✓ | ✓ |
+| `state_model_matrices` | ✓ | ✓ | ✓ | ✓ | [F2](#f2--three-docstrings-that-misdescribe-their-code) | ✓ | ✓ | ✓ |
 | `predict` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `innovation_of` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `normalised_innovation_squared` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -558,7 +558,7 @@ names now lives in `tracks.py`.
 | `TrackManager` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `TrackManager.lost_track_ids` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `TrackManager.confirmed_tracks` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `TrackManager.step` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | [F1](#f1-frameresult-was-returned-but-never-exported) |
+| `TrackManager.step` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | [F1](#f1--frameresult-was-returned-but-never-exported) |
 
 **D2 conformance.** Three state models are data returned by a factory, not a class hierarchy,
 and there is one association strategy. The promotion trigger has not fired, and the module says
@@ -905,7 +905,7 @@ stands.
 - **The 2-D OS cost.** `rank_filter` is linear in the ring's size, at 72 ms for M = 26 and
   1.9 s for M = 816 on S1's map. Both alternatives that were measured, the predecessor's
   chunked gather and a sliding-window `np.partition`, are no faster (see
-  [`detection.py` — 2-D CFAR](#detectionpy-2-d-cfar)). Sub-linear running-rank algorithms
+  [`detection.py` — 2-D CFAR](#detectionpy--2-d-cfar)). Sub-linear running-rank algorithms
   exist, but none is in NumPy or SciPy. The docstring already says "substantially slower".
 - **`n_guard` has a default in 1-D and none in 2-D.** The asymmetry is the right way round.
   The 1-D default of one guard cell is documented against the range mainlobe. A 2-D default
