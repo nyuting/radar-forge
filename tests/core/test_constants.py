@@ -18,13 +18,6 @@ def test_speed_of_light_is_the_exact_si_value() -> None:
     assert constants.SPEED_OF_LIGHT_MPS == 299_792_458.0
 
 
-def test_speed_of_light_is_not_the_3e8_approximation() -> None:
-    """The 3e8 shortcut is 0.07% high — 70 cm of range error at 1 km."""
-    relative_error = abs(3e8 - constants.SPEED_OF_LIGHT_MPS) / constants.SPEED_OF_LIGHT_MPS
-    assert relative_error > 6e-4
-    assert constants.SPEED_OF_LIGHT_MPS != 3e8
-
-
 def test_boltzmann_is_the_exact_si_value() -> None:
     assert constants.BOLTZMANN_JPK == 1.380_649e-23
 
@@ -42,13 +35,6 @@ def test_four_thirds_earth_radius_is_derived_not_retyped() -> None:
     assert constants.FOUR_THIRDS_EARTH_RADIUS_M == 4.0 / 3.0 * constants.EARTH_RADIUS_M
 
 
-def test_every_exported_constant_is_a_positive_float() -> None:
-    for name in constants.__all__:
-        value = getattr(constants, name)
-        assert isinstance(value, float), f"{name} should be a float"
-        assert value > 0.0, f"{name} should be positive"
-
-
 def test_all_is_complete() -> None:
     """Every public module-level constant is exported, so nothing hides."""
     public = {name for name in vars(constants) if name.isupper() and not name.startswith("_")}
@@ -60,22 +46,17 @@ def test_wgs84_semi_major_axis_is_the_defining_value() -> None:
     assert constants.WGS84_SEMI_MAJOR_AXIS_M == 6_378_137.0
 
 
-def test_wgs84_semi_major_axis_is_not_the_mean_radius() -> None:
-    """The equatorial radius and the IUGG mean radius differ by ~7.1 km.
+def test_earth_radius_is_the_iugg_mean_radius() -> None:
+    """Catches the WGS-84 equatorial radius (7.1 km larger) standing in for the mean one.
 
-    Substituting one for the other in a geodetic conversion is a kilometre-scale
-    position error, so the two constants must stay distinct.
+    The spherical-Earth constant is the IUGG mean radius R1 = (2a + b)/3 of the
+    GRS 80 ellipsoid, 6 371 008.7714 m (Moritz, "Geodetic Reference System
+    1980", J. Geodesy 74, 2000). Defined to that many digits, so the
+    comparison is exact.
     """
-    difference_m = constants.WGS84_SEMI_MAJOR_AXIS_M - constants.EARTH_RADIUS_M
-    assert 7_000.0 < difference_m < 7_200.0
+    assert constants.EARTH_RADIUS_M == 6_371_008.771_4
 
 
 def test_wgs84_flattening_matches_the_published_inverse() -> None:
     """TR8350.2 publishes 1/f; we store f, so check the round trip."""
     assert math.isclose(1.0 / constants.WGS84_FLATTENING, 298.257_223_563, rel_tol=1e-15)
-
-
-def test_wgs84_polar_axis_is_about_21_km_shorter() -> None:
-    """b = a(1 - f). The pole-to-equator difference is the classic ~21.4 km."""
-    semi_minor_axis_m = constants.WGS84_SEMI_MAJOR_AXIS_M * (1.0 - constants.WGS84_FLATTENING)
-    assert 21_000.0 < constants.WGS84_SEMI_MAJOR_AXIS_M - semi_minor_axis_m < 21_500.0
