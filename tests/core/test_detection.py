@@ -1118,6 +1118,40 @@ def test_ring_rejects_a_repeated_axis():
         cfar_noise_estimate_2d_w(np.ones((32, 64)), n_train=(2, 4), n_guard=(1, 1), axes=(1, -1))
 
 
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [
+        # Was accepted, and the third count silently dropped.
+        ("n_train", {"n_train": (2, 4, 6), "n_guard": (1, 1, 1)}),
+        # Was accepted, and int() silently truncated 2.5 to 2.
+        ("n_train", {"n_train": (2.5, 4), "n_guard": (1, 1)}),
+        # The 1-D habit of a bare count; was a TypeError about iterating an int.
+        ("n_train", {"n_train": 16, "n_guard": (1, 1)}),
+        # Was zip()'s own message, which names neither argument.
+        ("n_guard", {"n_train": (2, 4), "n_guard": (1, 1, 1)}),
+        # Was an unpacking error.
+        ("axes", {"n_train": (2, 4), "n_guard": (1, 1), "axes": (-1,)}),
+    ],
+)
+def test_ring_rejects_a_pair_that_is_not_two_integers(name, arguments):
+    """Each per-axis argument is exactly two integers, and the error names it."""
+    with pytest.raises(ValueError, match=f"{name} must be two integers"):
+        cfar_noise_estimate_2d_w(np.ones((32, 64)), **arguments)
+    with pytest.raises(ValueError, match=f"{name} must be two integers"):
+        cfar_valid_mask_2d((32, 64), **arguments)
+
+
+def test_ring_accepts_numpy_integer_counts():
+    """A pair read out of an array holds NumPy integers, and those are integers."""
+    estimate_w = cfar_noise_estimate_2d_w(
+        np.ones((32, 64)), n_train=tuple(np.array(RING_N_TRAIN)), n_guard=RING_N_GUARD
+    )
+    np.testing.assert_array_equal(
+        ~np.isnan(estimate_w),
+        cfar_valid_mask_2d((32, 64), n_train=RING_N_TRAIN, n_guard=RING_N_GUARD),
+    )
+
+
 def test_ring_rejects_a_wrap_axis_it_does_not_span():
     with pytest.raises(ValueError, match="must be among the ring's axes"):
         cfar_noise_estimate_2d_w(
