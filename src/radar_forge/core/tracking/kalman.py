@@ -90,10 +90,12 @@ StateModel = Literal["range_1d", "enu_2d", "enu_3d"]
 STATE_MODELS: tuple[StateModel, ...] = get_args(StateModel)
 
 # An unassociated pair must be impossible for the assignment solver to pick, but
-# scipy rejects a cost matrix containing inf, so the forbidden cost has to be a
-# large finite number instead. Any value above the largest admissible d^2 works;
-# this one is far above every chi-squared quantile and still squares without
-# overflowing float64.
+# scipy raises "cost matrix is infeasible" whenever inf entries leave no complete
+# matching -- which gating does routinely, as soon as one track has nothing in its
+# gate or two tracks contend for one measurement. So the forbidden cost has to be
+# a large finite number instead, and pairs carrying it are dropped from the
+# result. Any value above the largest admissible d^2 works; this one is far
+# above every chi-squared quantile and still squares without overflowing float64.
 _FORBIDDEN_COST = 1e12
 
 
