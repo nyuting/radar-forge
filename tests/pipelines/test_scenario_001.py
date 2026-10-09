@@ -13,11 +13,11 @@ one, produces a map that looks entirely plausible and fails here.
 Marked slow: it synthesises and processes real IQ cubes. A five-frame window
 keeps `make check` quick while still running every frame of it.
 
-The window at 2646 s is chosen because the target is closing at about 50 m/s
-there, which is past *both* S3 bursts' unambiguous velocities and about 6.6 folds
-of S1's, while the range of roughly 14 km is 2.3 unambiguous ranges of S2. One
-window therefore exercises all three foldings; the shipped default window at
-t = 0 does not fold S3 at all.
+The window at 2835 s is chosen because the target is closing at about 55 m/s
+there, which is past *both* S3 bursts' unambiguous velocities and about 7.2 of
+S1's 15.30 m/s fold spans, while the range of roughly 15.1 km is 2.5 unambiguous
+ranges of S2. One window therefore exercises all three foldings; the shipped
+default window at t = 0 does not fold S3 at all.
 """
 
 from __future__ import annotations
