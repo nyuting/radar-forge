@@ -6,10 +6,35 @@
 | :--- | :--- |
 | Project name | `radar-forge` |
 | PyPI package | `radar-forge` (imports via `import radar_forge`) |
-| Primary goal | An open-source, modular Python library and educational workbench combining 3D ray-tracing, phased array beamforming, tracking and machine-learning dataset synthesis |
-| Target audience | Interns, students, researchers and algorithm developers in radar / wireless sensing |
+| Primary goal | A research and educational workbench for radar that is both state of the art and simple: the current best method for every block, with correct and cited mathematics, written so a new engineer can follow it and a practitioner can learn from it |
+| Scope | A modular, open-source Python library covering 3D ray-tracing, phased-array beamforming, detection and tracking, and machine-learning dataset synthesis |
+| Target audience | Radar practitioners and researchers, new staff, interns and students, and algorithm developers in radar / wireless sensing |
 | Python | >= 3.11, src layout |
 | Configuration | TOML only, in `pyproject.toml`; scenarios in `scenarios/*.toml` |
+
+### 1.1 The bar
+
+**State of the art and simple are both required, and neither is traded for the other.** A block
+that meets only one of them is not finished.
+
+1. **State of the art.** Each block implements the current best published method. A classical
+   method is in the repo only as a baseline or a test oracle, never as the end state.
+2. **Simple.** Code must be simple enough to understand and to test. A new staff member or intern
+   can read the block top to bottom, follow it, and write a test for each step: plain names, small
+   functions, one idea per function, a derivation note that walks from the textbook baseline to
+   the current method, and a worked example.
+3. **Both, when they pull apart.** Making a current method simple is part of the work: break it
+   into steps, derive it from the classical method, show the example. A block that is current but
+   opaque is not ready, and neither is one that is clear but outdated.
+4. **Correct.** Every block cites the equation it implements (paper or book, with the equation
+   number) and is tested against analytic ground truth or a published result.
+5. **Excellent.** Numerics, edge cases and performance are fit for research use, not just for a
+   demo. Tolerances are justified and never loosened to make a test pass.
+6. **Insightful.** Each block exposes its intermediate quantities (SNR budget terms, NIS, losses,
+   ambiguity limits) and comes with a plot or notebook, so a practitioner sees why the method
+   works and not only what it outputs.
+7. **Kept current.** A periodic currency audit, in the style of `docs/audits/`, checks each module
+   against recent literature and records when it was last checked.
 
 **Companion documents.** [`structure.md`](structure.md) is the file-level design and the decision
 list. The vertical slices through it are specified one document each:

@@ -12,7 +12,7 @@ build-backend = "hatchling.build"
 [project]
 name = "radar-forge"
 version = "0.0.0"
-description = "Open-source radar simulation and signal processing toolkit for education and research."
+description = "State-of-the-art, simple radar simulation and signal processing workbench for research and education."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }

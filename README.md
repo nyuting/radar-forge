@@ -1,10 +1,13 @@
 # radar-forge
 
-**Open-source radar simulation and signal processing toolkit for education and research.**
+**A state-of-the-art, simple radar workbench for research and education.**
 
-`radar-forge` is a modular Python library and educational workbench that brings 3D ray-tracing,
-phased array beamforming, tracking, and machine-learning dataset synthesis under one consistent API.
-It is built for radar interns, students, researchers, and algorithm developers in radar and wireless
+`radar-forge` is a research and educational workbench for radar that is both state of the art
+and simple: the current best method for every block, with correct and cited mathematics, written
+so a new engineer can follow it and a practitioner can learn from it. It is a modular, open-source
+Python library that brings 3D ray-tracing, phased-array beamforming, detection and tracking, and
+machine-learning dataset synthesis under one consistent API. It is built for radar practitioners
+and researchers, new staff, interns, students, and algorithm developers in radar and wireless
 sensing who want to go from the radar range equation to a labelled deep-learning dataset without
 stitching together seven incompatible codebases.
 
