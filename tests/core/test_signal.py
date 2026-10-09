@@ -300,31 +300,31 @@ class TestThermalNoise:
         """
         rng = np.random.default_rng(20260911)
         noise_power_w = 4.0e-15
-        noise = thermal_noise((2000, 1000), noise_power_w, rng)
+        noise = thermal_noise((2000, 1000), noise_power_w, rng=rng)
         measured_w = float(np.mean(np.abs(noise) ** 2))
         assert abs(measured_w - noise_power_w) / noise_power_w < 0.01
 
     def test_is_circularly_symmetric(self) -> None:
         """Real and imaginary parts carry half the power each and do not correlate."""
         rng = np.random.default_rng(20260911)
-        noise = thermal_noise((4000, 500), 2.0, rng)
+        noise = thermal_noise((4000, 500), 2.0, rng=rng)
         np.testing.assert_allclose(np.var(noise.real), 1.0, rtol=0.02)
         np.testing.assert_allclose(np.var(noise.imag), 1.0, rtol=0.02)
         correlation = float(np.mean(noise.real * noise.imag))
         assert abs(correlation) < 0.05
 
     def test_is_reproducible_from_a_seed(self) -> None:
-        first = thermal_noise((8, 8), 1.0, np.random.default_rng(7))
-        second = thermal_noise((8, 8), 1.0, np.random.default_rng(7))
+        first = thermal_noise((8, 8), 1.0, rng=np.random.default_rng(7))
+        second = thermal_noise((8, 8), 1.0, rng=np.random.default_rng(7))
         np.testing.assert_array_equal(first, second)
 
     def test_zero_power_gives_an_exactly_silent_cube(self) -> None:
-        noise = thermal_noise((4, 4), 0.0, np.random.default_rng(1))
+        noise = thermal_noise((4, 4), 0.0, rng=np.random.default_rng(1))
         np.testing.assert_array_equal(noise, 0.0)
 
     def test_rejects_negative_power(self) -> None:
         with pytest.raises(ValueError, match="non-negative"):
-            thermal_noise((2, 2), -1.0, np.random.default_rng(1))
+            thermal_noise((2, 2), -1.0, rng=np.random.default_rng(1))
 
     def test_noise_is_added_when_a_generator_is_supplied(self) -> None:
         paths = line_of_sight_paths(S1_RADAR, 10_000.0, 0.0, 10.0)

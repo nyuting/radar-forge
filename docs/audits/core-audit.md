@@ -44,13 +44,16 @@ pulsed TOML gets more false alarms than its `pfa`, 1.29 times design at `1e-4`, 
 matched-filter output is oversampled. The tracking modules listed above are still not covered
 here: their audit is left to the `spec/tracker-001.md` workstream.
 
+Since then, R1 and R3 have been applied, both as API breaks. R2 and R4 are declined, and stay
+recorded for the reasons given. R5–R7 are still open.
+
 ## Verdict key
 
 | Mark | Meaning |
 | :--- | :--- |
 | ✓ | Sound. Nothing better available at reasonable cost; no action. |
 | **F*n*** | A finding. Links to the section that records it. Fixed unless the section says otherwise. |
-| **R*n*** | A recommendation, deliberately **not** applied — see [Recommended, not applied](#recommended-not-applied). |
+| **R*n*** | A recommendation, deliberately **not** applied unless its entry says **Applied** — see [Recommended, not applied](#recommended-not-applied). |
 
 Q1 mathematical and radar-physics accuracy · Q2 clarity · Q3 speed and vectorisation ·
 Q4 conciseness · Q5 documentation · Q6 naming · Q7 inputs · Q8 outputs.
@@ -820,8 +823,9 @@ the schema version stays where it is.
 
 ## Recommended, not applied
 
-Each of these is a real observation. None is unambiguous enough to justify an API break or the
-churn, so they are recorded rather than acted on.
+Each of these is a real observation. When the audit was written, none was unambiguous enough to
+justify an API break or the churn, so they were recorded rather than acted on. R1 and R3 were
+later taken deliberately; their entries say so.
 
 **R1 — `received_power_w` takes six adjacent positional `ArrayLike` arguments.** Swapping
 `gain_tx_linear` and `gain_rx_linear` is harmless (they multiply), but swapping `wavelength_m`
@@ -829,6 +833,8 @@ and `rcs_m2` is silent and wrong. Making the trailing arguments keyword-only wou
 hazard. Not applied: this module is the repository's declared style exemplar, its own doctests
 call positionally, and the change would break every positional call site in and outside the
 repository. If it is taken, it should be taken deliberately and across the pair.
+**Applied** later, across the pair: every argument of both functions is now keyword-only. The
+only positional callers in the repository were the two doctests.
 
 **R2 — `range_from_beat_frequency_m`'s first parameter is named `beat_frequency_hz`, shadowing
 the sibling function of that name.** Inside the body, `beat_frequency_hz` is the array, so the
@@ -840,7 +846,7 @@ keyword-accessible parameter is an API break, and the shadowing costs nothing to
 generators in the same module take it keyword-only. Making it keyword-only would be consistent
 and is the direction `docs/conventions/style.md` §7 points. Not applied: it is an API break for
 a function with existing positional callers, and the current signature is not wrong, only
-inconsistent.
+inconsistent. **Applied** later: `thermal_noise(shape, noise_power_w, *, rng)`.
 
 **R4 — `_normalize_axis` is written three times**, in `windows.py`, `dsp.py` and
 `detection.py`, with two different error-message wordings. Consolidating into one private helper

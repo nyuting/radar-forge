@@ -33,6 +33,7 @@ _FOUR_PI_CUBED = (4.0 * np.pi) ** 3
 
 
 def received_power_w(
+    *,
     transmit_power_w: ArrayLike,
     gain_tx_linear: ArrayLike,
     gain_rx_linear: ArrayLike,
@@ -101,7 +102,15 @@ def received_power_w(
     ...     rcs_m2=10.0,
     ...     range_m=100.0,
     ... )
-    >>> bool(np.isclose(p, received_power_w(1.0, 1e3, 1e3, 3.9e-3, 10.0, 200.0) * 16.0))
+    >>> p_far = received_power_w(
+    ...     transmit_power_w=1.0,
+    ...     gain_tx_linear=10 ** 3.0,
+    ...     gain_rx_linear=10 ** 3.0,
+    ...     wavelength_m=3.9e-3,
+    ...     rcs_m2=10.0,
+    ...     range_m=200.0,
+    ... )
+    >>> bool(np.isclose(p, p_far * 16.0))  # doubling the range costs 12 dB
     True
     """
     range_arr = np.asarray(range_m, dtype=np.float64)
@@ -127,6 +136,7 @@ def received_power_w(
 
 
 def bistatic_received_power_w(
+    *,
     transmit_power_w: ArrayLike,
     gain_tx_linear: ArrayLike,
     gain_rx_linear: ArrayLike,
@@ -224,7 +234,14 @@ def bistatic_received_power_w(
     ...     range_tx_m=100.0,
     ...     range_rx_m=100.0,
     ... )
-    >>> p_monostatic = received_power_w(1.0, 1e3, 1e3, 3.9e-3, 10.0, 100.0)
+    >>> p_monostatic = received_power_w(
+    ...     transmit_power_w=1.0,
+    ...     gain_tx_linear=10 ** 3.0,
+    ...     gain_rx_linear=10 ** 3.0,
+    ...     wavelength_m=3.9e-3,
+    ...     rcs_m2=10.0,
+    ...     range_m=100.0,
+    ... )
     >>> bool(np.isclose(p_bistatic, p_monostatic))  # equal ranges are monostatic
     True
     """

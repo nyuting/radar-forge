@@ -574,6 +574,7 @@ def bistatic_line_of_sight_paths(
 def thermal_noise(
     shape: tuple[int, ...],
     noise_power_w: float,
+    *,
     rng: np.random.Generator,
 ) -> NDArray[np.complex128]:
     r"""Draw circularly-symmetric complex Gaussian receiver noise.
@@ -712,7 +713,7 @@ def fmcw_deramp_baseband(
     cube: NDArray[np.complex128] = np.asarray(per_path.sum(axis=1), dtype=np.complex128)
 
     if rng is not None:
-        cube = cube + thermal_noise(cube.shape, radar.noise_power_w, rng)
+        cube = cube + thermal_noise(cube.shape, radar.noise_power_w, rng=rng)
     return cube
 
 
@@ -812,7 +813,7 @@ def pulsed_baseband(
     cube: NDArray[np.complex128] = np.asarray(per_path.sum(axis=1), dtype=np.complex128)
 
     if rng is not None:
-        cube = cube + thermal_noise(cube.shape, radar.noise_power_w, rng)
+        cube = cube + thermal_noise(cube.shape, radar.noise_power_w, rng=rng)
     return cube
 
 
