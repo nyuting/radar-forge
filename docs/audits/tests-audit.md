@@ -741,8 +741,9 @@ every `Notes` edge case. A deletion that left a `src/` line or branch unexecuted
 the result section).
 
 All counts and coverage are measured against `origin/main` at `e92a9be`, after PR #20 renamed the
-scenario TOML tables. Two files had a constraint. `test_scenarios.py` and `test_public_api.py` may
-still be changed by the rest of the unmerged `docs/retire-refactor-001` branch. In those two, only
+scenario TOML tables. Two files had a constraint. `test_scenarios.py` and `test_public_api.py` were
+also being changed by `docs/retire-refactor-001`, then unmerged (it merged later as PR #23, with no
+conflict). In those two, only
 whole tests or whole parametrize cases were deleted, and no surviving test body was edited. The tests
 PR #20 rewrote (`test_rejects_a_file_with_no_burst`, `test_rejects_a_file_missing_a_table`, all of
 `TestReceiveEndTables`, `test_deleting_the_table_makes_the_same_file_monostatic`) were left alone.
