@@ -963,6 +963,37 @@ def test_ring_false_alarm_rate_matches_design_pfa(rng, variant, pfa):
     assert_rate_consistent_with_design(n_hit, n_tested, pfa)
 
 
+@pytest.mark.parametrize("dimensions", [1, 2])
+def test_a_tapered_map_breaks_the_calibration_as_the_module_notes_say(rng, dimensions):
+    """Hann on both axes correlates neighbouring cells, so the rate exceeds pfa.
+
+    Pins the module docstring's warning; it is the converse of the rate tests
+    above, which draw independent cells. Measured at 1.6 to 1.7 times the design
+    rate over three seeds, for the window and the ring alike, so the lower end of
+    the 99.9% interval clears pfa by a wide margin.
+    """
+    n_pulses, n_samples, n_maps, pfa = 64, 256, 30, 1e-3
+    windows = {
+        "fast_time_window": taper("hann", n_samples),
+        "slow_time_window": taper("hann", n_pulses),
+    }
+    n_hit = n_tested = 0
+    for _ in range(n_maps):
+        noise = rng.normal(size=(2, n_pulses, n_samples))
+        power_w = np.abs(range_doppler_map(noise[0] + 1j * noise[1], **windows)) ** 2
+        if dimensions == 1:
+            mask = cfar_detect(power_w, pfa=pfa, n_train=16, n_guard=4)
+            valid = cfar_valid_mask(power_w.shape, n_train=16, n_guard=4)
+        else:
+            ring = {"n_train": RING_N_TRAIN, "n_guard": RING_N_GUARD, "wrap_axes": (0,)}
+            mask = cfar_detect_2d(power_w, pfa=pfa, **ring)
+            valid = cfar_valid_mask_2d(power_w.shape, **ring)
+        n_hit += int(np.count_nonzero(mask))
+        n_tested += int(np.count_nonzero(valid))
+    low, _ = clopper_pearson_interval(n_hit, n_tested)
+    assert low > pfa, f"measured {n_hit / n_tested:.3e}, interval from {low:.3e}"
+
+
 def test_order_statistic_ring_holds_detection_where_cell_averaging_loses_it():
     """Four strong interferers in the ring mask a target from CA but not from OS.
 

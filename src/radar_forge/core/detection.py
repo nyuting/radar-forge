@@ -73,6 +73,16 @@ detections. :func:`cfar_valid_mask` and :func:`cfar_valid_mask_2d` report which
 cells were actually tested, and any measured false-alarm rate must be taken over
 those cells alone.
 
+The closed forms also assume the reference cells are *independent*, which holds
+for an untapered, unpadded FFT of white noise and fails for a tapered one. A
+taper correlates neighbouring bins — after a Hann window the complex amplitudes
+of adjacent bins have a correlation of magnitude about 2/3 — and zero-padding
+the FFT does the same. Correlated cells carry less information than as many
+independent ones, so the noise estimate is noisier than the calibration assumed
+and the false-alarm rate comes out above ``pfa``. This applies to the 1-D window
+and the ring alike: check a calibration by measurement on an untapered map, or
+expect the measured rate to be high.
+
 References
 ----------
 .. [1] H. M. Finn and R. S. Johnson, "Adaptive detection mode with threshold
@@ -956,7 +966,8 @@ def cfar_threshold_2d_w(
     -----
     Under the noise model the reference cells are i.i.d., and neither CA nor OS
     depends on where they lie, so a ring of :math:`M` cells takes the threshold
-    factor of a window of :math:`M/2` cells per side.
+    factor of a window of :math:`M/2` cells per side. A taper along either axis
+    breaks the independence; see the module notes.
 
     Examples
     --------
