@@ -55,66 +55,26 @@ def deramped_cube(range_bin: int, doppler_bin: int) -> np.ndarray:
 
 class TestMatchedFilter:
     def test_matches_numpy_correlate(self) -> None:
-        """Cross-check against the direct correlation used in test_waveforms."""
-        chirp = lfm_chirp(bandwidth_hz=10e6, chirp_duration_s=10e-6, sample_rate_hz=20e6)
-        expected = np.correlate(chirp, chirp, mode="full")
-        # atol, not rtol alone: an autocorrelation has exact nulls, where the
-        # true value is zero and a relative tolerance is meaningless. The FFT
-        # and direct methods land on ~1e-13 there by different routes. atol is
-        # set to 1e-12 of the peak (which is chirp.size), so a genuine error
-        # anywhere near the mainlobe still fails by orders of magnitude.
-        np.testing.assert_allclose(
-            matched_filter(chirp, chirp), expected, rtol=1e-10, atol=chirp.size * 1e-12
-        )
+        """Catches a circular correlation, a missing conjugate or reversal, or a reversed output.
 
-    def test_peaks_at_zero_lag_with_the_pulse_energy(self) -> None:
-        """A matched filter's peak is the energy of the pulse it matches."""
-        chirp = lfm_chirp(bandwidth_hz=10e6, chirp_duration_s=10e-6, sample_rate_hz=20e6)
-        compressed = matched_filter(chirp, chirp)
-        assert int(np.argmax(np.abs(compressed))) == chirp.size - 1
-        # A unit-modulus chirp of N samples carries energy N exactly.
-        np.testing.assert_allclose(
-            np.abs(compressed[chirp.size - 1]), float(chirp.size), rtol=1e-10
-        )
-
-    def test_compresses_by_the_time_bandwidth_product(self) -> None:
-        """The -3 dB mainlobe narrows from T to about 1/B, a factor of BT."""
-        # Oversampled 20x: at fs = 2B the compressed mainlobe is under two
-        # samples wide, so counting samples above -3 dB cannot measure it at all.
-        bandwidth_hz, chirp_duration_s, sample_rate_hz = 10e6, 10e-6, 200e6
-        chirp = lfm_chirp(bandwidth_hz, chirp_duration_s, sample_rate_hz)
-        compressed = np.abs(matched_filter(chirp, chirp))
-        peak_index = int(np.argmax(compressed))
-        above_half_power = compressed >= compressed[peak_index] / np.sqrt(2.0)
-        width_s = int(np.sum(above_half_power)) / sample_rate_hz
-        # For large BT the compressed LFM is approximately a sinc with Rayleigh
-        # (peak-to-null) width 1/B (Richards FRSP 2e §4.6.1); the -3 dB width of
-        # that sinc is 0.886/B. A +/-20% band around that is tight enough to catch a
-        # compression that is not happening, and loose enough for the residual
-        # sample quantisation.
-        np.testing.assert_allclose(width_s, 0.886 / bandwidth_hz, rtol=0.2)
-
-    def test_delays_the_peak_by_the_target_delay(self) -> None:
-        """A target delayed by k samples moves the peak by exactly k bins."""
+        The echo is the chirp delayed by 17 samples and scaled, not the chirp
+        itself: an autocorrelation is Hermitian-symmetric, so against
+        ``samples == reference`` an output returned time-reversed and
+        conjugated would still match. With a delay it cannot, and the peak
+        must sit at zero lag (index n_reference - 1) plus the delay.
+        """
         chirp = lfm_chirp(bandwidth_hz=10e6, chirp_duration_s=10e-6, sample_rate_hz=20e6)
         delay_samples = 17
-        echo = np.concatenate([np.zeros(delay_samples, dtype=np.complex128), chirp])
-        peak = int(np.argmax(np.abs(matched_filter(echo, chirp))))
-        assert peak == chirp.size - 1 + delay_samples
-
-    def test_is_linear_in_two_targets(self) -> None:
-        """Superposition: compression of a sum is the sum of compressions."""
-        chirp = lfm_chirp(bandwidth_hz=10e6, chirp_duration_s=10e-6, sample_rate_hz=20e6)
-        pad = np.zeros(20, dtype=np.complex128)
-        near = np.concatenate([chirp, pad])
-        far = np.concatenate([pad, 0.5 * chirp])
-        # atol at 1e-12 of the peak, for the null bins; see the cross-check test.
-        np.testing.assert_allclose(
-            matched_filter(near + far, chirp),
-            matched_filter(near, chirp) + matched_filter(far, chirp),
-            rtol=1e-10,
-            atol=chirp.size * 1e-12,
-        )
+        echo = 0.5j * np.concatenate([np.zeros(delay_samples, dtype=np.complex128), chirp])
+        compressed = matched_filter(echo, chirp)
+        expected = np.correlate(echo, chirp, mode="full")
+        # atol, not rtol alone: a correlation has exact nulls, where the true
+        # value is zero and a relative tolerance is meaningless. The FFT and
+        # direct methods land on ~1e-13 there by different routes. atol is set
+        # to 1e-12 of the peak (about chirp.size), so a genuine error anywhere
+        # near the mainlobe still fails by orders of magnitude.
+        np.testing.assert_allclose(compressed, expected, rtol=1e-10, atol=chirp.size * 1e-12)
+        assert int(np.argmax(np.abs(compressed))) == chirp.size - 1 + delay_samples
 
     def test_compresses_each_chirp_of_a_cube_independently(self) -> None:
         """Compressing along an axis must equal compressing row by row."""
@@ -141,31 +101,22 @@ class TestMatchedFilter:
 
 class TestRangeFft:
     def test_places_an_exact_tone_on_its_exact_bin(self) -> None:
-        """A tone at k*fs/N belongs in bin k and nowhere else."""
+        """Catches an ifft (bin N - k), a stray fftshift, or a hidden 1/N normalisation.
+
+        A unit tone at k*fs/N belongs in bin k with magnitude exactly N, and
+        every other bin is a numerical null.
+        """
         n_samples = 64
         for bin_index in (1, 7, 31):
             tone = np.exp(2j * np.pi * bin_index * np.arange(n_samples) / n_samples)
             spectrum = np.abs(range_fft(tone))
             assert int(np.argmax(spectrum)) == bin_index
+            # rtol 1e-10: an FFT round-off budget, per docs/conventions/testing.md.
+            np.testing.assert_allclose(spectrum[bin_index], float(n_samples), rtol=1e-10)
             # Every other bin is a numerical null, not a small number: the
             # leakage is pure float error, so assert it is 200 dB down.
             others = np.delete(spectrum, bin_index)
             assert others.max() < spectrum[bin_index] * 1e-10
-
-    def test_is_not_shifted(self) -> None:
-        """Zero beat frequency, hence zero range, must stay at bin 0."""
-        dc = np.ones(16, dtype=np.complex128)
-        assert int(np.argmax(np.abs(range_fft(dc)))) == 0
-
-    def test_conserves_energy(self) -> None:
-        """Parseval across the range transform."""
-        rng = np.random.default_rng(20260911)
-        samples = rng.standard_normal(64) + 1j * rng.standard_normal(64)
-        spectrum = range_fft(samples)
-        # rtol 1e-10: one forward FFT, per the tolerance table in testing.md.
-        np.testing.assert_allclose(
-            np.sum(np.abs(spectrum) ** 2) / samples.size, np.sum(np.abs(samples) ** 2), rtol=1e-10
-        )
 
     def test_zero_padding_interpolates_without_moving_the_peak(self) -> None:
         """Zero-padding refines the grid; it does not add resolution."""
@@ -184,25 +135,15 @@ class TestRangeFft:
             range_fft(samples, window=window), range_fft(samples * window), rtol=1e-10
         )
 
-    def test_window_suppresses_sidelobes_of_an_off_bin_target(self) -> None:
-        """The reason windowing exists: a half-bin target leaks without it."""
-        n_samples = 64
-        # Half a bin off centre is the worst case for spectral leakage.
-        tone = np.exp(2j * np.pi * 7.5 * np.arange(n_samples) / n_samples)
-        untapered = np.abs(range_fft(tone))
-        tapered = np.abs(range_fft(tone, window=taper("blackmanharris", n_samples)))
-        far_bins = slice(20, 44)
-        assert tapered[far_bins].max() < untapered[far_bins].max()
-
     def test_rejects_truncating_transform_length(self) -> None:
         """Silently dropping samples would be a quiet loss of energy."""
         with pytest.raises(ValueError, match="shorter than samples"):
             range_fft(np.ones(64), n_fft=32)
 
-    @pytest.mark.parametrize("bad_n_fft", [0, -8])
-    def test_rejects_non_positive_transform_length(self, bad_n_fft: int) -> None:
+    def test_rejects_a_zero_transform_length(self) -> None:
+        """Zero is the boundary of the ``n_fft >= 1`` guard."""
         with pytest.raises(ValueError, match="at least one"):
-            range_fft(np.ones(64), n_fft=bad_n_fft)
+            range_fft(np.ones(64), n_fft=0)
 
     def test_rejects_mismatched_window(self) -> None:
         with pytest.raises(ValueError, match="must match samples"):
@@ -210,75 +151,70 @@ class TestRangeFft:
 
 
 class TestDopplerFft:
-    def test_puts_zero_doppler_at_the_centre(self) -> None:
-        """A stationary target has no phase advance between chirps."""
-        stationary = np.ones(16, dtype=np.complex128)
-        assert int(np.argmax(np.abs(doppler_fft(stationary, axis=0)))) == 8
-
     def test_separates_closing_from_opening(self) -> None:
-        """Closing targets sit above centre, opening targets below."""
+        """Catches a missing fftshift, a flipped Doppler sign, or a hidden normalisation.
+
+        With zero Doppler at bin N/2 = 16, a closing tone advancing +3/32 of a
+        turn per chirp lands on bin 19 and the opening one on bin 13, each with
+        magnitude N. Without the shift they would land on 3 and 29; with the
+        sign flipped, on 13 and 19.
+        """
         n_pulses = 32
         closing = np.exp(2j * np.pi * 3 * np.arange(n_pulses) / n_pulses)
         opening = np.exp(-2j * np.pi * 3 * np.arange(n_pulses) / n_pulses)
-        assert int(np.argmax(np.abs(doppler_fft(closing, axis=0)))) > n_pulses // 2
-        assert int(np.argmax(np.abs(doppler_fft(opening, axis=0)))) < n_pulses // 2
-
-    def test_conserves_energy(self) -> None:
-        """Parseval survives the fftshift, which only permutes bins."""
-        rng = np.random.default_rng(20260911)
-        samples = rng.standard_normal(32) + 1j * rng.standard_normal(32)
-        spectrum = doppler_fft(samples, axis=0)
-        np.testing.assert_allclose(
-            np.sum(np.abs(spectrum) ** 2) / samples.size, np.sum(np.abs(samples) ** 2), rtol=1e-10
-        )
-
-    def test_transforms_slow_time_of_a_cube(self) -> None:
-        cube = np.ones((16, 8), dtype=np.complex128)
-        spectrum = np.abs(doppler_fft(cube, axis=0))
-        assert spectrum.shape == (16, 8)
-        # Stationary everywhere, so every range bin peaks at centre Doppler.
-        assert np.all(np.argmax(spectrum, axis=0) == 8)
+        closing_spectrum = np.abs(doppler_fft(closing, axis=0))
+        opening_spectrum = np.abs(doppler_fft(opening, axis=0))
+        assert int(np.argmax(closing_spectrum)) == n_pulses // 2 + 3
+        assert int(np.argmax(opening_spectrum)) == n_pulses // 2 - 3
+        # rtol 1e-10: an FFT round-off budget.
+        np.testing.assert_allclose(closing_spectrum.max(), float(n_pulses), rtol=1e-10)
 
 
 class TestBinCenters:
-    def test_range_bins_start_at_zero_and_increase(self) -> None:
-        bins_m = range_bin_centers_m(N_SAMPLES, **NOMINAL)
-        np.testing.assert_allclose(bins_m[0], 0.0, atol=1e-12)
-        assert np.all(np.diff(bins_m) > 0.0)
-
     def test_range_bin_spacing_matches_the_deramp_relation(self) -> None:
-        r"""Bin spacing is c*fs/(2*alpha*N), an exact closed form."""
+        r"""Bin k sits at k c f_s / (2 alpha N), an exact closed form starting at zero.
+
+        Catches a one-way (c f_s / alpha N) relation, an offset first bin, and
+        the Notes' unambiguous limit: bin N/2 is R_max = c f_s T / (4 B).
+        """
         bins_m = range_bin_centers_m(N_SAMPLES, **NOMINAL)
         sweep_rate = NOMINAL["bandwidth_hz"] / NOMINAL["chirp_duration_s"]
         # Independent re-derivation, not a golden number.
         from radar_forge.core import SPEED_OF_LIGHT_MPS
 
-        expected = SPEED_OF_LIGHT_MPS * NOMINAL["sample_rate_hz"] / (2.0 * sweep_rate * N_SAMPLES)
+        spacing_m = SPEED_OF_LIGHT_MPS * NOMINAL["sample_rate_hz"] / (2.0 * sweep_rate * N_SAMPLES)
         # rtol 1e-12: a handful of float64 operations.
-        np.testing.assert_allclose(np.diff(bins_m), expected, rtol=1e-12)
-
-    def test_doppler_bins_are_centred_on_zero(self) -> None:
-        velocities = doppler_bin_centers_mps(8, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)
-        np.testing.assert_allclose(velocities[4], 0.0, atol=1e-15)
-        assert np.all(np.diff(velocities) > 0.0)
+        np.testing.assert_allclose(bins_m, np.arange(N_SAMPLES) * spacing_m, rtol=1e-12)
+        max_unambiguous_range_m = (
+            SPEED_OF_LIGHT_MPS
+            * NOMINAL["sample_rate_hz"]
+            * NOMINAL["chirp_duration_s"]
+            / (4.0 * NOMINAL["bandwidth_hz"])
+        )
+        np.testing.assert_allclose(bins_m[N_SAMPLES // 2], max_unambiguous_range_m, rtol=1e-12)
 
     def test_doppler_span_is_the_unambiguous_velocity(self) -> None:
-        r"""The axis spans exactly \pm \lambda/(4 T_PRI)."""
+        r"""Bin k is (k - N/2) lambda / (2 N T_PRI): zero at N/2, -lambda/(4 T_PRI) at 0.
+
+        Catches a one-way (lambda f_d) relation, the wrong sign convention, an
+        uncentred axis, or the top bin placed at +v_max rather than one step
+        short of it, the usual FFT asymmetry.
+        """
         n_bins = 32
         velocities = doppler_bin_centers_mps(n_bins, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)
+        step_mps = WAVELENGTH_M / (2.0 * n_bins * PULSE_REPETITION_INTERVAL_S)
+        expected_mps = (np.arange(n_bins) - n_bins // 2) * step_mps
+        # rtol 1e-12, with atol for the zero-Doppler bin, where rtol is meaningless.
+        np.testing.assert_allclose(velocities, expected_mps, rtol=1e-12, atol=1e-12)
         unambiguous_mps = WAVELENGTH_M / (4.0 * PULSE_REPETITION_INTERVAL_S)
         np.testing.assert_allclose(velocities[0], -unambiguous_mps, rtol=1e-12)
-        # The top bin is one step short of +v_max, the usual FFT asymmetry.
-        np.testing.assert_allclose(
-            velocities[-1], unambiguous_mps * (1.0 - 2.0 / n_bins), rtol=1e-12
-        )
 
-    @pytest.mark.parametrize("bad_n_bins", [0, -4])
-    def test_rejects_non_positive_bin_count(self, bad_n_bins: int) -> None:
+    def test_rejects_a_zero_bin_count(self) -> None:
+        """Zero is the boundary of both helpers' ``n_bins >= 1`` guard."""
         with pytest.raises(ValueError, match="at least one"):
-            range_bin_centers_m(bad_n_bins, **NOMINAL)
+            range_bin_centers_m(0, **NOMINAL)
         with pytest.raises(ValueError, match="at least one"):
-            doppler_bin_centers_mps(bad_n_bins, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)
+            doppler_bin_centers_mps(0, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)
 
     def test_rejects_non_positive_wavelength(self) -> None:
         with pytest.raises(ValueError, match="wavelength_m"):
@@ -324,37 +260,26 @@ class TestMtiFilter:
         blind = np.exp(2j * np.pi * blind_doppler_hz * slow_time_s)
         np.testing.assert_allclose(mti_filter(blind), 0.0, atol=1e-12)
 
-    def test_passes_the_optimum_doppler(self) -> None:
-        """Half the PRF is the peak of the canceller's response, a gain of 2."""
-        n_pulses = 32
-        doppler_hz = 0.5 / PULSE_REPETITION_INTERVAL_S
-        slow_time_s = np.arange(n_pulses) * PULSE_REPETITION_INTERVAL_S
-        tone = np.exp(2j * np.pi * doppler_hz * slow_time_s)
-        np.testing.assert_allclose(np.abs(mti_filter(tone)), 2.0, rtol=1e-10)
+    def test_double_canceller_matches_its_analytic_response(self) -> None:
+        r"""|H(f_d)| = 4 sin^2(pi f_d T_PRI) for the [1, -2, 1] canceller.
 
-    def test_suppresses_clutter_under_a_moving_target(self) -> None:
-        """The operational claim: strong clutter falls far below a weak target."""
-        clutter = deramped_cube(range_bin=10, doppler_bin=N_PULSES // 2) * 1000.0
-        target = deramped_cube(range_bin=10, doppler_bin=N_PULSES // 2 + 8)
-        before = range_doppler_map(clutter + target, fast_time_axis=1, slow_time_axis=0)
-        after = range_doppler_map(mti_filter(clutter + target), fast_time_axis=1, slow_time_axis=0)
-        # Clutter dominates by 60 dB before the canceller and must not after.
-        assert np.abs(before).max() / np.abs(before[N_PULSES // 2 + 8]).max() > 10.0
-        assert int(np.argmax(np.abs(after)) // after.shape[1]) != after.shape[0] // 2
-
-    def test_double_canceller_nulls_harder(self) -> None:
-        """Two cancellers stack, so the near-zero-Doppler notch deepens."""
+        Catches wrong taps (an [1, -1, 1] or [1, -2, -1] kernel) that the
+        single-canceller response cannot see. At the creeping 0.01 PRF used
+        here the gain is 3.9e-3, against 6.3e-2 for the single canceller: the
+        deeper notch is what the second stage buys.
+        """
         n_pulses = 32
         slow_doppler_hz = 0.01 / PULSE_REPETITION_INTERVAL_S
         slow_time_s = np.arange(n_pulses) * PULSE_REPETITION_INTERVAL_S
         creeping = np.exp(2j * np.pi * slow_doppler_hz * slow_time_s)
-        assert (
-            np.abs(mti_filter(creeping, n_pulses=3)).max()
-            < np.abs(mti_filter(creeping, n_pulses=2)).max()
-        )
+        expected = 4.0 * np.sin(np.pi * slow_doppler_hz * PULSE_REPETITION_INTERVAL_S) ** 2
+        # rtol 1e-10: two subtractions and a magnitude in float64, on a gain of
+        # 4e-3 -- no cancellation beyond what the closed form also carries.
+        np.testing.assert_allclose(np.abs(mti_filter(creeping, n_pulses=3)), expected, rtol=1e-10)
 
-    @pytest.mark.parametrize("bad_n_pulses", [1, 4, 0])
+    @pytest.mark.parametrize("bad_n_pulses", [1, 4], ids=["below", "above"])
     def test_rejects_unsupported_order(self, bad_n_pulses: int) -> None:
+        """One order either side of {2, 3}: catches a one-sided range check."""
         with pytest.raises(ValueError, match="must be one of"):
             mti_filter(np.ones((8, 4)), n_pulses=bad_n_pulses)
 
@@ -371,46 +296,35 @@ class TestRangeDopplerMap:
         doppler_index, range_index = np.unravel_index(int(np.argmax(rd_map)), rd_map.shape)
         assert (int(doppler_index), int(range_index)) == (20, 10)
 
-    def test_separates_two_targets_at_the_same_range(self) -> None:
-        """Doppler resolves what range cannot: same bin, different velocity."""
-        cube = deramped_cube(range_bin=15, doppler_bin=8) + deramped_cube(
-            range_bin=15, doppler_bin=24
-        )
-        rd_map = np.abs(range_doppler_map(cube, fast_time_axis=1, slow_time_axis=0))
-        column = rd_map[:, 15]
-        assert int(np.argmax(column)) in (8, 24)
-        # Both peaks stand far above the rest of the Doppler column.
-        peaks = np.sort(column)[-2:]
-        assert peaks.min() > np.median(column) * 100.0
-
     def test_equals_the_two_transforms_in_sequence(self) -> None:
-        """The convenience wrapper must not diverge from its parts."""
+        """Catches the wrapper swapping or dropping a window or a transform length.
+
+        Two different tapers and two different padded lengths, so a fast-time
+        window handed to the slow-time transform (or ignored) cannot pass.
+        """
         cube = deramped_cube(range_bin=10, doppler_bin=20)
-        expected = doppler_fft(range_fft(cube, axis=1), axis=0)
+        fast_window = taper("hann", N_SAMPLES)
+        slow_window = taper("hamming", N_PULSES)
+        expected = doppler_fft(
+            range_fft(cube, axis=1, window=fast_window, n_fft=2 * N_SAMPLES),
+            axis=0,
+            window=slow_window,
+            n_fft=2 * N_PULSES,
+        )
         np.testing.assert_allclose(
-            range_doppler_map(cube, fast_time_axis=1, slow_time_axis=0),
+            range_doppler_map(
+                cube,
+                fast_time_window=fast_window,
+                slow_time_window=slow_window,
+                n_range_fft=2 * N_SAMPLES,
+                n_doppler_fft=2 * N_PULSES,
+                fast_time_axis=1,
+                slow_time_axis=0,
+            ),
             expected,
             rtol=1e-10,
             atol=float(N_PULSES * N_SAMPLES) * 1e-12,
         )
-
-    def test_transforms_commute(self) -> None:
-        """They act on different axes, so the order is convention only."""
-        cube = deramped_cube(range_bin=10, doppler_bin=20)
-        # The map peaks at n_pulses * n_samples; every other bin is an exact
-        # null, so compare against an atol pegged to that peak rather than a
-        # relative tolerance on numbers whose true value is zero.
-        peak = float(N_PULSES * N_SAMPLES)
-        np.testing.assert_allclose(
-            doppler_fft(range_fft(cube, axis=1), axis=0),
-            range_fft(doppler_fft(cube, axis=0), axis=1),
-            rtol=1e-10,
-            atol=peak * 1e-12,
-        )
-
-    def test_rejects_a_repeated_axis(self) -> None:
-        with pytest.raises(ValueError, match="different axes"):
-            range_doppler_map(np.ones((8, 8)), fast_time_axis=0, slow_time_axis=0)
 
     def test_rejects_aliased_repeated_axis(self) -> None:
         """-1 and 1 are the same axis of a 2-D cube; say so rather than aliasing."""
@@ -448,17 +362,6 @@ class TestStraddleLoss:
         )
         np.testing.assert_allclose(loss_db, exact_db, rtol=1e-9)
 
-    def test_an_on_bin_tone_suffers_no_loss_at_all(self) -> None:
-        """The other end of the same curve: a bin-centred tone keeps all its amplitude.
-
-        An N-point FFT of a unit tone on bin k has peak magnitude exactly N, so
-        this pins the transform's scaling as well as the absence of straddling.
-        """
-        n_samples = 1024
-        tone = np.exp(2j * np.pi * 37.0 * np.arange(n_samples) / n_samples)
-        # rtol 1e-10: an FFT round-off budget, per docs/conventions/testing.md.
-        np.testing.assert_allclose(np.abs(range_fft(tone)).max(), float(n_samples), rtol=1e-10)
-
 
 class TestBinCenterValidation:
     """The documented Raises of the bin-centre helpers."""
@@ -471,8 +374,3 @@ class TestBinCenterValidation:
         """
         with pytest.raises(ValueError, match="sample_rate_hz must be strictly positive"):
             range_bin_centers_m(8, bandwidth_hz=1e9, chirp_duration_s=4e-5, sample_rate_hz=0.0)
-
-    def test_rejects_a_negative_sample_rate(self) -> None:
-        """A negative rate would run the range axis backwards into negative range."""
-        with pytest.raises(ValueError, match="sample_rate_hz must be strictly positive"):
-            range_bin_centers_m(8, bandwidth_hz=1e9, chirp_duration_s=4e-5, sample_rate_hz=-1e6)

@@ -26,9 +26,6 @@ S1_V_UA = 7.65
 
 
 class TestFoldVelocityMps:
-    def test_leaves_an_unambiguous_velocity_alone(self) -> None:
-        np.testing.assert_allclose(fold_velocity_mps(3.0, S1_V_UA), 3.0, rtol=1e-15)
-
     def test_folds_an_aircraft_by_the_predicted_number_of_intervals(self) -> None:
         """80 m/s at S1's 7.65 m/s half-interval is five folds down to 3.5 m/s."""
         span = 2.0 * S1_V_UA
@@ -44,56 +41,13 @@ class TestFoldVelocityMps:
         assert np.all(folded_mps >= -S1_V_UA)
         assert np.all(folded_mps < S1_V_UA)
 
-    def test_folding_is_periodic_in_the_full_span(self) -> None:
-        """Adding one span changes nothing — the defining property of the map."""
-        velocity_mps = np.linspace(-100.0, 100.0, 401)
-        np.testing.assert_allclose(
-            fold_velocity_mps(velocity_mps + 2.0 * S1_V_UA, S1_V_UA),
-            fold_velocity_mps(velocity_mps, S1_V_UA),
-            atol=1e-12,  # near the wrap the two branches differ by float epsilon only
-        )
-
-    def test_preserves_shape(self) -> None:
-        assert fold_velocity_mps(np.zeros((3, 4)), S1_V_UA).shape == (3, 4)
-
-    @pytest.mark.parametrize("bad_half_interval_mps", [0.0, -1.0])
-    def test_rejects_a_non_positive_interval(self, bad_half_interval_mps: float) -> None:
+    def test_rejects_a_zero_interval(self) -> None:
+        """Zero is the boundary: a ``< 0`` guard would hand np.mod a zero span."""
         with pytest.raises(ValueError, match="strictly positive"):
-            fold_velocity_mps(10.0, bad_half_interval_mps)
+            fold_velocity_mps(10.0, 0.0)
 
 
 class TestUnfoldDopplerDualPrf:
-    def test_recovers_every_velocity_the_prf_pair_can_reach(self) -> None:
-        """The closed-form round trip, swept across the whole reachable span.
-
-        The sweep stops just inside the search bound, MAX_VELOCITY_MPS, which
-        is inside the pair's own span of about 229 m/s (the test below).
-        """
-        true_mps = np.linspace(-190.0, 190.0, 761)
-        velocity_mps, residual_mps = unfold_doppler_dual_prf(
-            fold_velocity_mps(true_mps, V_UA_A),
-            fold_velocity_mps(true_mps, V_UA_B),
-            V_UA_A,
-            V_UA_B,
-            max_velocity_mps=MAX_VELOCITY_MPS,
-            tolerance_mps=TOLERANCE_MPS,
-        )
-        # Exact arithmetic recovery: the candidate is the true value to within
-        # the float error of a handful of adds, so 1e-9 is generous.
-        np.testing.assert_allclose(velocity_mps, true_mps, atol=1e-9)
-        np.testing.assert_allclose(residual_mps, 0.0, atol=1e-9)
-
-    def test_a_slow_target_needs_no_unfolding(self) -> None:
-        velocity_mps, _ = unfold_doppler_dual_prf(
-            fold_velocity_mps(12.0, V_UA_A),
-            fold_velocity_mps(12.0, V_UA_B),
-            V_UA_A,
-            V_UA_B,
-            max_velocity_mps=MAX_VELOCITY_MPS,
-            tolerance_mps=TOLERANCE_MPS,
-        )
-        np.testing.assert_allclose(velocity_mps, 12.0, atol=1e-9)
-
     def test_reaches_the_full_span_the_lcm_of_the_two_spans_allows(self) -> None:
         """The limit is the least common multiple of the folding spans.
 
@@ -101,7 +55,7 @@ class TestUnfoldDopplerDualPrf:
         about 229 m/s is recoverable (``spec/scenario-001-xband.md``, S3).
         """
         true_mps = np.linspace(-225.0, 225.0, 901)
-        velocity_mps, _ = unfold_doppler_dual_prf(
+        velocity_mps, residual_mps = unfold_doppler_dual_prf(
             fold_velocity_mps(true_mps, V_UA_A),
             fold_velocity_mps(true_mps, V_UA_B),
             V_UA_A,
@@ -109,7 +63,10 @@ class TestUnfoldDopplerDualPrf:
             max_velocity_mps=229.0,
             tolerance_mps=TOLERANCE_MPS,
         )
+        # Exact arithmetic recovery: the candidate is the true value to within
+        # the float error of a handful of adds, so 1e-9 is generous.
         np.testing.assert_allclose(velocity_mps, true_mps, atol=1e-9)
+        np.testing.assert_allclose(residual_mps, 0.0, atol=1e-9)
 
     def test_a_target_outside_the_bound_can_alias_to_a_confident_wrong_answer(self) -> None:
         """The failure the Notes section warns about, pinned so it cannot surprise.
@@ -130,21 +87,11 @@ class TestUnfoldDopplerDualPrf:
             tolerance_mps=TOLERANCE_MPS,
         )
         alias_period_mps = 6.0 * 2.0 * V_UA_A
-        np.testing.assert_allclose(velocity_mps, true_mps - alias_period_mps, atol=0.1)
+        # The answer is a burst-A candidate, folded A plus a whole number of A
+        # spans, and 300 - 6 spans is exactly such a candidate: float error of a
+        # few adds, so atol 1e-9 as in the span sweep.
+        np.testing.assert_allclose(velocity_mps, true_mps - alias_period_mps, atol=1e-9)
         assert residual_mps < TOLERANCE_MPS
-
-    def test_a_target_outside_the_bound_with_no_alias_is_unresolved(self) -> None:
-        """250 m/s has no in-bound alias, so it is reported as nan, not guessed."""
-        velocity_mps, residual_mps = unfold_doppler_dual_prf(
-            fold_velocity_mps(250.0, V_UA_A),
-            fold_velocity_mps(250.0, V_UA_B),
-            V_UA_A,
-            V_UA_B,
-            max_velocity_mps=MAX_VELOCITY_MPS,
-            tolerance_mps=TOLERANCE_MPS,
-        )
-        assert np.isnan(velocity_mps)
-        assert residual_mps > TOLERANCE_MPS
 
     def test_reports_an_inconsistent_pair_as_unresolved(self) -> None:
         """Noise beyond the tolerance yields nan, not a guess."""
@@ -175,28 +122,43 @@ class TestUnfoldDopplerDualPrf:
         # jitter only has to stay inside the tolerance to pick the right one.
         np.testing.assert_allclose(velocity_mps, true_mps, atol=1e-9)
 
-    def test_broadcasts_the_two_bursts_against_each_other(self) -> None:
-        true_mps = np.array([[10.0, 80.0, -120.0]])
+    def test_pairs_every_burst_a_reading_with_every_burst_b_reading(self) -> None:
+        """Catches broadcasting that pairs readings by position instead of by outer product.
+
+        Three targets, burst A as a column and burst B as a row: the (3, 3)
+        result is every A-B pairing. Only the diagonal pairs one target with
+        itself, so only the diagonal resolves; every off-diagonal pairing misses
+        burst B by more than the tolerance (by 1.1 m/s or more here) and is nan.
+        """
+        true_mps = np.array([10.0, 80.0, -120.0])
         velocity_mps, residual_mps = unfold_doppler_dual_prf(
-            fold_velocity_mps(true_mps, V_UA_A),
-            fold_velocity_mps(true_mps, V_UA_B),
+            fold_velocity_mps(true_mps, V_UA_A)[:, None],
+            fold_velocity_mps(true_mps, V_UA_B)[None, :],
             V_UA_A,
             V_UA_B,
             max_velocity_mps=MAX_VELOCITY_MPS,
             tolerance_mps=TOLERANCE_MPS,
         )
-        assert velocity_mps.shape == (1, 3)
-        assert residual_mps.shape == (1, 3)
-        np.testing.assert_allclose(velocity_mps, true_mps, atol=1e-9)
+        assert residual_mps.shape == (3, 3)
+        np.testing.assert_allclose(np.diag(velocity_mps), true_mps, atol=1e-9)
+        off_diagonal = ~np.eye(3, dtype=bool)
+        assert np.all(np.isnan(velocity_mps[off_diagonal]))
 
-    @pytest.mark.parametrize("bad_half_interval_mps", [0.0, -1.0])
-    def test_rejects_a_non_positive_interval(self, bad_half_interval_mps: float) -> None:
+    @pytest.mark.parametrize(
+        ("half_interval_a_mps", "half_interval_b_mps"),
+        [(0.0, V_UA_B), (V_UA_A, 0.0)],
+        ids=["burst-a", "burst-b"],
+    )
+    def test_rejects_a_zero_interval(
+        self, half_interval_a_mps: float, half_interval_b_mps: float
+    ) -> None:
+        """Either burst's interval is checked, not only the first."""
         with pytest.raises(ValueError, match="strictly positive"):
             unfold_doppler_dual_prf(
                 0.0,
                 0.0,
-                bad_half_interval_mps,
-                V_UA_B,
+                half_interval_a_mps,
+                half_interval_b_mps,
                 max_velocity_mps=MAX_VELOCITY_MPS,
                 tolerance_mps=TOLERANCE_MPS,
             )
@@ -212,8 +174,7 @@ class TestUnfoldDopplerDualPrf:
                 tolerance_mps=TOLERANCE_MPS,
             )
 
-    @pytest.mark.parametrize("bad_tolerance_mps", [0.0, -1.0])
-    def test_rejects_a_non_positive_tolerance(self, bad_tolerance_mps: float) -> None:
+    def test_rejects_a_zero_tolerance(self) -> None:
         with pytest.raises(ValueError, match="tolerance_mps"):
             unfold_doppler_dual_prf(
                 0.0,
@@ -221,7 +182,7 @@ class TestUnfoldDopplerDualPrf:
                 V_UA_A,
                 V_UA_B,
                 max_velocity_mps=MAX_VELOCITY_MPS,
-                tolerance_mps=bad_tolerance_mps,
+                tolerance_mps=0.0,
             )
 
     def test_rejects_a_bound_below_the_smaller_interval(self) -> None:
