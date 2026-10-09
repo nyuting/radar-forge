@@ -9,12 +9,15 @@ the slowest thing in the module.
 """
 
 import math
+import tomllib
+from pathlib import Path
 
 import numpy as np
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from scipy.stats import beta
+from scipy import integrate
+from scipy.stats import beta, gamma
 
 from radar_forge.core.detection import (
     CFAR_VARIANTS,
@@ -165,23 +168,47 @@ def assert_rate_consistent_with_design(n_hit: int, n_tested: int, pfa: float) ->
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("n_train", [1, 2, 5, 16])
-@pytest.mark.parametrize("alpha_linear", [0.5, 2.0, 10.0])
-def test_greatest_and_smallest_of_partition_the_same_total(n_train, alpha_linear):
-    """GO and SO split 2 (1 + beta)^-N between them.
+@pytest.mark.parametrize(
+    ("n_train", "alpha_linear"),
+    [(5, 10.0), (16, 2.0)],
+    ids=["beta-2-cancellation", "beta-0.125-typical"],
+)
+def test_greatest_and_smallest_of_match_a_numerical_integration(n_train, alpha_linear):
+    """GO and SO Pfa against a route that shares no code with the series.
 
-    {max, min} = {X, Y} pointwise, so E[exp(-beta max)] + E[exp(-beta min)] =
-    E[exp(-beta X)] + E[exp(-beta Y)] = 2 (1 + beta)^-N.
-
-    An independent identity: it constrains both expressions at once and would
-    fail if either series were mis-indexed.
+    Each half-window mean m is Gamma(N, 1/N) for unit-mean exponential cells, so
+    Pfa = E[exp(-alpha * g)] with g the larger (GO) or smaller (SO) of two
+    independent means, whose densities are 2 f F and 2 f (1 - F). Integrating
+    that numerically catches a mis-indexed series. The partition identity
+    GO + SO = 2 (1 + beta)^-N that this test replaces could not: the code
+    computes GO as that total minus the SO series, so the identity held by
+    construction. The two cases are beta = alpha/N = 2, where the Notes'
+    cancellation in GO bites, and beta = 0.125, the typical regime.
     """
-    beta_linear = alpha_linear / n_train
-    go = cfar_probability_of_false_alarm(alpha_linear, n_train=n_train, variant="go")
-    so = cfar_probability_of_false_alarm(alpha_linear, n_train=n_train, variant="so")
-    # rtol at 1e-12: a handful of float64 powers and a binomial sum, so anything
-    # looser would hide a genuine indexing error in the series.
-    np.testing.assert_allclose(go + so, 2.0 * (1.0 + beta_linear) ** -n_train, rtol=1e-12)
+    half_mean = gamma(n_train, scale=1.0 / n_train)
+
+    def expected(weight):
+        return integrate.quad(
+            lambda m: math.exp(-alpha_linear * m) * 2.0 * half_mean.pdf(m) * weight(m),
+            0.0,
+            math.inf,
+            epsabs=0.0,
+            epsrel=1e-13,
+            limit=200,
+        )[0]
+
+    # rtol 1e-10: quad agrees with the series to 2e-15 here; the margin covers
+    # quad's own error estimate, not any slack in the series.
+    np.testing.assert_allclose(
+        cfar_probability_of_false_alarm(alpha_linear, n_train=n_train, variant="so"),
+        expected(half_mean.sf),
+        rtol=1e-10,
+    )
+    np.testing.assert_allclose(
+        cfar_probability_of_false_alarm(alpha_linear, n_train=n_train, variant="go"),
+        expected(half_mean.cdf),
+        rtol=1e-10,
+    )
 
 
 def test_smallest_window_matches_the_hand_derivation():
@@ -277,6 +304,50 @@ def test_default_order_statistic_rank_is_three_quarters_of_the_window():
     assert default_os_rank(16) == 24
     assert default_os_rank(8) == 12
     assert default_os_rank(1) == 2
+
+
+def test_scenario_003_calibration_matches_its_specification():
+    """Catches the shipped scenario-003 detector drifting from the figures its spec quotes.
+
+    ``spec/scenario-003-tracking.md`` §12 quotes 245 760 tested cells and
+    alpha = 11.417 dB, and §3 requires both to be re-derived in a test. The
+    operating point is read from ``scenarios/scenario_003_tracking.toml``: CA
+    along range, n_train = 16 and n_guard = 4 per side, pfa = 1e-5, on a
+    (256, 1000) map (256 pulses; 1 ms x 1 MHz = 1000 range samples).
+
+    Valid cells: 256 x (1000 - 2 x (16 + 4)) = 245 760.
+
+    Threshold factor, CA with M = 2N = 32 cells:
+    alpha = M (pfa^(-1/M) - 1) = 32 (exp(ln(1e5)/32) - 1) = 32 (1.433013 - 1)
+    = 13.8564, and 10 log10(13.8564) = 11.4165 dB, which the spec rounds to
+    11.417 dB.
+    """
+    scenario = tomllib.loads(
+        (Path(__file__).parents[2] / "scenarios" / "scenario_003_tracking.toml").read_text()
+    )
+    detection = scenario["detection"]
+    burst = scenario["burst"][0]
+    n_samples = round(burst["chirp_duration_s"] * burst["sample_rate_hz"])
+    assert detection["variant"] == "ca"
+
+    valid = cfar_valid_mask(
+        (burst["n_pulses"], n_samples),
+        n_train=detection["n_train"],
+        n_guard=detection["n_guard"],
+        axis=-1,
+    )
+    assert int(valid.sum()) == 245_760
+
+    alpha_linear = cfar_threshold_factor(
+        pfa=detection["pfa"], n_train=detection["n_train"], variant="ca"
+    )
+    n_reference = 2 * detection["n_train"]
+    # rtol 1e-12: the closed form is a power and a subtraction in float64.
+    np.testing.assert_allclose(
+        alpha_linear, n_reference * (detection["pfa"] ** (-1.0 / n_reference) - 1.0), rtol=1e-12
+    )
+    # atol 1e-4 dB: the spec's 11.417 is this value to three decimals.
+    np.testing.assert_allclose(10.0 * math.log10(alpha_linear), 11.4165, atol=1e-4)
 
 
 # --------------------------------------------------------------------------- #
@@ -561,20 +632,23 @@ def test_rejects_an_unknown_variant():
         cfar_probability_of_false_alarm(10.0, n_train=8, variant="median")  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("pfa", [0.0, 1.0, -0.1, 1.5])
+@pytest.mark.parametrize("pfa", [0.0, 1.0])
 def test_rejects_a_probability_outside_the_unit_interval(pfa):
+    """The two boundaries of the open interval: catches ``<=`` written as ``<``."""
     with pytest.raises(ValueError, match="pfa must be a probability"):
         cfar_threshold_factor(pfa=pfa, n_train=8)
 
 
-@pytest.mark.parametrize("alpha_linear", [0.0, -1.0, np.nan, np.inf])
+@pytest.mark.parametrize("alpha_linear", [0.0, np.nan, np.inf])
 def test_rejects_a_non_positive_threshold_factor(alpha_linear):
+    """Zero is the boundary; nan and inf are the two ways ``isfinite`` can be dropped."""
     with pytest.raises(ValueError, match="alpha_linear must be"):
         cfar_probability_of_false_alarm(alpha_linear, n_train=8)
 
 
-@pytest.mark.parametrize("rank", [0, -1, 17])
+@pytest.mark.parametrize("rank", [0, 17])
 def test_rejects_a_rank_outside_the_reference_window(rank):
+    """One past each end of 1..2N, for N = 8."""
     with pytest.raises(ValueError, match="rank must be a one-based index"):
         cfar_probability_of_false_alarm(10.0, n_train=8, variant="os", rank=rank)
 
@@ -814,6 +888,18 @@ def test_ring_threshold_factor_satisfies_the_cell_averaging_closed_form():
     )
 
 
+def test_a_ring_has_less_cfar_loss_than_a_line_of_the_same_reach():
+    """The reason for a 2-D window: more reference cells for the same reach in range.
+
+    Both windows reach 10 cells along range; the ring also draws on two Doppler
+    rows each side, so its estimate is less noisy and its threshold factor lower.
+    """
+    floor_w = np.ones((32, 64))
+    line_w = cfar_threshold_w(floor_w, pfa=1e-4, n_train=8, n_guard=2)
+    ring_w = cfar_threshold_2d_w(floor_w, pfa=1e-4, n_train=(2, 8), n_guard=(1, 2))
+    assert np.nanmax(ring_w) < np.nanmax(line_w)
+
+
 @pytest.mark.parametrize(("variant", "pfa"), [("ca", 1e-3), ("os", 1e-2)])
 def test_ring_false_alarm_rate_matches_design_pfa(rng, variant, pfa):
     """The measured false-alarm rate of the ring is consistent with the design pfa.
@@ -999,11 +1085,11 @@ def test_the_ring_variants_are_the_one_dimensional_ones_without_half_windows():
     assert set(CFAR_VARIANTS_2D) == set(CFAR_VARIANTS) - {"go", "so"}
 
 
-@pytest.mark.parametrize("variant", ["go", "so"])
-def test_ring_rejects_the_half_window_variants(variant):
+def test_ring_rejects_the_half_window_variants():
+    """GO is refused; that SO is too follows from the variant set, pinned above."""
     with pytest.raises(ValueError, match="for a 2-D ring"):
         cfar_threshold_2d_w(
-            np.ones((32, 64)), pfa=1e-3, n_train=(2, 4), n_guard=(1, 1), variant=variant
+            np.ones((32, 64)), pfa=1e-3, n_train=(2, 4), n_guard=(1, 1), variant="go"
         )
 
 

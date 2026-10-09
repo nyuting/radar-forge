@@ -796,7 +796,7 @@ what was measured against it.
 | 8 | The pictures exist | `track_00000.png`, `rd_00000.png` with markers, `tracks.csv`, `detections.csv` | `tests/viz/test_track_plot.py`, `tests/pipelines/test_scenario_003.py` |
 | — | `gate_threshold` matches the tabulated chi^2 quantile at each `dim` | 6.635 / 9.210 / 11.345 / 13.277 | `tests/core/test_tracking.py` |
 | — | EKF Jacobians match a central-difference derivative of `h` | 1e-8 | same |
-| — | `cfar_valid_mask` cell count and `cfar_threshold_factor` | 245 760 cells; alpha = 11.417 dB | `tests/core/test_detection.py` |
+| — | `cfar_valid_mask` cell count and `cfar_threshold_factor`, at the shipped TOML's operating point | 245 760 cells; alpha = 13.856 = 11.417 dB | `tests/core/test_detection.py::test_scenario_003_calibration_matches_its_specification` |
 
 Run over **20 frames** rather than §12's 15: the bootstrap holds a track range-only for ten frames
 and S1's first fold change is at frame 17. Criterion 1 is measured from the first confirmation,
