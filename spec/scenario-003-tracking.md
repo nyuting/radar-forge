@@ -609,18 +609,29 @@ first.
 
 `core/detection.py` slides a 1-D window. Applied along range, in one-target thermal noise, it is
 correct — but it is the wrong detector the moment there is Doppler-spread clutter or a second
-target, and a 2-D reference window would also roughly halve the number of training cells needed
-for the same `pfa`. This is a change to `core/detection.py` and belongs to that module's
+target, and a 2-D reference window would also collect its reference cells within a much shorter
+reach along range. This is a change to `core/detection.py` and belongs to that module's
 workstream, not to this scenario (§10.1); it lands as a new `axis`-pair argument or a sibling
 function, not as a rewrite, so that this scenario's `pfa` calibration stays valid.
 
 **Landed as sibling functions:** `cfar_valid_mask_2d`, `cfar_noise_estimate_2d_w`,
 `cfar_threshold_2d_w` and `cfar_detect_2d`, with per-axis `n_train` and `n_guard`, `axes` (default
-`(-2, -1)`) and `wrap_axes`. The 1-D functions are unchanged, so this scenario's calibration
-(α = 11.417 dB) is too. Only CA and OS are offered in 2-D: their `pfa` depends only on the number
-of reference cells M, so a ring is calibrated as a 1-D window of M/2 cells per side. GO and SO
-compare two half-windows, which a ring does not have. Switching this scenario's pipeline over is a
-pipeline change, not part of this one.
+`(-2, -1)`) and `wrap_axes`. This scenario's 1-D calibration is unchanged (α = 11.417 dB). Only
+CA and OS are offered in 2-D: their `pfa` depends only on the number of reference cells M, so a
+ring is calibrated as a 1-D window of M/2 cells per side. GO and SO compare two half-windows, which
+a ring does not have. Switching this scenario's pipeline over is a pipeline change, not part of
+this one.
+
+> **Corrected by the refactor-002 audit** (`docs/audits/core-audit.md`, F9). An earlier draft said
+> a 2-D window would "roughly halve the number of training cells needed for the same `pfa`". It
+> cannot: the threshold factor, and with it the CFAR loss, depends on the number of reference cells
+> M alone, as the paragraph above says, so the same `pfa` at the same loss needs the same M in any
+> shape. What a ring changes is the *reach*: it draws M cells from both axes, so it extends fewer
+> cells along range for the same M, and for the same reach it has more cells and less loss
+> (`test_a_ring_has_less_cfar_loss_than_a_line_of_the_same_reach`). The draft also said the 1-D
+> functions were unchanged. Their calibration is, but PR #4 made two changes that reach the 1-D path:
+> the CA threshold factor uses `expm1`, which moves only its last bits, and power that is not finite
+> is now rejected.
 
 ### 13.3 Multiple targets — a note only
 
