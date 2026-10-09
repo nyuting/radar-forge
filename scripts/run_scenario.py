@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 
 from radar_forge import __version__
 from radar_forge.core.ambiguity import fold_velocity_mps
@@ -44,6 +45,8 @@ from radar_forge.pipelines.tracking import (
     FrameTracks,
     MetricRow,
     ScenarioTracker,
+    primary_track_id,
+    range_layout,
     score_primary_track,
 )
 from radar_forge.pipelines.trajectories import load_flight_csv
@@ -476,13 +479,15 @@ def render_frame(
     products: Sequence[RangeDopplerProduct],
     out_dir: Path,
     dynamic_range_db: float,
-    record: FrameTracks | None = None,
+    frames: Sequence[FrameTracks] = (),
 ) -> None:
     """Draw one range-Doppler panel per burst and save it.
 
     Takes the already-processed ``products`` rather than processing the cubes
     itself, so the receive chain runs once per frame however many consumers a
-    frame has.
+    frame has. ``frames`` is the tracker's history up to and including this
+    frame, empty when nothing is tracked; the last entry is drawn, and the
+    history picks the primary track (:func:`primary_track_id`).
     """
     from radar_forge.viz.plotting import save_figure
     from radar_forge.viz.scopes.rd_map import render_range_doppler
@@ -490,21 +495,25 @@ def render_frame(
     for index, (product, burst) in enumerate(zip(products, scenario.bursts, strict=True)):
         suffix = "" if len(scenario.bursts) == 1 else f"_burst{index}"
         # Where this burst's ambiguities oblige the target to appear: Doppler
-        # wraps into the unambiguous interval, range modulo the unambiguous
-        # range. For a burst that folds in neither, both are the truth itself.
+        # wraps into the unambiguous interval, range into the span of this
+        # map's range axis. For a burst that folds in neither, both are the
+        # truth itself.
         folded_velocity_mps = float(
             fold_velocity_mps(frame.radial_velocity_mps, burst.unambiguous_velocity_mps)
         )
-        folded_range_m = frame.range_m % burst.unambiguous_range_m
+        folded_range_m = float(
+            range_layout(burst).wrap(np.asarray([frame.range_m]), interval="nonnegative")[0]
+        )
         title = (
             f"{scenario.name}{suffix}  t = {frame.time_s:.0f} s   "
             f"truth {frame.range_m / 1e3:.2f} km, {frame.radial_velocity_mps:+.1f} m/s"
         )
-        # Detections and the track are drawn on the first burst's map only:
-        # they are formed from it, or in the dual-PRF case from the pair, and
-        # repeating them on burst B would imply they were measured there.
+        # Each burst's map shows the detections made on it. The track is drawn
+        # on the first burst's map only: its range is wrapped at that map's
+        # span, and its measurements came from that burst, or from the pair.
         detections = track_estimate = gate_extent = None
-        if record is not None and index == 0:
+        if frames:
+            record = frames[-1]
             # ``velocity_folded_mps`` is already inside this burst's
             # unambiguous interval -- it was read off the map's own velocity
             # axis -- so it is what the marker goes on. The *unfolded* value
@@ -512,10 +521,16 @@ def render_frame(
             detections = [
                 (measurement.range_m, measurement.velocity_folded_mps)
                 for measurement in record.measurements
+                if measurement.burst_index == index
             ]
-            confirmed = [track for track in record.tracks if track.is_confirmed]
-            if confirmed:
-                track = max(confirmed, key=lambda candidate: candidate.n_hits)
+            primary_id = primary_track_id(frames)
+            primary = [
+                track
+                for track in record.tracks
+                if track.track_id == primary_id and track.is_confirmed
+            ]
+            if index == 0 and primary:
+                track = primary[0]
                 track_estimate = (
                     float(track.state[0]),
                     float(fold_velocity_mps(track.state[1], burst.unambiguous_velocity_mps)),
@@ -570,24 +585,18 @@ def render_track_frame(
         measurement.range_m for entry in frames for measurement in entry.measurements
     ]
 
-    # The longest-lived confirmed track, so the line does not jump between
-    # rivals from frame to frame.
-    counts: dict[int, int] = {}
-    for entry in frames:
-        for track in entry.tracks:
-            if track.is_confirmed:
-                counts[track.track_id] = counts.get(track.track_id, 0) + 1
-    track_time_s: list[float] = []
-    track_states: list[np.ndarray[Any, Any]] = []
-    track_sigma_m: list[float] = []
-    if counts:
-        best_id = max(counts, key=lambda key: counts[key])
-        for entry in frames:
-            for track in entry.tracks:
-                if track.track_id == best_id and track.is_confirmed:
-                    track_time_s.append(entry.time_s)
-                    track_states.append(track.state)
-                    track_sigma_m.append(float(np.sqrt(track.covariance[0, 0])))
+    # The primary track, so the line does not jump between rivals from frame
+    # to frame, and is the track the metrics score.
+    primary_id = primary_track_id(frames)
+    primary = [
+        (entry.time_s, track)
+        for entry in frames
+        for track in entry.tracks
+        if track.track_id == primary_id and track.is_confirmed
+    ]
+    track_time_s = [time_s for time_s, _ in primary]
+    track_states: list[NDArray[np.float64]] = [track.state for _, track in primary]
+    track_sigma_m = [float(np.sqrt(track.covariance[0, 0])) for _, track in primary]
 
     truth_m = tracker.folding_layout.wrap(
         np.asarray(truth_range_m)[:, None], interval="nonnegative"
@@ -742,25 +751,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                 break
             # Truth is the true, unfolded geometry in every variant; the gap
             # between it and the map is what the scenario is for.
-            row = [
+            # Shortest round-trip precision, as every data-001 table is
+            # written (_cell), not a fixed number of decimals.
+            row: list[object] = [
                 frame.index,
-                f"{frame.time_s:.3f}",
-                f"{frame.range_m:.3f}",
-                f"{frame.radial_velocity_mps:.6f}",
-                f"{frame.azimuth_deg:.6f}",
-                f"{frame.elevation_deg:.6f}",
+                frame.time_s,
+                frame.range_m,
+                frame.radial_velocity_mps,
+                frame.azimuth_deg,
+                frame.elevation_deg,
             ]
             if (
                 frame.range_tx_m is not None
                 and frame.range_rx_m is not None
                 and frame.bistatic_angle_deg is not None
             ):
-                row += [
-                    f"{frame.range_tx_m:.3f}",
-                    f"{frame.range_rx_m:.3f}",
-                    f"{frame.bistatic_angle_deg:.6f}",
-                ]
-            writer.writerow(row)
+                row += [frame.range_tx_m, frame.range_rx_m, frame.bistatic_angle_deg]
+            writer.writerow([_cell(value) for value in row])
 
             if not args.no_iq:
                 arrays = {f"burst{index}": cube for index, cube in enumerate(frame.iq)}
@@ -788,9 +795,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     for cube, burst in zip(frame.iq, scenario.bursts, strict=True)
                 ]
 
-            record: FrameTracks | None = None
             if tracker is not None:
-                record = tracker.step(
+                tracker.step(
                     products,
                     frame_index=frame.index,
                     time_s=frame.time_s,
@@ -801,7 +807,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 truth_range_rate_mps.append(frame.radial_velocity_mps)
 
             if not args.no_plots:
-                render_frame(frame, scenario, products, out_dir, args.dynamic_range_db, record)
+                render_frame(
+                    frame,
+                    scenario,
+                    products,
+                    out_dir,
+                    args.dynamic_range_db,
+                    tracker.frames if tracker is not None else (),
+                )
                 if tracker is not None:
                     render_track_frame(
                         out_dir, tracker, truth_time_s, truth_range_m, truth_range_rate_mps

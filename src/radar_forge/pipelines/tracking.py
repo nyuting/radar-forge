@@ -119,6 +119,8 @@ __all__ = [
     "dual_prf_measurements",
     "frame_detections",
     "minimum_unfold_history_frames",
+    "primary_track_id",
+    "range_layout",
     "range_slope_sigma_mps",
     "replace_measurement",
     "score_primary_track",
@@ -1098,6 +1100,34 @@ class FrameTracks:
     unfold_reference_id: int | None = None
 
 
+def range_layout(burst: RadarLike) -> StateLayout:
+    """Return a one-coordinate layout, ``range_m``, with the period of a burst's map.
+
+    The period is the span of the burst's range axis
+    (:func:`~radar_forge.pipelines.scenarios.range_axis_m`): its number of bins
+    times its bin width. A return beyond it lands back near zero on that map,
+    so wrapping a true range with this layout puts it where the map shows it.
+
+    Parameters
+    ----------
+    burst : Radar or BistaticRadar
+        The burst whose map is meant.
+
+    Returns
+    -------
+    StateLayout
+        One coordinate, ``range_m`` in metres, with that period.
+
+    References
+    ----------
+    .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
+           McGraw-Hill, 2014, §5.5.4 (range ambiguity and its resolution).
+    """
+    axis_m = range_axis_m(burst)
+    range_period_m = axis_m.size * float(axis_m[1] - axis_m[0])
+    return StateLayout((Coordinate("range_m", "m", period=range_period_m),), frame="radial")
+
+
 @dataclass
 class ScenarioTracker:
     """Detect, pair, unfold and track a scenario's frames, with either tracker.
@@ -1221,11 +1251,7 @@ class ScenarioTracker:
         self._check_settings()
         burst = self.bursts[0]
         if self.tracking.estimator == "ukf":
-            axis_m = range_axis_m(burst)
-            range_period_m = axis_m.size * float(axis_m[1] - axis_m[0])
-            self.folding_layout = StateLayout(
-                (Coordinate("range_m", "m", period=range_period_m),), frame="radial"
-            )
+            self.folding_layout = range_layout(burst)
             # A single burst may fold the Doppler unless its unambiguous
             # velocity exceeds any speed the target can have.
             folds_doppler = (
@@ -1777,6 +1803,45 @@ class MetricRow:
     target_id: str | None = None
 
 
+def primary_track_id(frames: Sequence[FrameTracks]) -> int | None:
+    """Return the ID of the track confirmed in the most of ``frames``.
+
+    The one rule for which track stands for the target, shared by the scoring
+    and every plot, so that a short-lived false track never stands in for it
+    and the plots never show a different track from the one that is scored.
+    Coasting counts as confirmed. A tie goes to the track confirmed first.
+
+    This is a stand-in for a track-to-truth associator, which scenario 003's one
+    target does not need. Stone Soup's ``TrackToTruth``, with SIAP or OSPA
+    metrics, is the general form.
+
+    Parameters
+    ----------
+    frames : sequence of FrameTracks
+        The run's frames so far, in order.
+
+    Returns
+    -------
+    int or None
+        The track ID, or ``None`` if no track was ever confirmed.
+
+    References
+    ----------
+    .. [1] ``spec/scenario-003-tracking.md`` §14.11 (the C4 metric and the
+           primary track).
+    """
+    # A Python loop: each frame holds a handful of tracks, and counting them
+    # into a dict keeps "first confirmed wins a tie" without sorting IDs.
+    n_confirmed: dict[int, int] = {}
+    for frame in frames:
+        for track in frame.tracks:
+            if track.is_confirmed:
+                n_confirmed[track.track_id] = n_confirmed.get(track.track_id, 0) + 1
+    if not n_confirmed:
+        return None
+    return max(n_confirmed, key=lambda track_id: n_confirmed[track_id])
+
+
 def score_primary_track(
     frames: Sequence[FrameTracks],
     truth_range_m: ArrayLike,
@@ -1791,10 +1856,9 @@ def score_primary_track(
     recomputed from a run's ``tracks.csv`` and ``truth.csv`` alone, and a
     different track or a different metric needs no rerun.
 
-    The **primary track** is the track confirmed in the most frames, the one
-    the runner plots, so that a short-lived false track never stands in for
-    the target. Its metrics are taken over the frames in which it is confirmed
-    or coasting:
+    The **primary track** is :func:`primary_track_id`'s: the track confirmed
+    in the most frames, the one the runner plots. Its metrics are taken over
+    the frames in which it is confirmed or coasting:
 
     - ``n_confirmed_frames``: how many such frames there are;
     - ``confirmation_latency_s``: from the run's first frame to its first;
@@ -1850,24 +1914,22 @@ def score_primary_track(
 
     start, end = frames[0].frame_index, frames[-1].frame_index
     statuses = [measurement.status for frame in frames for measurement in frame.measurements]
-    n_confirmed: dict[int, int] = {}
-    for frame in frames:
-        for track in frame.tracks:
-            if track.is_confirmed:
-                n_confirmed[track.track_id] = n_confirmed.get(track.track_id, 0) + 1
+    confirmed_ids = {
+        track.track_id for frame in frames for track in frame.tracks if track.is_confirmed
+    }
     n_tracked = sum(any(track.is_confirmed for track in frame.tracks) for frame in frames)
     rows = [
         MetricRow("n_tracked_frames", float(n_tracked), start, end),
-        MetricRow("n_confirmed_tracks", float(len(n_confirmed)), start, end),
+        MetricRow("n_confirmed_tracks", float(len(confirmed_ids)), start, end),
         *(
             MetricRow(f"n_detections_{status}", float(statuses.count(status)), start, end)
             for status in DETECTION_STATUSES
         ),
     ]
-    if not n_confirmed:
+    primary_id = primary_track_id(frames)
+    if primary_id is None:
         return rows
 
-    primary_id = max(n_confirmed, key=lambda track_id: n_confirmed[track_id])
     # (frame position, record) for every frame in which the primary track is confirmed.
     confirmed = [
         (position, track)
