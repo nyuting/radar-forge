@@ -152,7 +152,7 @@ tracker doesn't yet have these, and the change that switches them over adds them
 - a range-only retry when a measurement fails the gate on velocity;
 - re-finding a lost target with a widened gate while keeping its track ID;
 - a per-track `measurement_dim`, as `KalmanFilter` records. Which measurement each track
-  took in the last scan, and its NIS, are `Tracker.last_associations` and `Tracker.last_nis`;
+  took in the scan, and its NIS, are on the scan's `TrackSnapshot`s;
 - range, azimuth and range-rate measurement models for a monostatic radar;
 - the interacting multiple model (IMM) filter and the coordinated-turn motion model;
 - Singer's motion model, which carries the acceleration in the state and is exact at every

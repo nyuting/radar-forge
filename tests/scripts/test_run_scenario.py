@@ -163,6 +163,25 @@ def test_a_ukf_run_writes_the_data_001_files(tmp_path):
         rows = list(csv.DictReader(handle))
     assert {row["sensor_id"] for row in rows} == {"rx0"}
     assert {row["burst_index"] for row in rows} == {"0", "1"}
+    detection_keys = {(row["frame"], row["detection_id"]) for row in rows}
+
+    # A track's first row names the detection it was born from, which is not
+    # an update, so associated is 0 and the detection is left unassociated.
+    with (out_dir / "tracks.csv").open(newline="", encoding="utf-8") as handle:
+        track_rows = list(csv.DictReader(handle))
+    first_rows = {}
+    for row in track_rows:
+        first_rows.setdefault(row["track_id"], row)
+    assert first_rows
+    for row in first_rows.values():
+        assert row["associated"] == "0"
+        assert (row["frame"], row["associated_detection_id"]) in detection_keys
+        seed = next(
+            r
+            for r in rows
+            if (r["frame"], r["detection_id"]) == (row["frame"], row["associated_detection_id"])
+        )
+        assert seed["associated_track_id"] == ""
 
 
 @pytest.mark.slow

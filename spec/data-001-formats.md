@@ -315,7 +315,7 @@ closes the gap scenario 003 §9 left open. That spec promised the ENU state colu
 | `latitude_deg`, `longitude_deg`, `altitude_m` | float64 | deg, deg, m | O | *new*. Derived for ENU models, for geodetic consumers |
 | `nis` | float64 | — | R | Normalised innovation squared of the last update. Empty on a miss |
 | `associated` | 0/1 | — | R | Updated this frame |
-| `associated_detection_id` | int | — | R | *new*. Empty on a miss. The key back into `detections.csv` |
+| `associated_detection_id` | int | — | R | *new*. Empty on a miss. The key back into `detections.csv`. On a track's first row it names the detection the track was born from, with `associated` 0, since a seed is not an update |
 
 For `range_1d`, `state_fields` is `["range_m", "range_rate_mps"]`, and the state *is* the
 `range_m` / `range_rate_mps` columns. There is one off-diagonal, `cov_0_1`, in m²/s. The covariance

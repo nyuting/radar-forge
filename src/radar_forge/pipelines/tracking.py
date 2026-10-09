@@ -1084,6 +1084,11 @@ class TrackRecord:
     nis : float or None
         The normalised innovation squared of the measurement the track took
         this frame. ``None`` if it missed, or was born this frame.
+    detection_index : int or None, default None
+        Index into :attr:`FrameTracks.measurements` of the detection the track
+        took this frame, or was born from. ``None`` on a miss. A birth is not an
+        association (:attr:`FrameTracks.associations`), but the track still
+        began at a detection, and this says which.
     """
 
     track_id: int
@@ -1094,6 +1099,7 @@ class TrackRecord:
     n_hits: int
     n_misses: int
     nis: float | None
+    detection_index: int | None = None
 
     @property
     def is_confirmed(self) -> bool:
@@ -1118,7 +1124,9 @@ class FrameTracks:
         available.
     associations : dict
         Maps ``track_id`` to the index into ``measurements`` of the detection
-        it took.
+        it was updated with. A track born this frame is absent: a seed is not
+        an association (data-001 §6.5), though its record's
+        ``detection_index`` names it.
     tracks : tuple of TrackRecord
         Every track alive at the end of the frame.
     unfold_reference_id : int or None
@@ -1591,9 +1599,13 @@ class ScenarioTracker:
         batch = tracker.sensors[SENSOR_ID].batch(
             time_s, [(MEASUREMENT_MODEL_ID, value, covariance) for value in values]
         )
-        snapshots = tracker.process(batch)
-
-        live = {track.track_id: track for track in tracker.tracks}
+        # A track deleted this scan reports once, as "deleted", and gets no
+        # record (TrackRecord).
+        snapshots = [
+            snapshot for snapshot in tracker.process(batch) if snapshot.status != "deleted"
+        ]
+        # The batch held only the accepted detections, so a batch index maps
+        # back to a detection through accepted.
         records = tuple(
             TrackRecord(
                 track_id=snapshot.track_id,
@@ -1606,15 +1618,20 @@ class ScenarioTracker:
                 ),
                 covariance=np.array(snapshot.covariance, dtype=np.float64),
                 measurement_dim=n,
-                n_hits=live[snapshot.track_id].n_hits,
-                n_misses=live[snapshot.track_id].n_misses,
-                nis=tracker.last_nis.get(snapshot.track_id),
+                n_hits=snapshot.n_hits,
+                n_misses=snapshot.n_misses,
+                nis=snapshot.nis,
+                detection_index=None
+                if snapshot.measurement_index is None
+                else accepted[snapshot.measurement_index],
             )
             for snapshot in snapshots
-            if snapshot.track_id in live
         )
+        # An update has a NIS; a birth, which also took a detection, has none.
         associations = {
-            track_id: accepted[index] for track_id, index in tracker.last_associations.items()
+            record.track_id: record.detection_index
+            for record in records
+            if record.detection_index is not None and record.nis is not None
         }
         return detections, associations, records
 
@@ -1643,10 +1660,16 @@ class ScenarioTracker:
                 time_s,
                 unfolded=True,
             )
+            # _advance indexes the accepted detections; map back to all of them.
             return (
                 detections,
                 {track_id: accepted[index] for track_id, index in associations.items()},
-                records,
+                tuple(
+                    record
+                    if record.detection_index is None
+                    else replace(record, detection_index=accepted[record.detection_index])
+                    for record in records
+                ),
                 None,
             )
 
@@ -1700,7 +1723,13 @@ class ScenarioTracker:
             )
             for measurement in measurements
         ]
+        known_ids = {track.track_id for track in tracker.tracks}
         result = tracker.step(vectors, time_s=time_s, measurement_dims=dims)
+        # KalmanTracker seeds one track per unassociated measurement, in order,
+        # and appends it, so the new IDs pair with result.unassociated in turn.
+        new_ids = [track.track_id for track in result.tracks if track.track_id not in known_ids]
+        detection_index = dict(result.associations)
+        detection_index.update(zip(new_ids, result.unassociated, strict=True))
 
         # Range history drives the bootstrap, so it counts associations, not
         # frames: a coasting track learns nothing new about its range slope.
@@ -1731,6 +1760,7 @@ class ScenarioTracker:
                 n_hits=track.n_hits,
                 n_misses=track.n_misses,
                 nis=track.estimator.last_nis,
+                detection_index=detection_index.get(track.track_id),
             )
             for track in result.tracks
         )

@@ -432,7 +432,7 @@ def track_rows(
                 "cov_0_1": float(track.covariance[0, 1]),
                 "nis": track.nis,
                 "associated": track.track_id in record.associations,
-                "associated_detection_id": record.associations.get(track.track_id),
+                "associated_detection_id": track.detection_index,
             }
 
 
