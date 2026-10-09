@@ -61,7 +61,7 @@ Outputs, on top of scenario 001's: `track_{frame:05d}.png` (range against time),
       Measurement  z = [range_m, range_rate_mps]
             |
             v
-  core/tracking.py   predict -> gate -> assign (GNN) -> update -> initiate/delete
+  core/tracking/     predict -> gate -> assign (GNN) -> update -> initiate/delete
             |
             v
   tracks.csv, detections.csv, track_*.png, rd_*.png

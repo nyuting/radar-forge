@@ -260,6 +260,52 @@ baseband : numpy.ndarray
     along axis 1, slow time along axis 0.
 ```
 
+### 4.1 Checking a citation **[review]**
+
+A wrong section number is worse than none: the student opens the book at the wrong page and
+concludes they have misunderstood. PR #11 found about half the repository's citations wrong.
+So a citation, in a docstring, a test or a spec, passes only if all three hold:
+
+1. **The record matches.** Authors, title, venue, volume, issue, pages and year agree with the
+   publisher's record.
+2. **The number can be seen.** The section, equation or chapter number is visible in the source
+   or its table of contents.
+3. **The title fits the claim.** What that section is about supports the sentence the citation
+   is attached to.
+
+**Evidence**, best first: the source itself; a scanned table of contents or the publisher's
+front matter; the publisher's listing or the DOI record (`https://api.crossref.org/works/<doi>`)
+for the bibliographic details. A secondary source, such as another paper describing the
+first, only corroborates. Memory and search-engine summaries are not evidence.
+
+**When the number can't be seen,** cite the level you can see (the chapter rather than its
+§11.6), or remove the citation, as #11 removed Blackman & Popoli. When only the title is visible
+(a paywalled book), the text claims no more than the title says, and the commit lists that
+citation as "title only".
+
+**What a citation covers.**
+
+- **Scope.** A paper is cited only for what it covers: Lerro & Bar-Shalom (1993) debias 2-D
+  polar measurements, so a 3-D conversion also cites Suchomski (1999).
+- **Attribution.** An attribution names the paper that made the claim: κ = 3 − n is the
+  heuristic of Julier & Uhlmann (1997), not of Julier's later scaled transform.
+- **Reference lists.** Every entry in a `References` list is cited in the text; an entry
+  nothing cites is removed.
+
+**Pointers into the repository** (a spec's §, a decision ID such as DF7, `file:line`, a review's
+#N) are checked the same way: the target exists and says what is claimed. In historical
+documents, a line number that has since moved is marked as true when written, not updated.
+
+**Who checks.**
+
+- **The PR's author** checks, in one pass, every citation the PR adds or changes.
+- **An audit** checks a package, a new spec, or the whole repository, as #11 and the tracker-001
+  check did. Two passes work independently, neither seeing the other's results. Their results
+  are reconciled, and anything only one pass saw is re-checked by hand.
+
+Either way, the commit message records each correction with its evidence (the URL and what was
+seen there), and lists what was left as "title only" or removed.
+
 ---
 
 ## 5. Typing

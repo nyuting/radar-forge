@@ -578,8 +578,7 @@ it would be later. The names and module moves are TD13's.
    (TD13), so this step also updates the scenario 003 TOMLs and spec, and the data-001
    `metadata.json` schema. Module moves (§3 target column). Refresh the stale text:
    `kalman.py`'s "promotes this module to a subpackage", `estimation.py`'s "the one
-   implementation", `spec/structure.md` D2, and `spec/data-001-formats.md`'s `core/tracking.py`
-   paths. *Check:* AC1, AC7 and AC8;
+   implementation", and `spec/structure.md` D2. *Check:* AC1, AC7 and AC8;
    `git grep -nE '^class (KalmanTracker|KalmanTrackState|KalmanState|TrackModel|FrameResult)\b' -- src`
    returns nothing; and so does
    `git grep -nE 'n_reacquire_frames|\bCartesianPosition\b|\bRadialMotion\b|def normalise|\.normalise\(|\.noise_density\b[^_]|self\.noise_density\b|sigma_accel_mps2' -- src tests scripts scenarios spec/scenario-003-tracking.md docs/tracking`.

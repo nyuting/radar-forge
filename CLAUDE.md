@@ -5,9 +5,13 @@ Instructions for AI agents working in this repository. Humans should read
 
 ## What this is
 
-`radar-forge` is a Python radar simulation and DSP library for **education and research**.
-Its readers are interns and students. Code that is clever but opaque fails the brief;
-code that is plain, documented, and cites its source passes it.
+`radar-forge` is a radar workbench for **research and education** that is both state of the art
+and simple. Its readers are radar practitioners, new staff, interns and students. Both halves of
+that are required and neither is traded for the other: an outdated method fails the brief, and
+so does code that is clever but opaque. A current method with correct, cited math, in code that
+is plain and documented and shows its intermediate quantities, passes. Code must be simple enough
+to understand and to test; if a step is hard to test on its own, split it. The full bar is
+[`spec/starter.md` §1.1](spec/starter.md#11-the-bar).
 
 ## Non-negotiables
 
@@ -57,7 +61,7 @@ code that is plain, documented, and cites its source passes it.
 | `docs/conventions/style.md` | Naming, units, data layout, docstrings, typing, API surface |
 | `docs/conventions/commits.md` | Commit and branch conventions |
 | `docs/conventions/testing.md` | Test layout, tolerances, golden data, markers |
-| `docs/conventions/review.md` | Writing a PR review: layout, findings, checks, voice, what to check against |
+| `docs/conventions/review.md` | Doing and writing a PR review: procedure, layout, findings, checks, voice, what to check against |
 | `src/radar_forge/core/constants.py` | Every physical constant, defined once |
 | `.githooks/` | pre-commit, commit-msg, pre-push |
 | `scripts/check_conventions.py` | Rules R1–R7: TOML config, layout, docstrings, constants, units, broadcasting, Markdown anchors |

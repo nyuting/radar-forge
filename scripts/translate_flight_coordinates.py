@@ -29,8 +29,7 @@ golden fixture the same way.
 The original track has the header ``timestamp,lat,lon``. The output uses the
 ``spec/data-001-formats.md`` §6.3 names, ``time_s,latitude_deg,longitude_deg``,
 which is what :func:`radar_forge.pipelines.trajectories.load_flight_csv` reads.
-``time_s`` is seconds from the first fix, so the shipped track has no epoch. The
-original track's first fix was at ``2026-09-03T00:17:56Z``.
+``time_s`` is seconds from the first fix, so the shipped track has no epoch.
 
 References
 ----------

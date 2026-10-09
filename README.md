@@ -1,10 +1,13 @@
 # radar-forge
 
-**Open-source radar simulation and signal processing toolkit for education and research.**
+**A state-of-the-art, simple radar workbench for research and education.**
 
-`radar-forge` is a modular Python library and educational workbench that brings 3D ray-tracing,
-phased array beamforming, tracking, and machine-learning dataset synthesis under one consistent API.
-It is built for radar interns, students, researchers, and algorithm developers in radar and wireless
+`radar-forge` is a research and educational workbench for radar that is both state of the art
+and simple: the current best method for every block, with correct and cited mathematics, written
+so a new engineer can follow it and a practitioner can learn from it. It is a modular, open-source
+Python library that brings 3D ray-tracing, phased-array beamforming, detection and tracking, and
+machine-learning dataset synthesis under one consistent API. It is built for radar practitioners
+and researchers, new staff, interns, students, and algorithm developers in radar and wireless
 sensing who want to go from the radar range equation to a labelled deep-learning dataset without
 stitching together seven incompatible codebases.
 
@@ -178,9 +181,9 @@ much can be borrowed — GPL-licensed code is treated as a **reference to reimpl
 | [Steinmetz Neural Networks](https://github.com/shyamven/SteinmetzNeuralNetworks) | *(no licence declared)* | Complex-valued networks keeping I/Q as an analytic pair (AISTATS '25) by the RASPNet author; ships a RASPNet regression notebook | Reference for the complex-valued I/Q feature convention in `pipelines/datasets.py`; paired with RASPNet as a dataset-plus-model benchmark |
 | [pyAPRiL](https://github.com/pyapril/pyapril) | GPL-3.0 | Passive radar signal processing library (BME, Budapest) | Reference for space-time clutter cancellation (Wiener-SMI, ECA) and bistatic geometries |
 | [RadarSim (GUI)](https://github.com/SpaceEngineerSS/RadarSim) | MIT | Educational pulse-Doppler visualizer with real-time PySide6 scopes | Blueprint for the interactive teaching modules (A-Scope, B-Scope, PPI, RHI) |
-| [Stone Soup](https://github.com/dstl/Stone-Soup) | MIT | Dstl's target-tracking and state-estimation framework: filters, gaters, data associators, initiators, OSPA/GOSPA metrics | The architectural reference for `core/tracking.py` — its predictor/updater/associator seams and its `Detection`/`Track`/`Hypothesis` vocabulary, at a fraction of the surface area; the reference for JPDA and IMM when those arrive |
-| [FilterPy](https://github.com/rlabbe/filterpy) | MIT | Kalman, extended, unscented and particle filters, with the *Kalman and Bayesian Filters in Python* companion text | Reference formulation for the constant-velocity KF and the `Q_discrete_white_noise` process-noise construction, reimplemented in `core/tracking.py` rather than depended on |
-| [motpy](https://github.com/wmuron/motpy) | MIT | Minimal tracking-by-detection multi-object tracker: predict, Hungarian match, update, prune | Evidence that the whole tracking loop fits in one module, which is why `spec/structure.md` D2 keeps `core/tracking.py` unsplit; shape reference for `TrackManager` |
+| [Stone Soup](https://github.com/dstl/Stone-Soup) | MIT | Dstl's target-tracking and state-estimation framework: filters, gaters, data associators, initiators, OSPA/GOSPA metrics | The architectural reference for `core/tracking/` — its predictor/updater/associator seams and its `Detection`/`Track`/`Hypothesis` vocabulary, at a fraction of the surface area; the reference for JPDA and IMM when those arrive |
+| [FilterPy](https://github.com/rlabbe/filterpy) | MIT | Kalman, extended, unscented and particle filters, with the *Kalman and Bayesian Filters in Python* companion text | Reference formulation for the constant-velocity KF and the `Q_discrete_white_noise` process-noise construction, reimplemented in `core/tracking/` from the cited papers rather than depended on |
+| [motpy](https://github.com/wmuron/motpy) | MIT | Minimal tracking-by-detection multi-object tracker: predict, Hungarian match, update, prune | Shape reference for the scan loop: one scan in, the current tracks out, as `core.tracking.Tracker.process(batch)` |
 | [Tracktable](https://github.com/sandialabs/tracktable) | BSD-3-Clause | Sandia's C++/Python moving-object trajectory analysis: coordinate domains, spatial indexing, clustering, map rendering | Prior art for the trajectory data model in `pipelines/trajectories.py` and the plan-view plot; **not a dependency** — matplotlib already draws the one plot needed |
 | [labeledRFS](https://github.com/linh-gist/labeledRFS) / [VisualRFS](https://github.com/linh-gist/VisualRFS) | MIT (ports of Ba-Tuong Vo's MATLAB, whose own terms differ) | GLMB/LMB random-finite-set multi-target trackers with Gibbs-sampled ranked assignment and OSPA metrics | The target state for high-clutter multi-target tracking: no heuristic gate, no M-of-N initiator, no deleter. Written from the papers if implemented; nothing vendored |
 

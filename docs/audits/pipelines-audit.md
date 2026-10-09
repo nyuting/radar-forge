@@ -15,6 +15,28 @@ sign conventions, units; and `spec/structure.md`'s decisions D1–D8.
 Each public function is judged on both halves: does it compute what the spec says, and is it
 the better implementation available. An honest "no change, here is why" is a result.
 
+## Status at 2026-10-08
+
+Re-checked against `main` at `8a9e579`. Every fix (F1–F9) is still in place, and every item left
+alone in [F11](#f11-left-alone-deliberately) and the verdict notes is still unchanged. No public
+name in scope has been added or removed.
+
+What has moved since:
+
+- **The tracker underneath changed** (PR #2, `91a3454`). `ScenarioTracker` now drives
+  `core.tracking.KalmanTracker` and holds it as `.tracker`, where this audit says `.manager`.
+  `pipelines/tracking.py` grew to about 1080 lines in that migration. It does not yet run on the
+  unified `core.tracking.Tracker`. Steps 6–7 of `spec/tracker-001.md` would move it there, delete
+  `KalmanTracker`, and retire `sigma_accel_mps2`. When that lands, [F3](#f3-the-sigma_accel_mps2-margin-no-longer-exists)
+  describes a setting that no longer exists.
+- **Two old-style citations survive.** `pipelines/scenarios.py` cites "S4.2" in its module
+  docstring and "S4.3" in `form_range_doppler_map`. Both name the right section of
+  `spec/scenario-001-xband.md`, but in the form [F2](#f2-four-citations-pointed-at-a-section-that-does-not-exist)
+  replaced everywhere else.
+- **The quoted target SNR disagrees.** `frame_detections`' docstring and
+  `spec/scenario-003-tracking.md` say 45–69 dB, which PR #2 changed. Both
+  `scenarios/scenario_003_tracking*.toml` comments still say 51–65 dB.
+
 ## Findings index
 
 | # | Finding | Q | Side that was wrong | Status |
@@ -113,7 +135,7 @@ disclosure and it is why nothing here needed a numerical change.
 | `ScenarioTracker.step_unfolded` | ok | ok | ok | ok | ok | ok | ok | ok |
 | `replace_measurement` | ok | ok | ok | fixed | fixed | ok | ok | ok |
 
-This is the file the brief expected the most bloat in, at ~1030 lines. It is not bloated. The
+This is the file the brief expected the most bloat in, at ~1030 lines (~1080 since PR #2). It is not bloated. The
 length is prose: the module docstring, the fold-consistency comment inside `_unfold_all` and
 the `TrackingConfig` docstring together run to about 90 lines and every one of them records a
 measurement or a failure mode that a reader would otherwise rediscover the hard way. That is
@@ -235,7 +257,8 @@ repeat runs:
 
 Both sides were wrong, in different ways. The code had drifted to a third figure, 95%, which
 matches nothing. The specification's margin was real when measured but has since been overtaken
-by two of its own later decisions: §14.10 moved the default window to 663 s, and §14.7 added
+by two of its own later decisions: §14.10 moved the default window to start at 663 s (it still
+runs 120 frames at 1 Hz), and §14.7 added
 re-acquisition, which holds a confirmed track through a mis-unfold instead of deleting it.
 Re-acquisition is precisely the mechanism that makes track retention insensitive to the process
 noise here, and §14.7 already credits it with taking the run from six track ids to two.
@@ -332,8 +355,8 @@ the one the marker goes on and what plotting the unfolded one would do.
 `ScenarioTracker.min_unfold_frames` is public, is printed by `scripts/run_scenario.py` and is
 asserted by a test, but was assigned in `__post_init__` without being declared as a field or
 appearing in the class docstring — so neither `help()` nor the dataclass signature admitted it
-exists. Declared `field(init=False)` and given an Attributes entry, alongside `manager` and
-`frames`, saying why it is derived rather than passed: it is a consequence of `sigma_range_m`,
+exists. Declared `field(init=False)` and given an Attributes entry, alongside `manager` (since
+renamed `tracker`; see [Status at 2026-10-08](#status-at-2026-10-08)) and `frames`, saying why it is derived rather than passed: it is a consequence of `sigma_range_m`,
 `fold_span_mps`, `frame_time_s` and `unfold_sigma_gate`, and setting it independently would let
 a track unfold before its range slope can tell it which fold to take.
 

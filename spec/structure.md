@@ -1,21 +1,28 @@
 # radar-forge — Module Structure
 
-> `radar-forge` is built on a lightweight core with optional extras. It prioritises
-> zero-friction imports, clear educational abstractions, and modular backend pluggability.
+> `radar-forge` is built on a lightweight core with optional extras. Every block meets the bar in
+> [`starter.md` §1.1](starter.md#11-the-bar): the current best published method, with cited
+> mathematics, written so a new engineer can read it and a practitioner can see its intermediate
+> quantities. Around that it prioritises zero-friction imports and modular backend pluggability.
 >
 > **Core principles**
+> - **State of the art and simple** — both are required; neither is traded for the other.
 > - **Lightweight core** — `radar_forge.core` and `radar_forge.array` rely only on NumPy and SciPy.
 > - **Zero-breakage imports** — `import radar_forge` always succeeds.
 > - **Unified backend contract** — one `raytracing.Scene` powers all backends.
 > - **Clean licensing and attribution** — copyleft or unlicensed code is never vendored.
 
 **Status:** design document, partially implemented. `core/` and `pipelines/` are built as far as
-scenarios 001, 002 and 003 required; `array/`, `raytracing/`, `pipelines/exporters/` and most of
+scenarios 001, 002 and 003 required, and `core/tracking/` is a package built out further, to
+[`tracker-001.md`](tracker-001.md); `array/`, `raytracing/`, `pipelines/exporters/` and most of
 `teaching/` are still design only. Part B marks the tree as intended, not as built — read it
 alongside the source.
 **Companion to:** [`starter.md`](starter.md) (project charter and ecosystem survey).
 **File formats:** [`data-001-formats.md`](data-001-formats.md) fixes the on-disk form of every
 input, output and product the tree below reads or writes.
+**Tracking architecture:** [`tracker-001.md`](tracker-001.md) owns the internal design of
+`core/tracking/` — its pieces, their protocols, and how the filters are kept from drifting. This
+document only places the package in the tree.
 
 This document does two things, in the order a reader needs them. **Part B** is the file-level design
 of the `radar_forge` package: the tree as intended, the module-to-upstream mapping, the design rules
@@ -53,7 +60,22 @@ src/radar_forge/
 │   ├── ambiguity.py             # velocity folding; dual-PRF Doppler unfolding
 │   ├── detection.py             # CA/GO/SO/OS-CFAR (1-D), CA/OS 2-D ring, Pfa calibration, wrap-aware clustering
 │   ├── clutter.py               # land/sea clutter models; ECA / Wiener-SMI cancellation
-│   └── tracking.py              # KF, EKF, gating, assignment, simple track manager
+│   └── tracking/                # one tracker, cut at Stone Soup's seams (spec/tracker-001.md §3)
+│       ├── __init__.py          # re-exports every public name; import path is radar_forge.core.tracking
+│       ├── coordinates.py       # Coordinate, StateLayout (named, unit-bearing, wrap-aware), StateEstimate
+│       ├── estimation.py        # Estimator protocol; the one correction core; NIS and log-likelihood
+│       ├── kalman.py            # linear KF and EKF as Estimators; predict/update kept as the teaching layer
+│       ├── ukf.py               # unscented Kalman filter
+│       ├── motion.py            # MotionModel: Cartesian CV/CA, range-only; DWNA process noise
+│       ├── measurements.py      # Measurement, MeasurementBatch (planned: today in measurement_models.py)
+│       ├── measurement_models.py # MeasurementModel: Cartesian, spherical, monostatic and bistatic range-Doppler
+│       ├── sensors.py           # SensorRegistration, SensorPose (planned: today in measurement_models.py)
+│       ├── association.py       # chi-square gate; GNN and NN assignment; JPDA extension point
+│       ├── initiation.py        # TrackInitiator: start a track from an unassigned measurement
+│       ├── lifecycle.py         # M-of-N confirmation; miss, coast-time and covariance deletion
+│       ├── tracks.py            # Track, TrackStatus, TrackSnapshot
+│       ├── tracker.py           # Tracker: the one scan loop every pipeline uses
+│       └── _validation.py       # shared shape and covariance checks
 ├── array/
 │   ├── __init__.py
 │   ├── geometry.py              # ULA, URA, circular, cylindrical, spherical, conformal, sparse; subarrays
@@ -79,7 +101,7 @@ src/radar_forge/
 │   ├── __init__.py
 │   ├── scenarios.py             # TOML scenario schema + loader (stdlib tomllib); frame loop
 │   ├── trajectories.py          # trajectory load/resample; monostatic and bistatic radar frames
-│   ├── tracking.py              # RD map → measurements → KalmanTracker, frame by frame (scenario 3)
+│   ├── tracking.py              # RD map → measurements → core.tracking.Tracker, frame by frame (scenario 3)
 │   ├── generate.py              # scene -> baseband -> cube orchestration, batching, seeding
 │   ├── datasets.py              # torch Dataset / DataLoader wrappers (extra: ml)
 │   └── exporters/
@@ -114,7 +136,12 @@ src/radar_forge/
 | `core/clutter.py` | pyAPRiL `clutterCancellation` (reimplemented from papers); RadarSim land/sea clutter |
 | `pipelines/tracking.py` | motpy's `step(detections)` loop shape; Stone Soup's detection → gate → associate → update decomposition |
 | `teaching/scopes/track_plot.py` | Tracktable's plan-view track rendering (prior art only; not a dependency) |
-| `core/tracking.py` | Stone Soup data model and predictor/updater/associator seams; FilterPy filter and `Q_discrete_white_noise` formulation; motpy's single-module tracking loop; RadarSim tracking and fusion; RadarBook tracking-filter chapters |
+| `core/tracking/` (all) | `unified-extensible-tracker`, contributed under MIT (`tracker-001.md` §1.2); Stone Soup's data model and seams |
+| `core/tracking/estimation.py`, `kalman.py`, `ukf.py` | FilterPy filter formulation and `UnscentedKalmanFilter` shape; Wan & van der Merwe (2000) for the UKF; Bar-Shalom, Li & Kirubarajan (2001); RadarBook tracking-filter chapters |
+| `core/tracking/motion.py` | FilterPy `Q_discrete_white_noise`; Bar-Shalom, Li & Kirubarajan (2001) DWNA model |
+| `core/tracking/association.py` | Stone Soup gater and data-associator seams; `scipy.optimize.linear_sum_assignment` (Crouse 2016) |
+| `core/tracking/initiation.py`, `lifecycle.py`, `tracks.py` | Bar-Shalom & Li (1995) logic-based track formation; Stone Soup initiator/deleter split; RadarSim track management |
+| `core/tracking/tracker.py` | motpy's `step(detections)` loop shape; Stone Soup's tracker |
 | `array/*` | Phased-Array-Antenna-Model (near one-to-one module split) |
 | `array/doa.py` | pyroomacoustics `doa` base-class pattern; RadarSimPy and pyroomacoustics estimators as benchmarks |
 | `raytracing/base.py`, `scene.py` | RF-Genesis pipeline staging; RadarSimPy scene/mesh API |
@@ -137,8 +164,13 @@ src/radar_forge/
    `mitsuba` changes fidelity and runtime, not user code.
 4. **Licence hygiene is a design constraint.** GPL and unlicensed references are reimplemented from
    published equations, with the source cited in the module docstring. See §A.14.
-5. **Every core algorithm is teachable.** Each `core/` and `array/` module pairs with a notebook in
-   `teaching/notebooks/` and a numerical test against a textbook-published value.
+5. **Every block is state of the art and simple** ([`starter.md` §1.1](starter.md#11-the-bar)).
+   The current best published method is the end state; a classical method stays only as a
+   baseline or a test oracle. The code reads top to bottom for a new engineer, exposes its
+   intermediate quantities (NIS, SNR budget terms, losses), pairs with a notebook in
+   `teaching/notebooks/`, and is tested against analytic ground truth or a published value.
+6. **A block that outgrows one module becomes a subpackage**, re-exported from its
+   `__init__.py` so the public import path never changes. `core/tracking/` is the first (D2).
 
 ### B.3 Proposed extras
 
@@ -176,7 +208,7 @@ why.
 | [A.10](#a10-ovrtx-pypi-optional) | ovrtx | NVIDIA proprietary | An opt-in, hardware-gated backend (D3) |
 | [A.11](#a11-pyroomacoustics) | pyroomacoustics | MIT | The DoA estimator base-class pattern and DoA benchmarks |
 | [A.12](#a12-complex-valued-neural-networks) | torchcvnn, complexPyTorch, Steinmetz | MIT / undeclared | The complex-valued I/Q feature convention `pipelines/datasets.py` exports against |
-| [A.13](#a13-tracking-and-data-fusion) | Stone Soup, FilterPy, motpy, Tracktable, labeledRFS | MIT / BSD-3 | The comparative map for `core/tracking.py` — scenario 3's module |
+| [A.13](#a13-tracking-and-data-fusion) | Stone Soup, FilterPy, motpy, Tracktable, labeledRFS | MIT / BSD-3 | The comparative map for `core/tracking/` and `tracker-001.md` |
 | [A.14](#a14-licence-summary) | *(licence summary)* | — | The matrix that governs every row above |
 
 ### A.1 RadarSimPy
@@ -437,10 +469,12 @@ undeclared ⇒ no code enters the tree and it is never a runtime dependency.
 
 ### A.13 Tracking and data fusion
 
-`core/tracking.py` is the one module in Part B with no upstream in §A.1–A.12 beyond two textbook
-companions. These five projects are its comparative map. None is vendored and none is a runtime
-dependency; `scipy.optimize.linear_sum_assignment` covers the only algorithm
-`spec/scenario-003-tracking.md` actually needs, and `scipy` is already in core.
+`core/tracking/` has no upstream in §A.1–A.12 beyond two textbook companions. These five
+projects are its comparative map; its scope — KF, EKF and UKF behind one interface, GNN and NN
+assignment, and extension points for IMM and JPDA — is fixed by
+[`tracker-001.md` §1.1](tracker-001.md#11-scope). None is vendored and none is a runtime
+dependency: `scipy.optimize.linear_sum_assignment` covers assignment, and `scipy` is already in
+core.
 
 **A.13a Stone Soup**
 
@@ -459,14 +493,17 @@ dependency; `scipy.optimize.linear_sum_assignment` covers the only algorithm
 | `models/` | Transition (constant velocity/acceleration, singer) and measurement models, incl. IMM |
 | `metricgenerator/` | OSPA, GOSPA, SIAP — the standard tracking performance metrics |
 
-**What radar-forge borrows:** the *vocabulary and the seams*, not the code. The
-detection → hypothesiser → gater → associator → updater → initiator/deleter decomposition is the
-one this repository's `core/tracking.py` follows, at a fraction of the surface area: Stone Soup is
-a framework for comparing trackers, and radar-forge needs one tracker an intern can read end to
-end. Its metric generators are the reference for any future acceptance criterion beyond
-`spec/scenario-003-tracking.md` §12, and its JPDA and IMM implementations are the
-reference for the extensions that would fire D2's promotion trigger. MIT, so code could be
-borrowed with attribution; the reason not to is size, not licence.
+**What radar-forge borrows:** the *vocabulary and the seams*, not the code. `core/tracking/`
+follows the detection → hypothesiser → gater → associator → updater → initiator/deleter
+decomposition one module per seam ([`tracker-001.md` §3](tracker-001.md#3-architecture-strict-decoupling)),
+cut coarser in two places: predictor and updater are one `Estimator`, and the hypothesiser is the
+gate. Stone Soup is a framework for comparing trackers; radar-forge has one tracker, each piece
+small enough to read on its own, so a student who moves on to Stone Soup recognises the cut. Its
+metric generators are the reference for acceptance criteria beyond
+`spec/scenario-003-tracking.md` §12, and its JPDA and IMM implementations are the references for
+the extension points in tracker-001 [§7.4](tracker-001.md#74-extension-point-jpda) and
+[§9](tracker-001.md#9-multiple-models-imm). MIT, so code could be borrowed with attribution; the
+reason not to is size and readability, not licence.
 
 **A.13b FilterPy**
 
@@ -483,11 +520,13 @@ borrowed with attribution; the reason not to is size, not licence.
 | `stats/` | NEES/NIS consistency statistics, covariance ellipses, plotting helpers |
 
 **What radar-forge borrows:** the *formulation*. `Q_discrete_white_noise` is the exact
-discrete-white-noise-acceleration construction `core/tracking.py` reimplements from reference [2]
-of the scenario spec, and FilterPy's `log_likelihood`/NIS bookkeeping is the model for the
-consistency statistic that scenario 003 §12 asserts on. It is a reference to reimplement rather
-than a dependency: the two-state constant-velocity case is about forty vectorised lines, and
-carrying a filter library to get them would fail `CLAUDE.md`'s test for adding a dependency.
+discrete-white-noise-acceleration construction `core/tracking/motion.py` reimplements from
+reference [2] of the scenario spec; FilterPy's `log_likelihood`/NIS bookkeeping is the model for
+`core/tracking/estimation.py`, whose NIS scenario 003 §12 asserts on; and `core/tracking/ukf.py`
+keeps `UnscentedKalmanFilter`'s shape, one object holding the estimate and changing it in place.
+It is a reference to reimplement rather than a dependency: written from the cited papers, each
+equation stays visible in a docstring a reader can check, and carrying a filter library to get
+them would fail `CLAUDE.md`'s test for adding a dependency.
 
 **A.13c motpy**
 
@@ -501,12 +540,12 @@ carrying a filter library to get them would fail `CLAUDE.md`'s test for adding a
 | `metrics.py` | IoU and Euclidean cost matrices for the assignment step |
 | `model.py` | Constant-velocity and constant-acceleration motion models with a single order knob |
 
-**What radar-forge borrows:** the *proof of scale*. motpy is tracking-by-detection with Hungarian
-matching and a staleness-based track manager, complete, in roughly one module — which is the
-evidence behind `spec/structure.md` D2's decision to keep `core/tracking.py` unsplit until a
-second association strategy arrives. Its `MultiObjectTracker.step(detections) -> tracks` signature
-is the shape `KalmanTracker` (formerly `TrackManager`) follows. It is a computer-vision tracker, so nothing about its cost
-metrics or box model transfers; the loop structure is the whole borrowing.
+**What radar-forge borrows:** the *loop shape*. motpy is tracking-by-detection with Hungarian
+matching and a staleness-based track manager, complete, in roughly one module. Its
+`MultiObjectTracker.step(detections) -> tracks` signature is the shape
+`core/tracking/tracker.py`'s `Tracker.process(batch)` follows: one scan in, the current tracks
+out. It is a computer-vision tracker, so nothing about its cost metrics or box model transfers;
+the loop structure is the whole borrowing.
 
 **A.13d Tracktable**
 
@@ -552,9 +591,12 @@ multi-target tracking, recorded here so that the extension has a reference rathe
 improvisation. The relevant idea is that a random-finite-set filter propagates a distribution over
 *sets* of targets and so needs no heuristic gate, no M-of-N initiator and no deleter: exactly the
 three components `spec/scenario-003-tracking.md` §7 has to size by hand and defend in
-§3. That contrast is worth teaching even before the filter is implemented. Implementation is
-gated on a multi-target, high-clutter scenario existing to justify it, and would be written from
-the papers.
+§3. That contrast is worth teaching even before the filter is implemented. Under the bar of
+[`starter.md` §1.1](starter.md#11-the-bar), random-finite-set filters (GLMB, PMBM) are the
+state of the art for high-clutter multi-target tracking, and the GNN tracker is the baseline
+they are measured against. [`tracker-001.md` §7.5](tracker-001.md#75-out-of-scope-pmbm) records
+why they are out of scope for now: implementation is gated on a multi-target, high-clutter
+scenario existing to justify it, and would be written from the papers.
 
 ### A.14 Licence summary
 
@@ -562,7 +604,7 @@ the papers.
 | :--- | :--- | :--- | :--- |
 | Phased-Array-Antenna-Model | MIT | yes | yes, with attribution |
 | Stone Soup | MIT | yes | yes, with attribution — not taken, size not licence |
-| FilterPy | MIT | yes | yes, with attribution — reimplemented instead, ~40 lines |
+| FilterPy | MIT | yes | yes, with attribution — reimplemented instead, from the cited papers |
 | motpy | MIT | no (computer-vision domain) | loop structure only |
 | Tracktable | BSD-3-Clause | yes, if trajectory analytics is ever a goal | yes, with attribution |
 | labeledRFS / VisualRFS | MIT (ports); original MATLAB terms differ | no | **no** — write from the papers |
@@ -608,19 +650,26 @@ signals. Backends that natively produce baseband (RadarSimPy, ovrtx) may additio
 optional `trace_baseband()` fast path; `base.py` declares it, and `generate.py` prefers it only when the
 requested waveform matches what the backend supports natively.
 
-### D2 — Clutter and tracking stay in `core/`, with a promotion trigger
+### D2 — Promote a `core/` module to a subpackage when it outgrows one module
 
-`core/clutter.py` and `core/tracking.py` remain single modules for now. Scenario 3 built
-`core/tracking.py` out in full — three state models, GNN association and M-of-N track management —
-and did **not** fire the trigger: per `spec/scenario-003-tracking.md` §6.2 the state models are
-data returned by a factory, not a class hierarchy, and one association strategy is not two.
+**The rule.** A `core/` module becomes a subpackage once it carries more than roughly one
+module's worth of responsibility, and not before. The subpackage re-exports every public name
+from its `__init__.py`, so the public import path never changes (§B.2 rule 6). Do not pre-split;
+do not let a file drift past its trigger.
 
-> **Note.** Promote either to a subpackage as soon as it exceeds roughly one module's worth of
-> responsibility — concretely, when `tracking.py` gains a second association strategy beyond
-> nearest-neighbour gating (JPDA, MHT) or a track-fusion layer, or when `clutter.py` carries more than two
-> clutter models plus the cancellation algorithms. The promotion is `core/tracking.py` →
-> `core/tracking/{filters,association,fusion}.py`, re-exported from `core/tracking/__init__.py` so the
-> public import path never changes. Do not pre-split; do not let either file drift past the trigger.
+**Tracking: promoted.** Scenario 3 first built `core/tracking.py` out as one module — three
+state models, GNN association and M-of-N track management — and that did not fire the trigger:
+per `spec/scenario-003-tracking.md` §6.2 the state models were data returned by a factory, not a
+class hierarchy, and one association strategy was not two. The trigger was a second association
+strategy or a second filter, and PR #2 (`91a3454`) brought both: the UKF, and nearest-neighbour
+assignment beside GNN. `core/tracking.py` became the package `core/tracking/`, and the original
+module survives as `core/tracking/kalman.py`. The split follows Stone Soup's seams, as specified
+in [`tracker-001.md` §3](tracker-001.md#3-architecture-strict-decoupling), not the
+`{filters,association,fusion}` this decision first sketched. Track-to-track fusion is out of
+scope (tracker-001 §1.1); its design belongs to tracker-001 from here on.
+
+**Clutter: stays a single module.** Promote `core/clutter.py` to `core/clutter/` when it carries
+more than two clutter models plus the cancellation algorithms.
 
 ### D3 — ovrtx stays an opt-in, hardware-gated backend
 

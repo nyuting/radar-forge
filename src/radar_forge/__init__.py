@@ -1,4 +1,4 @@
-"""radar-forge: radar simulation and signal processing for education and research.
+"""radar-forge: state-of-the-art, simple radar simulation and DSP for research and education.
 
 The public API is exactly what this module re-exports; anything reached through a
 submodule path is subject to change without notice. See ``docs/conventions/style.md``.

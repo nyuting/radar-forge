@@ -11,9 +11,11 @@ These are the rules the git hooks and CI enforce. Read them before your first co
   practice, errors. Every rule is tagged with what enforces it: `[ruff]`, `[mypy]`, `[hook]` or
   `[review]`.
 - [**testing.md**](conventions/testing.md) — test layout, float-comparison tolerances,
-  analytic ground truth over golden data, fixtures and seeding, property-based tests, markers.
-- [**review.md**](conventions/review.md) — writing a PR review: where it lives, its layout, how a
-  finding and a check are phrased, the voice, and what to review against.
+  analytic ground truth over golden data, fixtures and seeding, property-based tests, markers,
+  and radar-domain verification: which physics and statistics tests each pipeline stage needs.
+- [**review.md**](conventions/review.md) — doing and writing a PR review: where it lives, the order
+  the work is done in, its layout, how a finding and a check are phrased, the voice, and what to
+  review against.
 
 ## Getting started
 

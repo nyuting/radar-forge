@@ -1,8 +1,11 @@
 # Contributing to radar-forge
 
-`radar-forge` is built for interns, students and researchers, and a good deal of it will be
-*written* by them too. These conventions exist so that a first contribution can be reviewed
-for its radar content rather than its formatting.
+`radar-forge` is built for radar practitioners, researchers, new staff, interns and students,
+and a good deal of it will be *written* by them too. These conventions exist so that a first
+contribution can be reviewed for its radar content rather than its formatting. The aim is a
+workbench that is both state of the art and simple, and neither is traded for the other: the
+current best method, with correct and cited math, in code a newcomer can follow and a
+practitioner can learn from. The full bar is [`spec/starter.md` §1.1](spec/starter.md#11-the-bar).
 
 Everything here is enforced automatically. You should never have to remember a rule — the
 hooks will tell you, and they will tell you how to fix it.
@@ -133,7 +136,7 @@ failure, not avoided it.
 | [conventions/commits.md](docs/conventions/commits.md) | Writing a commit, naming a branch, opening a PR |
 | [conventions/style.md](docs/conventions/style.md) | Writing library code — naming, **units**, docstrings, typing |
 | [conventions/testing.md](docs/conventions/testing.md) | Writing tests — tolerances, ground truth, golden data, markers |
-| [conventions/review.md](docs/conventions/review.md) | Reviewing a PR — layout, findings, checks, voice |
+| [conventions/review.md](docs/conventions/review.md) | Reviewing a PR — procedure, layout, findings, checks, voice |
 | [spec/data-001-formats.md](spec/data-001-formats.md) | Writing or reading a run's output files — formats, columns, units |
 | [CLAUDE.md](CLAUDE.md) | Directing an AI agent at this repo |
 

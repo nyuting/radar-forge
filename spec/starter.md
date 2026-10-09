@@ -6,10 +6,35 @@
 | :--- | :--- |
 | Project name | `radar-forge` |
 | PyPI package | `radar-forge` (imports via `import radar_forge`) |
-| Primary goal | An open-source, modular Python library and educational workbench combining 3D ray-tracing, phased array beamforming, tracking and machine-learning dataset synthesis |
-| Target audience | Interns, students, researchers and algorithm developers in radar / wireless sensing |
+| Primary goal | A research and educational workbench for radar that is both state of the art and simple: the current best method for every block, with correct and cited mathematics, written so a new engineer can follow it and a practitioner can learn from it |
+| Scope | A modular, open-source Python library covering 3D ray-tracing, phased-array beamforming, detection and tracking, and machine-learning dataset synthesis |
+| Target audience | Radar practitioners and researchers, new staff, interns and students, and algorithm developers in radar / wireless sensing |
 | Python | >= 3.11, src layout |
 | Configuration | TOML only, in `pyproject.toml`; scenarios in `scenarios/*.toml` |
+
+### 1.1 The bar
+
+**State of the art and simple are both required, and neither is traded for the other.** A block
+that meets only one of them is not finished.
+
+1. **State of the art.** Each block implements the current best published method. A classical
+   method is in the repo only as a baseline or a test oracle, never as the end state.
+2. **Simple.** Code must be simple enough to understand and to test. A new staff member or intern
+   can read the block top to bottom, follow it, and write a test for each step: plain names, small
+   functions, one idea per function, a derivation note that walks from the textbook baseline to
+   the current method, and a worked example.
+3. **Both, when they pull apart.** Making a current method simple is part of the work: break it
+   into steps, derive it from the classical method, show the example. A block that is current but
+   opaque is not ready, and neither is one that is clear but outdated.
+4. **Correct.** Every block cites the equation it implements (paper or book, with the equation
+   number) and is tested against analytic ground truth or a published result.
+5. **Excellent.** Numerics, edge cases and performance are fit for research use, not just for a
+   demo. Tolerances are justified and never loosened to make a test pass.
+6. **Insightful.** Each block exposes its intermediate quantities (SNR budget terms, NIS, losses,
+   ambiguity limits) and comes with a plot or notebook, so a practitioner sees why the method
+   works and not only what it outputs.
+7. **Kept current.** A periodic currency audit, in the style of `docs/audits/`, checks each module
+   against recent literature and records when it was last checked.
 
 **Companion documents.** [`structure.md`](structure.md) is the file-level design and the decision
 list. The vertical slices through it are specified one document each:
@@ -95,13 +120,13 @@ Canonical blocks for `core/dsp.py`, `core/detection.py` and `core/clutter.py`. P
 
 #### 3.1.4 Tracking and data fusion
 
-The comparative map for `core/tracking.py`, built by scenario 3. None is a runtime dependency: `scipy.optimize.linear_sum_assignment` covers the only algorithm the scenario needs.
+The comparative map for `core/tracking/`, first built by scenario 3 and specified by [`tracker-001.md`](tracker-001.md). None is a runtime dependency: `scipy.optimize.linear_sum_assignment` covers assignment.
 
 | Project Name | Description | Reason for Inclusion / Core Utility |
 | :--- | :--- | :--- |
-| **Stone Soup** (Dstl) | Target-tracking and state-estimation framework: predictors and updaters, gaters and hypothesisers, data associators (NN, GNN, PDA, JPDA, MHT), M-of-N initiators and deleters, OSPA/GOSPA metrics. | The architectural reference for `core/tracking.py` — the detection → gate → associate → update → initiate decomposition and the `Detection`/`Track`/`Hypothesis` vocabulary, reproduced at a fraction of the surface area. MIT; no code vendored, size rather than licence is the reason. |
-| **FilterPy** | Kalman, extended, unscented and particle filters with the *Kalman and Bayesian Filters in Python* companion text. | Reference formulation for the two-state constant-velocity filter and the discrete-white-noise-acceleration process noise (`Q_discrete_white_noise`), plus the NIS consistency statistic the scenario acceptance criteria assert on. MIT; reimplemented in ~40 vectorised lines rather than carried as a dependency. |
-| **motpy** | Minimal tracking-by-detection multi-object tracker: predict, Hungarian assignment, update, staleness-based pruning, in about one module. | Evidence for the decision in `structure.md` D2 to keep `core/tracking.py` a single module until a second association strategy arrives, and the shape reference for `TrackManager.step(detections)`. MIT; a computer-vision tracker, so only the loop structure transfers. |
+| **Stone Soup** (Dstl) | Target-tracking and state-estimation framework: predictors and updaters, gaters and hypothesisers, data associators (NN, GNN, PDA, JPDA, MHT), M-of-N initiators and deleters, OSPA/GOSPA metrics. | The architectural reference for `core/tracking/` — the detection → gate → associate → update → initiate decomposition and the `Detection`/`Track`/`Hypothesis` vocabulary, reproduced at a fraction of the surface area. MIT; no code vendored, size rather than licence is the reason. |
+| **FilterPy** | Kalman, extended, unscented and particle filters with the *Kalman and Bayesian Filters in Python* companion text. | Reference formulation for the two-state constant-velocity filter and the discrete-white-noise-acceleration process noise (`Q_discrete_white_noise`), plus the NIS consistency statistic the scenario acceptance criteria assert on. MIT; reimplemented from the cited papers rather than carried as a dependency. |
+| **motpy** | Minimal tracking-by-detection multi-object tracker: predict, Hungarian assignment, update, staleness-based pruning, in about one module. | The shape reference for the scan loop: one scan in, the current tracks out, as `core.tracking.Tracker.process(batch)`. MIT; a computer-vision tracker, so only the loop structure transfers. |
 | **Tracktable** (Sandia) | C++/Python moving-object trajectory analysis: unit-aware coordinate domains, trajectory assembly, R-tree spatial indexing, DBSCAN clustering, Cartopy map rendering. | Prior art for the trajectory data model in `pipelines/trajectories.py` and for plan-view track rendering, especially the separation of coordinate domain from trajectory container. BSD-3-Clause — usable, but deliberately **not** a dependency: one matplotlib plot does not justify a C++/Boost build. |
 | **labeledRFS / VisualRFS** (Vo, ported by Linh Ma) | GLMB and LMB random-finite-set multi-target filters with joint predict-update, Gibbs-sampled ranked assignment and OSPA/OSPA(2) metrics. | The target state for high-clutter multi-target tracking: an RFS filter propagates a distribution over *sets* of targets and so needs no heuristic gate, no M-of-N initiation and no deletion logic — the three things scenario 003 must size by hand. Ports are MIT, the original MATLAB terms differ; written from the papers if implemented. |
 
