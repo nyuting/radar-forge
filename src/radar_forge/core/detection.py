@@ -108,7 +108,9 @@ from scipy.sparse import csgraph
 
 __all__ = [
     "CFAR_VARIANTS",
+    "CFAR_VARIANTS_2D",
     "CfarVariant",
+    "CfarVariant2d",
     "Detection",
     "cfar_detect",
     "cfar_detect_2d",
@@ -128,6 +130,12 @@ CfarVariant = Literal["ca", "go", "so", "os"]
 
 CFAR_VARIANTS: tuple[CfarVariant, ...] = get_args(CfarVariant)
 
+# GO and SO compare two half-windows, which a 2-D ring does not have (see the
+# module docstring), so the 2-D functions offer only these two.
+CfarVariant2d = Literal["ca", "os"]
+
+CFAR_VARIANTS_2D: tuple[CfarVariant2d, ...] = get_args(CfarVariant2d)
+
 # Upper bound for the threshold-factor bracket search. Pfa(alpha) falls at least
 # geometrically in alpha, so a design Pfa small enough to need alpha > 1e12 is a
 # sign of a mis-specified window rather than a bracket that needs widening.
@@ -136,10 +144,6 @@ _MAX_ALPHA_LINEAR = 1.0e12
 # OS-CFAR needs every reference cell, not a running sum, so it materialises a
 # sliding window. This caps that temporary at roughly a few hundred megabytes.
 _OS_MAX_WINDOW_ELEMENTS = 1 << 24
-
-# GO and SO compare two half-windows, which a 2-D ring does not have (see the
-# module docstring), so the 2-D functions offer only these two.
-_CFAR_2D_VARIANTS = ("ca", "os")
 
 
 @dataclass(frozen=True)
@@ -805,7 +809,7 @@ def cfar_noise_estimate_2d_w(
     *,
     n_train: tuple[int, int],
     n_guard: tuple[int, int],
-    variant: Literal["ca", "os"] = "ca",
+    variant: CfarVariant2d = "ca",
     rank: int | None = None,
     axes: tuple[int, int] = (-2, -1),
     wrap_axes: tuple[int, ...] = (),
@@ -915,7 +919,7 @@ def cfar_threshold_2d_w(
     pfa: float,
     n_train: tuple[int, int],
     n_guard: tuple[int, int],
-    variant: Literal["ca", "os"] = "ca",
+    variant: CfarVariant2d = "ca",
     rank: int | None = None,
     axes: tuple[int, int] = (-2, -1),
     wrap_axes: tuple[int, ...] = (),
@@ -987,7 +991,7 @@ def cfar_detect_2d(
     pfa: float,
     n_train: tuple[int, int],
     n_guard: tuple[int, int],
-    variant: Literal["ca", "os"] = "ca",
+    variant: CfarVariant2d = "ca",
     rank: int | None = None,
     axes: tuple[int, int] = (-2, -1),
     wrap_axes: tuple[int, ...] = (),
@@ -1307,9 +1311,9 @@ def _order_statistic(
 
 def _validate_variant_2d(variant: str) -> None:
     """Reject a variant that the 2-D ring does not offer."""
-    if variant not in _CFAR_2D_VARIANTS:
+    if variant not in CFAR_VARIANTS_2D:
         msg = (
-            f"variant must be one of {_CFAR_2D_VARIANTS!r} for a 2-D ring, got {variant!r}. "
+            f"variant must be one of {CFAR_VARIANTS_2D!r} for a 2-D ring, got {variant!r}. "
             "'go' and 'so' compare two half-windows, which a ring does not have."
         )
         raise ValueError(msg)

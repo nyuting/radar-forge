@@ -18,6 +18,7 @@ from scipy.stats import beta
 
 from radar_forge.core.detection import (
     CFAR_VARIANTS,
+    CFAR_VARIANTS_2D,
     Detection,
     cfar_detect,
     cfar_detect_2d,
@@ -1098,6 +1099,11 @@ def test_a_target_on_the_doppler_wrap_gives_one_detection(rng):
 # --------------------------------------------------------------------------- #
 # Documented failure modes of the 2-D functions and the new arguments
 # --------------------------------------------------------------------------- #
+
+
+def test_the_ring_variants_are_the_one_dimensional_ones_without_half_windows():
+    """A 2-D variant must be one the 1-D calibration covers, since the ring borrows it."""
+    assert set(CFAR_VARIANTS_2D) == set(CFAR_VARIANTS) - {"go", "so"}
 
 
 @pytest.mark.parametrize("variant", ["go", "so"])
