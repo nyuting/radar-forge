@@ -23,6 +23,7 @@ range-only for its first ten frames and S1's first fold change is at frame 17;
 a fifteen-frame window would assert criterion 4 against a single constant fold.
 """
 
+import tomllib
 from dataclasses import replace
 from pathlib import Path
 
@@ -34,7 +35,7 @@ from radar_forge.pipelines.scenarios import (
     iterate_frames,
     load_scenario,
 )
-from radar_forge.pipelines.tracking import ScenarioTracker, range_layout
+from radar_forge.pipelines.tracking import ScenarioTracker, primary_track_id, range_layout
 from radar_forge.pipelines.trajectories import load_flight_csv, resample, to_radar_frame
 
 pytestmark = pytest.mark.slow
@@ -321,3 +322,61 @@ def test_the_target_stays_inside_both_dual_prf_maps(name):
     spans_m = [range_layout(burst).coordinates[0].period for burst in scenario.bursts]
     assert None not in spans_m
     assert float(np.max(truth_m)) < min(span_m for span_m in spans_m if span_m is not None)
+
+
+# Criterion C4 (spec/scenario-003-tracking.md §14.11): frames, of the 120, in
+# which the primary track is confirmed. The targets are §14.11's, set below
+# what the UKF reached (118, 59 and 118) so that a regression fails and a run
+# that merely varies does not.
+C4_TARGETS = {
+    "scenario_003_ukf_fmcw_low_prf": 118,
+    "scenario_003_ukf_pulsed_medium_prf": 13,
+    "scenario_003_ukf_fmcw_dual_prf": 94,
+}
+
+
+@pytest.mark.parametrize(("name", "target"), C4_TARGETS.items())
+def test_the_ukf_meets_c4_over_the_whole_window(name, target):
+    """The UKF holds the primary track confirmed in at least C4's frames.
+
+    Slow: a full 120-frame run of each waveform, a few seconds each.
+    """
+    toml_path = SCENARIOS_DIR / f"{name}.toml"
+    _, tracker, _ = run(toml_path, n_frames=load_scenario(toml_path).n_frames)
+    primary_id = primary_track_id(tracker.frames)
+    n_confirmed = sum(
+        any(t.track_id == primary_id and t.is_confirmed for t in frame.tracks)
+        for frame in tracker.frames
+    )
+    assert n_confirmed >= target
+
+
+# Each scenario 003 file is its scenario 001 twin plus [detection] and
+# [tracking]. The two Kalman files also move the window to 663 s (§14.10).
+TWINS = [
+    ("scenario_003_ukf_fmcw_low_prf", "scenario_001_fmcw_low_prf"),
+    ("scenario_003_ukf_pulsed_medium_prf", "scenario_001_pulsed_medium_prf"),
+    ("scenario_003_ukf_fmcw_dual_prf", "scenario_001_fmcw_dual_prf"),
+    ("scenario_003_tracking", "scenario_001_fmcw_low_prf"),
+    ("scenario_003_tracking_dual_prf", "scenario_001_fmcw_dual_prf"),
+]
+
+
+def _scene(name):
+    """A scenario TOML's tables, less what scenario 003 adds or renames."""
+    tables = tomllib.loads((SCENARIOS_DIR / f"{name}.toml").read_text(encoding="utf-8"))
+    tables.pop("detection", None)
+    tables.pop("tracking", None)
+    for key in ("name", "description"):
+        tables["scenario"].pop(key)
+    tables["trajectory"].pop("start_time_s")
+    return tables
+
+
+@pytest.mark.parametrize(("copy", "original"), TWINS)
+def test_a_scenario_003_file_matches_its_scenario_001_twin(copy, original):
+    """The copies have no include, so this is what keeps them the same scenario.
+
+    Tables are compared, not text, so the comments are free to differ.
+    """
+    assert _scene(copy) == _scene(original)

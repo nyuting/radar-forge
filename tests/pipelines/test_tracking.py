@@ -37,7 +37,6 @@ from radar_forge.pipelines.tracking import (
 )
 
 SIGMA_RANGE_M = 21.635652855125496
-FOLD_SPAN_MPS = 15.295533571428571
 SCENARIOS_DIR = Path(__file__).parent.parent.parent / "scenarios"
 
 
@@ -45,6 +44,24 @@ SCENARIOS_DIR = Path(__file__).parent.parent.parent / "scenarios"
 def bursts(variant: str) -> tuple[RadarLike, ...]:
     """The bursts of one of scenario 001's variants, read from its TOML."""
     return load_scenario(SCENARIOS_DIR / f"scenario_001_{variant}.toml").bursts
+
+
+def range_bin_m(burst: RadarLike) -> float:
+    """The width of one bin of a burst's range axis, in metres."""
+    from radar_forge.pipelines.scenarios import range_axis_m
+
+    axis_m = range_axis_m(burst)
+    return float(axis_m[1] - axis_m[0])
+
+
+# Every figure below follows from a scenario 001 burst and SPEED_OF_LIGHT_MPS,
+# so it is derived, not typed in: a change to either cannot leave one stale.
+# S1: one FMCW burst at 1 kHz, folding Doppler every 15.3 m/s.
+FOLD_SPAN_MPS = 2.0 * bursts("fmcw_low_prf")[0].unambiguous_velocity_mps
+S1_RANGE_BIN_M = range_bin_m(bursts("fmcw_low_prf")[0])
+# S2: pulsed at 25 kHz, folding Doppler at +-191 m/s and range at 6 km.
+S2_FOLD_SPAN_MPS = 2.0 * bursts("pulsed_medium_prf")[0].unambiguous_velocity_mps
+S2_RANGE_BIN_M = range_bin_m(bursts("pulsed_medium_prf")[0])
 
 
 class TestUnfoldVelocity:
@@ -272,7 +289,7 @@ def synthetic_product(range_m, velocity_mps, *, n_doppler_bins=256, n_range_bins
     from radar_forge.pipelines.scenarios import RangeDopplerProduct
 
     rng = np.random.default_rng(seed)
-    range_axis_m = np.arange(n_range_bins, dtype=np.float64) * 74.9481145
+    range_axis_m = np.arange(n_range_bins, dtype=np.float64) * S1_RANGE_BIN_M
     half_span = FOLD_SPAN_MPS / 2.0
     velocity_axis_mps = np.linspace(
         -half_span, half_span, n_doppler_bins, endpoint=False, dtype=np.float64
@@ -366,7 +383,7 @@ class TestFrameDetections:
         ) / np.sqrt(2.0)
         product = RangeDopplerProduct(
             rd_map=noise.astype(np.complex128),
-            range_axis_m=np.arange(1000, dtype=np.float64) * 74.9481145,
+            range_axis_m=np.arange(1000, dtype=np.float64) * S1_RANGE_BIN_M,
             velocity_axis_mps=np.linspace(-7.65, 7.65, 256, endpoint=False),
         )
         assert len(frame_detections(product)) < 15
@@ -445,18 +462,21 @@ def targets_product(
     fold_span_mps,
     n_doppler_bins=128,
     n_range_bins=800,
-    range_bin_m=74.9481145,
+    range_bin_m=None,
     amplitude=3.0e3,
     seed=7,
 ):
     """A range-Doppler map with point targets at ``(range_m, velocity_mps)``, in noise.
 
     Both axes are circular, as a real map's are: a response near one end of
-    either axis spills onto the other end.
+    either axis spills onto the other end. The defaults are S3's burst A:
+    800 range bins of ``S3_RANGE_BIN_M``.
     """
     from radar_forge.pipelines.scenarios import RangeDopplerProduct
 
     rng = np.random.default_rng(seed)
+    if range_bin_m is None:
+        range_bin_m = S3_RANGE_BIN_M
     range_axis_m = np.arange(n_range_bins, dtype=np.float64) * range_bin_m
     half_span = fold_span_mps / 2.0
     velocity_axis_mps = np.linspace(
@@ -486,7 +506,8 @@ def targets_product(
 
 
 # Scenario 001's S3: two FMCW bursts at 5 and 6 kHz.
-S3_SPANS_MPS = (76.47578, 91.77093)
+S3_SPANS_MPS = tuple(2.0 * burst.unambiguous_velocity_mps for burst in bursts("fmcw_dual_prf"))
+S3_RANGE_BIN_M = range_bin_m(bursts("fmcw_dual_prf")[0])
 # The search bound: scenario_003_ukf_fmcw_dual_prf.toml's v_max_mps.
 S3_V_MAX_MPS = 100.0
 
@@ -539,7 +560,7 @@ class TestDualPrfDetections:
         target = (15_000.0, -30.4)
         # 1.5 range bins away: inside the default tolerance of two bins, and
         # not on its edge, where float rounding of the centroid would decide.
-        beside = (15_000.0 + 1.5 * 74.9481145, 10.0)
+        beside = (15_000.0 + 1.5 * S3_RANGE_BIN_M, 10.0)
         records = dual_prf_detections(
             dual_products([target], [target, beside]), S3_SPANS_MPS, max_velocity_mps=S3_V_MAX_MPS
         )
@@ -571,7 +592,7 @@ class TestDualPrfDetections:
         """
         from radar_forge.pipelines.tracking import dual_prf_detections
 
-        span_m = dual_products([], [])[0].range_axis_m.size * 74.9481145
+        span_m = dual_products([], [])[0].range_axis_m.size * S3_RANGE_BIN_M
         products = dual_products([(span_m - 30.0, -30.4)], [(span_m + 30.0, -30.4)])
         records = dual_prf_detections(
             products, S3_SPANS_MPS, max_velocity_mps=S3_V_MAX_MPS, wrap_range=True
@@ -582,15 +603,13 @@ class TestDualPrfDetections:
         assert {r.status for r in edge} == {"accepted"}
         assert len({r.pair_id for r in edge}) == 1
 
-    def test_only_the_first_bursts_accepted_detections_are_measurements(self):
-        target = (15_000.0, -30.4)
-        measurements = dual_prf_measurements(
-            dual_products([target], [target]), S3_SPANS_MPS, max_velocity_mps=S3_V_MAX_MPS
-        )
-        near = [m for m in measurements if abs(m.range_m - 15_000.0) < 150.0]
-        assert [(m.burst_index, m.status) for m in near] == [(0, "accepted")]
-
     def test_a_tie_is_nearest_for_neither(self):
+        """Tested on the helper directly, as an exception to testing.md.
+
+        A tie needs two range gaps equal to the last bit, which no centroid read
+        off a noisy map produces, so it cannot be set up through
+        dual_prf_detections. The rule is the one its docstring promises.
+        """
         from radar_forge.pipelines.tracking import _strictly_nearest
 
         distance_m = np.array([[1.0, 1.0, 2.0], [3.0, 0.5, 4.0]])
@@ -603,11 +622,28 @@ class TestDualPrfDetections:
             [[True, False, True], [False, True, False]],
         )
 
-    def test_an_empty_burst_marks_nothing(self):
-        from radar_forge.pipelines.tracking import _strictly_nearest
+    def test_a_burst_with_no_detections_leaves_every_other_unpaired(self):
+        from radar_forge.pipelines.scenarios import RangeDopplerProduct
+        from radar_forge.pipelines.tracking import dual_prf_detections
 
-        assert _strictly_nearest(np.zeros((2, 0)), axis=1).shape == (2, 0)
-        assert _strictly_nearest(np.zeros((0, 3)), axis=1).shape == (0, 3)
+        first, second = dual_products([(15_000.0, -30.4)], [])
+        # A map of zeros: CFAR finds nothing in it, so the second burst is empty.
+        silent = RangeDopplerProduct(
+            rd_map=np.zeros_like(second.rd_map),
+            range_axis_m=second.range_axis_m,
+            velocity_axis_mps=second.velocity_axis_mps,
+        )
+        records = dual_prf_detections([first, silent], S3_SPANS_MPS, max_velocity_mps=S3_V_MAX_MPS)
+        assert records
+        assert {(r.burst_index, r.status) for r in records} == {(0, "missing_pair")}
+
+    def test_only_the_first_bursts_accepted_detections_are_measurements(self):
+        target = (15_000.0, -30.4)
+        measurements = dual_prf_measurements(
+            dual_products([target], [target]), S3_SPANS_MPS, max_velocity_mps=S3_V_MAX_MPS
+        )
+        near = [m for m in measurements if abs(m.range_m - 15_000.0) < 150.0]
+        assert [(m.burst_index, m.status) for m in near] == [(0, "accepted")]
 
 
 class TestCircularRange:
@@ -620,7 +656,7 @@ class TestCircularRange:
     def _product(self, range_m):
         return targets_product(
             [(range_m, -17.0)],
-            fold_span_mps=2.0 * 191.1935,
+            fold_span_mps=S2_FOLD_SPAN_MPS,
             n_doppler_bins=256,
             n_range_bins=self.N_RANGE_BINS,
             range_bin_m=self.RANGE_BIN_M,
@@ -651,12 +687,25 @@ class TestCircularRange:
 
 
 class TestBinQuantisationSigmas:
+    @pytest.mark.parametrize(("n_range_bins", "n_doppler_bins"), [(1, 4), (4, 1)])
+    def test_an_axis_with_one_bin_has_no_width(self, n_range_bins, n_doppler_bins):
+        from radar_forge.pipelines.scenarios import RangeDopplerProduct
+        from radar_forge.pipelines.tracking import bin_quantisation_sigmas
+
+        product = RangeDopplerProduct(
+            rd_map=np.zeros((n_doppler_bins, n_range_bins), dtype=np.complex128),
+            range_axis_m=np.arange(n_range_bins, dtype=np.float64) * S1_RANGE_BIN_M,
+            velocity_axis_mps=np.linspace(-1.0, 1.0, n_doppler_bins, endpoint=False),
+        )
+        with pytest.raises(ValueError, match="at least two bins"):
+            bin_quantisation_sigmas(product)
+
     def test_one_bin_over_root_twelve(self):
         from radar_forge.pipelines.tracking import bin_quantisation_sigmas
 
         product = synthetic_product(15_000.0, 2.0)
         sigma_range_m, sigma_velocity_mps = bin_quantisation_sigmas(product)
-        np.testing.assert_allclose(sigma_range_m, 74.9481145 / np.sqrt(12.0), rtol=1e-12)
+        np.testing.assert_allclose(sigma_range_m, S1_RANGE_BIN_M / np.sqrt(12.0), rtol=1e-12)
         np.testing.assert_allclose(
             sigma_velocity_mps, FOLD_SPAN_MPS / 256 / np.sqrt(12.0), rtol=1e-12
         )
@@ -846,14 +895,16 @@ class TestUkfPath:
             tracker,
             [3_000.0 + 17.0 * k for k in range(8)],
             -17.0,
-            fold_span_mps=2.0 * 191.1935,
+            fold_span_mps=S2_FOLD_SPAN_MPS,
             n_doppler_bins=256,
             n_range_bins=100,
-            range_bin_m=59.958491600000004,
+            range_bin_m=S2_RANGE_BIN_M,
         )
         track = next(t for t in frames[-1].tracks if t.is_confirmed)
         assert track.measurement_dim == 2
-        np.testing.assert_allclose(track.state[1], -17.0, atol=2.0 * 191.1935 / 256)
+        # Two Doppler bins: each detection is read to within a bin of the
+        # 256-bin map, and the filter has had only a few frames to average.
+        np.testing.assert_allclose(track.state[1], -17.0, atol=2.0 * S2_FOLD_SPAN_MPS / 256)
         associated = frames[-1].measurements[frames[-1].associations[track.track_id]]
         assert associated.fold_index == 0
         assert associated.velocity_unfolded_mps == associated.velocity_folded_mps
@@ -868,16 +919,20 @@ class TestUkfPath:
             tracker,
             [5_850.0 + 17.0 * k for k in range(16)],
             -17.0,
-            fold_span_mps=2.0 * 191.1935,
+            fold_span_mps=S2_FOLD_SPAN_MPS,
             n_doppler_bins=256,
             n_range_bins=100,
-            range_bin_m=59.958491600000004,
+            range_bin_m=S2_RANGE_BIN_M,
         )
         confirmed_ids = {t.track_id for f in frames for t in f.tracks if t.is_confirmed}
         assert len(confirmed_ids) == 1
         last = next(t for t in frames[-1].tracks if t.is_confirmed)
         assert 0.0 <= last.state[0] < period_m
-        np.testing.assert_allclose(last.state[0], (5_850.0 + 17.0 * 15) % period_m, atol=60.0)
+        # One range bin: each detection is read to within a bin, and the
+        # filter's estimate after 16 frames is no worse than one detection.
+        np.testing.assert_allclose(
+            last.state[0], (5_850.0 + 17.0 * 15) % period_m, atol=S2_RANGE_BIN_M
+        )
 
     def test_records_say_which_detection_each_track_took(self):
         tracker = ScenarioTracker(bursts("pulsed_medium_prf"), tracking=UKF_SETTINGS)
@@ -885,10 +940,10 @@ class TestUkfPath:
             tracker,
             [3_000.0 + 17.0 * k for k in range(6)],
             -17.0,
-            fold_span_mps=2.0 * 191.1935,
+            fold_span_mps=S2_FOLD_SPAN_MPS,
             n_doppler_bins=256,
             n_range_bins=100,
-            range_bin_m=59.958491600000004,
+            range_bin_m=S2_RANGE_BIN_M,
         )
         frame = frames[-1]
         track = next(t for t in frame.tracks if t.is_confirmed)

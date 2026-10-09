@@ -205,10 +205,17 @@ class TestFoldedRange:
         assert "modulo 6.000 km" in axes.get_ylabel()
         close(figure)
 
-    def test_a_line_is_broken_where_it_wraps(self):
-        from radar_forge.teaching.scopes.track_plot import _break_at_wraps
+    @pytest.mark.parametrize(
+        ("period_m", "gaps"), [(PERIOD_M, [False, False, True, False]), (None, [False] * 4)]
+    )
+    def test_a_line_is_broken_where_it_wraps(self, period_m, gaps):
+        """The point after the wrap is left out, so no line crosses the plot.
 
-        wrapped = np.array([5_900.0, 5_990.0, 80.0, 170.0])
-        broken = _break_at_wraps(wrapped, self.PERIOD_M)
-        np.testing.assert_array_equal(np.isnan(broken), [False, False, True, False])
-        np.testing.assert_array_equal(_break_at_wraps(wrapped, None), wrapped)
+        Without a period nothing is a wrap, and the line is drawn whole.
+        """
+        time_s = np.arange(4, dtype=np.float64)
+        wrapped_m = np.array([5_900.0, 5_990.0, 80.0, 170.0])
+        figure = render_range_time_history(time_s, wrapped_m, range_period_m=period_m)
+        (truth_line,) = [line for line in figure.axes[0].get_lines() if line.get_label() == "truth"]
+        np.testing.assert_array_equal(np.isnan(np.asarray(truth_line.get_ydata())), gaps)
+        close(figure)
