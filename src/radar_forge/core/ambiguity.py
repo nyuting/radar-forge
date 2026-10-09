@@ -154,9 +154,7 @@ def unfold_doppler_dual_prf(
     :math:`p:q` in lowest terms the pair of readings repeats after
     :math:`q \cdot 2 v_{ua,a}`, so velocities up to :math:`q\, v_{ua,a}` are
     recoverable. Scenario 001 S3's 5:6 bursts give
-    :math:`6 \times 38.24 \approx 229` m/s, comfortably outside the ±191.2 m/s
-    the scenario asks for — the scenario's figure is a design target chosen to
-    match S2, not this function's limit.
+    :math:`6 \times 38.24 = 5 \times 45.89 \approx 229` m/s.
 
     Beyond the repeat the ambiguity returns, and a target outside
     ``max_velocity_mps`` is *not* simply missed: it can alias onto a candidate

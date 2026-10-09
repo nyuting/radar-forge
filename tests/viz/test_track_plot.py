@@ -157,3 +157,65 @@ def test_off_scale_detections_are_counted_in_a_corner_note() -> None:
     )
     notes = [text.get_text() for text in figure.axes[0].texts]
     assert any("off-scale" in note for note in notes)
+
+
+class TestRangeRatePanel:
+    """The optional second panel: range rate against time."""
+
+    def test_a_truth_range_rate_adds_a_panel_below_sharing_time(self):
+        time_s, range_m = truth()
+        figure = render_range_time_history(
+            time_s,
+            range_m,
+            track_time_s=time_s,
+            track_range_m=range_m,
+            truth_range_rate_mps=np.full(N_FRAMES, -20.0),
+            track_range_rate_mps=np.full(N_FRAMES, -19.0),
+        )
+        top, bottom = figure.axes
+        assert bottom.get_shared_x_axes().joined(top, bottom)
+        rates = sorted(float(line.get_ydata()[0]) for line in bottom.get_lines())
+        assert rates == [-20.0, -19.0]
+        close(figure)
+
+    def test_without_a_truth_range_rate_there_is_one_panel(self):
+        time_s, range_m = truth()
+        figure = render_range_time_history(time_s, range_m)
+        assert len(figure.axes) == 1
+        close(figure)
+
+    def test_rejects_a_track_range_rate_without_the_truth(self):
+        time_s, range_m = truth()
+        with pytest.raises(ValueError, match="truth_range_rate_mps"):
+            render_range_time_history(time_s, range_m, track_range_rate_mps=np.zeros(N_FRAMES))
+
+
+class TestFoldedRange:
+    """A range period: one period on the axis, a modulo label, and lines broken at the wrap."""
+
+    PERIOD_M = 6_000.0
+
+    def test_the_axis_spans_one_period_and_says_it_is_modulo(self):
+        time_s, range_m = truth()
+        figure = render_range_time_history(
+            time_s, range_m % self.PERIOD_M, range_period_m=self.PERIOD_M
+        )
+        (axes,) = figure.axes
+        assert axes.get_ylim() == (0.0, 6.0)
+        assert "modulo 6.000 km" in axes.get_ylabel()
+        close(figure)
+
+    @pytest.mark.parametrize(
+        ("period_m", "gaps"), [(PERIOD_M, [False, False, True, False]), (None, [False] * 4)]
+    )
+    def test_a_line_is_broken_where_it_wraps(self, period_m, gaps):
+        """The point after the wrap is left out, so no line crosses the plot.
+
+        Without a period nothing is a wrap, and the line is drawn whole.
+        """
+        time_s = np.arange(4, dtype=np.float64)
+        wrapped_m = np.array([5_900.0, 5_990.0, 80.0, 170.0])
+        figure = render_range_time_history(time_s, wrapped_m, range_period_m=period_m)
+        (truth_line,) = [line for line in figure.axes[0].get_lines() if line.get_label() == "truth"]
+        np.testing.assert_array_equal(np.isnan(np.asarray(truth_line.get_ydata())), gaps)
+        close(figure)

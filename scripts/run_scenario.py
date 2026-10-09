@@ -14,15 +14,18 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import platform
 import shutil
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 
 from radar_forge import __version__
 from radar_forge.core.ambiguity import fold_velocity_mps
@@ -37,11 +40,16 @@ from radar_forge.pipelines.scenarios import (
     peak_range_velocity,
 )
 from radar_forge.pipelines.tracking import (
+    SENSOR_ID,
+    STATE_FIELDS,
     FrameTracks,
+    MetricRow,
     ScenarioTracker,
-    configs_from_scenario,
-    dual_prf_measurements,
+    primary_track_id,
+    range_layout,
+    score_primary_track,
 )
+from radar_forge.pipelines.trajectories import load_flight_csv
 
 # A monostatic run writes the first six. A bistatic run appends the last three,
 # so the bistatic column set is a superset of the monostatic one and the D5 COCO
@@ -58,36 +66,75 @@ TRUTH_COLUMNS = [
 ]
 BISTATIC_TRUTH_COLUMNS = ["range_tx_m", "range_rx_m", "bistatic_angle_deg"]
 
-# Scenario 003 §9. `associated_track_id` is empty for a measurement no track
-# claimed, which is how the plots tell a false alarm from a hit without
-# rerunning the associator.
-DETECTION_COLUMNS = [
+# The data-001 files, each as one tuple of column names in the order
+# spec/data-001-formats.md §6 lists them. Each row is built by name, so a
+# column can only be written under its own header. When pipelines/io lands
+# (data-001 §12), these tuples move into its schema registry unchanged.
+#
+# §6.5. `time_utc` is written only when the trajectory has an absolute epoch.
+# The angle columns are optional and left out: this radar measures no angle.
+# `associated_track_id` is empty for a detection no track claimed, which is how
+# the plots tell a false alarm from a hit without rerunning the associator.
+# `burst_index`, `status` and `pair_id` say what became of each detection on
+# its way to the tracker, which matters for a dual-PRF pair.
+DETECTION_COLUMNS = (
     "frame",
     "time_s",
+    "time_utc",
+    "detection_id",
+    "sensor_id",
     "range_m",
     "velocity_folded_mps",
     "velocity_unfolded_mps",
     "fold_index",
+    "range_index",
+    "velocity_index",
     "peak_power_w",
+    "total_power_w",
+    "snr_db",
     "n_cells",
     "associated_track_id",
-]
-# `measurement_dim` records the §5.3 bootstrap: the frame at which it steps
-# from 1 to 2 is the frame the track became able to unfold its Doppler, and
-# `velocity_unfolded_mps` in detections.csv is empty until then.
-TRACK_COLUMNS = [
+    "burst_index",
+    "status",
+    "pair_id",
+)
+# §6.6, for the range_1d state model: the state *is* `range_m` and
+# `range_rate_mps`, and `cov_0_1` is their one off-diagonal covariance, in
+# m²/s, indexed by `tracking.state_fields` in metadata.json. `measurement_dim`
+# records the §5.3 bootstrap: the frame at which it steps from 1 to 2 is the
+# frame the track became able to unfold its Doppler.
+TRACK_COLUMNS = (
     "frame",
     "time_s",
+    "time_utc",
     "track_id",
     "status",
+    "state_model",
     "measurement_dim",
+    "n_hits",
+    "n_misses_in_a_row",
     "range_m",
     "range_rate_mps",
     "var_range_m2",
     "var_range_rate_m2ps2",
+    "cov_0_1",
     "nis",
     "associated",
-]
+    "associated_detection_id",
+)
+# §6.9: tidy and long, one row per metric per scope.
+METRIC_COLUMNS = ("metric", "track_id", "target_id", "frame_start", "frame_end", "value")
+
+# Fixed strings restating data-001 §5, so a reader can check them rather than
+# assume them (§6.1).
+CONVENTIONS = {
+    "frame": "enu",
+    "azimuth_reference": "true_north_clockwise",
+    "velocity_sign": "closing_positive",
+    "cube_layout": "frame,pulse,sample[,rx]",
+    "rd_layout": "frame,doppler,range",
+}
+SCHEMA_VERSION = "1.1.0"
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -192,14 +239,77 @@ def site_metadata(scenario: Scenario) -> dict[str, object]:
     }
 
 
-def write_metadata(scenario: Scenario, out_dir: Path, n_frames: int) -> None:
+def reference_site(scenario: Scenario) -> dict[str, object]:
+    """The ENU origin of data-001 §5: the radar, or the receiver of a bistatic pair."""
+    burst = scenario.bursts[0]
+    if isinstance(burst, BistaticRadar):
+        return {
+            "latitude_deg": burst.receiver_latitude_deg,
+            "longitude_deg": burst.receiver_longitude_deg,
+            "altitude_m": burst.receiver_altitude_m,
+            "role": "receiver",
+        }
+    return {
+        "latitude_deg": burst.latitude_deg,
+        "longitude_deg": burst.longitude_deg,
+        "altitude_m": burst.altitude_m,
+        "role": "monostatic",
+    }
+
+
+def tracking_metadata(scenario: Scenario, tracker: ScenarioTracker) -> dict[str, object]:
+    """The resolved tracking settings, with what a reader of tracks.csv needs to know.
+
+    The settings are the resolved ones, defaults included, under the scenario
+    TOML's names, so every key of the ``[tracking]`` table appears with its
+    value, as data-001 §6.1 asks. ``unused`` lists the settings the chosen
+    estimator did not read (:meth:`TrackingConfig.unused_fields`), so that
+    no value is mistaken for one the run used. ``state_fields`` indexes the
+    ``cov_<i>_<j>`` columns of tracks.csv (data-001 §6.1). ``range_period_m``
+    is the period of the exported range when range folds, and ``None`` when it
+    does not, so that a reader knows once, here, whether ``range_m`` is
+    absolute or modulo.
+    """
+    settings = asdict(tracker.tracking)
+    # configs_from_scenario renames the TOML's velocity_unfolding to the field
+    # unfolding_mode on the way in; this renames it back on the way out.
+    settings["velocity_unfolding"] = settings.pop("unfolding_mode")
+    return {
+        **settings,
+        # Recorded explicitly, so no stored run is ambiguous about whether its
+        # angles were measured or synthesised (scenario 003 §6.3).
+        "simulated_angles": bool((scenario.tracking_table or {}).get("simulated_angles", False)),
+        "state_fields": list(STATE_FIELDS),
+        "range_period_m": tracker.folding_layout.coordinates[0].period,
+        "unused": list(tracker.tracking.unused_fields()),
+    }
+
+
+def write_metadata(
+    scenario: Scenario,
+    out_dir: Path,
+    n_frames: int,
+    *,
+    tracker: ScenarioTracker | None,
+    created_utc: datetime,
+    epoch_utc: datetime | None,
+    command: Sequence[str],
+) -> None:
     """Write ``metadata.json``: everything needed to interpret the run's files.
 
-    ``n_frames`` is the count actually written, which ``--frames`` can make
-    smaller than ``scenario.n_frames``. Recording the two separately is what
-    lets a reader tell a truncated run from a short scenario.
+    The keys are data-001 §6.1's, except ``files``, the inventory of written
+    files, which comes with the ``pipelines/io`` follow-up (§12). ``n_frames``
+    is the count actually written, which ``--frames`` can make smaller than
+    ``scenario.n_frames``. Recording the two separately is what lets a reader
+    tell a truncated run from a short scenario.
     """
     metadata = {
+        "schema_version": SCHEMA_VERSION,
+        "run_id": f"{scenario.name}-{created_utc:%Y%m%dT%H%M%SZ}",
+        "created_utc": _iso_utc(created_utc),
+        "epoch_utc": None if epoch_utc is None else _iso_utc(epoch_utc),
+        "reference_site": reference_site(scenario),
+        "conventions": CONVENTIONS,
         "scenario": {
             "name": scenario.name,
             "description": scenario.description,
@@ -214,20 +324,157 @@ def write_metadata(scenario: Scenario, out_dir: Path, n_frames: int) -> None:
         "sites": site_metadata(scenario),
         "target": asdict(scenario.target),
         "bursts": burst_metadata(scenario),
-        "tracking": (
-            None
-            if scenario.tracking_table is None
-            else {
-                **scenario.tracking_table,
-                # Recorded explicitly, so no stored run is ambiguous about
-                # whether its angles were measured or synthesised (§6.3).
-                "simulated_angles": bool(scenario.tracking_table.get("simulated_angles", False)),
-            }
-        ),
-        "detection": scenario.detection_table,
-        "provenance": {"radar_forge_version": __version__, "git_commit": git_commit()},
+        "tracking": None if tracker is None else tracking_metadata(scenario, tracker),
+        "detection": None if tracker is None else asdict(tracker.detection),
+        "provenance": {
+            "radar_forge_version": __version__,
+            "git_commit": git_commit(),
+            "python_version": platform.python_version(),
+            "numpy_version": np.__version__,
+            "command": list(command),
+        },
     }
     (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
+
+
+def trajectory_epoch(scenario: Scenario) -> datetime | None:
+    """The absolute time of the trajectory's first fix, from which ``time_s`` counts."""
+    epoch = load_flight_csv(scenario.trajectory_path, altitude_m=scenario.target_altitude_m).epoch
+    if epoch is None:
+        return None
+    return epoch.replace(tzinfo=UTC) if epoch.tzinfo is None else epoch.astimezone(UTC)
+
+
+def _iso_utc(instant: datetime) -> str:
+    """ISO 8601 UTC with microseconds and a ``Z``, as data-001 §5 writes every instant."""
+    return instant.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _cell(value: object) -> str:
+    """Format one CSV cell as data-001 §5 asks.
+
+    ``None`` is an empty cell (not applicable), a boolean is 0 or 1, and a
+    float is written in the shortest form that reads back to the same value
+    (Python's ``repr``), never at a fixed precision.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bool | np.bool_):
+        return str(int(value))
+    if isinstance(value, float | np.floating):
+        return repr(float(value))
+    return str(value)
+
+
+def _write_csv(path: Path, columns: Sequence[str], rows: Iterable[Mapping[str, object]]) -> None:
+    """Write rows under ``columns``, each row's cells looked up by column name."""
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(columns)
+        for row in rows:
+            writer.writerow([_cell(row[column]) for column in columns])
+
+
+def _columns(columns: Sequence[str], *, with_time_utc: bool) -> tuple[str, ...]:
+    """Drop ``time_utc`` from a column list when the run has no absolute epoch."""
+    return tuple(c for c in columns if c != "time_utc" or with_time_utc)
+
+
+def detection_rows(
+    frames: Iterable[FrameTracks], scenario: Scenario, epoch_utc: datetime | None
+) -> Iterable[dict[str, object]]:
+    """One detections.csv row per detection per frame (data-001 §6.5)."""
+    for record in frames:
+        claimed = {index: track_id for track_id, index in record.associations.items()}
+        for detection_id, measurement in enumerate(record.measurements):
+            # snr_db is against the burst's thermal noise power, not the CFAR
+            # estimate of the local floor (data-001 §6.5).
+            noise_power_w = scenario.bursts[measurement.burst_index].noise_power_w
+            yield {
+                "frame": record.frame_index,
+                "time_s": record.time_s,
+                "time_utc": _time_utc(epoch_utc, record.time_s),
+                "detection_id": detection_id,
+                "sensor_id": SENSOR_ID,
+                "range_m": measurement.range_m,
+                "velocity_folded_mps": measurement.velocity_folded_mps,
+                "velocity_unfolded_mps": measurement.velocity_unfolded_mps,
+                "fold_index": measurement.fold_index,
+                "range_index": measurement.range_index,
+                "velocity_index": measurement.velocity_index,
+                "peak_power_w": measurement.peak_power_w,
+                "total_power_w": measurement.total_power_w,
+                "snr_db": float(10.0 * np.log10(measurement.peak_power_w / noise_power_w)),
+                "n_cells": measurement.n_cells,
+                "associated_track_id": claimed.get(detection_id),
+                "burst_index": measurement.burst_index,
+                "status": measurement.status,
+                "pair_id": measurement.pair_id,
+            }
+
+
+def track_rows(
+    frames: Iterable[FrameTracks], state_model: str, epoch_utc: datetime | None
+) -> Iterable[dict[str, object]]:
+    """One tracks.csv row per track per frame (data-001 §6.6)."""
+    for record in frames:
+        for track in record.tracks:
+            yield {
+                "frame": record.frame_index,
+                "time_s": record.time_s,
+                "time_utc": _time_utc(epoch_utc, record.time_s),
+                "track_id": track.track_id,
+                "status": track.status,
+                "state_model": state_model,
+                "measurement_dim": track.measurement_dim,
+                "n_hits": track.n_hits,
+                "n_misses_in_a_row": track.n_misses,
+                "range_m": float(track.state[0]),
+                "range_rate_mps": float(track.state[1]),
+                "var_range_m2": float(track.covariance[0, 0]),
+                "var_range_rate_m2ps2": float(track.covariance[1, 1]),
+                "cov_0_1": float(track.covariance[0, 1]),
+                "nis": track.nis,
+                "associated": track.track_id in record.associations,
+                "associated_detection_id": track.detection_index,
+            }
+
+
+def metric_rows(metrics: Iterable[MetricRow]) -> Iterable[dict[str, object]]:
+    """One metrics.csv row per metric (data-001 §6.9)."""
+    for row in metrics:
+        yield {
+            "metric": row.metric,
+            "track_id": row.track_id,
+            "target_id": row.target_id,
+            "frame_start": row.frame_start,
+            "frame_end": row.frame_end,
+            "value": row.value,
+        }
+
+
+def _time_utc(epoch_utc: datetime | None, time_s: float) -> str | None:
+    """``epoch_utc + time_s`` as data-001 §5 writes it, or None with no epoch."""
+    return None if epoch_utc is None else _iso_utc(epoch_utc + timedelta(seconds=time_s))
+
+
+def write_detections_csv(
+    path: Path, rows: Iterable[Mapping[str, object]], *, with_time_utc: bool
+) -> None:
+    """Write detections.csv, columns in data-001 §6.5's order."""
+    _write_csv(path, _columns(DETECTION_COLUMNS, with_time_utc=with_time_utc), rows)
+
+
+def write_tracks_csv(
+    path: Path, rows: Iterable[Mapping[str, object]], *, with_time_utc: bool
+) -> None:
+    """Write tracks.csv, columns in data-001 §6.6's order."""
+    _write_csv(path, _columns(TRACK_COLUMNS, with_time_utc=with_time_utc), rows)
+
+
+def write_metrics_csv(path: Path, rows: Iterable[Mapping[str, object]]) -> None:
+    """Write metrics.csv, columns in data-001 §6.9's order."""
+    _write_csv(path, METRIC_COLUMNS, rows)
 
 
 def render_frame(
@@ -236,13 +483,15 @@ def render_frame(
     products: Sequence[RangeDopplerProduct],
     out_dir: Path,
     dynamic_range_db: float,
-    record: FrameTracks | None = None,
+    frames: Sequence[FrameTracks] = (),
 ) -> None:
     """Draw one range-Doppler panel per burst and save it.
 
     Takes the already-processed ``products`` rather than processing the cubes
     itself, so the receive chain runs once per frame however many consumers a
-    frame has.
+    frame has. ``frames`` is the tracker's history up to and including this
+    frame, empty when nothing is tracked; the last entry is drawn, and the
+    history picks the primary track (:func:`primary_track_id`).
     """
     from radar_forge.viz.plotting import save_figure
     from radar_forge.viz.scopes.rd_map import render_range_doppler
@@ -250,21 +499,25 @@ def render_frame(
     for index, (product, burst) in enumerate(zip(products, scenario.bursts, strict=True)):
         suffix = "" if len(scenario.bursts) == 1 else f"_burst{index}"
         # Where this burst's ambiguities oblige the target to appear: Doppler
-        # wraps into the unambiguous interval, range modulo the unambiguous
-        # range. For a burst that folds in neither, both are the truth itself.
+        # wraps into the unambiguous interval, range into the span of this
+        # map's range axis. For a burst that folds in neither, both are the
+        # truth itself.
         folded_velocity_mps = float(
             fold_velocity_mps(frame.radial_velocity_mps, burst.unambiguous_velocity_mps)
         )
-        folded_range_m = frame.range_m % burst.unambiguous_range_m
+        folded_range_m = float(
+            range_layout(burst).wrap(np.asarray([frame.range_m]), interval="nonnegative")[0]
+        )
         title = (
             f"{scenario.name}{suffix}  t = {frame.time_s:.0f} s   "
             f"truth {frame.range_m / 1e3:.2f} km, {frame.radial_velocity_mps:+.1f} m/s"
         )
-        # Detections and the track are drawn on the first burst's map only:
-        # they are formed from it, or in the dual-PRF case from the pair, and
-        # repeating them on burst B would imply they were measured there.
+        # Each burst's map shows the detections made on it. The track is drawn
+        # on the first burst's map only: its range is wrapped at that map's
+        # span, and its measurements came from that burst, or from the pair.
         detections = track_estimate = gate_extent = None
-        if record is not None and index == 0:
+        if frames:
+            record = frames[-1]
             # ``velocity_folded_mps`` is already inside this burst's
             # unambiguous interval -- it was read off the map's own velocity
             # axis -- so it is what the marker goes on. The *unfolded* value
@@ -272,23 +525,25 @@ def render_frame(
             detections = [
                 (measurement.range_m, measurement.velocity_folded_mps)
                 for measurement in record.measurements
+                if measurement.burst_index == index
             ]
-            confirmed = [track for track in record.tracks if track.is_confirmed]
-            if confirmed:
-                track = max(confirmed, key=lambda candidate: candidate.n_hits)
+            primary_id = primary_track_id(frames)
+            primary = [
+                track
+                for track in record.tracks
+                if track.track_id == primary_id and track.is_confirmed
+            ]
+            if index == 0 and primary:
+                track = primary[0]
                 track_estimate = (
-                    float(track.estimator.estimate.state[0]),
-                    float(
-                        fold_velocity_mps(
-                            track.estimator.estimate.state[1], burst.unambiguous_velocity_mps
-                        )
-                    ),
+                    float(track.state[0]),
+                    float(fold_velocity_mps(track.state[1], burst.unambiguous_velocity_mps)),
                 )
-                # One standard deviation of the innovation in each component, so
-                # the ellipse is the gate the associator actually applied.
+                # Three standard deviations of the estimate in each component,
+                # the extent of the track's uncertainty on the map.
                 gate_extent = (
-                    3.0 * float(np.sqrt(track.estimator.estimate.covariance[0, 0])),
-                    3.0 * float(np.sqrt(track.estimator.estimate.covariance[1, 1])),
+                    3.0 * float(np.sqrt(track.covariance[0, 0])),
+                    3.0 * float(np.sqrt(track.covariance[1, 1])),
                 )
 
         figure = render_range_doppler(
@@ -309,145 +564,60 @@ def render_frame(
         save_figure(figure, out_dir / f"rd{suffix}_{frame.index:05d}.png")
 
 
-def build_tracker(scenario: Scenario) -> tuple[ScenarioTracker, bool]:
-    """Build the tracker a scenario's [tracking] table asks for.
-
-    Returns the tracker and whether the scenario uses the simulated angle
-    measurement of §6.3, which the caller warns about. A scenario with two
-    bursts is tracked through the dual-PRF path, where the waveform resolves
-    the Doppler ambiguity and no unfolding is needed.
-    """
-    detection, tracking = configs_from_scenario(scenario)
-    simulated_angles = bool((scenario.tracking_table or {}).get("simulated_angles", False))
-    tracker = ScenarioTracker(
-        fold_span_mps=2.0 * scenario.bursts[0].unambiguous_velocity_mps,
-        frame_time_s=1.0 / scenario.frame_rate_hz,
-        detection=detection,
-        tracking=tracking,
-    )
-    return tracker, simulated_angles
-
-
-def track_frame(
-    tracker: ScenarioTracker,
-    scenario: Scenario,
-    frame: Frame,
-    products: list[RangeDopplerProduct],
-) -> FrameTracks:
-    """Advance the tracker one frame, by whichever path the waveform allows."""
-    if len(products) == 2:
-        spans_mps = [2.0 * burst.unambiguous_velocity_mps for burst in scenario.bursts]
-        measurements = dual_prf_measurements(products, spans_mps, config=tracker.detection)
-        return tracker.step_unfolded(measurements, frame_index=frame.index, time_s=frame.time_s)
-    return tracker.step(
-        products[0],
-        frame_index=frame.index,
-        time_s=frame.time_s,
-        truth_velocity_mps=frame.radial_velocity_mps,
-    )
-
-
-def write_tracking_csvs(out_dir: Path, frames: Sequence[FrameTracks]) -> tuple[Path, Path]:
-    """Write detections.csv and tracks.csv, per scenario 003 §9."""
-    detections_path = out_dir / "detections.csv"
-    with detections_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(DETECTION_COLUMNS)
-        for record in frames:
-            claimed = {index: track_id for track_id, index in record.associations.items()}
-            for index, measurement in enumerate(record.measurements):
-                writer.writerow(
-                    [
-                        record.frame_index,
-                        f"{record.time_s:.3f}",
-                        f"{measurement.range_m:.3f}",
-                        f"{measurement.velocity_folded_mps:.6f}",
-                        ""
-                        if measurement.velocity_unfolded_mps is None
-                        else f"{measurement.velocity_unfolded_mps:.6f}",
-                        "" if measurement.fold_index is None else measurement.fold_index,
-                        f"{measurement.peak_power_w:.6e}",
-                        measurement.n_cells,
-                        claimed.get(index, ""),
-                    ]
-                )
-
-    tracks_path = out_dir / "tracks.csv"
-    with tracks_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(TRACK_COLUMNS)
-        for record in frames:
-            for track in record.tracks:
-                covariance = track.estimator.estimate.covariance
-                writer.writerow(
-                    [
-                        record.frame_index,
-                        f"{record.time_s:.3f}",
-                        track.track_id,
-                        track.status,
-                        track.estimator.measurement_dim,
-                        f"{track.estimator.estimate.state[0]:.3f}",
-                        f"{track.estimator.estimate.state[1]:.6f}",
-                        f"{covariance[0, 0]:.6e}",
-                        f"{covariance[1, 1]:.6e}",
-                        ""
-                        if track.estimator.last_nis is None
-                        else f"{track.estimator.last_nis:.6f}",
-                        int(track.track_id in record.associations),
-                    ]
-                )
-    return detections_path, tracks_path
-
-
 def render_track_frame(
     out_dir: Path,
-    frames: Sequence[FrameTracks],
+    tracker: ScenarioTracker,
     truth_time_s: Sequence[float],
     truth_range_m: Sequence[float],
+    truth_range_rate_mps: Sequence[float],
 ) -> None:
-    """Draw the range-against-time history up to the most recent frame.
+    """Draw range and range rate against time, up to the most recent frame.
 
     Called once per frame so the series grow, which is what makes the assembled
-    movie show a track being built rather than a finished plot appearing.
+    movie show a track being built rather than a finished plot appearing. When
+    range folds, the truth is wrapped as the detections and the track are, so
+    all three are compared modulo the same period.
     """
     from radar_forge.viz.plotting import save_figure
     from radar_forge.viz.scopes.track_plot import render_range_time_history
 
+    frames = tracker.frames
     record = frames[-1]
+    range_period_m = tracker.folding_layout.coordinates[0].period
     detection_time_s = [entry.time_s for entry in frames for _ in entry.measurements]
     detection_range_m = [
         measurement.range_m for entry in frames for measurement in entry.measurements
     ]
 
-    # The longest-lived confirmed track, so the line does not jump between
-    # rivals from frame to frame.
-    counts: dict[int, int] = {}
-    for entry in frames:
-        for track in entry.tracks:
-            if track.is_confirmed:
-                counts[track.track_id] = counts.get(track.track_id, 0) + 1
-    track_time_s: list[float] = []
-    track_range_m: list[float] = []
-    track_sigma_m: list[float] = []
-    if counts:
-        best_id = max(counts, key=lambda key: counts[key])
-        for entry in frames:
-            for track in entry.tracks:
-                if track.track_id == best_id and track.is_confirmed:
-                    track_time_s.append(entry.time_s)
-                    track_range_m.append(float(track.estimator.estimate.state[0]))
-                    track_sigma_m.append(float(np.sqrt(track.estimator.estimate.covariance[0, 0])))
+    # The primary track, so the line does not jump between rivals from frame
+    # to frame, and is the track the metrics score.
+    primary_id = primary_track_id(frames)
+    primary = [
+        (entry.time_s, track)
+        for entry in frames
+        for track in entry.tracks
+        if track.track_id == primary_id and track.is_confirmed
+    ]
+    track_time_s = [time_s for time_s, _ in primary]
+    track_states: list[NDArray[np.float64]] = [track.state for _, track in primary]
+    track_sigma_m = [float(np.sqrt(track.covariance[0, 0])) for _, track in primary]
 
+    truth_m = tracker.folding_layout.wrap(
+        np.asarray(truth_range_m)[:, None], interval="nonnegative"
+    )
     figure = render_range_time_history(
         truth_time_s,
-        truth_range_m,
+        truth_m[:, 0],
         detection_time_s=detection_time_s,
         detection_range_m=detection_range_m,
         track_time_s=track_time_s or None,
-        track_range_m=track_range_m or None,
+        track_range_m=[float(state[0]) for state in track_states] or None,
         track_sigma_range_m=track_sigma_m or None,
         current_time_s=record.time_s,
         title=f"frame {record.frame_index}  t = {record.time_s:.1f} s",
+        truth_range_rate_mps=truth_range_rate_mps,
+        track_range_rate_mps=[float(state[1]) for state in track_states] or None,
+        range_period_m=range_period_m,
     )
     save_figure(figure, out_dir / f"track_{record.frame_index:05d}.png")
 
@@ -530,8 +700,11 @@ def assemble_movie(out_dir: Path, pattern: str, stem: str, frame_rate_hz: float)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    created_utc = datetime.now(UTC)
+    command = sys.argv if argv is None else [sys.argv[0], *argv]
     args = parse_args(argv)
     scenario = load_scenario(args.scenario)
+    epoch_utc = trajectory_epoch(scenario)
     out_dir = args.out
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -544,17 +717,21 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     tracking_enabled = scenario.tracking_table is not None and not args.no_tracking
     tracker: ScenarioTracker | None = None
-    tracked_frames: list[FrameTracks] = []
     truth_time_s: list[float] = []
     truth_range_m: list[float] = []
+    truth_range_rate_mps: list[float] = []
     if tracking_enabled:
-        tracker, simulated_angles = build_tracker(scenario)
-        print(
-            f"  tracking: {tracker.tracking.state_model}, "
-            f"unfolding {tracker.tracking.unfolding_mode}, "
-            f"bootstrap {tracker.min_unfold_frames} frames"
+        tracker = ScenarioTracker.from_scenario(scenario)
+        bootstrap = (
+            ""
+            if tracker.min_unfold_frames is None
+            else f", bootstrap {tracker.min_unfold_frames} frames"
         )
-        if simulated_angles:
+        print(
+            f"  tracking: {tracker.tracking.estimator}, {tracker.tracking.state_model}, "
+            f"unfolding {tracker.tracking.unfolding_mode}{bootstrap}"
+        )
+        if (scenario.tracking_table or {}).get("simulated_angles", False):
             # §6.3: the angles are a crutch and must be labelled as one
             # everywhere they appear, so that no stored run is ambiguous about
             # whether its angles were real.
@@ -578,25 +755,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                 break
             # Truth is the true, unfolded geometry in every variant; the gap
             # between it and the map is what the scenario is for.
-            row = [
+            # Shortest round-trip precision, as every data-001 table is
+            # written (_cell), not a fixed number of decimals.
+            row: list[object] = [
                 frame.index,
-                f"{frame.time_s:.3f}",
-                f"{frame.range_m:.3f}",
-                f"{frame.radial_velocity_mps:.6f}",
-                f"{frame.azimuth_deg:.6f}",
-                f"{frame.elevation_deg:.6f}",
+                frame.time_s,
+                frame.range_m,
+                frame.radial_velocity_mps,
+                frame.azimuth_deg,
+                frame.elevation_deg,
             ]
             if (
                 frame.range_tx_m is not None
                 and frame.range_rx_m is not None
                 and frame.bistatic_angle_deg is not None
             ):
-                row += [
-                    f"{frame.range_tx_m:.3f}",
-                    f"{frame.range_rx_m:.3f}",
-                    f"{frame.bistatic_angle_deg:.6f}",
-                ]
-            writer.writerow(row)
+                row += [frame.range_tx_m, frame.range_rx_m, frame.bistatic_angle_deg]
+            writer.writerow([_cell(value) for value in row])
 
             if not args.no_iq:
                 arrays = {f"burst{index}": cube for index, cube in enumerate(frame.iq)}
@@ -624,44 +799,80 @@ def main(argv: Sequence[str] | None = None) -> int:
                     for cube, burst in zip(frame.iq, scenario.bursts, strict=True)
                 ]
 
-            record: FrameTracks | None = None
             if tracker is not None:
-                record = track_frame(tracker, scenario, frame, products)
-                tracked_frames.append(record)
+                tracker.step(
+                    products,
+                    frame_index=frame.index,
+                    time_s=frame.time_s,
+                    truth_velocity_mps=frame.radial_velocity_mps,
+                )
                 truth_time_s.append(frame.time_s)
                 truth_range_m.append(frame.range_m)
+                truth_range_rate_mps.append(frame.radial_velocity_mps)
 
             if not args.no_plots:
-                render_frame(frame, scenario, products, out_dir, args.dynamic_range_db, record)
-                if record is not None:
-                    render_track_frame(out_dir, tracked_frames, truth_time_s, truth_range_m)
+                render_frame(
+                    frame,
+                    scenario,
+                    products,
+                    out_dir,
+                    args.dynamic_range_db,
+                    tracker.frames if tracker is not None else (),
+                )
+                if tracker is not None:
+                    render_track_frame(
+                        out_dir, tracker, truth_time_s, truth_range_m, truth_range_rate_mps
+                    )
             if show_progress:
                 peaks = [peak_range_velocity(product) for product in products]
                 summary = "  ".join(f"[{r / 1e3:6.2f} km {v:+7.2f} m/s]" for r, v in peaks)
                 print(f"  frame {written}/{n_frames}  peak {summary}")
 
-    write_metadata(scenario, out_dir, written)
+    write_metadata(
+        scenario,
+        out_dir,
+        written,
+        tracker=tracker,
+        created_utc=created_utc,
+        epoch_utc=epoch_utc,
+        command=command,
+    )
     print(f"  wrote {truth_path}")
 
-    if tracked_frames:
-        detections_path, tracks_path = write_tracking_csvs(out_dir, tracked_frames)
-        print(f"  wrote {detections_path}")
-        print(f"  wrote {tracks_path}")
-        confirmed = {
-            track.track_id
-            for record in tracked_frames
-            for track in record.tracks
-            if track.is_confirmed
-        }
-        n_tracked = sum(
-            1 for record in tracked_frames if any(t.is_confirmed for t in record.tracks)
+    if tracker is not None and tracker.frames:
+        with_time_utc = epoch_utc is not None
+        write_detections_csv(
+            out_dir / "detections.csv",
+            detection_rows(tracker.frames, scenario, epoch_utc),
+            with_time_utc=with_time_utc,
         )
+        write_tracks_csv(
+            out_dir / "tracks.csv",
+            track_rows(tracker.frames, tracker.tracking.state_model, epoch_utc),
+            with_time_utc=with_time_utc,
+        )
+        metrics = score_primary_track(
+            tracker.frames,
+            truth_range_m,
+            truth_range_rate_mps,
+            folding_layout=tracker.folding_layout,
+        )
+        write_metrics_csv(out_dir / "metrics.csv", metric_rows(metrics))
+        for name in ("detections.csv", "tracks.csv", "metrics.csv"):
+            print(f"  wrote {out_dir / name}")
+        values = {row.metric: row.value for row in metrics}
         print(
-            f"  tracked {n_tracked}/{len(tracked_frames)} frames "
-            f"under {len(confirmed)} confirmed track id(s)"
+            f"  tracked {values['n_tracked_frames']:.0f}/{len(tracker.frames)} frames "
+            f"under {values['n_confirmed_tracks']:.0f} confirmed track id(s)"
         )
+        if "n_confirmed_frames" in values:
+            print(
+                f"  primary track: confirmed in {values['n_confirmed_frames']:.0f} frames, "
+                f"range RMSE {values['range_rmse_m']:.1f} m, "
+                f"range-rate RMSE {values['range_rate_rmse_mps']:.2f} m/s"
+            )
 
-    if not args.no_plots and not args.no_movie and tracked_frames:
+    if not args.no_plots and not args.no_movie and tracker is not None and tracker.frames:
         movie = assemble_movie(out_dir, "track_%05d.png", "track", scenario.frame_rate_hz)
         if movie is not None:
             print(f"  wrote {movie}")

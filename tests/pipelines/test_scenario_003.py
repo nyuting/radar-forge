@@ -12,7 +12,7 @@ frames are therefore unresolvable by any selector, and criteria 3 and 4 are
 asserted at the measured values rather than the specification's original ones.
 
 `scenario_003_tracking_dual_prf.toml` runs the same tracker over S3, where the
-coprime 5:6 kHz pair resolves velocity in the waveform to +-191 m/s and §5.3
+coprime 5:6 kHz pair resolves velocity in the waveform to +-229 m/s and §5.3
 disappears. It meets criteria 1 to 4 as originally written, by a wide margin,
 which is what shows that S1's numbers are a property of its waveform and not a
 defect in the tracker.
@@ -23,6 +23,7 @@ range-only for its first ten frames and S1's first fold change is at frame 17;
 a fifteen-frame window would assert criterion 4 against a single constant fold.
 """
 
+import tomllib
 from dataclasses import replace
 from pathlib import Path
 
@@ -34,11 +35,8 @@ from radar_forge.pipelines.scenarios import (
     iterate_frames,
     load_scenario,
 )
-from radar_forge.pipelines.tracking import (
-    ScenarioTracker,
-    configs_from_scenario,
-    dual_prf_measurements,
-)
+from radar_forge.pipelines.tracking import ScenarioTracker, primary_track_id, range_layout
+from radar_forge.pipelines.trajectories import load_flight_csv, resample, to_radar_frame
 
 pytestmark = pytest.mark.slow
 
@@ -57,15 +55,7 @@ def run(toml_path, n_frames=N_FRAMES):
     """
     scenario = load_scenario(toml_path)
     scenario = replace(scenario, duration_s=n_frames / scenario.frame_rate_hz)
-    detection, tracking = configs_from_scenario(scenario)
-    spans_mps = [2.0 * burst.unambiguous_velocity_mps for burst in scenario.bursts]
-
-    tracker = ScenarioTracker(
-        fold_span_mps=spans_mps[0],
-        frame_time_s=1.0 / scenario.frame_rate_hz,
-        detection=detection,
-        tracking=tracking,
-    )
+    tracker = ScenarioTracker.from_scenario(scenario)
 
     records = []
     for frame in iterate_frames(scenario):
@@ -73,18 +63,12 @@ def run(toml_path, n_frames=N_FRAMES):
             form_range_doppler_map(cube, burst)
             for cube, burst in zip(frame.iq, scenario.bursts, strict=True)
         ]
-        if len(products) == 2:
-            measurements = dual_prf_measurements(products, spans_mps, config=detection)
-            result = tracker.step_unfolded(
-                measurements, frame_index=frame.index, time_s=frame.time_s
-            )
-        else:
-            result = tracker.step(
-                products[0],
-                frame_index=frame.index,
-                time_s=frame.time_s,
-                truth_velocity_mps=frame.radial_velocity_mps,
-            )
+        result = tracker.step(
+            products,
+            frame_index=frame.index,
+            time_s=frame.time_s,
+            truth_velocity_mps=frame.radial_velocity_mps,
+        )
         confirmed = [track for track in result.tracks if track.is_confirmed]
         records.append((frame, confirmed, result))
     return scenario, tracker, records
@@ -107,7 +91,7 @@ def from_first_confirmation(records):
 
 def primary(confirmed, frame):
     """The confirmed track closest to truth in range."""
-    return min(confirmed, key=lambda track: abs(track.estimator.estimate.state[0] - frame.range_m))
+    return min(confirmed, key=lambda track: abs(track.state[0] - frame.range_m))
 
 
 @pytest.fixture(scope="module")
@@ -149,7 +133,7 @@ class TestS1:
     def test_criterion_2_range_rmse_is_well_inside_one_bin(self, s1_run):
         scenario, _, records = s1_run
         errors_m = [
-            primary(confirmed, frame).estimator.estimate.state[0] - frame.range_m
+            primary(confirmed, frame).state[0] - frame.range_m
             for frame, confirmed, _ in records
             if confirmed
         ]
@@ -170,9 +154,9 @@ class TestS1:
         """
         _, _, records = s1_run
         errors = [
-            primary(confirmed, frame).estimator.estimate.state[1] - frame.radial_velocity_mps
+            primary(confirmed, frame).state[1] - frame.radial_velocity_mps
             for frame, confirmed, _ in records
-            if confirmed and primary(confirmed, frame).estimator.measurement_dim == 2
+            if confirmed and primary(confirmed, frame).measurement_dim == 2
         ]
         if errors:
             assert float(np.sqrt(np.mean(np.square(errors)))) < 12.0
@@ -197,7 +181,7 @@ class TestS1:
             if not confirmed:
                 continue
             track = primary(confirmed, frame)
-            if track.track_id not in result.associations or track.estimator.measurement_dim != 2:
+            if track.track_id not in result.associations or track.measurement_dim != 2:
                 continue
             measurement = result.measurements[result.associations[track.track_id]]
             total += 1
@@ -215,11 +199,11 @@ class TestS1:
         _, _, records = s1_run
         samples = [
             (
-                primary(confirmed, frame).estimator.last_nis,
-                primary(confirmed, frame).estimator.measurement_dim,
+                primary(confirmed, frame).nis,
+                primary(confirmed, frame).measurement_dim,
             )
             for frame, confirmed, _ in records
-            if confirmed and primary(confirmed, frame).estimator.last_nis is not None
+            if confirmed and primary(confirmed, frame).nis is not None
         ]
         assert samples
         values = np.array([value for value, _ in samples])
@@ -275,7 +259,7 @@ class TestDualPrf:
     def test_criterion_2_range_rmse_is_far_inside_one_bin(self, dual_prf_run):
         scenario, _, records = dual_prf_run
         errors_m = [
-            primary(confirmed, frame).estimator.estimate.state[0] - frame.range_m
+            primary(confirmed, frame).state[0] - frame.range_m
             for frame, confirmed, _ in records
             if confirmed
         ]
@@ -286,7 +270,7 @@ class TestDualPrf:
         """The criterion as originally written, met because §5.3 is not needed."""
         _, _, records = dual_prf_run
         errors = [
-            primary(confirmed, frame).estimator.estimate.state[1] - frame.radial_velocity_mps
+            primary(confirmed, frame).state[1] - frame.radial_velocity_mps
             for frame, confirmed, _ in records
             if confirmed
         ]
@@ -298,7 +282,8 @@ class TestDualPrf:
         span_mps = 2.0 * scenario.bursts[0].unambiguous_velocity_mps
         for frame, confirmed, result in records:
             for measurement in result.measurements:
-                assert measurement.velocity_unfolded_mps is not None
+                if measurement.status == "accepted":
+                    assert measurement.velocity_unfolded_mps is not None
             if not confirmed:
                 continue
             track = primary(confirmed, frame)
@@ -315,5 +300,83 @@ class TestDualPrf:
         _, _, records = dual_prf_run
         for frame, confirmed, _ in records:
             if confirmed:
-                assert primary(confirmed, frame).estimator.measurement_dim == 2
+                assert primary(confirmed, frame).measurement_dim == 2
                 break
+
+
+@pytest.mark.parametrize(
+    "name", ["scenario_003_tracking_dual_prf", "scenario_003_ukf_fmcw_dual_prf"]
+)
+def test_the_target_stays_inside_both_dual_prf_maps(name):
+    """dual_prf_detections pairs on the assumption that both maps see the true range.
+
+    The two bursts' range axes span different ranges, and a target beyond the
+    shorter would read differently on each and never pair. Nothing checks this
+    at run time, so it is checked here, from the truth, over each window.
+    """
+    scenario = load_scenario(SCENARIOS_DIR / f"{name}.toml")
+    trajectory = load_flight_csv(scenario.trajectory_path, altitude_m=scenario.target_altitude_m)
+    truth_m = to_radar_frame(
+        resample(trajectory, scenario.frame_times_s), scenario.bursts[0]
+    ).range_m
+    spans_m = [range_layout(burst).coordinates[0].period for burst in scenario.bursts]
+    assert None not in spans_m
+    assert float(np.max(truth_m)) < min(span_m for span_m in spans_m if span_m is not None)
+
+
+# Criterion C4 (spec/scenario-003-tracking.md §14.11): frames, of the 120, in
+# which the primary track is confirmed. The targets are §14.11's, set below
+# what the UKF reached (118, 59 and 118) so that a regression fails and a run
+# that merely varies does not.
+C4_TARGETS = {
+    "scenario_003_ukf_fmcw_low_prf": 118,
+    "scenario_003_ukf_pulsed_medium_prf": 13,
+    "scenario_003_ukf_fmcw_dual_prf": 94,
+}
+
+
+@pytest.mark.parametrize(("name", "target"), C4_TARGETS.items())
+def test_the_ukf_meets_c4_over_the_whole_window(name, target):
+    """The UKF holds the primary track confirmed in at least C4's frames.
+
+    Slow: a full 120-frame run of each waveform, a few seconds each.
+    """
+    toml_path = SCENARIOS_DIR / f"{name}.toml"
+    _, tracker, _ = run(toml_path, n_frames=load_scenario(toml_path).n_frames)
+    primary_id = primary_track_id(tracker.frames)
+    n_confirmed = sum(
+        any(t.track_id == primary_id and t.is_confirmed for t in frame.tracks)
+        for frame in tracker.frames
+    )
+    assert n_confirmed >= target
+
+
+# Each scenario 003 file is its scenario 001 twin plus [detection] and
+# [tracking]. The two Kalman files also move the window to 663 s (§14.10).
+TWINS = [
+    ("scenario_003_ukf_fmcw_low_prf", "scenario_001_fmcw_low_prf"),
+    ("scenario_003_ukf_pulsed_medium_prf", "scenario_001_pulsed_medium_prf"),
+    ("scenario_003_ukf_fmcw_dual_prf", "scenario_001_fmcw_dual_prf"),
+    ("scenario_003_tracking", "scenario_001_fmcw_low_prf"),
+    ("scenario_003_tracking_dual_prf", "scenario_001_fmcw_dual_prf"),
+]
+
+
+def _scene(name):
+    """A scenario TOML's tables, less what scenario 003 adds or renames."""
+    tables = tomllib.loads((SCENARIOS_DIR / f"{name}.toml").read_text(encoding="utf-8"))
+    tables.pop("detection", None)
+    tables.pop("tracking", None)
+    for key in ("name", "description"):
+        tables["scenario"].pop(key)
+    tables["trajectory"].pop("start_time_s")
+    return tables
+
+
+@pytest.mark.parametrize(("copy", "original"), TWINS)
+def test_a_scenario_003_file_matches_its_scenario_001_twin(copy, original):
+    """The copies have no include, so this is what keeps them the same scenario.
+
+    Tables are compared, not text, so the comments are free to differ.
+    """
+    assert _scene(copy) == _scene(original)

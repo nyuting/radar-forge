@@ -342,7 +342,8 @@ def test_a_target_keeps_one_track_through_clutter_and_missed_detections(
     strict=True,
     reason=(
         "Several detections of one target in one scan each start a track, and GNN keeps "
-        "all of them fed. Fixed on the detection side by PR B: one detection per target."
+        "all of them fed. The tracker leaves this to detection, which clusters each target "
+        "into one detection: see tests/pipelines/test_tracking.py::TestUkfPath."
     ),
 )
 def test_several_detections_of_one_target_give_one_confirmed_track(
@@ -509,3 +510,49 @@ def test_build_tracker_rejects_an_unknown_association() -> None:
 def test_build_tracker_rejects_impossible_sigma_point_settings_before_any_track() -> None:
     with pytest.raises(ValueError, match="alpha"):
         one_axis_tracker(alpha=0.0)
+
+
+# --------------------------------------------------------------------------- #
+# What the last scan did: associations and NIS
+# --------------------------------------------------------------------------- #
+
+
+def test_a_snapshot_records_which_measurement_its_track_took_and_its_nis() -> None:
+    """The NIS recorded is the one the gate scored, computed before the update."""
+    tracker = confirmed_tracker()
+    (track,) = tracker.tracks
+    scan = batch(tracker, 5.0, [500.0, 115.0])
+    predicted = copy.deepcopy(track.estimator)
+    predicted.predict_to(5.0)
+    stats = predicted.innovation_statistics(
+        scan.measurements[1], tracker.measurement_models["measurement"]
+    )
+
+    snapshots = {snapshot.track_id: snapshot for snapshot in tracker.process(scan)}
+
+    updated = snapshots[track.track_id]
+    assert updated.measurement_index == 1
+    assert updated.nis is not None
+    np.testing.assert_allclose(updated.nis, stats.nis, rtol=1e-12)
+    assert (updated.n_hits, updated.n_misses) == (track.n_hits, 0)
+
+
+def test_a_track_born_in_a_scan_names_its_measurement_and_has_no_nis() -> None:
+    """A birth took a measurement, so it has an index; it had no prediction, so no NIS."""
+    tracker = confirmed_tracker()
+    (track,) = tracker.tracks
+    snapshots = tracker.process(batch(tracker, 5.0, [5000.0]))
+
+    (born,) = [snapshot for snapshot in snapshots if snapshot.track_id != track.track_id]
+    assert (born.measurement_index, born.nis) == (0, None)
+    assert (born.n_hits, born.n_misses) == (1, 0)
+
+
+def test_a_track_that_missed_took_no_measurement() -> None:
+    tracker = confirmed_tracker()
+    (track,) = tracker.tracks
+    snapshots = {s.track_id: s for s in tracker.process(batch(tracker, 5.0, [5000.0]))}
+
+    missed = snapshots[track.track_id]
+    assert (missed.measurement_index, missed.nis) == (None, None)
+    assert missed.n_misses == 1

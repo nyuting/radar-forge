@@ -43,6 +43,9 @@ def render_range_time_history(
     current_time_s: float | None = None,
     title: str | None = None,
     range_margin_m: float = 1_000.0,
+    truth_range_rate_mps: ArrayLike | None = None,
+    track_range_rate_mps: ArrayLike | None = None,
+    range_period_m: float | None = None,
 ) -> Any:
     """Draw the truth, the detections and the track history against time.
 
@@ -75,6 +78,19 @@ def render_range_time_history(
         Detections outside the limits are counted in a corner note rather than
         silently dropped; a marker that vanishes off-plot leaves the reader with
         a picture that looks cleaner than the data.
+    truth_range_rate_mps : array_like, optional
+        Shape ``(n_frames,)``. The true range rate, closing-positive. When
+        given, a second panel below the first plots range rate against time,
+        with ``track_range_rate_mps`` if that is given too.
+    track_range_rate_mps : array_like, optional
+        Shape ``(n_track_frames,)``. The track's range-rate estimate. Needs
+        ``truth_range_rate_mps``.
+    range_period_m : float, optional
+        The range period when range folds: the radar sees range only modulo
+        this, so the absolute range is unknown. Pass every range already
+        wrapped into ``[0, range_period_m)``. The axis is then labelled as a
+        modulo range and spans one period, and a line is broken where it wraps
+        rather than drawn across the plot.
 
     Returns
     -------
@@ -85,8 +101,9 @@ def render_range_time_history(
     Raises
     ------
     ValueError
-        If the truth arrays disagree in shape, or a paired optional argument is
-        supplied without its partner.
+        If the truth arrays disagree in shape, a paired optional argument is
+        supplied without its partner, or ``track_range_rate_mps`` is given
+        without ``truth_range_rate_mps``.
 
     Notes
     -----
@@ -108,11 +125,19 @@ def render_range_time_history(
 
     _require_pair(detection_time_s, detection_range_m, "detection")
     _require_pair(track_time_s, track_range_m, "track")
+    if track_range_rate_mps is not None and truth_range_rate_mps is None:
+        msg = "track_range_rate_mps needs truth_range_rate_mps, which draws its panel."
+        raise ValueError(msg)
 
-    figure, axes = plt.subplots(figsize=(8.0, 5.0))
+    if truth_range_rate_mps is None:
+        figure, axes = plt.subplots(figsize=(8.0, 5.0))
+    else:
+        figure, (axes, rate_axes) = plt.subplots(
+            2, 1, sharex=True, figsize=(8.0, 7.0), height_ratios=(2.0, 1.0)
+        )
     axes.plot(
         time_s,
-        range_m * 1.0e-3,
+        _break_at_wraps(range_m, range_period_m) * 1.0e-3,
         color="tab:green",
         linewidth=1.8,
         label="truth",
@@ -147,7 +172,7 @@ def render_range_time_history(
             )
         axes.plot(
             track_s,
-            track_m * 1.0e-3,
+            _break_at_wraps(track_m, range_period_m) * 1.0e-3,
             color="tab:blue",
             linewidth=1.4,
             linestyle="--",
@@ -158,7 +183,11 @@ def render_range_time_history(
     if current_time_s is not None:
         axes.axvline(current_time_s, color="0.4", linewidth=0.8, linestyle=":", zorder=0)
 
-    lower_m, upper_m = _range_limits_m(range_m, track_range_m, range_margin_m)
+    lower_m, upper_m = (
+        (0.0, range_period_m)
+        if range_period_m is not None
+        else _range_limits_m(range_m, track_range_m, range_margin_m)
+    )
     axes.set_ylim(lower_m * 1.0e-3, upper_m * 1.0e-3)
     if detection_range_m is not None:
         detections_m = np.asarray(detection_range_m, dtype=np.float64)
@@ -175,14 +204,56 @@ def render_range_time_history(
                 color="tab:orange",
             )
 
-    axes.set_xlabel("Time (s)")
-    axes.set_ylabel("Range (km)")
+    axes.set_ylabel(
+        "Range (km)"
+        if range_period_m is None
+        else f"Range modulo {range_period_m * 1.0e-3:.3f} km (km)"
+    )
     axes.grid(visible=True, alpha=0.25)
     axes.legend(loc="best", framealpha=0.85, fontsize="small")
     if title is not None:
         axes.set_title(title)
 
+    if truth_range_rate_mps is None:
+        axes.set_xlabel("Time (s)")
+        return figure
+
+    rate_axes.plot(
+        time_s,
+        np.asarray(truth_range_rate_mps, dtype=np.float64),
+        color="tab:green",
+        linewidth=1.8,
+        label="truth",
+    )
+    if track_time_s is not None and track_range_rate_mps is not None:
+        rate_axes.plot(
+            np.asarray(track_time_s, dtype=np.float64),
+            np.asarray(track_range_rate_mps, dtype=np.float64),
+            color="tab:blue",
+            linewidth=1.4,
+            linestyle="--",
+            label="track",
+        )
+    if current_time_s is not None:
+        rate_axes.axvline(current_time_s, color="0.4", linewidth=0.8, linestyle=":", zorder=0)
+    rate_axes.set_xlabel("Time (s)")
+    rate_axes.set_ylabel("Range rate, closing (m/s)")
+    rate_axes.grid(visible=True, alpha=0.25)
     return figure
+
+
+def _break_at_wraps(value: NDArray[np.float64], period: float | None) -> NDArray[np.float64]:
+    """Return ``value`` with NaN where it wraps, so a line is not drawn across the plot.
+
+    A jump of more than half a period between neighbours is a wrap, not motion.
+    Matplotlib leaves a gap at a NaN, so setting the point after each jump to
+    NaN breaks the line there and costs that one point.
+    """
+    if period is None or value.size < 2:
+        return value
+    broken = value.copy()
+    broken[1:][np.abs(np.diff(value)) > period / 2.0] = np.nan
+    return broken
 
 
 def _range_limits_m(

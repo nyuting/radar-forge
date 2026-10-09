@@ -253,11 +253,14 @@ others do not: `unfold_doppler_dual_prf`.
 | Receive | Deramp, `sample_rate_hz` = 4.0 MHz |
 | Unambiguous range | 29.979 km (A) / 24.983 km (B) — both cover the track |
 | Per-burst unambiguous velocity | ±38.2388 m/s (A) / ±45.8866 m/s (B) |
-| **After unfolding** | **±191.194 m/s** — extension ×5 from the 5:6 PRF ratio |
+| **After unfolding** | **±229.433 m/s** — extension ×6 of burst A's, ×5 of burst B's, from the 5:6 PRF ratio |
 | CPI | 25.60 ms + 21.33 ms ≈ 47 ms |
 
 The PRF ratio 5:6 is coprime, so the pair of folded velocity estimates identifies the true velocity
-uniquely up to 5 × 38.2388 = 191.194 m/s — matching S2's limit by a completely different mechanism.
+uniquely up to 6 × 38.2388 = 5 × 45.8866 = 229.433 m/s, beyond S2's ±191.194 m/s, by a completely
+different mechanism. The pair of folded readings repeats when the velocity moves by a common multiple
+of the two fold spans, 2 × 38.2388 and 2 × 45.8866 m/s; the least is 6 × 76.4777 = 5 × 91.7732 =
+458.866 m/s, which centred on zero is ±229.433 m/s.
 
 > Burst B's `chirp_duration_s` is exactly `1/6000` s, not the rounded 166.7 µs. At 6 kHz PRF the
 > rounded value is a duty cycle of 1.0002 and `Transmitter` rejects it: the next chirp would start

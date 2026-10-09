@@ -90,6 +90,33 @@ class TrackSnapshot:
     source_sensor_ids : frozenset of str
         Every sensor that has given the track a measurement, including the one
         it was born from.
+    n_hits : int
+        Scans in which the track was updated with a measurement, counting its
+        birth.
+    n_misses : int
+        Scans in a row without a measurement.
+    measurement_index : int or None
+        The index, into the scan's ``MeasurementBatch.measurements``, of the
+        measurement the track was updated with, or born from, in the scan the
+        snapshot reports. ``None`` if it took none.
+    nis : float or None
+        The normalised innovation squared of that update, computed before it
+        [1]_. ``None`` if the track took no measurement, or was born, since a
+        birth has no prediction to compare against.
+
+    Notes
+    -----
+    Stone Soup carries the same thing on the track's state instead: each
+    ``GaussianStateUpdate`` holds the ``hypothesis`` that made it, with its
+    ``measurement`` and ``measurement_prediction``. A snapshot holds the
+    index and the NIS only, which is what ``tracks.csv`` needs (data-001
+    §6.6).
+
+    References
+    ----------
+    .. [1] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with
+           Applications to Tracking and Navigation*, Wiley, 2001, §5.4.2
+           (the NIS test).
     """
 
     track_id: int
@@ -97,6 +124,10 @@ class TrackSnapshot:
     status: TrackStatus
     last_measurement_time_s: float
     source_sensor_ids: frozenset[str]
+    n_hits: int
+    n_misses: int
+    measurement_index: int | None
+    nis: float | None
 
     @property
     def timestamp_s(self) -> float:
@@ -187,7 +218,12 @@ class Track(Generic[FilterT]):
         """Whether the track has passed the M-of-N test: confirmed or coasting."""
         return self.status in ("confirmed", "coasting")
 
-    def snapshot(self: Track[Estimator]) -> TrackSnapshot:
+    def snapshot(
+        self: Track[Estimator],
+        *,
+        measurement_index: int | None = None,
+        nis: float | None = None,
+    ) -> TrackSnapshot:
         """Return a frozen copy of the track as it is now.
 
         Only a track whose filter is an
@@ -195,12 +231,21 @@ class Track(Generic[FilterT]):
         snapshot, because only an estimator reports a timed
         :class:`~radar_forge.core.tracking.coordinates.StateEstimate`.
 
+        Parameters
+        ----------
+        measurement_index : int or None, optional
+            The index of the measurement the track took in this scan, if any.
+            The track does not know it, so the tracker passes it in.
+        nis : float or None, optional
+            The NIS of that update, if it was one.
+
         Returns
         -------
         TrackSnapshot
-            The track's identifier, status, last measurement time and source
-            sensors, and a copy of its current estimate. The copy's arrays are
-            read-only and do not share memory with the filter.
+            The track's identifier, status, counters, last measurement time and
+            source sensors, the two arguments, and a copy of its current
+            estimate. The copy's arrays are read-only and do not share memory
+            with the filter.
         """
         state = self.estimator.state
         # Build a new StateEstimate, which copies the arrays. Then a caller who
@@ -212,4 +257,8 @@ class Track(Generic[FilterT]):
             self.status,
             self.last_measurement_time_s,
             frozenset(self.source_sensor_ids),
+            self.n_hits,
+            self.n_misses,
+            measurement_index,
+            nis,
         )

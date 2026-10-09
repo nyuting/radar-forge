@@ -26,8 +26,10 @@
 
 ## 1. Status, purpose and scope
 
-Status: **proposed**. Schema version **1.0.0**. Nothing below is implemented yet except where §12
-says today's writer already matches.
+Status: **proposed**. Schema version **1.1.0**. `scripts/run_scenario.py` writes `metadata.json`
+(§6.1, all but `files`), `detections.csv` (§6.5), `tracks.csv` (§6.6, for the `range_1d` state
+model) and `metrics.csv` (§6.9). Nothing else below is implemented yet except where §12 says
+today's writer already matches.
 
 Today each scenario specification defines its own output files:
 `spec/scenario-001-xband.md` §3.6, `spec/scenario-002-bistatic.md` §3.6 and
@@ -166,7 +168,7 @@ original scenario file has been edited.
 | **Identifiers** | `target_id`, `track_id`, `sensor_id`: strings or integers, stable for the whole run, never reused. `detection_id` is an integer that is unique **within a frame**, so `(frame, detection_id)` is the detection key |
 | **Missing values** | An **empty cell** means *not applicable or not yet known*: `velocity_unfolded_mps` before a track can unfold, or `associated_track_id` for a false alarm. `NaN` means *computed and invalid*. The two are never interchanged. In HDF5, an absent dataset means not applicable |
 | **Booleans** | `0` / `1` in CSV (it is what the current writer emits, and every reader parses it). `uint8` in HDF5 attributes |
-| **Enumerations** | Lowercase ASCII strings: `tentative`, `confirmed`, `coasting`, `deleted`; `fmcw`, `pulsed`; `range_1d`, `enu_2d`, `enu_3d` |
+| **Enumerations** | Lowercase ASCII strings: `tentative`, `confirmed`, `coasting`, `deleted`; `fmcw`, `pulsed`; `range_1d`, `enu_2d`, `enu_3d`; `accepted`, `missing_pair`, `ambiguous_pair`, `unresolved_velocity` |
 | **Numeric precision** | Floats are written with the shortest representation that round-trips exactly: Python's `repr` / `str`, or C's `%.17g`. Never a fixed `%.3f` (DF9). Arrays are `float64` / `complex128`, except recorded hardware IQ (§6.7) |
 | **Array axis order** | The library's in-memory order from `style.md` §3.1: slow time before fast time, receive channels last, with the frame axis added in front. Axes are named in the file, so no reader has to guess (DF1) |
 
@@ -184,7 +186,7 @@ the ones marked *new*.
 
 | Key | Type | Content |
 | :--- | :--- | :--- |
-| `schema_version` *new* | string | Semver of this spec, `"1.0.0"` |
+| `schema_version` *new* | string | Semver of this spec, `"1.1.0"` |
 | `run_id` *new* | string | `<scenario-name>-<created_utc as YYYYMMDDTHHMMSSZ>` unless the caller overrides it. The run directory is named after it |
 | `created_utc` *new* | string | ISO 8601 UTC instant the run started |
 | `epoch_utc` *new* | string or null | §5 Time |
@@ -194,7 +196,7 @@ the ones marked *new*.
 | `sites`, `target` | object | As today |
 | `bursts` | array | As today, one object per burst: waveform, `f0_hz`, `bandwidth_hz`, `prf_hz`, `n_pulses`, `n_samples`, resolutions, unambiguous range and velocity, `noise_power_w` |
 | `detection` | object or null | As today: the resolved `[detection]` table |
-| `tracking` | object or null | As today, including `simulated_angles` (`spec/scenario-003-tracking.md` §6.3). **Adds** `state_model` and `state_fields`: the ordered list of state-vector column names, e.g. `["east_m", "north_m", "east_rate_mps", "north_rate_mps"]`. §6.6's covariance columns are indexed by it |
+| `tracking` | object or null | As today, including `simulated_angles` (`spec/scenario-003-tracking.md` §6.3). **Adds** `state_model` and `state_fields`: the ordered list of state-vector column names, e.g. `["east_m", "north_m", "east_rate_mps", "north_rate_mps"]`. §6.6's covariance columns are indexed by it. **Adds** `range_period_m`: when the tracker measures range modulo a period, that period, and every `range_m` in `detections.csv` and `tracks.csv` lies in `[0, range_period_m)`. `null` when range is absolute. **Adds** `unused`: the names of the settings, among those recorded, that the chosen `estimator` did not read, so that no recorded value is mistaken for one the run used |
 | `provenance` | object | As today, `radar_forge_version` and `git_commit`. **Adds** `python_version`, `numpy_version`, and `command` (the argv that produced the run) |
 | `files` *new* | array | One object per file written: `path` (relative), `level` (`L0`–`L4`, `truth`, `metrics`, `export`, `figure`), `format`, `sha256`, `size_bytes`. The inventory is what lets the validator tell a truncated run from a complete one |
 
@@ -283,6 +285,9 @@ polar position, a Doppler speed and an amplitude. The units are SI, not ASTERIX'
 | `snr_db` | float64 | dB | O | *new*. `10 log10(peak_power_w / noise_power_w)` using the burst's `noise_power_w`. A convenience beside its linear source (§2.4) |
 | `n_cells` | int | — | R | Cells in the cluster |
 | `associated_track_id` | string | — | T | Empty for an unassociated detection (a false alarm or a new track seed) |
+| `burst_index` | int | — | R | *new*. The burst whose map the detection was found in, `0` for a single-burst run. `range_index` and `velocity_index` index that burst's map |
+| `status` | enum | — | R | *new*. What became of the detection on its way to the tracker: `accepted` (passed to it); or, for a dual-PRF pair, `missing_pair` (no detection in the other burst within the range tolerance), `ambiguous_pair` (one within it, but not mutually nearest) or `unresolved_velocity` (paired, but the two folded velocities agree on no unfolded one). Only the first burst's `accepted` detections reach the tracker |
+| `pair_id` | int | — | R | *new*. The same integer on the two detections of a dual-PRF pair, unique within the frame. Empty for a detection that was not paired |
 
 ### 6.6 `tracks.csv`
 
@@ -310,7 +315,7 @@ closes the gap scenario 003 §9 left open. That spec promised the ENU state colu
 | `latitude_deg`, `longitude_deg`, `altitude_m` | float64 | deg, deg, m | O | *new*. Derived for ENU models, for geodetic consumers |
 | `nis` | float64 | — | R | Normalised innovation squared of the last update. Empty on a miss |
 | `associated` | 0/1 | — | R | Updated this frame |
-| `associated_detection_id` | int | — | R | *new*. Empty on a miss. The key back into `detections.csv` |
+| `associated_detection_id` | int | — | R | *new*. Empty on a miss. The key back into `detections.csv`. On a track's first row it names the detection the track was born from, with `associated` 0, since a seed is not an update |
 
 For `range_1d`, `state_fields` is `["range_m", "range_rate_mps"]`, and the state *is* the
 `range_m` / `range_rate_mps` columns. There is one off-diagonal, `cov_0_1`, in m²/s. The covariance
@@ -390,7 +395,7 @@ could disagree with it.
 
 | Column | dtype | Req. | Meaning |
 | :--- | :--- | :--- | :--- |
-| `metric` | string | R | Name with unit suffix: `range_rmse_m`, `range_rate_rmse_mps`, `mean_nis`, `ospa_m`, `track_breaks` |
+| `metric` | string | R | Name with unit suffix: `range_rmse_m`, `range_rate_rmse_mps`, `mean_nis_dim2`, `ospa_m`, `track_breaks`. NIS is averaged per measurement dimension, `mean_nis_dim<k>`, because its expected value is `k` |
 | `track_id` | string | O | Empty for a run-level metric |
 | `target_id` | string | O | |
 | `frame_start`, `frame_end` | int | R | The inclusive frame window the metric covers |
@@ -659,6 +664,7 @@ item 5. Only rule R7, which AC8 cites, is in place.
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 1.0.0 | 2026-09-29 | First proposal |
+| 1.1.0 | 2026-10-07 | `detections.csv` adds `burst_index`, `status` and `pair_id`; `metadata.json` `tracking` adds `range_period_m` and `unused`, and records the resolved settings, defaults included, beside the `[tracking]` table's own keys |
 
 ## References
 

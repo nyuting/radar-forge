@@ -11,14 +11,17 @@ The package runs two tracker loops for now. Both keep their tracks as the same `
 (`tracks.py`), with the same `TrackStatus`, and both confirm and delete them with the same
 `TrackManager` (`lifecycle.py`). Only the filter inside each track differs.
 
-- **`KalmanTracker`** (`kalman.py`) is the linear Kalman tracker that scenario 003's pipeline
-  uses (`pipelines/tracking.py`). Each of its tracks carries a `KalmanFilter`.
+- **`KalmanTracker`** (`kalman.py`) is the linear Kalman tracker. Each of its tracks carries a
+  `KalmanFilter`. Scenario 003's own runs use it: `estimator = "kalman"` in the scenario's
+  `[tracking]` table, read by `pipelines/tracking.py`.
 - **`Tracker`** (`tracker.py`) is the UKF tracker. Each of its tracks carries an `Estimator`,
   the UKF. It is built from small, swappable pieces, and it is multi-sensor: one `Tracker`
   should handle every sensor in a scenario, each registered with `Tracker.add_sensor`, so
-  that each target has one track whichever sensor sees it.
+  that each target has one track whichever sensor sees it. The scenario-003 runs over
+  scenario 001's S1, S2 and S3 use it: `estimator = "ukf"`.
 
-A later change moves the pipeline onto `Tracker` and deletes `KalmanTracker`.
+A later change moves scenario 003's own runs onto `Tracker` too, and deletes `KalmanTracker`,
+once `Tracker` has what the Limitations below list.
 
 | Module | What it holds |
 | :-- | :-- |
@@ -141,15 +144,15 @@ docstring explains this, gives the CA case (`sigma_jerk_mps3`), and compares the
 
 ## Limitations
 
-**Not yet supported here.** Main's pipeline still runs on `kalman.py` because the UKF
-tracker doesn't yet have these, and the change that switches it over adds them:
+**Not yet supported here.** Scenario 003's own runs still use `kalman.py` because the UKF
+tracker doesn't yet have these, and the change that switches them over adds them:
 
 - choosing per track whether a measurement uses range alone or range and range rate (the
   range-only start that scenario 003's S1 needs);
 - a range-only retry when a measurement fails the gate on velocity;
 - re-finding a lost target with a widened gate while keeping its track ID;
-- a report of which measurement went to which track, and the per-track `last_nis` and
-  `measurement_dim` that `KalmanFilter` records;
+- a per-track `measurement_dim`, as `KalmanFilter` records. Which measurement each track
+  took in the scan, and its NIS, are on the scan's `TrackSnapshot`s;
 - range, azimuth and range-rate measurement models for a monostatic radar;
 - the interacting multiple model (IMM) filter and the coordinated-turn motion model;
 - Singer's motion model, which carries the acceleration in the state and is exact at every

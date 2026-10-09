@@ -66,8 +66,8 @@ class TestUnfoldDopplerDualPrf:
     def test_recovers_every_velocity_the_prf_pair_can_reach(self) -> None:
         """The closed-form round trip, swept across the whole reachable span.
 
-        Five folds of burst A is 5 * 38.24 = 191.2 m/s, so a sweep stopping just
-        inside that is exactly the set the 5:6 ratio is supposed to cover.
+        The sweep stops just inside the search bound, MAX_VELOCITY_MPS, which
+        is inside the pair's own span of about 229 m/s (the test below).
         """
         true_mps = np.linspace(-190.0, 190.0, 761)
         velocity_mps, residual_mps = unfold_doppler_dual_prf(
@@ -98,9 +98,7 @@ class TestUnfoldDopplerDualPrf:
         """The limit is the least common multiple of the folding spans.
 
         For the 5:6 bursts that is 6 * 2 * 38.24 = 458.88 m/s, so a half-span of
-        about 229 m/s is recoverable — more than the +/-191.2 m/s the scenario
-        asks for, which is a design target chosen to match S2 rather than this
-        function's ceiling.
+        about 229 m/s is recoverable (``spec/scenario-001-xband.md``, S3).
         """
         true_mps = np.linspace(-225.0, 225.0, 901)
         velocity_mps, _ = unfold_doppler_dual_prf(

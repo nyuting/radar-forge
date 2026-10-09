@@ -1,0 +1,81 @@
+# Scenario 003, UKF over scenario 001's S2 -- see spec/scenario-003-tracking.md.
+#
+# Everything above [detection] is scenario_001_pulsed_medium_prf.toml verbatim
+# but for the name and description, so the window is scenario 001's own.
+# The three UKF scenarios differ only in [[burst]], as scenario 001's do.
+
+[scenario]
+name = "scenario-003-ukf-pulsed-medium-prf"
+description = "The UKF tracker over scenario 001's S2. Range folds at 5.996 km, so range is measured, tracked and written modulo that; velocity is unambiguous to +-191 m/s and is measured."
+seed = 20260911
+
+[radar]
+# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna.
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
+
+[receiver]
+gain_rx_dbi = 30.0
+noise_figure_db = 3.0
+
+[target]
+name = "light-aircraft"
+rcs_dbsm = 10.0        # 10 m^2, Swerling 0 (non-fluctuating)
+altitude_m = 1500.0    # the CSV has no altitude column; held constant
+
+[trajectory]
+path = "../data/flight_coordinates.csv"
+start_time_s = 0.0
+duration_s = 120.0     # the full track is ~16,500 frames; this window is opt-out
+frame_rate_hz = 1.0
+
+# One burst. 10 us LFM pulse, B = 2 MHz (time-bandwidth 20), matched-filtered.
+# PRI 40 us at 2.5 MHz -> 100 samples/PRI. 256 pulses = 10.24 ms of CPI.
+[[burst]]
+waveform = "pulsed"
+f0_hz = 9.8e9
+bandwidth_hz = 2.0e6
+transmit_power_w = 1.0e3
+gain_tx_dbi = 30.0
+chirp_duration_s = 10.0e-6
+prf_hz = 25.0e3
+sample_rate_hz = 2.5e6
+n_pulses = 256
+
+# Cell-averaging CFAR along range, as in scenario_003_tracking.toml, so the
+# two trackers are compared on the same detections.
+[detection]
+pfa = 1e-5
+n_train = 16
+n_guard = 4
+variant = "ca"
+merge_range_bins = 1.0
+
+[tracking]
+estimator = "ukf"
+state_model = "range_1d"
+# The process noise is RadialMotion's, from the target's acceleration and its
+# correlation time (core/tracking/motion.py). Measured from scenario 001's
+# truth: the acceleration's standard deviation is 3.3 m/s^2 east and north and
+# 4.0 m/s^2 radial, and its correlation falls to about a half after 1 s. So
+# sigma_a = 4 m/s^2 and tau = 1 s, which is q = 2 sigma_a^2 tau = 32 m^2/s^3.
+sigma_accel_mps2 = 4.0
+acceleration_correlation_time_s = 1.0
+# No sigma_range_m or sigma_velocity_mps: the UKF path takes its measurement
+# noise from each map's own bins, one bin over sqrt(12).
+gate_probability = 0.997
+# 3 hits in a track's first 5 frames confirm it; 5 misses in a row delete it.
+n_confirm_hits = 3
+n_confirm_frames = 5
+n_delete_misses = 5
+n_reacquire_frames = 0
+# The fastest the light aircraft can close or open. Over scenario 001's window
+# its range rate stays within -40 to +56 m/s, and 100 m/s bounds a light
+# aircraft in a circuit. It is the prior spread of a new track's range rate,
+# and it decides what one burst may measure: a burst whose unambiguous
+# velocity is below it may fold the Doppler, so it measures range alone.
+v_max_mps = 100.0
+# The UKF path has no track-aided unfolding: it unfolds by dual PRF or not at all.
+velocity_unfolding = "none"
+simulated_angles = false

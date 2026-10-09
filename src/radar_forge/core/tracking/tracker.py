@@ -155,7 +155,10 @@ class Tracker:
     builds it from a detector, an initiator, deleters, a data associator and an
     updater. Here the deleters are the ``manager``, the data associator is
     ``gate`` plus ``associator``, and each track's estimator does the
-    predicting and updating.
+    predicting and updating. As in Stone Soup, the tracker keeps no record of
+    a scan: which measurement each track took, and its NIS, come back on the
+    scan's :class:`~radar_forge.core.tracking.tracks.TrackSnapshot`\ s, where
+    Stone Soup puts them on each update's ``hypothesis``.
 
     References
     ----------
@@ -386,6 +389,9 @@ class Tracker:
         matches += self._assign(costs, tentative, free)
 
         hit = dict(matches)
+        # took[track_id]: (measurement index, NIS) for each track that took a
+        # measurement this scan, updated or born. A birth has no NIS.
+        took: dict[int, tuple[int, float | None]] = {}
         # Each update changes one track's own filter, so tracks are updated one
         # at a time.
         for i, track in enumerate(visible):
@@ -395,6 +401,7 @@ class Tracker:
                 continue
             measurement = batch.measurements[j]
             track.estimator.update(measurement, models[j], innovation=innovations[i, j])
+            took[track.track_id] = (j, innovations[i, j].nis)
             self.manager.record_hit(track, measurement.timestamp_s, measurement.sensor_id)
 
         claimed = set(hit.values())
@@ -407,10 +414,12 @@ class Tracker:
             new_track = self._start(measurement, model)
             if new_track is not None:
                 self.tracks.append(new_track)
+                took[new_track.track_id] = (j, None)
 
         # A snapshot copies one track's filter state, so it is taken per track.
         for track in self.tracks:
-            snapshot = track.snapshot()
+            j, nis = took.get(track.track_id, (None, None))
+            snapshot = track.snapshot(measurement_index=j, nis=nis)
             track.history.append(snapshot)
             reported.append(snapshot)
         self.tracks = [track for track in self.tracks if track.is_alive]
