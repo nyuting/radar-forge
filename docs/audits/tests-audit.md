@@ -6,7 +6,10 @@ Scope: the eleven `tests/core/` modules that test the signal chain: `test_ambigu
 them uses a shared conftest fixture or helper. Tracking (`tests/core/tracking/**` and
 `tests/core/test_tracking.py`) is deferred to `spec/tracker-001.md` by the user's decision and is
 untouched. The `tests/pipelines/`, `tests/viz/`, `tests/tools/`, `tests/scripts/` and top-level
-sections are written by a parallel stream and will be appended to this file. `src/` is unchanged.
+sections are written by a parallel stream and will be appended to this file. This stream changed no
+`src/`. It was done on `origin/main` at `e92a9be` and then merged with the 2-D CFAR audit
+(`refactor/audit-cfar-2d`, "Stream A"), whose four new `test_detection.py` tests are classified
+below with the rest.
 
 Every test was judged against `spec/refactor-002-spec-first-audit.md` §2.1–§2.3 and against
 `docs/conventions/testing.md` §10.1 items 1–4: it names a plausible bug, it is the cheapest test
@@ -36,9 +39,9 @@ cases gives the number in brackets.
 
 ## Findings
 
-No test asserted something untrue, so there are no Wrong findings. Two Weak findings were
+No test asserted something untrue, so there are no Wrong findings. Three Weak findings were
 confirmed by mutation: the original test stayed green under the bug it was meant to catch (see
-[Mutation spot-check](#mutation-spot-check)).
+[Mutation spot-check](#mutation-spot-check)). W20 is a spec-to-test gap rather than a test verdict.
 
 | # | Where | Verdict |
 | :--- | :--- | :--- |
@@ -60,6 +63,8 @@ confirmed by mutation: the original test stayed green under the bug it was meant
 | [W16](#w16-the-s2-doppler-band-was-13-bins-wide) | `test_signal.py` pulsed Doppler | Weak — tightened |
 | [W17](#w17-the-guard-test-did-not-produce-the-masking-it-describes) | `test_detection.py` guard cells | Weak — rewritten |
 | [W18](#w18-the-power-weighted-centroid-was-bounded-not-pinned) | `test_detection.py` centroid | Weak — tightened |
+| [W19](#w19-the-go-so-partition-held-by-construction) | `test_detection.py` GO+SO partition (12 items) | Weak — 2 rewritten, 10 deleted, confirmed by mutation |
+| [W20](#w20-a-spec-acceptance-figure-cited-a-test-that-did-not-exist) | `spec/scenario-003-tracking.md` §12 | Gap — test added, spec row pointed at it |
 
 ### W1. Equal gains hide a squared gain
 
@@ -187,15 +192,59 @@ halves.
 Cells 10, 11, 12 at powers 1, 4, 3 were asserted to centroid in (11, 12). The value is
 (10 + 44 + 36)/8 = 11.25 exactly, now asserted to 1e-12. The symmetric half of the test is implied.
 
-### Observations not acted on
+### W19. The GO-SO partition held by construction
 
-- `spec/scenario-003-tracking.md` §12 attributes a check of "245 760 cells; alpha = 11.417 dB" to
-  `tests/core/test_detection.py`, but no such test exists there, before or after this audit. That
-  is a spec or coverage gap for the scenario-003 stream, not a test to prune.
-- Stream A (the 2-D CFAR audit) is adding tests to `test_detection.py`. To keep that merge simple,
-  deletions in that file are whole tests only. Sixteen parametrize cases are judged Redundant but
-  **held**, listed as such in its table, and left for a follow-up once Stream A has landed. The
-  2-D ring argument checks and both ring false-alarm-rate cases are kept at Stream A's request.
+`test_greatest_and_smallest_of_partition_the_same_total` checked GO + SO = 2(1 + β)^-N over 12
+cases and said it "would fail if either series were mis-indexed". The code computes GO as exactly
+that total minus the SO series, so the identity holds for any series, right or wrong. Mutation M17
+mis-indexes the binomial coefficient. Under it, the partition test passes, and so does the N = 1
+hand derivation (its one-term series is unaffected); only the Monte Carlo GO and SO rates would
+have caught it.
+
+It is replaced by `test_greatest_and_smallest_of_match_a_numerical_integration`, which shares no
+code with the series. Each half-window mean of unit-mean exponential cells is Gamma(N, 1/N), and
+Pfa = E[exp(−α g)] for g the larger (density 2fF) or smaller (2f(1 − F)) of two of them, integrated
+with `scipy.integrate.quad`. The two cases are β = 2 (N = 5, α = 10), where the Notes' GO
+cancellation bites, and β = 0.125 (N = 16, α = 2), the typical regime. The other ten cases added no
+regime. quad agrees with the series to 2e-15; the assertion is rtol 1e-10.
+
+### W20. A spec acceptance figure cited a test that did not exist
+
+`spec/scenario-003-tracking.md` §12 attributed "245 760 cells; alpha = 11.417 dB" to
+`tests/core/test_detection.py`, and its §3 says the implementation must re-derive the valid-cell
+count and assert it in a test. No test asserted either number, here or in `tests/pipelines/`.
+Under refactor-002 R1.3.4 the figure is worth pinning: it is the operating point the scenario's
+whole false-alarm budget is derived from. So it gets a test rather than a spec correction.
+
+`test_scenario_003_calibration_matches_its_specification` reads the operating point from
+`scenarios/scenario_003_tracking.toml`: CA along range, n_train = 16 and n_guard = 4 per side,
+pfa = 1e-5, on a (256, 1000) map (256 pulses; 1 ms × 1 MHz = 1000 samples). It asserts:
+
+- the valid cells: 256 × (1000 − 2 × 20) = 245 760, exactly;
+- α against the CA closed form M(pfa^(−1/M) − 1), to rtol 1e-12. With M = 32 that is
+  32(e^(ln 10⁵/32) − 1) = 32 × 0.433013 = 13.8564;
+- 10 log10 α = 11.4165 dB to 1e-4 dB, which the spec rounds to 11.417.
+
+Mutation M22 (the TOML's `pfa` changed to 1e-4) turns it red, so config drift away from the spec
+fails too. The spec row now names the test and gives α in both forms.
+
+### Coordination with Stream A
+
+While Stream A was open, deletions in `test_detection.py` were whole tests only, and sixteen
+parametrize cases were held. After the merge, each was re-checked against the merged source:
+
+- Ten were the W19 partition cases.
+- Five are deleted with their survivors named in the table: pfa −0.1 and 1.5, alpha −1, rank −1,
+  and the ring's SO case.
+- One is not Redundant after all, and is kept: `test_rejects_power_that_is_not_finite[inf]`. The
+  guard is `np.isfinite`, and a regression to `np.isnan` passes the nan case and fails only the inf
+  one (mutation M21). Calling it held was a mistake.
+
+`test_a_ring_has_less_cfar_loss_than_a_line_of_the_same_reach` was deleted on the pre-merge base.
+After the merge, Stream A's F9 correction (scenario-003 §13.2, core-audit F9) cites it by name as
+the evidence for the reach claim, so it is restored and reclassified Sound. No other deleted test
+name appears anywhere in `spec/`, `docs/` (outside `testing.md`'s illustrative examples), `src/`,
+`scripts/` or the rest of `tests/`.
 
 ## `tests/core/test_constants.py`
 
@@ -506,13 +555,12 @@ this file as their check.
 
 The `hypothesis` round trip, the Clopper–Pearson rate tests and their helper
 `assert_rate_consistent_with_design` (named in testing.md §10.4), and the clutter-edge and
-masking tests are kept. Deletions are whole tests only (see
-[Observations not acted on](#observations-not-acted-on)). Cases marked **held** are Redundant and
-left in place for now.
+masking tests are kept. The table covers the merged file, including Stream A's four tests (marked
+A); see [Coordination with Stream A](#coordination-with-stream-a).
 
 | Test | Class | Reason | Survivor if deleted |
 | :--- | :--- | :--- | :--- |
-| `test_greatest_and_smallest_of_partition_the_same_total` [12] | Sound [2], Redundant held [10] | Two cases cover the regimes, (N = 5, α = 10) for the Notes cancellation and (16, 2) for typical use; the other ten add none | |
+| `test_greatest_and_smallest_of_partition_the_same_total` [12] → `test_greatest_and_smallest_of_match_a_numerical_integration` [2] | Weak [12] | [W19](#w19-the-go-so-partition-held-by-construction); 2 rewritten, 10 deleted | the two integration cases |
 | `test_smallest_window_matches_the_hand_derivation` | Sound | Notes; distinguishes GO from SO, which the partition cannot | |
 | `test_cell_averaging_matches_the_gamma_moment_generating_function` | Sound | CA known values | |
 | `test_closed_form_cell_averaging_inverse_agrees_with_bisection` | Redundant | Forward(α_CA(pfa)) = pfa is the round trip's `ca` case | `test_threshold_factor_round_trips_through_pfa[ca]` |
@@ -521,6 +569,7 @@ left in place for now.
 | `test_threshold_factor_decreases_with_window_size` | Sound | Notes: CFAR loss | |
 | `test_greatest_of_needs_a_lower_factor_than_smallest_of` | Redundant | A GO/SO swap fails the N = 1 hand derivation | `test_smallest_window_matches_the_hand_derivation` |
 | `test_default_order_statistic_rank_is_three_quarters_of_the_window` | Sound | Notes | |
+| `test_scenario_003_calibration_matches_its_specification` | added | [W20](#w20-a-spec-acceptance-figure-cited-a-test-that-did-not-exist) | |
 | `test_false_alarm_rate_matches_design_pfa` [3] | Sound | §10.4 | |
 | `test_order_statistic_false_alarm_rate_matches_design_pfa` | Sound | §10.4, OS | |
 | `test_false_alarm_rate_holds_at_one_in_ten_thousand` | Redundant | testing.md §10.1: 1e-3 catches the same exponent and factor errors; it was the slowest test (0.11 s) | `test_false_alarm_rate_matches_design_pfa[ca]` |
@@ -541,54 +590,66 @@ left in place for now.
 | `test_clusters_are_connected_in_two_dimensions`, `test_clustering_an_empty_mask_returns_nothing`, `test_detection_is_immutable` | Sound | Connectivity, empty branch, frozen | |
 | `test_detects_a_point_target_in_a_range_doppler_map` | Redundant | A pipeline re-check: bins are pinned in `test_dsp.py`, detection and clustering here | `test_dsp.py::test_places_a_target_on_its_exact_bins`, `test_detects_a_point_target_well_above_the_floor` |
 | `test_rejects_an_unknown_variant` | Sound | `Raises` | |
-| `test_rejects_a_probability_outside_the_unit_interval` [4] | Sound [2], Redundant held [2] | 0 and 1 are the boundaries; −0.1 and 1.5 add nothing | |
-| `test_rejects_a_non_positive_threshold_factor` [4] | Sound [3], Redundant held [1] | 0, nan and inf are distinct; −1 adds nothing | |
-| `test_rejects_a_rank_outside_the_reference_window` [3] | Sound [2], Redundant held [1] | 0 and 17 bracket the range; −1 adds nothing | |
+| `test_rejects_a_probability_outside_the_unit_interval` [4] | Sound [2], Redundant [2] | 0 and 1 are the boundaries of the open interval (M20); −0.1 and 1.5 add nothing | the 0 and 1 cases |
+| `test_rejects_a_non_positive_threshold_factor` [4] | Sound [3], Redundant [1] | 0, nan and inf are distinct; −1 adds nothing | the 0 case |
+| `test_rejects_a_rank_outside_the_reference_window` [3] | Sound [2], Redundant [1] | 0 and 17 bracket 1..16 (M18); −1 adds nothing | the 0 case |
 | remaining 1-D `Raises` tests [10] | Sound | One per documented `Raises`, including the too-short estimate branch | |
 | `test_ring_mean_equals_the_explicit_ring_mean`, `test_ring_order_statistic_equals_the_explicit_sorted_ring` | Sound | Explicit ring enumeration | |
 | `test_ring_follows_its_axes_when_the_map_is_transposed` [2] | Sound | `uniform_filter` and `rank_filter` paths | |
 | `cfar_valid_mask_2d` tests [3] | Sound | Wrapped, unwrapped, defined-where, too short | |
 | `test_ring_threshold_factor_satisfies_the_cell_averaging_closed_form` | Sound | Pins M | |
-| `test_a_ring_has_less_cfar_loss_than_a_line_of_the_same_reach` | Redundant | Ring calibrated for its own M, and α falls with M | `test_ring_threshold_factor_satisfies_the_cell_averaging_closed_form`, `test_threshold_factor_decreases_with_window_size` |
+| `test_a_ring_has_less_cfar_loss_than_a_line_of_the_same_reach` | Sound | Cited by scenario-003 §13.2 and core-audit F9 as the evidence for the reach claim. The survivors pin its two halves separately, but not the comparison. Deleted before the merge, restored after | |
 | `test_ring_false_alarm_rate_matches_design_pfa` [2] | Sound | OS ring needs it; CA kept at Stream A's request | |
+| A `test_a_tapered_map_breaks_the_calibration_as_the_module_notes_say` [2] | Sound | Module Notes: a taper correlates cells and the rate exceeds pfa. The 1-D window and the ring are separate code paths | |
 | `test_order_statistic_ring_holds_detection_where_cell_averaging_loses_it` | Sound | 2-D masking | |
 | circular clustering [6] | Sound | Notes: wrap centroid, connectivity across the wrap, torus, noise estimate carried or nan | |
 | `test_a_target_on_the_doppler_wrap_gives_one_detection` | Sound | §9 regression for spec 003 §14.2 | |
-| `test_ring_rejects_the_half_window_variants` [2] | Sound [1], Redundant held [1] | One check covers both | |
+| A `test_the_ring_variants_are_the_one_dimensional_ones_without_half_windows` | Sound | A 2-D variant must be one the 1-D calibration covers (M19) | |
+| `test_ring_rejects_the_half_window_variants` [2] | Sound [1], Redundant [1] | The guard tests membership of `CFAR_VARIANTS_2D`, whose contents the variant-set test pins | the `go` case, `test_the_ring_variants_are_the_one_dimensional_ones_without_half_windows` |
 | 2-D `_ring` argument and rank checks [4] | Sound | `Raises`; kept at Stream A's request | |
-| `test_rejects_power_that_is_not_finite` [2] | Sound [1], Redundant held [1] | One `isfinite` guard | |
+| A `test_ring_rejects_a_pair_that_is_not_two_integers` [5] | Sound | Five distinct failure modes of `_integer_pair`: a third count, a float, a bare int, `n_guard`, `axes` | |
+| A `test_ring_accepts_numpy_integer_counts` | Sound | `operator.index` accepts NumPy integers; an `isinstance(int)` check would not | |
+| `test_rejects_power_that_is_not_finite` [2] | Sound [2] | nan and inf each catch a different narrowing of `isfinite` (M21) | |
 | `test_rejects_a_noise_estimate_of_the_wrong_shape`, `test_rejects_an_out_of_bounds_wrap_axis` | Sound | `Raises` | |
 
 ## Result
 
 ### Counts
 
-Collected pytest items, against `origin/main` at `e92a9be`.
+Collected pytest items. "Before" is `origin/main` at `e92a9be` plus Stream A's nine new
+`test_detection.py` items, which is the tree this branch is merged onto. A's items are classified
+here like any other.
 
-| File | Before | After | Sound | Weak | Redundant deleted | Redundant held |
-| :--- | --: | --: | --: | --: | --: | --: |
-| `test_ambiguity.py` | 22 | 14 | 10 | 4 | 8 | 0 |
-| `test_constants.py` | 11 | 8 | 7 | 1 | 3 | 0 |
-| `test_detection.py` | 105 | 91 | 73 | 2 | 14 | 16 |
-| `test_dsp.py` | 52 | 30 | 26 | 4 | 22 | 0 |
-| `test_geodesy.py` | 24 | 10 | 8 | 2 | 14 | 0 |
-| `test_radar.py` | 58 | 43 | 43 | 0 | 15 | 0 |
-| `test_radar_equation.py` | 19 | 10 | 8 | 2 | 9 | 0 |
-| `test_signal.py` | 55 | 41 | 37 | 7 | 11 | 0 |
-| `test_targets.py` | 16 | 8 | 8 | 0 | 8 | 0 |
-| `test_waveforms.py` | 33 | 20 | 19 | 1 | 13 | 0 |
-| `test_windows.py` | 74 | 33 | 31 | 1 | 42 | 0 |
-| **In scope** | **469** | **308** | **270** | **24** | **159** | **16** |
-| **Whole suite** | **1554** | **1393** | | | | |
+| File | Before | After | Sound | Weak | Redundant deleted |
+| :--- | --: | --: | --: | --: | --: |
+| `test_ambiguity.py` | 22 | 14 | 10 | 4 | 8 |
+| `test_constants.py` | 11 | 8 | 7 | 1 | 3 |
+| `test_detection.py` | 114 | 87 | 82 | 14 | 18 |
+| `test_dsp.py` | 52 | 30 | 26 | 4 | 22 |
+| `test_geodesy.py` | 24 | 10 | 8 | 2 | 14 |
+| `test_radar.py` | 58 | 43 | 43 | 0 | 15 |
+| `test_radar_equation.py` | 19 | 10 | 8 | 2 | 9 |
+| `test_signal.py` | 55 | 41 | 37 | 7 | 11 |
+| `test_targets.py` | 16 | 8 | 8 | 0 | 8 |
+| `test_waveforms.py` | 33 | 20 | 19 | 1 | 13 |
+| `test_windows.py` | 74 | 33 | 31 | 1 | 42 |
+| **In scope** | **478** | **304** | **279** | **36** | **163** |
+| **Whole suite** | **1563** | **1389** | | | |
 
-After = Sound + Weak, less the three Weak signal tests deleted against a rewritten survivor
-([W14](#w14-exact-bin-tests-allowed-a-whole-bin)), plus one added Harris case (Blackman-Harris).
-The in-scope files now run in 2.3 s, down from 2.9 s.
+After = Sound + the Weak tests kept (rewritten) + two added tests. Thirteen Weak items were
+deleted against a rewritten survivor: three in signal ([W14](#w14-exact-bin-tests-allowed-a-whole-bin))
+and ten in detection ([W19](#w19-the-go-so-partition-held-by-construction)). The two added tests
+are the Blackman-Harris Harris case and the scenario-003 calibration test.
+
+Against `e92a9be` alone, without Stream A's nine items: in scope 469 → 295, whole suite
+1554 → 1380, `test_detection.py` 105 → 78. The in-scope files run in 2.3 s, down from 2.9 s.
 
 ### Coverage
 
 Measured with `pytest --cov=radar_forge --cov-branch`, before and after, compared per source file
-for newly missing lines and branches.
+for newly missing lines and branches. Each round of pruning was compared against its own base:
+`e92a9be` for the first, and the merged tree (after Stream A, before the second round) for the
+second. Both rounds give the same result.
 
 | Run | Missing lines | Missing branches | Files with a new gap |
 | :--- | --: | --: | --: |
@@ -622,7 +683,16 @@ mutation.
 | M14 | 1-D detect declares nan-threshold edge cells | `test_edge_cells_are_never_detected` | `test_detects_a_point_target_well_above_the_floor` | red | |
 | M15 | coherent gain as a sum | `test_rectangular_has_unit_coherent_gain` | `test_normalized_tapers_have_unit_coherent_gain` | red | |
 | M16 | CA training bands ignore the guard | — (rewrite check) | `test_guard_cells_protect_the_threshold_from_target_spill` | red | red |
+| M17 | GO/SO series coefficient mis-indexed, C(N + k, k) | the 10 partition cases | `test_greatest_and_smallest_of_match_a_numerical_integration` | red | green |
+| M18 | rank guard `0 <= rank` | rank −1 case | `test_rejects_a_rank_outside_the_reference_window[0]` | red | |
+| M19 | `CfarVariant2d` admits `so` | ring `so` case | `test_the_ring_variants_are_the_one_dimensional_ones_without_half_windows` | red | |
+| M20 | `0.0 <= pfa` accepted | pfa −0.1, 1.5 cases | `test_rejects_a_probability_outside_the_unit_interval[0.0]` | red | |
+| M21 | finite check narrowed to `np.isnan` | (held `inf` case: kept) | `test_rejects_power_that_is_not_finite[inf]` | red | |
+| M22 | scenario TOML `pfa` changed to 1e-4 | — (new test check) | `test_scenario_003_calibration_matches_its_specification` | red | |
 
-All sixteen survivors fail under their mutation. M1 and M7 show the two pre-audit tests that stayed
-green: [W8](#w8-an-autocorrelation-cannot-see-a-reversed-output) and
-[W1](#w1-equal-gains-hide-a-squared-gain).
+All twenty-two survivors fail under their mutation. Under M21 the nan case stays green, which is
+why the inf case is kept. M1, M7 and M17 show the three pre-audit tests that stayed green:
+[W8](#w8-an-autocorrelation-cannot-see-a-reversed-output),
+[W1](#w1-equal-gains-hide-a-squared-gain) and
+[W19](#w19-the-go-so-partition-held-by-construction). Under M17 the N = 1 hand derivation stays
+green as well.
