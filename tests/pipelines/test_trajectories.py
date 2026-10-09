@@ -233,6 +233,7 @@ class TestToRadarFrame:
         track = to_radar_frame(trajectory, S1_RADAR)
         np.testing.assert_allclose(track.range_m, 1000.0, rtol=1e-9)
         np.testing.assert_allclose(track.elevation_deg, 90.0, rtol=1e-9)
+        assert track.n_frames == 3
 
     def test_a_target_due_east_reads_ninety_degrees(self) -> None:
         """Clockwise, so east is +90 -- the sign that distinguishes the convention."""
@@ -434,6 +435,7 @@ class TestToBistaticRadarFrame:
         speed_mps = 80.0
         trajectory = _straight_north_track(-speed_mps, duration_s=60.0, n_fixes=61)
         track = to_bistatic_radar_frame(trajectory, _BISTATIC_PAIR)
+        assert track.n_frames == 61
         # The premise: the total path shortens in every interval.
         assert np.all(np.diff(track.range_tx_m + track.range_rx_m) < 0.0)
         np.testing.assert_allclose(
