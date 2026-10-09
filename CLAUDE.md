@@ -64,7 +64,7 @@ to understand and to test; if a step is hard to test on its own, split it. The f
 | `docs/conventions/review.md` | Doing and writing a PR review: procedure, layout, findings, checks, voice, what to check against |
 | `src/radar_forge/core/constants.py` | Every physical constant, defined once |
 | `.githooks/` | pre-commit, commit-msg, pre-push |
-| `scripts/check_conventions.py` | Rules R1–R7: TOML config, layout, docstrings, constants, units, broadcasting, Markdown anchors |
+| `scripts/check_conventions.py` | Rules R1–R8: TOML config, layout, docstrings, constants, units, broadcasting, Markdown anchors, comment banners |
 | `Makefile` | The single definition of every gate |
 | `spec/` | Design specification; the intended end state |
 | `spec/data-001-formats.md` | File formats, columns, units and conventions for every input, output and product |

@@ -20,7 +20,7 @@ tagged **[review]** — which are the ones a tool genuinely cannot judge.
 | **[hook]** | `scripts/check_conventions.py` — runs at commit, push and in CI |
 | **[review]** | A human judgement call. Not automated, and honestly cannot be |
 
-`scripts/check_conventions.py` implements seven rules:
+`scripts/check_conventions.py` implements eight rules:
 
 | Rule | Catches |
 | :--- | :--- |
@@ -31,6 +31,7 @@ tagged **[review]** — which are the ones a tool genuinely cannot judge.
 | R5 `units` | A parameter named `range`, `gain_tx`, `power`… with no unit suffix |
 | R6 `broadcast` | `np.tile`/`np.repeat`/`np.broadcast_to` without a justification comment |
 | R7 `anchor` | An in-file Markdown link `](#section)` with no matching heading (§12) |
+| R8 `comments` | A `##########` banner comment, or an `# Inputs:`/`# Outputs:` comment block |
 
 Each failure prints the rule, the offending line, the fix, and a pointer back here.
 
@@ -452,6 +453,12 @@ reader must be able to tell an approximation from a bug.
 # Small-angle approximation: valid to <0.1 dB within the 3 dB beamwidth,
 # which is the only region export_coco() samples. See issue #17.
 ```
+
+- **No hash banners, no `Inputs:`/`Outputs:` blocks** **[hook: R8]**. A row of `#` adds noise,
+  not structure; if a module needs sections, use one `# ---- #` header. Parameters and returns
+  go in the docstring (§4), where they cannot drift from it.
+- **TODOs name an owner and an issue** **[ruff: TD]**: `# TODO(author): what — <issue link>`.
+  An unowned TODO is never done.
 
 ---
 
