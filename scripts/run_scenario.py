@@ -5,7 +5,7 @@
 
 Thin by design: every decision about physics, processing and geometry lives in
 ``radar_forge.pipelines`` and ``radar_forge.core``, so this file only walks the
-frame generator and writes files. Rendering needs the ``teaching`` extra; pass
+frame generator and writes files. Rendering needs the ``viz`` extra; pass
 ``--no-plots`` to run without it.
 """
 
@@ -111,7 +111,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--no-iq", action="store_true", help="Skip writing the IQ cubes.")
     parser.add_argument(
-        "--no-plots", action="store_true", help="Skip rendering (avoids the teaching extra)."
+        "--no-plots", action="store_true", help="Skip rendering (avoids the viz extra)."
     )
     parser.add_argument("--no-movie", action="store_true", help="Skip assembling the movie.")
     parser.add_argument(
@@ -244,8 +244,8 @@ def render_frame(
     itself, so the receive chain runs once per frame however many consumers a
     frame has.
     """
-    from radar_forge.teaching.plotting import save_figure
-    from radar_forge.teaching.scopes.rd_map import render_range_doppler
+    from radar_forge.viz.plotting import save_figure
+    from radar_forge.viz.scopes.rd_map import render_range_doppler
 
     for index, (product, burst) in enumerate(zip(products, scenario.bursts, strict=True)):
         suffix = "" if len(scenario.bursts) == 1 else f"_burst{index}"
@@ -410,8 +410,8 @@ def render_track_frame(
     Called once per frame so the series grow, which is what makes the assembled
     movie show a track being built rather than a finished plot appearing.
     """
-    from radar_forge.teaching.plotting import save_figure
-    from radar_forge.teaching.scopes.track_plot import render_range_time_history
+    from radar_forge.viz.plotting import save_figure
+    from radar_forge.viz.scopes.track_plot import render_range_time_history
 
     record = frames[-1]
     detection_time_s = [entry.time_s for entry in frames for _ in entry.measurements]
@@ -516,7 +516,7 @@ def assemble_movie(out_dir: Path, pattern: str, stem: str, frame_rate_hz: float)
     # out of memory on a long scenario.
     # Image.Palette.ADAPTIVE, not the bare Image.ADAPTIVE: the latter is a
     # legacy alias that still works at runtime but is absent from Pillow's type
-    # stubs, so it only fails the type gate once the teaching extra is present.
+    # stubs, so it only fails the type gate once the viz extra is present.
     first = Image.open(frames[0]).convert("P", palette=Image.Palette.ADAPTIVE)
     rest = (Image.open(path).convert("P", palette=Image.Palette.ADAPTIVE) for path in frames[1:])
     first.save(

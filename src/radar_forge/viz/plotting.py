@@ -1,6 +1,6 @@
-"""Plotting helpers shared by the teaching scopes.
+"""Plotting helpers shared by the viz scopes.
 
-Everything in :mod:`radar_forge.teaching` depends on ``matplotlib``, which is
+Everything in :mod:`radar_forge.viz` depends on ``matplotlib``, which is
 an optional extra rather than a core dependency: ``import radar_forge`` must
 succeed in an environment that has only ``numpy`` and ``scipy``. So the import
 happens inside :func:`require_pyplot` at call time, and the error names the
@@ -24,10 +24,10 @@ from numpy.typing import ArrayLike, NDArray
 
 __all__ = ["magnitude_db", "require_pyplot", "save_figure"]
 
-_TEACHING_EXTRA_HINT = (
-    "matplotlib is required for radar_forge.teaching but is not installed. "
-    "It ships in the 'teaching' extra: install with `uv sync --extra teaching`, "
-    "or `pip install 'radar-forge[teaching]'`."
+_VIZ_EXTRA_HINT = (
+    "matplotlib is required for radar_forge.viz but is not installed. "
+    "It ships in the 'viz' extra: install with `uv sync --extra viz`, "
+    "or `pip install 'radar-forge[viz]'`."
 )
 
 
@@ -42,7 +42,7 @@ def require_pyplot() -> ModuleType:
     Raises
     ------
     ImportError
-        If ``matplotlib`` is not installed. The message names the ``teaching``
+        If ``matplotlib`` is not installed. The message names the ``viz``
         extra and gives the command to install it.
 
     Notes
@@ -54,7 +54,7 @@ def require_pyplot() -> ModuleType:
     try:
         import matplotlib.pyplot as plt
     except ImportError as error:  # pragma: no cover - exercised only without the extra
-        raise ImportError(_TEACHING_EXTRA_HINT) from error
+        raise ImportError(_VIZ_EXTRA_HINT) from error
     pyplot: ModuleType = plt
     return pyplot
 

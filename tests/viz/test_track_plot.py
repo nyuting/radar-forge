@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from radar_forge.teaching.scopes.track_plot import render_range_time_history
+from radar_forge.viz.scopes.track_plot import render_range_time_history
 
 pytest.importorskip("matplotlib")
 

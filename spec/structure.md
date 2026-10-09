@@ -15,7 +15,7 @@
 **Status:** design document, partially implemented. `core/` and `pipelines/` are built as far as
 scenarios 001, 002 and 003 required, and `core/tracking/` is a package built out further, to
 [`tracker-001.md`](tracker-001.md); `array/`, `raytracing/`, `pipelines/exporters/` and most of
-`teaching/` are still design only. Part B marks the tree as intended, not as built — read it
+`viz/` are still design only. Part B marks the tree as intended, not as built — read it
 alongside the source.
 **Companion to:** [`starter.md`](starter.md) (project charter and ecosystem survey).
 **File formats:** [`data-001-formats.md`](data-001-formats.md) fixes the on-disk form of every
@@ -109,9 +109,9 @@ src/radar_forge/
 │       ├── coco.py              # range-Doppler(-azimuth) cube -> COCO annotations
 │       ├── range_doppler.py     # cube serialization per spec/data-001-formats.md (HDF5); dB scaling
 │       └── labels.py            # shared label schema: range, velocity, azimuth, x, y, w, h, heading, obstruction
-└── teaching/
+└── viz/
     ├── __init__.py
-    ├── app.py                   # PySide6 application shell (extra: teaching)
+    ├── app.py                   # PySide6 application shell (extra: gui)
     ├── scopes/
     │   ├── __init__.py
     │   ├── ascope.py            # amplitude vs range
@@ -119,9 +119,11 @@ src/radar_forge/
     │   ├── ppi.py               # plan position indicator
     │   ├── rd_map.py            # live range-Doppler map, with detection and gate overlays
     │   └── track_plot.py        # range vs time: truth, detections, track history, current gate
-    ├── plotting.py              # matplotlib helpers shared by notebooks and scopes
-    └── notebooks/               # chapter-style guided notebooks for intern onboarding
+    └── plotting.py              # matplotlib helpers shared by notebooks and scopes
 ```
+
+Notebooks are not part of the installed package. Chapter-style guided notebooks live in a top-level
+`notebooks/` directory beside `src/`, and run with the `notebooks` extra.
 
 ### B.1 Module-to-upstream mapping
 
@@ -135,7 +137,7 @@ src/radar_forge/
 | `core/dsp.py`, `core/detection.py` | RadarBook; RadarSimPy `processing.py`; RadarSim CFAR variants; pyAPRiL `detector`/`hitProcessor` (structure only) |
 | `core/clutter.py` | pyAPRiL `clutterCancellation` (reimplemented from papers); RadarSim land/sea clutter |
 | `pipelines/tracking.py` | motpy's `step(detections)` loop shape; Stone Soup's detection → gate → associate → update decomposition |
-| `teaching/scopes/track_plot.py` | Tracktable's plan-view track rendering (prior art only; not a dependency) |
+| `viz/scopes/track_plot.py` | Tracktable's plan-view track rendering (prior art only; not a dependency) |
 | `core/tracking/` (all) | `unified-extensible-tracker`, contributed under MIT (`tracker-001.md` §1.2); Stone Soup's data model and seams |
 | `core/tracking/estimation.py`, `kalman.py`, `ukf.py` | FilterPy filter formulation and `UnscentedKalmanFilter` shape; Wan & van der Merwe (2000) for the UKF; Bar-Shalom, Li & Kirubarajan (2001); RadarBook tracking-filter chapters |
 | `core/tracking/motion.py` | FilterPy `Q_discrete_white_noise`; Bar-Shalom, Li & Kirubarajan (2001) DWNA model |
@@ -150,8 +152,8 @@ src/radar_forge/
 | `pipelines/exporters/*` | FMCW Radar Target Simulator `JSONCoco.py` and its label schema |
 | `pipelines/scenarios.py` | RadarSim YAML scenario files (radar-forge uses TOML: `CLAUDE.md` requires it) |
 | `pipelines/datasets.py` | AIRadarLib PyTorch dataset/training wrappers; torchcvnn `datasets`/`transforms` (complex SAR loader layout); Steinmetz Neural Networks (complex-valued I/Q feature convention) |
-| `teaching/scopes/*`, `teaching/app.py` | RadarSim PySide6 GUI (PPI, RHI, A-Scope) |
-| `teaching/notebooks/` | RadarBook `jupyter/`; RadarSimNb |
+| `viz/scopes/*`, `viz/app.py` | RadarSim PySide6 GUI (PPI, RHI, A-Scope) |
+| `notebooks/` (top level) | RadarBook `jupyter/`; RadarSimNb |
 
 ### B.2 Design rules
 
@@ -168,7 +170,7 @@ src/radar_forge/
    The current best published method is the end state; a classical method stays only as a
    baseline or a test oracle. The code reads top to bottom for a new engineer, exposes its
    intermediate quantities (NIS, SNR budget terms, losses), pairs with a notebook in
-   `teaching/notebooks/`, and is tested against analytic ground truth or a published value.
+   `notebooks/`, and is tested against analytic ground truth or a published value.
 6. **A block that outgrows one module becomes a subpackage**, re-exported from its
    `__init__.py` so the public import path never changes. `core/tracking/` is the first (D2).
 
@@ -182,7 +184,9 @@ src/radar_forge/
 | `ovrtx` | ovrtx, ovstage | Omniverse RTX backend (NVIDIA licence, RTX GPU) |
 | `ml` | torch | `pipelines.datasets`, training loops |
 | `cvnn` | torch, torchcvnn, complexPyTorch | complex-valued layers and SAR dataset loaders for `pipelines.datasets` |
-| `teaching` | PySide6, matplotlib, jupyter | GUI scopes and notebooks |
+| `viz` | matplotlib | `viz` plots and scopes |
+| `notebooks` | jupyterlab | the top-level `notebooks/` |
+| `gui` | PySide6 | `viz/app.py` live scopes (added when `app.py` lands) |
 | `dev` | pytest, ruff, mypy, build tooling | development |
 
 ---
@@ -203,7 +207,7 @@ why.
 | [A.5](#a5-radarbook-software) | RadarBook Software | none declared | Canonical DSP blocks, written from the published equations (D4) |
 | [A.6](#a6-pyapril) | pyAPRiL | GPL-3.0 | Clutter cancellation and bistatic processing structure, reimplemented |
 | [A.7](#a7-raspnet-dataset) | RASPNet | none declared | ML dataset conventions; an evaluation benchmark |
-| [A.8](#a8-radarsim-gui) | RadarSim (GUI) | MIT | Blueprint for `teaching/scopes/`; the scenario-file idea |
+| [A.8](#a8-radarsim-gui) | RadarSim (GUI) | MIT | Blueprint for `viz/scopes/`; the scenario-file idea |
 | [A.9](#a9-airadarlib-pypi-optional) | AIRadarLib | unstated | Chirp generation and PyTorch dataset wrappers, as reference |
 | [A.10](#a10-ovrtx-pypi-optional) | ovrtx | NVIDIA proprietary | An opt-in, hardware-gated backend (D3) |
 | [A.11](#a11-pyroomacoustics) | pyroomacoustics | MIT | The DoA estimator base-class pattern and DoA benchmarks |
@@ -299,7 +303,7 @@ what transfers.
 | `docs/` | Book-companion documentation |
 
 **What radar-forge borrows:** the canonical formulations for `core/` (range equation, ambiguity function,
-CFAR, SAR primitives) and the chapter→notebook pedagogy for `teaching/notebooks/`. Implementations are
+CFAR, SAR primitives) and the chapter→notebook pedagogy for `notebooks/`. Implementations are
 written from the published equations, not transcribed.
 
 ### A.6 pyAPRiL
@@ -354,7 +358,7 @@ Networks, by the same author — is surveyed in §A.12.
 | `scenarios/` | YAML scenario configuration files |
 
 **What radar-forge borrows:** the scope layout and the PySide6 real-time-display architecture for
-`teaching/`, and the YAML-scenario idea for `pipelines/scenarios.py`. Its CFAR-variant and tracking
+`viz/`, and the YAML-scenario idea for `pipelines/scenarios.py`. Its CFAR-variant and tracking
 coverage is a useful checklist for `core/`.
 
 ### A.9 AIRadarLib *(PyPI, optional)*
@@ -562,7 +566,7 @@ the loop structure is the whole borrowing.
 | `applications/` | Trajectory assembly, filtering and rendering as command-line tools |
 
 **What radar-forge borrows:** the *trajectory data model*, as prior art for
-`pipelines/trajectories.py` and for `teaching/scopes/track_plot.py` — in particular the separation
+`pipelines/trajectories.py` and for `viz/scopes/track_plot.py` — in particular the separation
 of a coordinate domain from the trajectory container, which is what lets the same analysis run in
 geodetic and Cartesian frames. It is explicitly **not** a dependency: radar-forge needs one
 plan-view plot, matplotlib already draws it, and a C++/Boost build to draw it would fail
