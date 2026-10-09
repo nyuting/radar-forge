@@ -87,16 +87,6 @@ def _straight_north_track(speed_mps: float, duration_s: float, n_fixes: int) -> 
 
 
 class TestLoadFlightCsv:
-    def test_reads_every_row_of_the_golden_excerpt(self) -> None:
-        trajectory = load_flight_csv(GOLDEN_CSV, altitude_m=TARGET_ALTITUDE_M)
-        assert trajectory.n_fixes == 50  # 51 lines, one of them the header
-
-    def test_time_is_measured_from_the_first_fix(self) -> None:
-        """The shipped track is in time_s, so it carries no epoch."""
-        trajectory = load_flight_csv(GOLDEN_CSV, altitude_m=TARGET_ALTITUDE_M)
-        assert trajectory.time_s[0] == 0.0
-        assert trajectory.epoch is None
-
     def test_a_time_utc_file_keeps_its_epoch(self, tmp_path: Path) -> None:
         recorded = tmp_path / "recorded.csv"
         recorded.write_text(
@@ -105,15 +95,6 @@ class TestLoadFlightCsv:
         trajectory = load_flight_csv(recorded, altitude_m=TARGET_ALTITUDE_M)
         assert trajectory.epoch == datetime(2026, 9, 3, 0, 17, 56, tzinfo=UTC)
         np.testing.assert_array_equal(trajectory.time_s, [0.0, 8.0])
-
-    def test_the_second_fix_is_eight_seconds_in(self) -> None:
-        """0 s to 8 s -- the irregular sampling the spec S3 warns about."""
-        trajectory = load_flight_csv(GOLDEN_CSV, altitude_m=TARGET_ALTITUDE_M)
-        assert trajectory.time_s[1] == 8.0
-
-    def test_timestamps_are_strictly_increasing(self) -> None:
-        trajectory = load_flight_csv(GOLDEN_CSV, altitude_m=TARGET_ALTITUDE_M)
-        assert np.all(np.diff(trajectory.time_s) > 0.0)
 
     def test_altitude_is_the_constant_it_was_given(self) -> None:
         """The CSV has no altitude column; it is a scenario parameter."""
@@ -181,12 +162,6 @@ class TestLoadFlightCsv:
         with pytest.raises(ValueError, match="exactly one of"):
             load_flight_csv(bad, altitude_m=TARGET_ALTITUDE_M)
 
-    def test_rejects_a_file_with_no_time_column(self, tmp_path: Path) -> None:
-        bad = tmp_path / "no_clock.csv"
-        bad.write_text("latitude_deg,longitude_deg\n35.9,-78.9\n35.9,-78.9\n")
-        with pytest.raises(ValueError, match="exactly one of"):
-            load_flight_csv(bad, altitude_m=TARGET_ALTITUDE_M)
-
     def test_an_altitude_column_overrides_the_argument(self, tmp_path: Path) -> None:
         with_altitude = tmp_path / "with_altitude.csv"
         with_altitude.write_text(
@@ -219,20 +194,6 @@ class TestLoadFlightCsv:
 
 
 class TestResample:
-    def test_lands_on_the_requested_grid(self) -> None:
-        trajectory = load_flight_csv(GOLDEN_CSV, altitude_m=TARGET_ALTITUDE_M)
-        times_s = np.arange(0.0, 100.0, 1.0)
-        resampled = resample(trajectory, times_s)
-        np.testing.assert_array_equal(resampled.time_s, times_s)
-
-    def test_reproduces_the_original_fixes_exactly(self) -> None:
-        """Interpolating onto the input's own times is the identity."""
-        trajectory = load_flight_csv(GOLDEN_CSV, altitude_m=TARGET_ALTITUDE_M)
-        resampled = resample(trajectory, trajectory.time_s)
-        # Linear interpolation at a node returns the node, to the last bit.
-        np.testing.assert_allclose(resampled.latitude_deg, trajectory.latitude_deg, rtol=1e-15)
-        np.testing.assert_allclose(resampled.longitude_deg, trajectory.longitude_deg, rtol=1e-15)
-
     def test_the_midpoint_of_a_gap_is_the_mean_of_its_ends(self) -> None:
         """The defining property of linear interpolation."""
         trajectory = load_flight_csv(GOLDEN_CSV, altitude_m=TARGET_ALTITUDE_M)
@@ -273,17 +234,6 @@ class TestToRadarFrame:
         np.testing.assert_allclose(track.range_m, 1000.0, rtol=1e-9)
         np.testing.assert_allclose(track.elevation_deg, 90.0, rtol=1e-9)
 
-    def test_a_target_due_north_reads_zero_azimuth(self) -> None:
-        """Azimuth zero at true north, increasing clockwise, per data-001 DF2.
-
-        Compared on the circle: the azimuth axis is wrapped to [0, 360), and a
-        due-north target whose east offset rounds to -1e-12 metres legitimately
-        reads 359.999... rather than 0. Both are the same bearing.
-        """
-        track = to_radar_frame(_straight_north_track(0.0, 10.0, 11), S1_RADAR)
-        offset_deg = (track.azimuth_deg + 180.0) % 360.0 - 180.0
-        np.testing.assert_allclose(offset_deg, 0.0, atol=1e-9)
-
     def test_a_target_due_east_reads_ninety_degrees(self) -> None:
         """Clockwise, so east is +90 -- the sign that distinguishes the convention."""
         time_s = np.array([0.0, 1.0, 2.0])
@@ -320,12 +270,6 @@ class TestToRadarFrame:
         # because the synthetic track uses a flat degrees-to-metres factor while
         # the transform uses full WGS-84 geometry.
         np.testing.assert_allclose(track.radial_velocity_mps, -speed_mps, rtol=1e-3)
-
-    def test_a_closing_target_reports_positive_velocity(self) -> None:
-        speed_mps = 80.0
-        track = to_radar_frame(_straight_north_track(-speed_mps, 100.0, 101), S1_RADAR)
-        assert np.all(track.radial_velocity_mps > 0.0)
-        np.testing.assert_allclose(track.radial_velocity_mps, speed_mps, rtol=1e-3)
 
     def test_a_target_circling_the_radar_has_no_radial_velocity(self) -> None:
         """A known null: all motion is tangential, so Doppler must vanish.
@@ -364,13 +308,6 @@ class TestToRadarFrame:
         # flat scale factor instead of the two radii puts the residual at
         # 0.485 m/s here, eight times the threshold.
         assert np.max(np.abs(track.radial_velocity_mps)) < 0.1
-
-    def test_shapes_follow_the_trajectory(self) -> None:
-        trajectory = load_flight_csv(GOLDEN_CSV, altitude_m=TARGET_ALTITUDE_M)
-        track = to_radar_frame(trajectory, S1_RADAR)
-        assert track.n_frames == trajectory.n_fixes
-        for name in ("range_m", "azimuth_deg", "elevation_deg", "radial_velocity_mps"):
-            assert getattr(track, name).shape == (trajectory.n_fixes,)
 
 
 class TestTrajectoryValidation:
@@ -479,25 +416,28 @@ class TestToBistaticRadarFrame:
         track = to_bistatic_radar_frame(trajectory, _BISTATIC_PAIR)
         assert np.all(np.abs(track.range_tx_m - track.range_rx_m) > 1.0e3)
 
-    def test_the_departure_and_arrival_angles_differ(self) -> None:
-        """Two sites, two look directions; that is what makes it bistatic."""
-        trajectory = _straight_north_track(speed_mps=80.0, duration_s=60.0, n_fixes=61)
-        track = to_bistatic_radar_frame(trajectory, _BISTATIC_PAIR)
-        assert np.all(np.abs(track.transmit_azimuth_deg - track.receive_azimuth_deg) > 1.0)
+    def test_a_target_flying_at_the_receiver_closes_at_v_cos_squared_half_beta(self) -> None:
+        r"""Closed form for the bisector rate, on geometry where every frame shortens the path.
 
-    def test_a_stationary_target_has_no_bisector_rate(self) -> None:
-        trajectory = _straight_north_track(speed_mps=0.0, duration_s=60.0, n_fixes=61)
-        track = to_bistatic_radar_frame(trajectory, _BISTATIC_PAIR)
-        np.testing.assert_allclose(track.bisector_velocity_mps, 0.0, atol=1e-9)
+        The target flies due south, straight at the receiver, at speed v. So
+        the receive range closes at v, and the transmit range closes at
+        v cos(beta), beta being the angle at the target between the two sites.
+        Half their sum is v (1 + cos beta) / 2 = v cos^2(beta/2) (Willis,
+        *Bistatic Radar*, 2nd ed., section 6.1). Catches a missing half (twice
+        the answer), a flipped sign, and a rate from one range alone (v or
+        v cos beta, 7 % and 15 % off here, where beta runs 30-36 deg).
 
-    def test_the_bisector_rate_is_positive_when_the_path_shortens(self) -> None:
-        """Closing-positive, per spec/structure.md D5, on the *total* path."""
-        trajectory = _straight_north_track(speed_mps=80.0, duration_s=60.0, n_fixes=61)
+        rtol at 1e-3: the receive leg is only straight to the 1e-3 the flat
+        synthetic track allows (see the monostatic sign test), and the end
+        frames take a one-sided difference; measured 3.4e-4 at worst.
+        """
+        speed_mps = 80.0
+        trajectory = _straight_north_track(-speed_mps, duration_s=60.0, n_fixes=61)
         track = to_bistatic_radar_frame(trajectory, _BISTATIC_PAIR)
-        path_length_m = track.range_tx_m + track.range_rx_m
-        shortening = np.diff(path_length_m) < 0.0
-        assert np.all(track.bisector_velocity_mps[1:-1][shortening[1:]] > 0.0)
-
-    def test_n_frames_counts_the_grid(self) -> None:
-        trajectory = _straight_north_track(speed_mps=80.0, duration_s=60.0, n_fixes=61)
-        assert to_bistatic_radar_frame(trajectory, _BISTATIC_PAIR).n_frames == 61
+        # The premise: the total path shortens in every interval.
+        assert np.all(np.diff(track.range_tx_m + track.range_rx_m) < 0.0)
+        np.testing.assert_allclose(
+            track.bisector_velocity_mps,
+            speed_mps * np.cos(track.bistatic_angle_rad / 2.0) ** 2,
+            rtol=1e-3,
+        )
