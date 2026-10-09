@@ -196,7 +196,7 @@ the ones marked *new*.
 | `sites`, `target` | object | As today |
 | `bursts` | array | As today, one object per burst: waveform, `f0_hz`, `bandwidth_hz`, `prf_hz`, `n_pulses`, `n_samples`, resolutions, unambiguous range and velocity, `noise_power_w` |
 | `detection` | object or null | As today: the resolved `[detection]` table |
-| `tracking` | object or null | As today, including `simulated_angles` (`spec/scenario-003-tracking.md` §6.3). **Adds** `state_model` and `state_fields`: the ordered list of state-vector column names, e.g. `["east_m", "north_m", "east_rate_mps", "north_rate_mps"]`. §6.6's covariance columns are indexed by it. **Adds** `range_period_m`: when the tracker measures range modulo a period, that period, and every `range_m` in `detections.csv` and `tracks.csv` lies in `[0, range_period_m)`. `null` when range is absolute |
+| `tracking` | object or null | As today, including `simulated_angles` (`spec/scenario-003-tracking.md` §6.3). **Adds** `state_model` and `state_fields`: the ordered list of state-vector column names, e.g. `["east_m", "north_m", "east_rate_mps", "north_rate_mps"]`. §6.6's covariance columns are indexed by it. **Adds** `range_period_m`: when the tracker measures range modulo a period, that period, and every `range_m` in `detections.csv` and `tracks.csv` lies in `[0, range_period_m)`. `null` when range is absolute. **Adds** `unused`: the names of the settings, among those recorded, that the chosen `estimator` did not read, so that no recorded value is mistaken for one the run used |
 | `provenance` | object | As today, `radar_forge_version` and `git_commit`. **Adds** `python_version`, `numpy_version`, and `command` (the argv that produced the run) |
 | `files` *new* | array | One object per file written: `path` (relative), `level` (`L0`–`L4`, `truth`, `metrics`, `export`, `figure`), `format`, `sha256`, `size_bytes`. The inventory is what lets the validator tell a truncated run from a complete one |
 
@@ -664,7 +664,7 @@ item 5. Only rule R7, which AC8 cites, is in place.
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 1.0.0 | 2026-09-29 | First proposal |
-| 1.1.0 | 2026-10-07 | `detections.csv` adds `burst_index`, `status` and `pair_id`; `metadata.json` `tracking` adds `range_period_m`, and records the resolved settings, defaults included, beside the `[tracking]` table's own keys |
+| 1.1.0 | 2026-10-07 | `detections.csv` adds `burst_index`, `status` and `pair_id`; `metadata.json` `tracking` adds `range_period_m` and `unused`, and records the resolved settings, defaults included, beside the `[tracking]` table's own keys |
 
 ## References
 

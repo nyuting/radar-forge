@@ -65,7 +65,7 @@ References
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from typing import TYPE_CHECKING, Any, Literal, get_args, get_type_hints
 
 import numpy as np
@@ -332,6 +332,31 @@ class TrackingConfig:
     n_slope_frames: int = 5
     state_model: str = "range_1d"
     estimator: EstimatorKind = "kalman"
+
+    def unused_fields(self) -> tuple[str, ...]:
+        """Return the names of the fields that :attr:`estimator`'s path does not read.
+
+        A run records every setting, defaults included, so a reader needs to
+        be told which of them had no effect. Otherwise a ``"ukf"`` run's
+        ``sigma_range_m``, a value frozen for S1's bins, reads as the
+        measurement noise it used.
+
+        Returns
+        -------
+        tuple of str
+            Field names, in declaration order. ``sigma_azimuth_deg`` and
+            ``sigma_elevation_deg`` are always among them: only the ``enu_2d``
+            and ``enu_3d`` state models would read them, and neither path
+            builds those yet.
+        """
+        # Kept beside the fields, so that a field added to one path is added
+        # here in the same change. ScenarioTracker is the only reader.
+        unused = {"sigma_azimuth_deg", "sigma_elevation_deg"}
+        if self.estimator == "ukf":
+            unused |= {"sigma_range_m", "sigma_velocity_mps", "unfold_sigma_gate", "n_slope_frames"}
+        else:
+            unused |= {"acceleration_correlation_time_s"}
+        return tuple(f.name for f in fields(self) if f.name in unused)
 
 
 def _suppress_range_sidelobes(

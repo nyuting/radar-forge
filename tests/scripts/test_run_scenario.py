@@ -123,6 +123,36 @@ def test_metadata_tracking_keeps_every_key_of_the_toml_table(name):
         assert tracking[key] == value, key
 
 
+@pytest.mark.parametrize(
+    ("name", "unused"),
+    [
+        (
+            "scenario_003_ukf_fmcw_dual_prf",
+            {
+                "sigma_range_m",
+                "sigma_velocity_mps",
+                "sigma_azimuth_deg",
+                "sigma_elevation_deg",
+                "unfold_sigma_gate",
+                "n_slope_frames",
+            },
+        ),
+        (
+            "scenario_003_tracking",
+            {"acceleration_correlation_time_s", "sigma_azimuth_deg", "sigma_elevation_deg"},
+        ),
+    ],
+)
+def test_metadata_says_which_settings_the_estimator_did_not_read(name, unused):
+    """A UKF run records S1's frozen sigma_range_m, and must say it went unused."""
+    scenario = runner.load_scenario(ROOT / "scenarios" / f"{name}.toml")
+    tracker = runner.ScenarioTracker.from_scenario(scenario)
+    tracking = runner.tracking_metadata(scenario, tracker)
+    assert set(tracking["unused"]) == unused
+    # Every unused name is a recorded key, so a reader can find what it labels.
+    assert set(tracking["unused"]) <= set(tracking)
+
+
 @pytest.mark.slow
 def test_a_ukf_run_writes_the_data_001_files(tmp_path):
     """Three frames of the S3 UKF scenario: the headers, the metadata keys and the metrics."""

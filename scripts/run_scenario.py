@@ -260,12 +260,15 @@ def reference_site(scenario: Scenario) -> dict[str, object]:
 def tracking_metadata(scenario: Scenario, tracker: ScenarioTracker) -> dict[str, object]:
     """The resolved tracking settings, with what a reader of tracks.csv needs to know.
 
-    The settings are the ones the run used, defaults included, under the
-    scenario TOML's names, so every key of the ``[tracking]`` table appears
-    with its value, as data-001 §6.1 asks. ``state_fields`` indexes the ``cov_<i>_<j>`` columns of
-    tracks.csv (data-001 §6.1). ``range_period_m`` is the period of the
-    exported range when range folds, and ``None`` when it does not, so that a
-    reader knows once, here, whether ``range_m`` is absolute or modulo.
+    The settings are the resolved ones, defaults included, under the scenario
+    TOML's names, so every key of the ``[tracking]`` table appears with its
+    value, as data-001 §6.1 asks. ``unused`` lists the settings the chosen
+    estimator did not read (:meth:`TrackingConfig.unused_fields`), so that
+    no value is mistaken for one the run used. ``state_fields`` indexes the
+    ``cov_<i>_<j>`` columns of tracks.csv (data-001 §6.1). ``range_period_m``
+    is the period of the exported range when range folds, and ``None`` when it
+    does not, so that a reader knows once, here, whether ``range_m`` is
+    absolute or modulo.
     """
     settings = asdict(tracker.tracking)
     # configs_from_scenario renames the TOML's velocity_unfolding to the field
@@ -278,6 +281,7 @@ def tracking_metadata(scenario: Scenario, tracker: ScenarioTracker) -> dict[str,
         "simulated_angles": bool((scenario.tracking_table or {}).get("simulated_angles", False)),
         "state_fields": list(STATE_FIELDS),
         "range_period_m": tracker.folding_layout.coordinates[0].period,
+        "unused": list(tracker.tracking.unused_fields()),
     }
 
 
