@@ -8,8 +8,8 @@ suite 1563 to 1297). §5 gives each criterion's status. Three items: a function-
 against the specifications that predate it, a qualitative (rather than structural) audit of the
 test suite, and a navigational invariant for Markdown summary tables.
 
-Where `spec/refactor-001-standardisation-and-reading-pipeline.md` was mechanical — renames,
-restructures, a new tool — this one is a judgement exercise. Its output is as much a set of
+Where the earlier standardisation refactor was mechanical — renames, restructures, the reading
+view — this one is a judgement exercise. Its output is as much a set of
 findings as a set of diffs, and an honest "no change, here is why" is a valid result for any
 function audited.
 
@@ -86,7 +86,7 @@ Integrate winning elements into `src/`. Constraints:
 
 ## 2. Qualitative multidisciplinary test evaluation
 
-`refactor-001` §5.2 asked for an audit of the suite's **structural** coverage. This item asks a
+The earlier standardisation refactor audited the suite's **structural** coverage. This item asks a
 different question: not *is it covered*
 but **does it make sense**.
 
@@ -170,7 +170,7 @@ sections. It does **not** apply to parameter matrices, acceptance matrices, or c
 whose rows are data and have no section to point at. Applying it there would produce hundreds of
 links to nothing.
 
-`spec/structure.md` Part A already satisfies this (14 linked rows, added in refactor-001 §4.2).
+`spec/structure.md` Part A already satisfies this (14 linked rows).
 The work is to find any other navigational table that does not, and to state the invariant in
 `docs/conventions/style.md` so new ones comply.
 
@@ -196,7 +196,7 @@ request is reaching for. It is not the literal function-by-function code diff de
 
 ### 4.2 The upstream comparison finds nothing adoptable
 
-`refactor-001` §5.1 asked for `src/` to be cross-referenced against every reference project
+The earlier standardisation refactor asked for `src/` to be cross-referenced against every reference project
 catalogued in `structure.md` Part A, and none is adoptable — RadarBook, pyAPRiL, RadarSimPy,
 ovrtx, RASPNet and AIRadarLib are all GPL, proprietary, or declare no licence, and D4 already requires writing from
 published equations; the permissively-licensed references (Phased-Array-Antenna-Model,

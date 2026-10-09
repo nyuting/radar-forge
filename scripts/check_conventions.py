@@ -13,10 +13,12 @@ R4  Physical constants are defined once, in ``core/constants.py``. No other file
     may bind those names, and their literal values may not appear elsewhere.
 R5  Physical quantities carry a unit suffix; bare names like ``range`` or
     ``power`` are rejected.
-R7  Every in-file Markdown anchor (``](#section)``) resolves to a real heading
-    in that same file, so a summary table's jump links cannot rot.
 R6  ``np.tile``/``np.repeat`` used to fake broadcasting must carry a one-line
     justification.
+R7  Every in-file Markdown anchor (``](#section)``) resolves to a real heading
+    in that same file, so a summary table's jump links cannot rot.
+R8  Python comments carry no hash banners and no ``Inputs:``/``Outputs:``
+    blocks; parameters and returns belong in the NumPy docstring.
 
 Each failure prints the rule, the fix, and where the rule is documented.
 
@@ -29,9 +31,11 @@ Usage
 from __future__ import annotations
 
 import ast
+import io
 import re
 import subprocess
 import sys
+import tokenize
 from pathlib import Path
 from typing import NamedTuple
 
@@ -470,12 +474,72 @@ def check_markdown_anchors(rel: Path) -> list[Problem]:
     return problems
 
 
+# --------------------------------------------------------------------------- #
+# R8 — comment style
+# --------------------------------------------------------------------------- #
+
+# Ten or more leading hashes: a decorative banner. The section header used in
+# this file ("# ---- #") starts "# " and so never matches.
+BANNER_RE = re.compile(r"^\s*#{10,}")
+# An "Inputs:" / "Outputs:" comment block restates what the docstring's
+# Parameters and Returns sections already say, and drifts from them.
+IO_BLOCK_RE = re.compile(r"^\s*#\s*(Inputs|Outputs):")
+
+
+def check_comment_style(rel: Path, lines: list[str]) -> list[Problem]:
+    """R8: no hash banners and no Inputs/Outputs comment blocks.
+
+    Uses ``tokenize`` so only real comments are inspected: a string or docstring
+    that happens to contain ``##########`` is data, not a comment.
+    """
+    source = "\n".join(lines) + "\n"
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, SyntaxError):  # ruff reports broken source
+        return []
+
+    problems: list[Problem] = []
+    for token in tokens:
+        if token.type != tokenize.COMMENT:
+            continue
+        line = token.start[0]
+        if BANNER_RE.match(token.string):
+            problems.append(
+                Problem(
+                    rel,
+                    line,
+                    "R8 comments",
+                    "hash banner comment.",
+                    "delete it; if the module needs sections, use a single "
+                    "'# ---- #' style header (see this checker's own source).",
+                )
+            )
+        elif IO_BLOCK_RE.match(token.string):
+            problems.append(
+                Problem(
+                    rel,
+                    line,
+                    "R8 comments",
+                    f"'{token.string.strip()}' comment documents parameters or returns.",
+                    "move it into the NumPy docstring's Parameters/Returns sections "
+                    "(style.md §4); comments say why, not what (style.md §10).",
+                )
+            )
+    return problems
+
+
 def check_file(rel: Path, canonical: set[str]) -> list[Problem]:
     """Run every rule against one repository-relative path."""
     problems = check_path_rules(rel)
 
     if rel.suffix == ".md":
         problems += check_markdown_anchors(rel)
+
+    # R8 applies to every tracked Python file (src/, scripts/, tests/, tools/);
+    # the remaining rules are about the library package only.
+    if rel.suffix == ".py" and (REPO / rel).is_file():
+        lines = (REPO / rel).read_text(encoding="utf-8").splitlines()
+        problems += check_comment_style(rel, lines)
 
     if rel.parts[:2] != PKG.parts or rel.suffix != ".py":
         return problems

@@ -4,7 +4,7 @@ Two rules in `CLAUDE.md` and `docs/conventions/style.md` are stated for the
 whole library but were only ever tested in one module:
 
 * every module declares ``__all__``, so a reader can tell the surface from the
-  scaffolding (`spec/refactor-001` §6.1);
+  scaffolding (`docs/conventions/style.md` §6);
 * array arguments are ``ArrayLike`` in and ``NDArray`` out, so a caller may
   pass a Python list and always gets a float64 (or complex128) array back.
 

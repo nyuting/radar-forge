@@ -215,7 +215,7 @@ of three kinds:
 
 ### 10.1 What earns a place **[review]**
 
-Every test runs on every push, so a domain test must clear all four:
+Every test runs on every push, so a domain test must clear all five:
 
 1. **It names the bug it catches.** The docstring states, in one sentence, a plausible error
    that would fail it. If you cannot name one, do not write the test.
@@ -239,6 +239,21 @@ Every test runs on every push, so a domain test must clear all four:
    - Share an expensive run between its tests with a module-scoped fixture.
    - Anything over a second is marked `slow` with the reason in its docstring
      (`uv run pytest --durations=20` finds them).
+5. **Its setup makes physical sense.** A test can pass and still convince nobody. Check that:
+   - each target's range, altitude and RCS are plausible for its class, and its accelerations
+     and turn rates are ones that kind of aircraft can fly;
+   - the radar parameters could exist together in one sensor (PRF, duty cycle, pulse width);
+   - the window suits what the test measures: a low-sidelobe taper does not belong in a
+     resolution test;
+   - an expected bin index is right for the right reason, and a threshold sits near a plausible
+     operating point;
+   - an unfolding test's target actually folds;
+   - the test still passes away from its nominal parameters.
+
+   A test that fails this check is either **weak**, meaning it passes for an unconvincing
+   reason, or **wrong**, meaning it asserts something untrue or unphysical. Rewrite a weak
+   test's setup or assertion. Fix a wrong one, and say in the commit what it was hiding.
+   Labelling the test isn't enough.
 
 Not tests:
 

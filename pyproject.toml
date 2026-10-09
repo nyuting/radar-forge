@@ -81,6 +81,7 @@ select = [
     "D",    # pydocstyle
     "ANN",  # flake8-annotations
     "RUF",  # ruff-specific rules
+    "TD",   # flake8-todos: TODO(author): what — <issue link>
 ]
 ignore = [
     "D203",  # conflicts with D211 (no blank line before class docstring)

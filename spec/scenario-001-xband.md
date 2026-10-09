@@ -105,7 +105,7 @@ frame cadence. They differ only in `[[burst]]`. This is the comparison the scena
 Range resolution is **74.9481 m** in all three, since all three carry `f0_hz = 9.8e9` and
 `bandwidth_hz = 2.0e6`.
 
-> **Why the three sampling rates differ** (refactor-001 §7.1, an audit; no rate was changed).
+> **Why the three sampling rates differ** (an audit; no rate was changed).
 >
 > All three share the same 2 MHz RF bandwidth and therefore the same 74.95 m range resolution, so
 > the differing rates are **not** about resolution. The two waveform families sample *different

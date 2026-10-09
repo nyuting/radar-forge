@@ -72,7 +72,8 @@ Q4 conciseness · Q5 documentation · Q6 naming · Q7 inputs · Q8 outputs.
 | [F10](#f10--data-001-called-a-thermal-noise-power-the-cfar-estimate) | `spec/data-001-formats.md` §6.8 | Conformance, Q8 | **Spec** wrong — fixed |
 
 Everything else audited below carries no finding. That is the expected result: the suite is
-strong, refactor-001 hardened it, and most of `core/` is already the best available form.
+strong, the earlier standardisation pass hardened it, and most of `core/` is already the best
+available form.
 
 ## `constants.py`
 

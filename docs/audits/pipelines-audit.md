@@ -406,8 +406,8 @@ across repeats, and is identical at `sigma_accel_mps2` of 5.0 and 2.0 — see
 
 ### F11 — Left alone deliberately
 
-**`RangeDopplerProduct` → `RangeDopplerMap`: recommended against, as framed.** refactor-001
-§2.3 blocked this on the field, since `RangeDopplerMap.rd_map` is a tautology, and it is still
+**`RangeDopplerProduct` → `RangeDopplerMap`: recommended against, as framed.** The earlier
+naming audit blocked this on the field, since `RangeDopplerMap.rd_map` is a tautology, and it is still
 blocked — because no candidate replacement is better than what it replaces. `values` is vaguer;
 `amplitude` is a bare physical name of exactly the kind §3 exists to reject; `map_complex`
 describes the dtype rather than the quantity. Meanwhile `rd_map` is the term the specification,
