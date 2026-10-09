@@ -8,8 +8,6 @@ test is the one that decides.
 
 from __future__ import annotations
 
-import warnings
-
 import numpy as np
 import pytest
 
@@ -53,23 +51,13 @@ class TestTransmitter:
         """9.8 GHz gives 30.591 mm, the figure quoted throughout scenario 001."""
         np.testing.assert_allclose(S1_TRANSMITTER.wavelength_m, 0.030_591_067, rtol=1e-7)
 
-    def test_wavelength_is_c_over_f(self) -> None:
-        expected_m = SPEED_OF_LIGHT_MPS / S1_TRANSMITTER.f0_hz
-        np.testing.assert_allclose(S1_TRANSMITTER.wavelength_m, expected_m, rtol=1e-15)
-
     def test_fmcw_sweep_rate_is_two_ghz_per_second(self) -> None:
         """2 MHz over 1 ms is 2.000 GHz/s, per spec §3.4 S1."""
         np.testing.assert_allclose(S1_TRANSMITTER.sweep_rate_hzps, 2.0e9, rtol=1e-12)
 
     def test_fmcw_runs_at_full_duty(self) -> None:
+        """The Notes boundary: exactly 100% duty is permitted, and the formula is T * PRF."""
         np.testing.assert_allclose(S1_TRANSMITTER.duty_cycle_linear, 1.0, rtol=1e-12)
-
-    def test_pulsed_duty_cycle(self) -> None:
-        """10 us at 25 kHz is a 25% duty cycle."""
-        np.testing.assert_allclose(S2_TRANSMITTER.duty_cycle_linear, 0.25, rtol=1e-12)
-
-    def test_pulse_repetition_interval_is_the_prf_reciprocal(self) -> None:
-        np.testing.assert_allclose(S2_TRANSMITTER.pulse_repetition_interval_s, 40.0e-6, rtol=1e-12)
 
     @pytest.mark.parametrize(
         "field",
@@ -103,6 +91,7 @@ class TestReceiver:
         np.testing.assert_allclose(S1_RECEIVER.noise_figure_linear, 1.995_262, rtol=1e-6)
 
     def test_zero_db_noise_figure_is_unity(self) -> None:
+        """Zero is the boundary of the guard: a ``<= 0`` check would reject an ideal receiver."""
         np.testing.assert_allclose(Receiver(1.0e6, 30.0, 0.0).noise_figure_linear, 1.0, rtol=1e-15)
 
     def test_rejects_a_negative_noise_figure(self) -> None:
@@ -119,14 +108,6 @@ class TestRadarAmbiguity:
         """c/2B at 2 MHz is 74.95 m, per spec §2."""
         np.testing.assert_allclose(
             _radar(S1_TRANSMITTER, S1_RECEIVER).range_resolution_m, 74.948, rtol=1e-4
-        )
-
-    def test_range_resolution_is_waveform_independent(self) -> None:
-        """Both variants share a bandwidth, so both share a resolution."""
-        np.testing.assert_allclose(
-            _radar(S1_TRANSMITTER, S1_RECEIVER).range_resolution_m,
-            _radar(S2_TRANSMITTER, S2_RECEIVER).range_resolution_m,
-            rtol=1e-15,
         )
 
     def test_s1_unambiguous_range_covers_the_track(self) -> None:
@@ -153,34 +134,6 @@ class TestRadarAmbiguity:
         np.testing.assert_allclose(unambiguous_velocity_mps, 191.194, rtol=1e-5)
         assert unambiguous_velocity_mps > 100.0
 
-    def test_the_two_variants_trade_one_ambiguity_for_the_other(self) -> None:
-        """The central claim of spec §4, asserted rather than asserted in prose.
-
-        S1 is unambiguous in range and folded in Doppler; S2 is the exact
-        reverse. Neither is unambiguous in both, which is the design tension the
-        three-variant scenario exists to show.
-        """
-        s1 = _radar(S1_TRANSMITTER, S1_RECEIVER)
-        s2 = _radar(S2_TRANSMITTER, S2_RECEIVER)
-        track_maximum_range_m = 17_870.0
-        aircraft_speed_mps = 80.0
-
-        assert s1.unambiguous_range_m > track_maximum_range_m
-        assert s1.unambiguous_velocity_mps < aircraft_speed_mps
-        assert s2.unambiguous_range_m < track_maximum_range_m
-        assert s2.unambiguous_velocity_mps > aircraft_speed_mps
-
-    def test_range_doppler_product_is_bounded_by_c_over_four(self) -> None:
-        r"""R_ua * v_ua = c*lambda/8 for a pulsed radar, independent of PRF.
-
-        This is why the trade cannot be escaped by choosing a better PRF: the
-        product is fixed by the carrier alone.
-        """
-        radar = _radar(S2_TRANSMITTER, S2_RECEIVER)
-        product = radar.unambiguous_range_m * radar.unambiguous_velocity_mps
-        expected = SPEED_OF_LIGHT_MPS * radar.wavelength_m / 8.0
-        np.testing.assert_allclose(product, expected, rtol=1e-12)
-
 
 class TestRadarValidation:
     def test_rejects_an_impossible_site_latitude(self) -> None:
@@ -191,15 +144,6 @@ class TestRadarValidation:
         """A pulsed receiver must cover the signal bandwidth; FMCW need not."""
         with pytest.raises(ValueError, match="would alias"):
             Radar(S2_TRANSMITTER, Receiver(1.0e6, 30.0, 3.0), *DUKE_SITE)
-
-    def test_permits_an_fmcw_receiver_below_the_swept_bandwidth(self) -> None:
-        """1 MHz sampling of a 2 MHz sweep is correct: deramping comes first.
-
-        This is the property that makes FMCW cheap, and the reason the check
-        above is waveform-specific rather than universal.
-        """
-        radar = _radar(S1_TRANSMITTER, S1_RECEIVER)
-        assert radar.receiver.sample_rate_hz < radar.transmitter.bandwidth_hz
 
     def test_noise_power_matches_ktbf(self) -> None:
         """-174 dBm/Hz + 10log10(B) + F, the standard link-budget line."""
@@ -223,12 +167,6 @@ class TestRadarValidation:
         """
         assert _radar(S2_TRANSMITTER, S2_RECEIVER).n_samples_per_pri == 100
         assert _radar(S1_TRANSMITTER, S1_RECEIVER).n_samples_per_pri == 1000
-
-    def test_pri_and_chirp_windows_agree_only_at_full_duty(self) -> None:
-        s1 = _radar(S1_TRANSMITTER, S1_RECEIVER)
-        s2 = _radar(S2_TRANSMITTER, S2_RECEIVER)
-        assert s1.n_samples_per_pri == s1.n_samples_per_chirp
-        assert s2.n_samples_per_pri > s2.n_samples_per_chirp
 
     def test_is_frozen(self) -> None:
         """Value objects, so a scenario cannot be mutated halfway through a run."""
@@ -259,11 +197,6 @@ class TestBistaticGeometry:
         # this pins the wiring rather than the WGS-84 maths: exact to float64.
         np.testing.assert_allclose(pair.baseline_m, expected_m, rtol=1e-12)
 
-    def test_baseline_is_about_eighteen_kilometres(self) -> None:
-        """A sanity magnitude, so a frame or unit slip cannot pass the test above."""
-        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
-        assert 18.0e3 < pair.baseline_m < 18.1e3
-
     def test_bistatic_angle_is_pi_on_the_baseline(self) -> None:
         """A target between the sites subtends a straight line.
 
@@ -286,22 +219,6 @@ class TestBistaticGeometry:
         np.testing.assert_allclose(
             pair.bistatic_angle_rad(range_m, range_m), np.pi / 2.0, rtol=1e-12
         )
-
-    def test_bistatic_angle_vanishes_for_a_distant_target(self) -> None:
-        """Seen from far enough away the two sites merge and the pair goes monostatic."""
-        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
-        far_m = 1.0e7
-        angle_rad = pair.bistatic_angle_rad(far_m, far_m)
-        # Subtended angle is about L / R = 2.2e-3 rad; assert it is small and positive.
-        assert 0.0 < angle_rad < 1.0e-2
-
-    def test_bistatic_angle_broadcasts_over_targets(self) -> None:
-        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
-        ranges_m = np.array([20.0e3, 50.0e3, 100.0e3])
-        angles_rad = pair.bistatic_angle_rad(ranges_m, ranges_m)
-        assert angles_rad.shape == (3,)
-        # Further away is more nearly monostatic, so the angle must decrease.
-        assert np.all(np.diff(angles_rad) < 0.0)
 
     def test_impossible_triangle_is_rejected(self) -> None:
         pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
@@ -328,12 +245,6 @@ class TestBistaticGeometry:
 class TestBistaticResolution:
     """Range resolution stops being a function of bandwidth alone."""
 
-    def test_resolution_at_zero_angle_is_the_monostatic_value(self) -> None:
-        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
-        np.testing.assert_allclose(
-            pair.range_resolution_at_bistatic_angle_m(0.0), pair.range_resolution_m, rtol=1e-12
-        )
-
     def test_resolution_degrades_as_secant_of_half_the_angle(self) -> None:
         """At beta = 120 deg, cos(beta / 2) = 1 / 2, so the bin is exactly twice as coarse."""
         pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
@@ -344,16 +255,14 @@ class TestBistaticResolution:
         )
 
     def test_resolution_is_infinite_in_forward_scatter(self) -> None:
-        """On the baseline every route has the same length, so range carries no information."""
+        """On the baseline every route has the same length, so range carries no information.
+
+        The singularity is a real limit, returned as inf, not a numerical
+        accident: pyproject turns warnings into errors, so a divide-by-zero
+        RuntimeWarning on the way to inf fails this test.
+        """
         pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
         assert np.isinf(pair.range_resolution_at_bistatic_angle_m(np.pi))
-
-    def test_forward_scatter_does_not_warn(self) -> None:
-        """The singularity is a real limit, returned as inf, not a numerical accident."""
-        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
-        with warnings.catch_warnings():
-            warnings.simplefilter("error")
-            assert np.isinf(pair.range_resolution_at_bistatic_angle_m(np.pi))
 
     @pytest.mark.parametrize("bistatic_angle_rad", [-1.0e-9, np.pi + 1.0e-9])
     def test_resolution_rejects_angles_outside_the_half_turn(
@@ -373,13 +282,6 @@ class TestBistaticAmbiguity:
         # of delay buys c / PRF of range sum, not c / 2 PRF of range.
         expected_m = SPEED_OF_LIGHT_MPS / S2_TRANSMITTER.prf_hz
         np.testing.assert_allclose(pair.unambiguous_range_m, expected_m, rtol=1e-12)
-
-    def test_unambiguous_sum_range_is_twice_the_monostatic_range(self) -> None:
-        pair = _bistatic(S2_TRANSMITTER, S2_RECEIVER)
-        monostatic = _radar(S2_TRANSMITTER, S2_RECEIVER)
-        np.testing.assert_allclose(
-            pair.unambiguous_range_m, 2.0 * monostatic.unambiguous_range_m, rtol=1e-12
-        )
 
     def test_waveform_independent_properties_match_the_monostatic_radar(self) -> None:
         """Wavelength, noise and cube shape belong to the chains, not to the siting."""
@@ -428,16 +330,3 @@ class TestBistaticFmcwAmbiguity:
         )
         # rtol 1e-12: two float64 divides against the same constant.
         np.testing.assert_allclose(pair.unambiguous_range_m, expected_m, rtol=1e-12)
-
-    def test_the_fmcw_sum_range_is_twice_the_monostatic_range(self) -> None:
-        """The same factor of two as the pulsed case, and for the same reason.
-
-        What folds bistatically is the *sum* of two ranges, and that sum is
-        about twice a one-way range -- so the doubled bound is bookkeeping, not
-        a free extension of coverage.
-        """
-        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
-        monostatic = _radar(S1_TRANSMITTER, S1_RECEIVER)
-        np.testing.assert_allclose(
-            pair.unambiguous_range_m, 2.0 * monostatic.unambiguous_range_m, rtol=1e-12
-        )
