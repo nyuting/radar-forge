@@ -1034,7 +1034,7 @@ primary track is confirmed 2 s after it is born.
 **The NIS is below its dimension on all three, so the measurement noise is pessimistic.** The
 settings are PR A's, derived from scenario 001's truth and not tuned here. A mean NIS well under
 the measurement dimension means the filter expects larger innovations than it gets. The likely
-cause is the measurement noise, one bin over √12 (`bin_quantisation_sigmas`), which is a
+cause is the measurement noise, one bin over √12 (`_bin_quantisation_sigmas`), which is a
 quantisation-only figure for a detection known only to its cell. At these SNRs,
 `frame_detections`' power-weighted centroid is better than a cell. S3's 0.90 is nearest
 consistency. The tracks are unharmed, since an overstated noise only widens the gate, but a

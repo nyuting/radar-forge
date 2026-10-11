@@ -691,7 +691,7 @@ class TestBinQuantisationSigmas:
     @pytest.mark.parametrize(("n_range_bins", "n_doppler_bins"), [(1, 4), (4, 1)])
     def test_an_axis_with_one_bin_has_no_width(self, n_range_bins, n_doppler_bins):
         from radar_forge.pipelines.scenarios import RangeDopplerProduct
-        from radar_forge.pipelines.tracking import bin_quantisation_sigmas
+        from radar_forge.pipelines.tracking import _bin_quantisation_sigmas
 
         product = RangeDopplerProduct(
             rd_map=np.zeros((n_doppler_bins, n_range_bins), dtype=np.complex128),
@@ -699,13 +699,13 @@ class TestBinQuantisationSigmas:
             velocity_axis_mps=np.linspace(-1.0, 1.0, n_doppler_bins, endpoint=False),
         )
         with pytest.raises(ValueError, match="at least two bins"):
-            bin_quantisation_sigmas(product)
+            _bin_quantisation_sigmas(product)
 
     def test_one_bin_over_root_twelve(self):
-        from radar_forge.pipelines.tracking import bin_quantisation_sigmas
+        from radar_forge.pipelines.tracking import _bin_quantisation_sigmas
 
         product = synthetic_product(15_000.0, 2.0)
-        sigma_range_m, sigma_velocity_mps = bin_quantisation_sigmas(product)
+        sigma_range_m, sigma_velocity_mps = _bin_quantisation_sigmas(product)
         np.testing.assert_allclose(sigma_range_m, S1_RANGE_BIN_M / np.sqrt(12.0), rtol=1e-12)
         np.testing.assert_allclose(
             sigma_velocity_mps, FOLD_SPAN_MPS / 256 / np.sqrt(12.0), rtol=1e-12
