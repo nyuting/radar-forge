@@ -1,3 +1,6 @@
+> 🎓 **Interns, look here!** Research tasks for intern candidates and interns:
+> [interns/README.md](interns/README.md)
+
 # radar-forge
 
 **A state-of-the-art, simple radar workbench for research and education.**
