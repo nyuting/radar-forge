@@ -252,8 +252,11 @@ def test_a_trajectory_with_an_epoch_writes_time_utc(tmp_path):
     toml_text = (ROOT / "scenarios" / "scenario_003_ukf_fmcw_dual_prf.toml").read_text(
         encoding="utf-8"
     )
+    # A callable, not a string: re reads backslashes in a replacement string as
+    # escapes, which turns a Windows path's "\\U" back into the invalid TOML "\U".
+    path_line = f"path = {json.dumps(str(track_path))}"
     toml_text, n_replaced = re.subn(
-        r'^path = "[^"]*"', f"path = {json.dumps(str(track_path))}", toml_text, flags=re.MULTILINE
+        r'^path = "[^"]*"', lambda _: path_line, toml_text, flags=re.MULTILINE
     )
     assert n_replaced == 1
     toml_path = tmp_path / "scenario.toml"
