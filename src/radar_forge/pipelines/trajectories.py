@@ -197,8 +197,8 @@ def load_flight_csv(path: Path | str, *, altitude_m: float | None = None) -> Tra
     -----
     **Constant altitude is an approximation.** Elevation angle and the
     ground-range-to-slant-range correction are therefore approximate. For
-    scenario 001 the correction is 1.6 % at the closest approach (8.26 km
-    ground, 8.39 km slant) and shrinks with range.
+    scenario 001 the correction is 3.9 % at the closest approach (5.13 km
+    ground, 5.33 km slant) and shrinks with range.
 
     One file holds one target. ``target_id`` is accepted so that a file written
     for a later multi-target scenario still reads, but only while it names a

@@ -107,7 +107,7 @@ class TestSpecifiedAmbiguities:
 
     def test_s1_covers_the_track_in_range_and_folds_hard_in_doppler(self) -> None:
         burst = load_scenario(S1_TOML).bursts[0]
-        # 37.47 km, comfortably past the 17.9 km the track reaches.
+        # 37.47 km, comfortably past the 18.4 km the window reaches.
         np.testing.assert_allclose(burst.unambiguous_range_m, 37_474.057, rtol=1e-6)
         np.testing.assert_allclose(burst.unambiguous_velocity_mps, 7.6478, rtol=1e-4)
         # The point of S1: an 80 m/s aircraft is five folds out.
@@ -115,17 +115,17 @@ class TestSpecifiedAmbiguities:
 
     def test_s2_folds_in_range_and_covers_the_track_in_doppler(self) -> None:
         burst = load_scenario(S2_TOML).bursts[0]
-        # 5.996 km: the target at 8.4-17.9 km wraps once or twice.
+        # 5.996 km: the target at 16.6-18.4 km wraps two or three times.
         np.testing.assert_allclose(burst.unambiguous_range_m, 5_995.849, rtol=1e-6)
         np.testing.assert_allclose(burst.unambiguous_velocity_mps, 191.194, rtol=1e-5)
-        assert burst.unambiguous_range_m < 8_390.0
+        assert burst.unambiguous_range_m < 16_600.0
 
     def test_s3_bursts_both_cover_the_track_in_range(self) -> None:
         bursts = load_scenario(S3_TOML).bursts
         assert len(bursts) == 2
         np.testing.assert_allclose(bursts[0].unambiguous_range_m, 29_979.246, rtol=1e-6)
         np.testing.assert_allclose(bursts[1].unambiguous_range_m, 24_982.705, rtol=1e-6)
-        assert all(burst.unambiguous_range_m > 18_000.0 for burst in bursts)
+        assert all(burst.unambiguous_range_m > 18_400.0 for burst in bursts)
 
     def test_s3_bursts_are_in_the_coprime_five_to_six_ratio(self) -> None:
         """Coprime is what makes the pair identify a unique velocity."""
@@ -193,7 +193,7 @@ class TestIterateFrames:
         """Range and angles must be physically sensible for the Duke Receiver scenario."""
         scenario = _short_window(load_scenario(S2_TOML), 3)
         for frame in iterate_frames(scenario):
-            assert 8_000.0 < frame.range_m < 18_000.0
+            assert 16_000.0 < frame.range_m < 19_000.0
             assert 0.0 <= frame.azimuth_deg < 360.0
             assert 0.0 < frame.elevation_deg < 90.0
 

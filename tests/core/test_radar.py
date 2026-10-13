@@ -111,10 +111,10 @@ class TestRadarAmbiguity:
         )
 
     def test_s1_unambiguous_range_covers_the_track(self) -> None:
-        """FMCW deramp: c*fs/(4*alpha) = 37.47 km, against a track reaching 17.9 km."""
+        """FMCW deramp: c*fs/(4*alpha) = 37.47 km, against scenario 001's window, up to 18.4 km."""
         unambiguous_range_m = _radar(S1_TRANSMITTER, S1_RECEIVER).unambiguous_range_m
         np.testing.assert_allclose(unambiguous_range_m, 37_474.06, rtol=1e-6)
-        assert unambiguous_range_m > 18_000.0
+        assert unambiguous_range_m > 18_400.0
 
     def test_s1_unambiguous_velocity_folds_an_aircraft(self) -> None:
         """+/-7.65 m/s, so an 80 m/s target folds about five times over."""
@@ -123,10 +123,10 @@ class TestRadarAmbiguity:
         assert unambiguous_velocity_mps < 80.0
 
     def test_s2_unambiguous_range_folds_the_track(self) -> None:
-        """Pulsed: c/2*PRF = 5.996 km, against a track starting at 8.4 km."""
+        """Pulsed: c/2*PRF = 5.996 km, against scenario 001's window, from 16.6 km."""
         unambiguous_range_m = _radar(S2_TRANSMITTER, S2_RECEIVER).unambiguous_range_m
         np.testing.assert_allclose(unambiguous_range_m, 5_995.849, rtol=1e-6)
-        assert unambiguous_range_m < 8_390.0
+        assert unambiguous_range_m < 16_600.0
 
     def test_s2_unambiguous_velocity_does_not_fold(self) -> None:
         """+/-191.2 m/s covers any light aircraft."""

@@ -105,7 +105,6 @@ if TYPE_CHECKING:
 __all__ = [
     "DETECTION_STATUSES",
     "ESTIMATORS",
-    "MEASUREMENT_MODEL_ID",
     "SENSOR_ID",
     "STATE_FIELDS",
     "UNFOLDING_MODES",
@@ -119,7 +118,6 @@ __all__ = [
     "TrackRecord",
     "TrackingConfig",
     "UnfoldingMode",
-    "bin_quantisation_sigmas",
     "configs_from_scenario",
     "dual_prf_detections",
     "dual_prf_measurements",
@@ -165,7 +163,7 @@ SENSOR_ID = "rx0"
 ``spec/data-001-formats.md`` §6.5 names today's single receiver ``"rx0"``.
 """
 
-MEASUREMENT_MODEL_ID = "range_doppler"
+_MEASUREMENT_MODEL_ID = "range_doppler"
 """The ID under which the UKF tracker registers its one measurement model."""
 
 STATE_FIELDS: tuple[str, ...] = ("range_m", "range_rate_mps")
@@ -308,7 +306,7 @@ class TrackingConfig:
     - ``sigma_range_m`` and ``sigma_velocity_mps`` are read by the
       ``"kalman"`` path only. The ``"ukf"`` path computes its measurement
       noise from each frame's own map, one bin over :math:`\sqrt{12}`
-      (:func:`bin_quantisation_sigmas`), so it needs no number fixed for one
+      (:func:`_bin_quantisation_sigmas`), so it needs no number fixed for one
       waveform.
     - ``v_max_mps`` bounds the target's speed for both. It sets the prior
       standard deviation of a new track's range rate. On the ``"ukf"`` path it
@@ -845,7 +843,7 @@ def dual_prf_measurements(
     ]
 
 
-def bin_quantisation_sigmas(product: RangeDopplerProduct) -> tuple[float, float]:
+def _bin_quantisation_sigmas(product: RangeDopplerProduct) -> tuple[float, float]:
     r"""Return the range and velocity standard deviations of a detection at bin precision.
 
     A detection says only that the target is somewhere in a cell of width
@@ -1466,7 +1464,7 @@ class ScenarioTracker:
             policy=policy,
             gate_probability=self.tracking.gate_probability,
             sensor_id=SENSOR_ID,
-            model_id=MEASUREMENT_MODEL_ID,
+            model_id=_MEASUREMENT_MODEL_ID,
         )
 
     @classmethod
@@ -1605,7 +1603,7 @@ class ScenarioTracker:
             # Doppler cannot fold: the folded velocity is the velocity, on fold 0.
             detections = [replace_measurement(m, m.velocity_folded_mps, 0) for m in detections]
 
-        sigma_range_m, sigma_velocity_mps = bin_quantisation_sigmas(product)
+        sigma_range_m, sigma_velocity_mps = _bin_quantisation_sigmas(product)
         n = self._n_measured
         covariance = np.diag(
             np.asarray([sigma_range_m**2, sigma_velocity_mps**2], dtype=np.float64)
@@ -1630,7 +1628,7 @@ class ScenarioTracker:
             for index, velocity_mps in zip(accepted, unfolded_mps, strict=True)
         ]
         batch = tracker.sensors[SENSOR_ID].batch(
-            time_s, [(MEASUREMENT_MODEL_ID, value, covariance) for value in values]
+            time_s, [(_MEASUREMENT_MODEL_ID, value, covariance) for value in values]
         )
         # A track deleted this scan reports once, as "deleted", and gets no
         # record (TrackRecord).

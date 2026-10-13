@@ -4,7 +4,7 @@
 
 [scenario]
 name = "scenario-001-pulsed-medium-prf"
-description = "S2: LFM pulses at 25 kHz PRF. Velocity is unambiguous to +-191 m/s; range folds at 5.996 km, so the target at 8.4-17.9 km wraps once or twice. The exact mirror of S1."
+description = "S2: LFM pulses at 25 kHz PRF. Velocity is unambiguous to +-191 m/s; range folds at 5.996 km, so the target at 16.6-18.4 km wraps two or three times. The exact mirror of S1."
 seed = 20260911
 
 [target]
