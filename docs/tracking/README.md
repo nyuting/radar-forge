@@ -27,7 +27,7 @@ once `Tracker` has what the Limitations below list.
 | :-- | :-- |
 | `coordinates.py` | Named coordinates (`x_m`, `xdot_mps`, …), the state layout they form, and `StateEstimate`: a mean, a covariance and a time. x is east, y is north and z is up, so an azimuth is measured clockwise from north. |
 | `motion.py` | Motion models, which predict a state forward in time: `CartesianMotion` (constant velocity, CV, or constant acceleration, CA, per axis) and `RadialMotion` (range and range rate). |
-| `measurement_models.py` | `Measurement` (a value, its covariance, a time, a sensor and a model), `MeasurementBatch` (one scan from one sensor), `SensorRoute` (a sensor, and the models its measurements may use), and the models that predict a measurement from a state. |
+| `measurement_models.py` | `Measurement` (a value, its covariance, a time, a sensor and a model), `MeasurementBatch` (one scan from one sensor), `SensorRegistration` (a sensor, and the models its measurements may use), and the models that predict a measurement from a state. |
 | `estimation.py` | The `Estimator` interface, and the innovation statistics used for gating. |
 | `ukf.py` | The unscented Kalman filter (UKF), the estimator every track uses. |
 | `association.py` | The chi-square gate, and nearest-neighbour (NN) and global nearest-neighbour (GNN) assignment. |

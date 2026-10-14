@@ -85,7 +85,7 @@ from radar_forge.core.tracking.measurement_models import (
     MeasurementBatch,
     MeasurementModel,
     SensorPose,
-    SensorRoute,
+    SensorRegistration,
 )
 from radar_forge.core.tracking.motion import (
     CartesianMotion,
@@ -125,7 +125,7 @@ __all__ = [
     "NearestNeighbour",
     "RadialMotion",
     "SensorPose",
-    "SensorRoute",
+    "SensorRegistration",
     "StateEstimate",
     "StateLayout",
     "StateModel",
