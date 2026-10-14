@@ -499,8 +499,8 @@ All lifecycle settings live in `LifecyclePolicy`, once. Pipeline configs hold a
 (the PR #13 review found them declared twice and copied across).
 
 The counts below use *hit* and *miss* per scan: a track scores a hit in a scan where a plot
-was assigned to it, and a miss in one where none was. That is narrower than the vocabulary's
-*hit*, a tentative plot (`spec/data-001-formats.md` §5): here it is counted per track.
+was assigned to it, and a miss in one where none was. This M-of-N sense, counted per track per
+scan, is the only one the specs use (`spec/data-001-formats.md` §5 Vocabulary).
 
 | Rule | Setting | Status |
 | :--- | :--- | :--- |
@@ -774,14 +774,15 @@ untested against real data); implementing PMBM at all (§7.5).
 ### TD12 — `Plot` for the pipeline's detection report
 
 `pipelines.tracking.Measurement` is renamed `Plot`. The repo's vocabulary
-(`spec/data-001-formats.md` §5) defines a *detection* as one range-Doppler cell over the CFAR
-threshold, a *plot* as the report clustered from a target's detections, and a *hit* as a
-tentative plot. This class holds clustered reports, so it is a plot. ASTERIX CAT048
+(`spec/data-001-formats.md` §5) defines a *detection* as a connected group of threshold
+crossings, in cell indices (`core.detection.Detection`), and a *plot* as a detection converted
+to physical units. This class holds detections in metres and metres per second, with a
+`status`, so it is a plot. ASTERIX CAT048
 ("Monoradar Target Reports") agrees: it sends a target report either as a plot or as a track,
 and a plot is the untracked form. *Why:*
 two public classes named `Measurement` in one package tree, holding different things, is a
 trap. `core.tracking.Measurement` keeps the name, as the textbook word for z. (Stone Soup's
-equivalent class is `Detection`; that name is taken here by `core.detection.Detection`.)
+equivalent class is `Detection`, which here is `core.detection.Detection`, one step earlier.)
 
 ### TD13 — Target names
 
