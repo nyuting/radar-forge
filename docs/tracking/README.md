@@ -30,7 +30,7 @@ once `Tracker` has what the Limitations below list.
 | `motion.py` | Motion models, which predict a state forward in time: `CartesianMotion` (constant velocity, CV, or constant acceleration, CA, per axis) and `RadialMotion` (range and range rate). |
 | `measurement_models.py` | `Measurement` (a value, its covariance, a time, a sensor and a model), `MeasurementBatch` (one scan from one sensor), `SensorRegistration` (a sensor, and the models its measurements may use), and the models that predict a measurement from a state. |
 | `estimation.py` | The `Estimator` interface, the innovation statistics used for gating, and `GaussianFilter`: the Kalman filter (KF), the extended Kalman filter (EKF) and the unscented Kalman filter (UKF) in one predict and one update. |
-| `linearisation.py` | How `GaussianFilter` carries a mean and a covariance through a model, the one thing that differs between its filters: `UnscentedLinearisation` (the UKF). |
+| `linearisation.py` | How `GaussianFilter` carries a mean and a covariance through a model, the one thing that differs between its filters: `TaylorLinearisation` (the KF on a linear model, the EKF otherwise) and `UnscentedLinearisation` (the UKF). |
 | `association.py` | The chi-square gate, and nearest-neighbour (NN) and global nearest-neighbour (GNN) assignment. |
 | `initiation.py` | `DirectStateInitiator`, which starts a track from a measurement no track took. |
 | `kalman.py` | `KalmanTracker`, scenario 003's linear Kalman tracker, and the filter functions it uses. |

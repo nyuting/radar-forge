@@ -799,7 +799,13 @@ class KalmanFilter:
     its ``estimator`` in :class:`KalmanTracker`. It is not an
     :class:`~radar_forge.core.tracking.estimation.Estimator`: the predict and
     update are the functions :func:`predict` and :func:`update` above, and
-    this only holds what they produce.
+    this only holds what they produce. Despite its name it is not a filter:
+    the Kalman filter is
+    :class:`~radar_forge.core.tracking.estimation.GaussianFilter` with a
+    :class:`~radar_forge.core.tracking.linearisation.TaylorLinearisation`.
+    This class goes when scenario 003 moves onto
+    :class:`~radar_forge.core.tracking.tracker.Tracker`
+    (``spec/tracker-001.md`` §13 step 7).
 
     Attributes
     ----------
