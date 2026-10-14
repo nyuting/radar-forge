@@ -259,6 +259,27 @@ def test_check_sigma_point_settings_accepts_the_defaults() -> None:
     check_sigma_point_settings(1.0, 2.0, 0.0, 6)
 
 
+@pytest.mark.parametrize("n_state", range(1, 10))
+@pytest.mark.parametrize(
+    ("beta", "kappa_plus_n"), [(2.0, 3.0), (0.0, None)], ids=["kappa-3-minus-n", "beta-zero"]
+)
+def test_check_sigma_point_settings_accepts_non_negative_covariance_weights(
+    n_state: int, beta: float, kappa_plus_n: float | None
+) -> None:
+    """kappa = 3 - n (W0c = (9 - n)/3 at alpha = 1) and beta = 0 (W0c = 0) both pass."""
+    kappa = 0.0 if kappa_plus_n is None else kappa_plus_n - n_state
+    check_sigma_point_settings(1.0, beta, kappa, n_state)
+
+
+@pytest.mark.parametrize("alpha", [0.5, 1e-3])
+def test_check_sigma_point_settings_rejects_a_negative_centre_covariance_weight(
+    alpha: float,
+) -> None:
+    """A small alpha gives W0c < 0, which the short-form covariance update cannot allow."""
+    with pytest.raises(ValueError, match="negative covariance weight"):
+        check_sigma_point_settings(alpha, 2.0, 0.0, 6)
+
+
 @pytest.mark.parametrize(
     ("alpha", "beta", "kappa"),
     [(0.0, 2.0, 0.0), (1.0, -1.0, 0.0), (1.0, 2.0, -6.0), (np.nan, 2.0, 0.0)],

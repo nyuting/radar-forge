@@ -6,7 +6,9 @@ import numpy as np
 import pytest
 
 from radar_forge.core.tracking.coordinates import StateEstimate
+from radar_forge.core.tracking.estimation import GaussianFilter
 from radar_forge.core.tracking.initiation import DirectStateInitiator
+from radar_forge.core.tracking.linearisation import UnscentedLinearisation
 from radar_forge.core.tracking.measurement_models import (
     BistaticRangeDopplerModel,
     CartesianPosition,
@@ -14,7 +16,6 @@ from radar_forge.core.tracking.measurement_models import (
     SensorPose,
 )
 from radar_forge.core.tracking.motion import CartesianMotion
-from radar_forge.core.tracking.ukf import UKF
 
 ORIGIN = (36.00250, -78.94100, 60.0)
 MOTION = CartesianMotion({"x": "CV"}, origin_lla_deg_m=ORIGIN)
@@ -28,8 +29,8 @@ CORRELATED = StateEstimate(np.zeros(2), np.array([[1.0, 0.5], [0.5, 1.0]]), 0.0,
 INDEPENDENT = StateEstimate(np.array([0.0, 7.0]), np.diag([1.0, 100.0]), 0.0, LAYOUT)
 
 
-def _ukf(state: StateEstimate) -> UKF:
-    return UKF(state, MOTION)
+def _ukf(state: StateEstimate) -> GaussianFilter:
+    return GaussianFilter(state, MOTION, UnscentedLinearisation())
 
 
 def test_a_correlated_prior_is_rejected_at_construction() -> None:

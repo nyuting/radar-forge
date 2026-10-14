@@ -6,18 +6,21 @@ import numpy as np
 import pytest
 
 from radar_forge.core.tracking.coordinates import StateEstimate
+from radar_forge.core.tracking.estimation import GaussianFilter
+from radar_forge.core.tracking.linearisation import UnscentedLinearisation
 from radar_forge.core.tracking.motion import CartesianMotion
 from radar_forge.core.tracking.tracks import TRACK_STATUSES, Track
-from radar_forge.core.tracking.ukf import UKF
 
 ORIGIN = (36.00250, -78.94100, 60.0)
 MOTION = CartesianMotion({"x": "CV"}, origin_lla_deg_m=ORIGIN)
 
 
-def track() -> Track[UKF]:
+def track() -> Track[GaussianFilter]:
     """A track at x = 100 m moving at 3 m/s, at time 0."""
     state = StateEstimate(np.array([100.0, 3.0]), np.diag([1.0, 4.0]), 0.0, MOTION.state_layout)
-    return Track(1, UKF(state, MOTION), source_sensor_ids={"sensor"})
+    return Track(
+        1, GaussianFilter(state, MOTION, UnscentedLinearisation()), source_sensor_ids={"sensor"}
+    )
 
 
 def test_snapshot_state_is_the_mean_only() -> None:
