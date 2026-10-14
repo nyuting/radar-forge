@@ -1,15 +1,16 @@
 # Tracker 001 — Tracking architecture
 
 > **Reading order.** §1–§3 say what the tracking package is for and how it is cut into pieces.
-> §4 answers the question this spec was written for: how the Kalman filter and the UKF live in
-> one package without drifting apart. §5–§10 specify each piece and how it meets the rest of
-> radar-forge. §11–§13 cover performance, validation and the path from today's code. §14 holds
-> the decisions, §15 the acceptance criteria.
+> §4 answers the question this spec was written for: how the KF, the EKF and the UKF live in
+> one package without drifting apart. They are one filter with one flow, and differ only in how
+> they linearise. §5–§10 specify each piece and how it meets the rest of radar-forge. §11–§13
+> cover performance, validation and the path from today's code. §14 holds the decisions, §15
+> the acceptance criteria.
 >
 > | Part | Sections |
 > | :--- | :--- |
 > | Purpose and principles | [§1](#1-status-purpose-and-scope), [§2](#2-what-a-good-tracking-module-is) |
-> | Architecture | [§3](#3-architecture-strict-decoupling), [§4](#4-filters-kf-ekf-and-ukf-behind-one-interface) |
+> | Architecture | [§3](#3-architecture-strict-decoupling), [§4](#4-filters-one-gaussian-filter-three-linearisations) |
 > | The pieces | [§5](#5-state-and-motion-models) to [§9](#9-multiple-models-imm) |
 > | Integration | [§10](#10-integration-with-the-rest-of-radar-forge) |
 > | Performance, validation, migration | [§11](#11-performance) to [§13](#13-migration-from-todays-code) |
@@ -18,8 +19,8 @@
 ## 1. Status, purpose and scope
 
 **Status: specified, partially implemented.** Most of the pieces in §3 exist in
-`src/radar_forge/core/tracking/`. What does not yet hold is the "one tracker" end state of §4,
-and §13 lists the steps to it. Where this spec and the code disagree, the code is behind and
+`src/radar_forge/core/tracking/`. What does not yet hold is the end state of one tracker and
+one filter (§4, TD1), and §13 lists the steps to it. Where this spec and the code disagree, the code is behind and
 this spec is the target, except where §14 says otherwise. Step 9 of §13 also holds the audit of this package, deferred until the migration
 is done.
 
@@ -33,8 +34,9 @@ tracker, and how to choose its process noise, are in the user guide,
 **In scope.**
 
 - One scan-loop tracker, `Tracker`, used by every pipeline.
-- Three interchangeable filters behind one interface: the linear Kalman filter (KF), the
-  extended Kalman filter (EKF) and the unscented Kalman filter (UKF).
+- One Gaussian filter, `GaussianFilter`, with the linear Kalman filter (KF), the extended
+  Kalman filter (EKF) and the unscented Kalman filter (UKF) as its interchangeable
+  linearisations.
 - Cartesian motion models, and monostatic and bistatic radar measurement models, including the
   spherical-to-Cartesian geometry.
 - Chi-square gating, global nearest-neighbour (GNN) and nearest-neighbour (NN) assignment.
@@ -57,8 +59,7 @@ The UKF stack in `core/tracking/` comes from `unified-extensible-tracker`, an ea
 written by Ng Zeming Michael Eugene, who contributes it to radar-forge under the repository's
 MIT licence ([`LICENSE`](../LICENSE)). The linear Kalman stack was written for scenario 003
 (`spec/scenario-003-tracking.md`). Where the code implements a published method, the module or
-class docstring cites the source in its `References` section. This section replaces the former
-`spec/tracker-001-provenance.md`.
+class docstring cites the source in its `References` section. 
 
 ### 1.3 Where the requested features' premises do not match the code
 
@@ -82,13 +83,14 @@ requirement, and has a reason.
 1. **Models are data; the filter is generic.** A filter knows nothing about radars, axes or
    units. It is handed a motion model and a measurement model. *Why:* a new sensor or target
    then needs a new model, never a new filter, and the filter is tested once.
-2. **One implementation of each equation.** The Kalman gain, the covariance update, the NIS
-   and the angle wrap each exist in exactly one function. *Why:* two copies drift. Today's two
-   copies of the covariance update already argue opposite things in their docstrings (§4.2).
+2. **One implementation of each equation, and one flow.** The Kalman gain, the covariance
+   update, the NIS and the angle wrap each exist in exactly one function, and predict and
+   update each exist in one filter (§4). *Why:* two copies drift. Today's two copies of the
+   covariance update already argue opposite things in their docstrings (§4.3).
 3. **Every state component has a name and a unit.** Code reaches a component through
    `StateLayout` by name (`"x_m"`, `"xdot_mps"`), never by position. *Why:* positional indexing
-   silently breaks when the order changes. `KalmanTracker._forget_rate` assumes positions come
-   first, and is wrong for the UKF stack's interleaved order.
+   silently breaks when the order changes. Today's re-acquisition reset (§8.3) assumes
+   positions come first, and is wrong for the interleaved order of §5.
 4. **SI units, closing-positive range rate.** Every quantity is SI internally, with its unit in
    its name. Range rate is positive for a closing target, everywhere
    (`spec/data-001-formats.md` §5, DF7). *Why:* it is the repo's convention, and a sign flip in
@@ -105,8 +107,12 @@ requirement, and has a reason.
    mid-scan leaves half the tracks updated and the rest not.
 9. **Every equation cites its source.** Docstrings carry `References` with chapter or equation
    numbers. *Why:* the reader is a student, and the citation is how they check us.
-10. **Readable before fast.** Vectorise the obvious (§11), but never at the cost of the code
-    reading like the textbook.
+10. **Readable and fast.** Neither is traded for the other (`spec/starter.md` §1.1). The hot
+    path, gating every track against every measurement, is batched NumPy that still reads as
+    the textbook equation, with its array shapes written out (§11). *Why:* this is a
+    state-of-the-art workbench. A tracker that is clear but too slow for a realistic scan is
+    not one a practitioner can use, and one that is fast but opaque is not one a student can
+    check.
 
 ## 3. Architecture: strict decoupling
 
@@ -123,7 +129,8 @@ predictor and updater are one `Estimator` here, and its hypothesiser is the gate
 | Measurement | `Measurement`, `MeasurementBatch` | `measurements.py` | z, R, time, sensor, model ID |
 | Measurement model | `MeasurementModel` | `measurement_models.py` | layouts, `h(x)` |
 | Sensor | `SensorRegistration`, `SensorPose` | `sensors.py` | model IDs, coverage, pose |
-| Filter | `Estimator` | `estimation.py`, `kalman.py`, `ukf.py` | motion and measurement models |
+| Filter | `Estimator`, `GaussianFilter` | `estimation.py` | a motion model, a linearisation |
+| Linearisation | `Linearisation`, `TaylorLinearisation`, `UnscentedLinearisation` | `linearisation.py` | a function, a mean, a covariance |
 | Gate | `ChiSquareGate` | `association.py` | innovation statistics |
 | Associator | `Associator` | `association.py` | a cost matrix |
 | Initiator | `TrackInitiator` | `initiation.py` | a measurement, a model, a prior |
@@ -131,18 +138,17 @@ predictor and updater are one `Estimator` here, and its hypothesiser is the gate
 | Track | `Track`, `TrackSnapshot` | `tracks.py` | an estimator, a status, counts |
 | Tracker | `Tracker` | `tracker.py` | all of the above, through their protocols |
 
-**The decoupling rule.** Swapping the filter (KF → EKF → UKF → IMM), the associator (GNN → NN
-→ JPDA) or the initiator changes one constructor argument of `Tracker`, and no pipeline code.
-A branch on the type of a filter or of a tracker, in `tracker.py` or in `pipelines/`, breaks
-this rule: an `isinstance` check, or one code path per filter or per tracker class. A pipeline
-that keeps a code path for each of two trackers is the shape this rule forbids, and TD1 is why
-there will be only one.
+**The decoupling rule.** Swapping the linearisation (KF → EKF → UKF), the estimator (Gaussian
+filter → IMM), the associator (GNN → NN → JPDA) or the initiator changes one constructor
+argument, and no pipeline code. A branch on the type of a linearisation, a filter or a
+tracker, in `estimation.py`, `tracker.py` or `pipelines/`, breaks this rule: an `isinstance`
+check, or one code path per filter. There is one tracker class, `Tracker` (TD1).
 
 **The dependency rule.** `core/tracking/` imports from `core/` only (`core.constants`,
 `core.geodesy`), never from `pipelines/`. Pipelines adapt their products into `Measurement`s
 (§10).
 
-## 4. Filters: KF, EKF and UKF behind one interface
+## 4. Filters: one Gaussian filter, three linearisations
 
 ### 4.1 One contract
 
@@ -156,11 +162,51 @@ Every filter satisfies `Estimator` (`core/tracking/estimation.py`):
 | `innovation_statistics(measurement, model)` | score a measurement without changing anything |
 | `update(measurement, model, *, innovation=None)` | correct the estimate, optionally reusing the score |
 
-`Tracker` and `Track` see only this protocol. A filter is chosen by passing an *estimator
-factory* (a callable from a prior `StateEstimate` to an `Estimator`, with the motion model bound
-in) to the initiator, which is what `DirectStateInitiator(estimator_factory, ...)` already takes.
+`Tracker` and `Track` see only this protocol. Two classes implement it: `GaussianFilter`
+(§4.2), which is the KF, the EKF and the UKF, and `IMM` (§9), which holds `GaussianFilter`s. A
+filter is chosen by passing an *estimator factory* to the initiator. The factory is a callable
+from a prior `StateEstimate` to an `Estimator`, with the motion model and the linearisation
+bound in, and it is what `DirectStateInitiator(estimator_factory, ...)` already takes.
 
-### 4.2 One correction core
+### 4.2 One flow
+
+The KF, the EKF and the UKF are one algorithm, the general Gaussian filter (Särkkä 2013,
+ch. 6). At each step it approximates the density as Gaussian by matching its mean and
+covariance, then applies the same Kalman correction. The three differ in one thing only: how
+they carry a mean and a covariance through a function. That is the filter's *linearisation*.
+
+| Linearisation | Gives | Moments of g(x), for x with mean x̂ and covariance P | Supplies H |
+| :--- | :--- | :--- | :--- |
+| `TaylorLinearisation` | the KF on a linear model, the EKF otherwise | mean g(x̂), covariance J P Jᵀ, with J = ∂g/∂x at x̂ | yes: H, or J |
+| `UnscentedLinearisation(alpha, beta, kappa)` | the UKF | weighted sums over 2n + 1 sigma points (§4.4) | no |
+
+A `Linearisation` has two methods, one per step of the filter:
+
+| Method | Returns |
+| :--- | :--- |
+| `predict(motion, state, dt_s)` | the predicted mean x̂⁻ `(n_state,)` and covariance P⁻ `(n_state, n_state)`, with Q(dt_s) added |
+| `measure(model, state)` | `MeasurementMoments`: ẑ `(n_meas,)`, P_xz `(n_state, n_meas)`, S without R `(n_meas, n_meas)`, and H `(n_meas, n_state)` or `None` |
+
+`GaussianFilter` holds a `StateEstimate`, a motion model and a linearisation. Each of its
+methods is the same for all three filters:
+
+- `predict_to` calls `linearisation.predict` and stores the result.
+- `innovation_statistics` calls `linearisation.measure`, adds R to S, and passes ẑ, z and S
+  to `innovation_stats`, which returns ν, S, the NIS and the log-likelihood.
+- `update` takes the same moments, reused from `innovation_statistics` when its result is
+  passed back, and hands them to the correction core (§4.3).
+
+`GaussianFilter` never branches on the type of its linearisation. The only thing that varies
+downstream is whether H is `None`, and it is the correction core, not the filter, that chooses
+the covariance form from that. A further linearisation, such as cubature or Gauss–Hermite, is a
+new `Linearisation`, never a new filter.
+
+**Periodic coordinates in the moments.** The unscented linearisation forms its means with the
+layout's `weighted_mean` and its deviations with the layout's `residual`, so sigma points that
+straddle a wrap (an azimuth near ±π) are averaged and differenced the short way round.
+`UKF._innovation` does this today, and it moves into `UnscentedLinearisation` unchanged.
+
+### 4.3 One correction core
 
 All three filters compute the same three things for a measurement, and differ only in how:
 
@@ -171,8 +217,8 @@ All three filters compute the same three things for a measurement, and differ on
 | UKF | Σ wₘ h(χᵢ) | Σ w_c (χᵢ − x̂⁻)(h(χᵢ) − ẑ)ᵀ | Σ w_c (h(χᵢ) − ẑ)(h(χᵢ) − ẑ)ᵀ + R |
 
 Everything after that is the same, and lives in **one** private function in `estimation.py`,
-which every filter calls. It takes the prior, the innovation statistics, P_xz and, when the
-filter has one, the measurement matrix (H or J). It:
+which `GaussianFilter.update` calls. It takes the prior, the innovation statistics, P_xz and,
+when the linearisation supplies one, the measurement matrix (H or J). It:
 
 1. computes the gain K = P_xz S⁻¹ by solving S Kᵀ = P_xzᵀ, never by inverting S;
 2. updates the mean, x̂ = x̂⁻ + K ν, wrapping only the *state* layout's periodic components
@@ -194,9 +240,9 @@ measurement's period would make the track jump by one span whenever the target c
 
 **The covariance update (TD3).** The correction core uses:
 
-- the **Joseph form**, (I − KH) P⁻ (I − KH)ᵀ + K R Kᵀ, when the filter supplies H or J. It is
-  positive semidefinite for any K, because both terms have the form A M Aᵀ with M positive
-  semidefinite, so roundoff cannot make a variance negative. This is what
+- the **Joseph form**, (I − KH) P⁻ (I − KH)ᵀ + K R Kᵀ, when the linearisation supplies H or J.
+  It is positive semidefinite for any K, because both terms have the form A M Aᵀ with M
+  positive semidefinite, so roundoff cannot make a variance negative. This is what
   `kalman.update` does today;
 - the **short form**, P⁻ − K S Kᵀ, when it does not (the UKF). The UKF has no H. With every
   sigma-point *covariance* weight non-negative (§4.4), P⁻ − K S Kᵀ is the Schur complement of S in a
@@ -208,34 +254,38 @@ once. Today the argument is split across `kalman.py` (against the short form) an
 it), and each reads as if the other were wrong. They are not: they are about filters with and
 without H.
 
-### 4.3 The KF and the EKF
+The two forms agree in exact arithmetic at the optimal gain. Expanding the Joseph form with
+S = H P⁻ Hᵀ + R and P_xz = P⁻ Hᵀ gives P⁻ − K P_xzᵀ − P_xz Kᵀ + K S Kᵀ. With K = P_xz S⁻¹, each
+of the last three terms equals K S Kᵀ, so the sum is P⁻ − K S Kᵀ. They differ only in how
+roundoff enters, which is why §4.4's reduction of the UKF to the KF holds to roundoff.
 
-`KalmanFilter` (target `kalman.py`) is a stateful `Estimator`, shaped like `UKF`: it holds a
-`StateEstimate` and a motion model, and implements the protocol. One class covers the KF and
-the EKF, because the EKF is the KF with H replaced by the Jacobian at the prediction
-(Bar-Shalom, Li and Kirubarajan 2001, §10.3).
+### 4.4 The linearisations
+
+**`TaylorLinearisation`: the KF and the EKF.** The EKF is the KF with H replaced by the
+Jacobian at the prediction (Bar-Shalom, Li and Kirubarajan 2001, §10.3), so one linearisation
+gives both.
 
 - **Motion.** It needs F and Q, so it accepts a *linear* motion model: one with
   `matrices(dt_s) -> (F, Q)`. `CartesianMotion.matrices` exists; `RadialMotion` gains it. Every
   motion model in the repo is linear, so there is no EKF on the motion side yet; a nonlinear
-  motion model (coordinated turn) adds `jacobian(state, dt_s)` when it arrives.
+  motion model (coordinated turn) adds `jacobian(state, dt_s)` when it arrives. A
+  `GaussianFilter` built with this linearisation and a motion model without `matrices`
+  raises `TypeError` at construction, naming the model.
 - **Measurement.** It needs H or J, so it accepts a measurement model that also has
   `jacobian(state) -> (n_meas, n_state)`. A linear model returns its constant H. Passing a
-  model without `jacobian` raises `TypeError` at construction, naming the model. There is **no
-  silent finite-difference fallback**: a numeric Jacobian hides a wrong analytic one, and a
-  student cannot tell which filter they are running. Tests check each analytic Jacobian
-  against a central difference (§12).
-- **Teaching layer.** The free functions `predict` and `update` in today's `kalman.py` are
-  worth keeping for notebooks, as the textbook equations on bare arrays. If kept, they call
-  the correction core; they are never a second implementation (TD2).
+  model without `jacobian` raises `TypeError`, naming the model, at the first call, before
+  anything changes. There is **no silent finite-difference fallback**: a numeric Jacobian
+  hides a wrong analytic one, and a student cannot tell which filter they are running. Tests
+  check each analytic Jacobian against a central difference (§12).
+- **On a linear model this is the textbook KF**, line for line: x̂⁻ = F x̂, P⁻ = F P Fᵀ + Q,
+  and the update of §4.3 with H. A student looking for the KF finds it here (TD2).
 
-### 4.4 The UKF
-
-`UKF` (`ukf.py`) keeps its current shape. Two requirements:
+**`UnscentedLinearisation`: the UKF.** It keeps today's `UKF` algorithm (Wan and van der Merwe
+2000, §3), and its sigma points move here from `ukf.py`.
 
 - **Non-negative covariance weights.** The weights are w₀ᵐ = 1 − n/(α²(n + κ)) for the
   mean, w₀ᶜ = w₀ᵐ + 1 − α² + β for the covariance, and wᵢ = 1/(2α²(n + κ)) for every other
-  point, in both. §4.2's short-form argument needs every *covariance* weight non-negative,
+  point, in both. §4.3's short-form argument needs every *covariance* weight non-negative,
   because a weighted sum of outer products is positive semidefinite only then. The mean
   weights don't enter that argument: a negative w₀ᵐ changes how the mean is formed, not
   whether P stays positive semidefinite. So `check_sigma_point_settings` must reject settings
@@ -245,27 +295,50 @@ the EKF, because the EKF is the KF with H replaced by the Jacobian at the predic
     heuristic n + κ = 3 of Julier and Uhlmann (1997), κ = 3 − n, makes w₀ᵐ negative for n > 3, but keeps w₀ᶜ ≥ 0 up to n = 9, so it is accepted.
   - A small α, such as the 10⁻³ that Wan and van der Merwe (2000) call usual, makes w₀ᶜ large
     and negative, so it is rejected. That departs from the paper this UKF follows, on purpose:
-    the short-form update of §4.2 is only safe without it.
-- **Protocol names.** `predict_to` takes `timestamp_s`, as `Estimator` says. Today it takes
-  `time_s`, so a keyword call through the protocol raises `TypeError`
-  (TD13).
+    the short-form update of §4.3 is only safe without it.
+
+**When the UKF is the KF.** On a linear motion model and a linear measurement model, with no
+periodic state coordinate, the unscented linearisation returns exactly the Taylor moments, for
+any accepted α, β and κ. The argument is short enough to put in `UnscentedLinearisation`'s
+docstring, and it is the clearest way to see what the sigma points do. Write c = α²(n + κ), and
+let Lᵢ be column i of the Cholesky factor of P, so that Σᵢ Lᵢ Lᵢᵀ = P.
+
+1. **The points.** χ₀ = x̂, and χ±ᵢ = x̂ ± √c Lᵢ for i = 1 … n.
+2. **The mean.** The mean weights sum to one: w₀ᵐ + 2n · 1/(2c) = 1. Through a linear map F,
+   the ± pairs cancel, so Σ wₘ F χ = F x̂. The Taylor mean is the same.
+3. **The covariance.** The centre point's deviation F χ₀ − F x̂ is zero, so w₀ᶜ multiplies zero.
+   That removes the whole of β, and α's effect on w₀ᶜ. The other 2n points give
+   Σᵢ 2 · (1/(2c)) · c F Lᵢ Lᵢᵀ Fᵀ = F P Fᵀ. Adding Q gives the KF's P⁻.
+4. **The update.** The same steps with H in place of F give ẑ = H x̂⁻, P_xz = P⁻ Hᵀ and
+   S = H P⁻ Hᵀ + R, the KF's row of §4.3's table.
+5. **The covariance form.** The only difference left is that the UKF uses the short form and
+   the KF the Joseph form. The two are equal at the optimal gain (§4.3).
+
+So on linear models the UKF *is* the KF, up to roundoff. The weights matter only once g bends.
+§4.5 tests both halves of this argument.
+
+**The teaching layer.** The free functions `predict` and `update` in today's `kalman.py` are
+worth keeping for notebooks, as the textbook equations on bare arrays. If kept, they call the
+correction core; they are never a second implementation (TD2).
 
 ### 4.5 Drift guards
 
-Principle 2 is enforced by tests that run every filter through the same checks. The estimator
-list is one parametrised fixture, so a new filter (IMM included) joins every guard by being
-added once.
+Principle 2 is enforced by tests that run every filter through the same checks. The list of
+estimators, one `GaussianFilter` per linearisation plus `IMM` once it exists, is one
+parametrised fixture, so a new linearisation joins every guard by being added once.
 
 | Guard | Check | Tolerance |
 | :--- | :--- | :--- |
-| KF ≡ UKF on linear models | the real `KalmanFilter` and `UKF`, same prior, same `LinearMeasurement`, 200 steps | `rtol=1e-10` on mean and covariance, with each `atol` 10⁻¹⁰ times the scale of that entry's prior variance, since the entries mix m² and (m/s)² |
+| UKF moments ≡ KF moments | `CartesianMotion` with a `LinearMeasurement`: `UnscentedLinearisation` and `TaylorLinearisation` return the same x̂⁻, P⁻, ẑ, P_xz and S, for several accepted (α, β, κ): the defaults, κ = 3 − n, and β = 0. This is §4.4's argument, step by step | `rtol=1e-10`, with each `atol` 10⁻¹⁰ times the scale of that entry's prior variance, since the entries mix m² and (m/s)² |
+| UKF ≡ KF over a run | `GaussianFilter` with each linearisation, same prior, same `LinearMeasurement`, 200 steps: the two estimates agree in mean and covariance | as above |
 | EKF ≈ UKF on a nonlinear model | the spherical model of §6.1; scale the prior covariance by s², and the gap in the updated mean must shrink at second order in s, because it is ½ tr(∇²h P) to leading order | fitted slope of log gap against log s ≥ 1.8 (against log s², it would be 1) |
-| Consistency, every filter | NEES and NIS over Monte Carlo runs (§12) | chi-square interval at 99.9 % |
-| Definiteness, every filter | 200 steps, symmetric to `rtol=1e-12`, Cholesky succeeds | exact |
+| Consistency, every estimator | NEES and NIS over Monte Carlo runs (§12) | chi-square interval at 99.9 % |
+| Definiteness, every estimator | 200 steps, symmetric to `rtol=1e-12`, Cholesky succeeds | exact |
 
-The first guard replaces today's `tests/core/tracking/test_ukf.py` check, which compares the
-UKF against a hand-coded Kalman update rather than against `kalman.py`: two filters agreeing
-with a third copy proves nothing about each other.
+The first two guards replace today's `tests/core/tracking/test_ukf.py` check, which compares
+the UKF against a hand-coded Kalman update rather than against `kalman.py`: two filters agreeing
+with a third copy proves nothing about each other. The first guard also pins the claim a student
+is most likely to doubt, that β and the weights do not matter on a linear model.
 
 ## 5. State and motion models
 
@@ -293,9 +366,9 @@ with a third copy proves nothing about each other.
 
 A measurement model maps a state in its `state_layout` to a measurement in its
 `measurement_layout`. The state is Cartesian; the measurement is in the sensor's native
-coordinates. The filter, not the measurement, bridges the two: the EKF through the Jacobian,
-the UKF through sigma points. Converting measurements to Cartesian before filtering is not
-allowed, except to seed a track (§6.1).
+coordinates. The filter's linearisation, not the measurement, bridges the two: the Jacobian
+for the EKF, sigma points for the UKF (§4.4). Converting measurements to Cartesian before
+filtering is not allowed, except to seed a track (§6.1).
 
 ### 6.1 Spherical measurements of a Cartesian state
 
@@ -312,7 +385,7 @@ It **reuses** the geometry of `core.geodesy.enu_to_range_azimuth_elevation`, fac
 both call one function in radians. `kalman._enu_model` re-derives it today, with elevation as
 atan2(u, ground) where geodesy uses asin(u/R): the two agree, but there are two of them.
 
-It provides the analytic Jacobian (§4.3). The azimuth row is singular at r → 0 and the
+It provides the analytic Jacobian (§4.4). The azimuth row is singular at r → 0 and the
 elevation row at the zenith; the docstring says so, and the model raises rather than return a
 non-finite Jacobian.
 
@@ -365,31 +438,29 @@ cost; the docstring says so, and names a finite non-assignment cost as the alter
 can hold pairs scored at different measurement dimensions: range and rate (2) beside range
 alone (1). Raw NIS can't be compared across dimensions, because its expectation is the
 dimension. A 1-D pair costs about 1 and a 2-D pair about 2, so a pair that fell back to range
-alone undercuts its full-dimension rivals in the solve. `KalmanTracker` does this today: each
-pair tries the full model first and falls back only if that gate fails, but the fallback
-pairs then enter the same matrix as raw NIS (`kalman.py:1186-1196`). So
-when the dimensions in one matrix differ, the cost is the negative log-likelihood,
-½ νᵀ S⁻¹ ν + ½ ln |2π S|, the negative of the `log_likelihood` that `innovation_stats` already
-returns. NIS stays available as a
-cost only when every pair has the same dimension. If a scan would put NIS costs of different
-dimensions in one matrix, `Tracker` raises rather than solve it. This may move scenario 003's numbers when it migrates
-(§13 step 5). The commit records the move, as §12 requires.
+alone undercuts its full-dimension rivals in the solve. So when the dimensions in one matrix
+differ, the cost is the negative log-likelihood, ½ νᵀ S⁻¹ ν + ½ ln |2π S|, the negative of the
+`log_likelihood` that `innovation_stats` already returns. NIS stays available as a cost only
+when every pair has the same dimension. If a scan would put NIS costs of different dimensions
+in one matrix, `Tracker` raises rather than solve it. Today's scenario 003 code mixes raw NIS
+across dimensions, so its numbers may move when it migrates (§13 step 6); the commit records
+the move, as §12 requires.
 
 ### 7.3 Assignment order
 
-The two trackers disagree today, and the disagreement is measured, so this spec makes it a
-setting rather than choosing:
+Which tracks pick measurements first is measured to matter, and the better order depends on
+the problem, so it is a setting of `Tracker`, `assignment: Literal["confirmed_first",
+"joint"]`:
 
-- `Tracker` assigns in two stages: confirmed tracks pick first, then tentative ones, and no
-  track starts inside a confirmed track's gate (`tracker.py` module docstring);
-- `KalmanTracker` solves once over every track. Its step-3 comment records that confirmed-first
-  was tried on scenario 003 and was worse on every count (range RMSE 25.3 m against 17.5 m;
-  fold selection 82 % against 86 %), because a confirmed track with a gate widened for
-  re-acquisition outbids tentative tracks for false alarms.
+- `"confirmed_first"` assigns in two stages: confirmed tracks pick first, then tentative ones,
+  and no track starts inside a confirmed track's gate (`tracker.py` module docstring). It
+  protects established tracks from being stolen by new ones. It is the library default.
+- `"joint"` solves once over every track.
 
-`Tracker` takes `assignment: Literal["confirmed_first", "joint"]`. The library default stays
-`"confirmed_first"`; scenario 003 sets `"joint"` in its TOML. Changing either default needs a
-measurement, recorded in the docstring. TD8.
+On scenario 003, confirmed-first was worse on every count (range RMSE 25.3 m against 17.5 m;
+fold selection 82 % against 86 %). A confirmed track whose gate is widened for re-acquisition
+(§8.3) outbids tentative tracks for false alarms. So scenario 003 sets `"joint"` in its TOML.
+Changing either default needs a measurement, recorded in the docstring. TD8.
 
 ### 7.4 Extension point: JPDA
 
@@ -427,12 +498,16 @@ All lifecycle settings live in `LifecyclePolicy`, once. Pipeline configs hold a
 `LifecyclePolicy` (or build one from their TOML table); they never copy its fields one by one
 (the PR #13 review found them declared twice and copied across).
 
+The counts below use *hit* and *miss* per scan: a track scores a hit in a scan where a plot
+was assigned to it, and a miss in one where none was. That is narrower than the vocabulary's
+*hit*, a tentative plot (`spec/data-001-formats.md` §5): here it is counted per track.
+
 | Rule | Setting | Status |
 | :--- | :--- | :--- |
 | M-of-N confirmation, counted from birth | `n_confirm_hits`, `n_confirm_frames` | exists |
 | Tentative deletion once M is unreachable | (derived) | exists |
 | Deletion after misses in a row | `n_delete_misses` | exists |
-| Re-acquisition window for confirmed tracks | `n_reacquire_misses` (renamed, TD13) | the count exists in both stacks (`LifecyclePolicy`); the rate reset that widens the gate is KF stack only (§8.3) |
+| Re-acquisition window for confirmed tracks | `n_reacquire_misses` (renamed, TD13) | the count exists (`LifecyclePolicy`); the velocity reset that widens the gate is new in `Tracker` (§8.3) |
 | Deletion after a coast time | `max_coast_time_s` | exists |
 | **Covariance-based deletion** | `max_position_sigma_m` | **new** |
 
@@ -449,23 +524,21 @@ all positions. A standard deviation in metres is a number an intern can choose.
 `Track.score`, `age` and `existence_probability` (unused in any decision,
 `docs/reviews/pr1-review.md` #24) stay out of `Track` until a decision uses them.
 
-### 8.3 Scenario 003's special cases, made general
+### 8.3 Range-only bootstrap, retry and re-acquisition reset
 
-`KalmanTracker` has three behaviours `Tracker` lacks (`docs/tracking/README.md`,
-"Limitations"). They are what blocks the pipeline's move to `Tracker`, and where they should
-live was left open until now. This spec settles it: the
-mechanism goes in `core/tracking/`, generic and named by coordinates; the scenario's policy goes
-in `pipelines/`.
+A track whose Doppler cannot yet be trusted (§6.2) needs three behaviours from `Tracker`: to
+start on range alone, to fall back to range alone when its velocity gate fails, and to forget
+its range rate when it starts re-acquiring. The mechanism goes in `core/tracking/`, generic
+and named by coordinates; the scenario's policy goes in `pipelines/` (TD9).
 
-| Behaviour today | Core mechanism | Scenario policy |
+| Behaviour | Core mechanism | Scenario policy |
 | :--- | :--- | :--- |
-| Per-track range-only bootstrap (`measurement_dims`) | a measurement model can return its **marginal** over a subset of its components, by name | the pipeline passes a selector: a callable from a `TrackSnapshot` and a `Measurement` to the ordered model IDs to try |
+| Per-track range-only bootstrap | a measurement model can return its **marginal** over a subset of its components, by name | the pipeline passes a selector: a callable from a `TrackSnapshot` and a `Measurement` to the ordered model IDs to try |
 | Range-only retry when the velocity gate fails | `Tracker` gates each pair against the selector's models in order, and keeps the first that passes | scenario 003's selector returns (range and rate, range only) |
-| `_forget_rate` on entering re-acquisition | on the miss that starts the re-acquisition window, reset the named coordinates' variances to the initiator's prior and zero their cross-covariances | `LifecyclePolicy.reacquire_reset = ("range_rate_mps",)` |
+| Velocity reset on entering re-acquisition | on the miss that starts the re-acquisition window, reset the named coordinates' variances to the initiator's prior and zero their cross-covariances | `LifecyclePolicy.reacquire_reset = ("range_rate_mps",)` |
 
 The default selector returns the measurement's own model only, so every other user of `Tracker`
-sees no change. `_forget_rate`'s positional slicing (`n_axes = n_state // 2`) goes, per
-principle 3.
+sees no change. The reset finds its coordinates by name, never by slicing (principle 3).
 
 ## 9. Multiple models (IMM)
 
@@ -520,19 +593,33 @@ source sensors. The layout's coordinate names become
 
 ## 11. Performance
 
-The library is for teaching, so correctness and readability bound performance, not the other
-way round. The requirement is:
+The tracker must be readable and fast (principle 10, TD14). The cost of a scan is dominated by
+the gate: every track scored against every measurement, n_tracks × n_measurements innovation
+statistics, each a small dense solve. That is the hot path, and it is batched.
 
-- **Vectorise** where NumPy makes it natural: the sigma points, and the (n_tracks,
-  n_measurements) gate and cost matrices once the innovation statistics are batched.
-- **Loops over tracks are allowed**, each with a comment saying why (style.md §7): a track's
-  update is a small dense solve, and a vectorised version across tracks of different layouts
-  would be unreadable.
-- **No JIT or compiled dependency** in core (numba, Cython). If one is ever justified, it goes in
-  an extra, per CLAUDE.md.
-- **Measured, not assumed.** A `benchmark`-marked test records time per scan for scenario 003's
-  load and for a synthetic 100-track, 1000-measurement scan. It records; it does not assert a
-  budget, until a scenario sets one.
+- **Batch across tracks and measurements on the hot path.** The (n_tracks, n_measurements)
+  gate and cost matrices come from one batched computation of the innovation statistics, not
+  a Python loop over pairs. Both linearisations broadcast over leading axes: the Taylor
+  linearisation's Jacobians as (n_tracks, n_meas, n_state), the unscented linearisation's
+  sigma points as (n_tracks, 2 n_state + 1, n_state). The one flow of §4 is what makes this a
+  single batched path, rather than one per filter.
+- **Broadcast the linear algebra.** `np.linalg.cholesky`, `np.linalg.solve` and the triangular
+  solves of `innovation_stats` take stacks of matrices over leading axes. The batched
+  functions keep the textbook names and equations, and their docstrings give every shape.
+- **State the cost.** Gating is O(n_tracks · n_measurements · n_meas³) floating-point work with
+  no per-pair Python overhead. Assignment is `scipy.optimize.linear_sum_assignment` (§7.2),
+  O(n³) in the larger side of the cost matrix.
+- **Loops are allowed off the hot path**, each with a comment saying why (style.md §7): the
+  lifecycle bookkeeping, the one update per assigned track, and tracks of different layouts,
+  which are batched per layout.
+- **Measured, and held.** `benchmark`-marked tests time a scan of scenario 003's load and a
+  synthetic scan of 100 tracks and 1000 measurements. Each asserts a budget: it fails when a
+  scan takes longer than a stated factor of a baseline committed beside it. The PR that
+  batches the gate (§13 step 8b) measures the baseline, and this section then records the
+  number, the factor and the machine.
+- **No compiled dependency in core.** NumPy with batched linear algebra is the
+  implementation. A compiled backend (numba, JAX) may come only when a benchmark shows NumPy is
+  the binding limit, and then as an optional extra behind the same API, per CLAUDE.md.
 
 ## 12. Validation strategy
 
@@ -540,11 +627,13 @@ way round. The requirement is:
 | :--- | :--- | :--- |
 | Unit, analytic | dead reckoning; Q against the published matrices; a known GNN optimum; M-of-N by hand; Jacobians against central differences | exact or `rtol=1e-12`; Jacobians at the tolerance `tests/core/test_tracking.py` already justifies |
 | Unit, statistical | gate acceptance rate | Clopper–Pearson interval, fixed seed |
-| Filter consistency | NEES and NIS over 200 runs × 30 steps, every estimator (§4.5), per Bar-Shalom, Li and Kirubarajan (2001) §5.4.2 | chi-square interval at 99.9 %, `slow` |
+| Filter consistency | NEES and NIS over 200 runs × 30 steps, every linearisation, and IMM once it exists (§4.5), per Bar-Shalom, Li and Kirubarajan (2001) §5.4.2 | chi-square interval at 99.9 %, `slow` |
 | Drift guards | §4.5 | as tabled there |
 | Lifecycle | confirmation, deletion, re-acquisition, covariance deletion on hand-countable sequences | exact |
 | End to end | scenario 003 over S1, and its dual-PRF variant over S3 | `spec/scenario-003-tracking.md` §12 and §14.7, unchanged by migration |
 | Track metrics | range and rate RMSE, mean NIS, OSPA (Schuhmacher, Vo and Vo 2008), track breaks | `spec/data-001-formats.md` §6.9 |
+| Batched ≡ per pair | the batched gate's NIS and log-likelihood against `innovation_stats` called pair by pair | `rtol=1e-12` |
+| Performance | time per scan: scenario 003, and the synthetic 100 × 1000 scan (§11) | budget against the committed baseline, `benchmark` |
 
 Two rules carry over from `docs/conventions/testing.md`: never loosen a tolerance to pass, and
 prefer analytic truth to recorded output. Migration adds one: **each step of §13 leaves
@@ -562,30 +651,39 @@ it would be later. The names and module moves are TD13's.
 1. **Gate and GNN into `association.py`;** `kalman.py` imports them from there.
    *Check:* `git grep -n 'from radar_forge.core.tracking.kalman import' -- src/radar_forge/core/tracking/association.py`
    returns nothing.
-2. **One innovation API and the correction core** (§4.2). `InnovationStats.residual` becomes
-   `innovation`. `UKF` calls the core. *Check:* AC2.
-3. **`KalmanFilter` as an `Estimator`** (§4.3), on the core, with `RadialMotion.matrices`. The
-   KF ≡ UKF guard (§4.5) lands here. The same PR first renames today's `KalmanFilter`
-   (`kalman.py`), which holds a track's estimate and is not a filter, to `KalmanTrackState`.
-   Otherwise two public classes share one name until step 7, the trap TD12 avoids for
-   `Measurement`. *Check:* AC3 and AC4, and `git grep -nE '^class KalmanFilter\b' -- src` finds
-   exactly one class.
+2. **One innovation API, the correction core and `GaussianFilter`** (§4.2, §4.3).
+   `InnovationStats.residual` becomes `innovation`. The `Linearisation` protocol and
+   `UnscentedLinearisation` land, with today's `UKF` algorithm moved into them unchanged, and
+   `GaussianFilter(motion, UnscentedLinearisation())` replaces `UKF` wherever one is built
+   (`build_tracker`, `build_tracker_enu`, the tests). The UKF's numbers do not move.
+   *Check:* AC2, and the existing UKF tests pass against `GaussianFilter` without a tolerance
+   change.
+3. **`TaylorLinearisation`** (§4.4), with `RadialMotion.matrices`. The KF and the EKF are now
+   `GaussianFilter(motion, TaylorLinearisation())`, and the two UKF ≡ KF guards (§4.5) land
+   here. Today's `KalmanFilter` (`kalman.py`) holds a track's estimate and is not a filter. It
+   keeps its name until step 7 deletes it, since no new class takes the name.
+   *Check:* AC3, AC4 and AC12.
 4. **The spherical measurement model** (§6.1) with its Jacobian and the debiased initiator.
 5. **Scenario mechanisms in `Tracker`** (§8.3), and `assignment="joint"` (§7.3).
 6. **Scenario 003 on `Tracker`.** `pipelines/tracking.py` becomes an adapter: plots in,
    batches out, snapshots back. `TrackingConfig.state_model` is honoured (it is ignored today).
-7. **Delete the old stack:** `KalmanTracker`, `KalmanTrackState`, `KalmanState`, `TrackModel`,
-   `FrameResult`, and the rest of TD13's renames. Two of those renames are scenario TOML keys
-   (TD13), so this step also updates the scenario 003 TOMLs and spec, and the data-001
+7. **Delete the old stack:** `KalmanTracker`, `KalmanFilter`, `KalmanState`, `TrackModel`,
+   `FrameResult`, `UKF` and `ukf.py`, and the rest of TD13's renames. Two of those renames are
+   scenario TOML keys (TD13), so this step also updates the scenario 003 TOMLs and spec, and the data-001
    `metadata.json` schema. Module moves (§3 target column). Refresh the stale text:
    `kalman.py`'s "promotes this module to a subpackage", `estimation.py`'s "the one
    implementation", and `spec/structure.md` D2. *Check:* AC1, AC7 and AC8;
-   `git grep -nE '^class (KalmanTracker|KalmanTrackState|KalmanState|TrackModel|FrameResult)\b' -- src`
+   `git grep -nE '^class (KalmanTracker|KalmanFilter|KalmanState|TrackModel|FrameResult|UKF)\b' -- src`
    returns nothing; and so does
    `git grep -nE 'n_reacquire_frames|\bCartesianPosition\b|\bRadialMotion\b|def normalise|\.normalise\(|\.noise_density\b[^_]|self\.noise_density\b|sigma_accel_mps2' -- src tests scripts scenarios spec/scenario-003-tracking.md docs/tracking`.
-   Also fix `kalman.py`'s module docstring if it survives: it says "a linear Kalman filter",
-   but the ENU models make it an extended one (`:138`, `:479`).
-8. **Covariance-based deletion** (§8.2). Independent of the rest; any time after step 2.
+   If `kalman.py` survives as the teaching layer of §4.4, its module docstring says so; today
+   it says "a linear Kalman filter", but the ENU models make it an extended one (`:138`,
+   `:479`).
+8. Two steps independent of the rest, each its own PR, both before step 9:
+   - **8a. Covariance-based deletion** (§8.2). Any time after step 2.
+   - **8b. Batched innovation statistics and gating** (§11). Any time after step 3. The
+     batched gate replaces the per-pair loop in `Tracker`, the benchmarks gain their budget,
+     and §11 records the baseline. *Check:* AC13.
 9. **Audit the finished package.** The audits of the rest of the library
    ([`docs/conventions/audit.md`](../docs/conventions/audit.md)) left tracking out, because steps 0–7 replace most
    of it. Once step 7 has merged, run both audits over the tracking code as it then stands:
@@ -607,25 +705,29 @@ it would be later. The names and module moves are TD13's.
 
 ### 14.1 Design decisions
 
-### TD1 — One tracker loop
+### TD1 — One tracker
 
-`Tracker` is the only scan loop. `KalmanTracker` is deleted once scenario 003 runs on `Tracker`.
-*Rejected:* keeping `KalmanTracker` as a simpler teaching tracker. Two loops are what the PR #1,
-#2 and #13 reviews kept finding drifting; the simple version for teaching is the free functions
-of §4.3, not a second tracker.
+`Tracker` is the one tracker class and the one scan loop. Every filter, associator, initiator
+and lifecycle policy plugs into it through §3's protocols, and every pipeline uses it. The
+simple version for teaching is the free functions of §4.4, on bare arrays.
 
-### TD2 — Filters are interchangeable estimators
+### TD2 — One Gaussian filter, interchangeable linearisations
 
-KF, EKF and UKF implement `Estimator`, and are chosen by the estimator factory. *Rejected:* a
-filter-type switch inside `Tracker` (breaks §3's decoupling rule); a KF implemented as a UKF on
-linear models (correct, but hides the textbook KF a student is looking for).
+§4.2. KF, EKF and UKF are one class, `GaussianFilter`, with one predict and one update flow,
+and differ only in the `Linearisation` the estimator factory binds in. On a linear model the
+Taylor linearisation is the textbook KF line for line, so a student looking for the KF finds
+it; §4.4 shows, and §4.5 tests, that the unscented linearisation gives the same answer there.
+*Rejected:* two filter classes sharing only a correction core (two predict and two update
+flows, which is where they drift); a filter-type switch inside `GaussianFilter` or `Tracker`
+(breaks §3's decoupling rule); a KF implemented as a UKF on linear models (correct, but hides
+the textbook KF a student is looking for).
 
 ### TD3 — One correction core, two covariance forms
 
-§4.2. Joseph form when H or J exists, short form for the UKF, in one function. *Rejected:*
-Joseph form everywhere (the UKF has no H; a statistically linearised H can be built, but adds a
-solve for no gain under §4.4's weights); the short form everywhere (gives up the KF's guarantee
-at no saving that matters here).
+§4.3. Joseph form when the linearisation supplies H or J, short form for the UKF, in one
+function. *Rejected:* Joseph form everywhere (the UKF has no H; a statistically linearised H
+can be built, but adds a solve for no gain under §4.4's weights); the short form everywhere
+(gives up the KF's guarantee at no saving that matters here).
 
 ### TD4 — Names, not positions
 
@@ -650,8 +752,8 @@ singular).
 
 ### TD8 — Assignment order is a setting
 
-§7.3. *Rejected:* choosing one order for all scenarios. Each is measured better on a different
-problem.
+§7.3. `Tracker` takes `assignment="confirmed_first"` or `"joint"`. *Rejected:* fixing one order
+for all scenarios. Each is measured better on a different problem.
 
 ### TD9 — Mechanism in core, scenario policy in pipelines
 
@@ -671,9 +773,12 @@ untested against real data); implementing PMBM at all (§7.5).
 
 ### TD12 — `Plot` for the pipeline's detection report
 
-`pipelines.tracking.Measurement` is renamed `Plot`. ASTERIX CAT048 ("Monoradar Target Reports")
-sends a target report either as a plot or as a track, and a plot is the untracked form, which is
-what this class holds; `spec/data-001-formats.md` §4 already says "Detections (plots)". *Why:*
+`pipelines.tracking.Measurement` is renamed `Plot`. The repo's vocabulary
+(`spec/data-001-formats.md` §5) defines a *detection* as one range-Doppler cell over the CFAR
+threshold, a *plot* as the report clustered from a target's detections, and a *hit* as a
+tentative plot. This class holds clustered reports, so it is a plot. ASTERIX CAT048
+("Monoradar Target Reports") agrees: it sends a target report either as a plot or as a track,
+and a plot is the untracked form. *Why:*
 two public classes named `Measurement` in one package tree, holding different things, is a
 trap. `core.tracking.Measurement` keeps the name, as the textbook word for z. (Stone Soup's
 equivalent class is `Detection`; that name is taken here by `core.detection.Detection`.)
@@ -694,16 +799,20 @@ and "route" is not a tracking term a student can look up.
 | `LifecyclePolicy.n_reacquire_frames` | `n_reacquire_misses` | it counts misses, not frames |
 | `CartesianPosition`, `indices` | `LinearMeasurement`, `mapping` | its docstring says "despite the name, any coordinates"; it is z = Hx + w |
 | `RadialMotion` | `RadialConstantVelocity` | says which motion |
-| `build_tracker`, `build_tracker_enu` | same names, each with an `estimator_factory` argument defaulting to the UKF | both always build a UKF today. Per TD2, the filter is one argument, not one builder per filter |
+| `UKF` | `GaussianFilter(motion, UnscentedLinearisation())` | TD2: one filter, the linearisation is an argument |
+| `kalman.KalmanFilter` (a track's estimate) | deleted (§13 step 7) | it is not a filter; `GaussianFilter(motion, TaylorLinearisation())` is the KF |
+| `build_tracker`, `build_tracker_enu` | same names, each with an `estimator_factory` argument defaulting to the unscented linearisation | both always build a UKF today. Per TD2, the filter is one argument, not one builder per filter |
 | `UKF.predict_to(time_s)` | `predict_to(timestamp_s)` | the `Estimator` protocol's name |
 | `StateLayout.normalise` | removed | it is `wrap` under a second name |
 | `CartesianMotion.noise_density` | `acceleration_noise_density_m2ps3`, `jerk_noise_density_m2ps5` | one dict held two units |
 | `sigma_accel_mps2` | `sigma_acceleration_mps2` | as `motion.py` spells it |
 | `pipelines.tracking.Measurement` | `Plot` | TD12 |
 
-Textbook names stay: `UKF`, `KalmanFilter`, `ChiSquareGate`, `NearestNeighbour`,
-`GlobalNearestNeighbour`, `TrackInitiator`, `StateEstimate`, `TrackSnapshot`, `Measurement`,
-`TrackManager`, `BistaticRangeDopplerModel`.
+Textbook names stay: `ChiSquareGate`, `NearestNeighbour`, `GlobalNearestNeighbour`,
+`TrackInitiator`, `StateEstimate`, `TrackSnapshot`, `Measurement`, `TrackManager`,
+`BistaticRangeDopplerModel`. `GaussianFilter` is Särkkä's (2013) name for the family; its
+docstring and the two linearisations' docstrings name the KF, the EKF and the UKF, so a student
+searching for any of them lands on the right class.
 
 `sigma_accel_mps2` and `n_reacquire_frames` are also keys in the scenario 003 TOMLs'
 `[tracking]` table (`spec/scenario-003-tracking.md`, "Parameters as shipped"), and
@@ -712,9 +821,14 @@ the TOMLs, scenario 003's spec and `spec/data-001-formats.md` change in the same
 `metadata.json` schema version is bumped, and a TOML that still uses an old key fails with a
 message naming the new one, rather than being silently ignored.
 
-### TD14 — Readable before fast
+### TD14 — Readable and fast
 
-§11. *Rejected:* a real-time performance budget, and compiled dependencies in core.
+Principle 10, §11. The hot path is batched across tracks and measurements, and benchmarks
+hold a budget against a committed baseline. *Rejected:* readable before fast (leaves a Python
+loop over every track-measurement pair in the gate, which a realistic scan cannot afford);
+fast at the cost of reading like the textbook (a student must still match each batched line
+to its equation); compiled dependencies in core (an optional extra, only once a benchmark shows
+NumPy is the limit).
 
 ### 14.2 Rulings on the requested features
 
@@ -725,24 +839,26 @@ message naming the new one, rather than being silently ignored.
 | Doppler in the state vector | **Adopted as corrected:** in the measurement and the gate, not the state | §1.3, §6.2, TD7 |
 | GNN, JPDA, PMBM | **GNN adopted** (exists); **JPDA** as an extension point; **PMBM** out of scope | §7, TD11 |
 | M-of-N lifecycle, covariance deletion | **Adopted.** M-of-N exists; covariance deletion is new | §8, TD10 |
-| High-performance implementation | **Adopted, bounded:** vectorise and measure; readability first | §11, TD14 |
+| High-performance implementation | **Adopted:** batched across tracks and measurements, with a benchmark budget; readable and fast | §11, TD14 |
 | Validation strategies | **Adopted:** analytic, statistical, drift guards, end to end | §4.5, §12 |
 
 ## 15. Acceptance criteria
 
 | # | Criterion | Checked by |
 | :--- | :--- | :--- |
-| AC1 | One scan loop: `git grep -nE '^class (KalmanTracker\|KalmanState\|TrackModel\|FrameResult)\b' -- src` returns nothing | [review] |
+| AC1 | One tracker and one filter: `git grep -nE '^class (KalmanTracker\|KalmanFilter\|KalmanState\|TrackModel\|FrameResult\|UKF\|ExtendedKalmanFilter)\b' -- src` returns nothing | [review] |
 | AC2 | One gain and covariance update: `git grep -n 'np.linalg.solve' -- src/radar_forge/core/tracking` finds no gain computed outside the correction core | [review] |
-| AC3 | `KalmanFilter` and `UKF` both satisfy `Estimator`, and a test runs `Tracker` with each | [test] |
-| AC4 | KF ≡ UKF on linear models at `rtol=atol=1e-10`, using the real `KalmanFilter` | [test] |
-| AC5 | The NEES/NIS and definiteness tests are parametrised over every estimator | [test] |
+| AC3 | `GaussianFilter` satisfies `Estimator` with each linearisation, and a test runs `Tracker` with each | [test] |
+| AC4 | Both UKF ≡ KF guards of §4.5 pass through the real `GaussianFilter`: the per-step moments for several (α, β, κ), and the 200-step run | [test] |
+| AC5 | The NEES/NIS and definiteness tests are parametrised over every linearisation | [test] |
 | AC6 | Every analytic Jacobian matches a central difference | [test] |
 | AC7 | No tracking code indexes a state by position: a reviewer finds no slice of a state or covariance by integer outside `StateLayout` | [review] |
-| AC8 | Scenario 003's end-to-end criteria (`spec/scenario-003-tracking.md` §12) pass on `Tracker`, and every number that differs from `KalmanTracker`'s is explained in the commit that moved it (§12; §7.2's cost change may move some) | [test] |
+| AC8 | Scenario 003's end-to-end criteria (`spec/scenario-003-tracking.md` §12) pass on `Tracker`, and every number that differs from the scenario's output before migration is explained in the commit that moved it (§12; §7.2's cost change may move some) | [test] |
 | AC9 | `core/tracking/` imports nothing from `pipelines/` | [review] |
 | AC10 | This spec passes `scripts/check_conventions.py` R7 | [hook] |
 | AC11 | Step 9 is done: `docs/audits/tracking-audit.md` has a verdict for every public name in `core/tracking/`, and `docs/audits/tests-audit.md` classifies every tracking test, with the coverage comparison (`docs/conventions/audit.md`, `testing.md` §10.10) | [review] |
+| AC12 | One flow: `GaussianFilter` and the correction core hold no `isinstance` check, or other branch, on the type of a linearisation; the core's only branch is on whether H is `None` | [review] |
+| AC13 | The gate is batched: no Python loop over track-measurement pairs in `Tracker` or `association.py`, the batched ≡ per-pair test of §12 passes, and the `benchmark` tests assert §11's budget | [test] |
 
 ## 16. Limitations
 
@@ -750,8 +866,8 @@ These hold after migration; each is stated in a docstring, not discovered by a u
 
 - Every measurement in a batch carries the batch's time; batches must arrive in time order.
   Out-of-sequence measurements are rejected, not buffered.
-- GNN gives each track at most one measurement per scan. One target giving several detections
-  in a scan starts several tracks; the fix belongs in detection
+- GNN gives each track at most one measurement per scan. One target giving several plots in
+  a scan starts several tracks; the fix belongs in clustering, in detection
   (`test_several_detections_of_one_target_give_one_confirmed_track` is `xfail`).
 - A target crossing the line of sight is lost in the Doppler blind zone.
 - No initiator for the bistatic model: one bistatic measurement cannot fix a position. Seed
@@ -767,6 +883,10 @@ These hold after migration; each is stated in a docstring, not discovered by a u
   §6.2.2 (the continuous white noise acceleration model), §6.3.2 (the discrete white noise
   acceleration model), §10.3 (the extended Kalman filter), ch. 11 (adaptive estimation and
   maneuvering targets, including the interacting multiple model estimator).
+- S. Särkkä, *Bayesian Filtering and Smoothing*, Cambridge University Press, 2013. Ch. 5
+  (the extended and unscented Kalman filters) and ch. 6 (general Gaussian filtering: one filter,
+  with the Taylor and unscented approximations as instances). Chapter numbers are from the first
+  edition and are to be checked against the copy cited in the code.
 - S. J. Julier and J. K. Uhlmann, "A new extension of the Kalman filter to nonlinear systems,"
   *Proc. SPIE*, vol. 3068, *Signal Processing, Sensor Fusion, and Target Recognition VI*,
   1997, p. 182 ff. (the heuristic n + κ = 3).
