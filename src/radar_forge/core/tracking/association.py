@@ -468,4 +468,4 @@ class ChiSquareGate:
         bool
             True if the pair may be associated, False if it is gated out.
         """
-        return bool(stats.nis <= self.threshold(len(stats.residual)))
+        return bool(stats.nis <= self.threshold(len(stats.innovation)))
