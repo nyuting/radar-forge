@@ -123,7 +123,7 @@ its predecessor plus the metadata.
 | L0 | Target trajectories | `inputs/trajectory.csv` | the user, or `scripts/translate_flight_coordinates.py` |
 | L1 | Raw baseband IQ, `data_ftst` | `iq.h5` | `pipelines/scenarios.py` (`Frame.iq`) |
 | L2 | Processed arrays: `data_rfst`, `data_rv`, CFAR threshold, noise | `products.h5` | `pipelines/scenarios.py` (`RangeDopplerProduct`), `core/detection.py` |
-| L3 | Detections (plots) | `detections.csv` | `pipelines/tracking.py` (`Measurement`) |
+| L3 | Plots (clustered detections, §5 Vocabulary) | `detections.csv` | `pipelines/tracking.py` (`Measurement`, to be `Plot`) |
 | L4 | Tracks | `tracks.csv` | `core/tracking/` via `pipelines/tracking.py` (`FrameTracks`) |
 | — | Ground truth | `truth.csv` | `pipelines/trajectories.py` (`TargetTrack`, `BistaticTargetTrack`) |
 | — | Performance metrics | `metrics.csv` | acceptance tests, later a metrics module |
@@ -166,6 +166,7 @@ original scenario file has been edited.
 | **Bistatic reading** | `range_m` is the bistatic mean range `(R_t + R_r)/2`, and `radial_velocity_mps` is the bisector rate, per `spec/structure.md` D6. The individual legs appear only in the columns that name them |
 | **Units** | The `style.md` §2 suffix table, applied to every column and dataset name. Compound units follow the pattern already in use: `_m2` (m²), `_m2ps2` (m²/s²), `_mps2` (m/s²). An off-diagonal covariance column takes its unit from `metadata.json` (§6.6) |
 | **Identifiers** | `target_id`, `track_id`, `sensor_id`: strings or integers, stable for the whole run, never reused. `detection_id` is an integer that is unique **within a frame**, so `(frame, detection_id)` is the detection key |
+| **Vocabulary** | A **detection** is one range-Doppler cell over the CFAR threshold. A **plot** is the report clustered from a target's detections in one dwell: one position, one velocity, one power. A **hit** is a tentative plot. A **track** is a filtered state built from plots over time. `detections.csv` holds plots and keeps its historical name; `core.detection.Detection`, despite its name, is one clustered report, a plot |
 | **Missing values** | An **empty cell** means *not applicable or not yet known*: `velocity_unfolded_mps` before a track can unfold, or `associated_track_id` for a false alarm. `NaN` means *computed and invalid*. The two are never interchanged. In HDF5, an absent dataset means not applicable |
 | **Booleans** | `0` / `1` in CSV (it is what the current writer emits, and every reader parses it). `uint8` in HDF5 attributes |
 | **Enumerations** | Lowercase ASCII strings: `tentative`, `confirmed`, `coasting`, `deleted`; `fmcw`, `pulsed`; `range_1d`, `enu_2d`, `enu_3d`; `accepted`, `missing_pair`, `ambiguous_pair`, `unresolved_velocity` |
