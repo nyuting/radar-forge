@@ -107,5 +107,4 @@ The rule is the one in the [track-before-detect background](track-before-detect.
 cite a source for every architecture, loss, clutter model, threshold method and metric you use,
 in your report and in the `References` section of the docstring that implements it, and read
 what you cite. Take particular care with this topic. AI tools describe these methods fluently,
-overstate what they guarantee, and invent citations. Several statements on this page started
-out wrong in an AI-written draft.
+overstate what they guarantee, and invent citations. 
