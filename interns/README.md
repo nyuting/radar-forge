@@ -15,11 +15,20 @@ ourselves.
 | 3 | [Particle-filter TBD](tbd-particle-filter.md) | Build a particle filter that decides target existence from unthresholded maps. How fast and how reliably does it declare a dim target? | about 2 days |
 | 4 | [Where can learning beat the textbook?](tbd-learned.md) | Put a learned component into a TBD detector. Where, if anywhere, does it beat the classical one at the same false-track rate? | about 2–3 days |
 | 5 | [Do world models help a radar?](world-models.md) | The tracker is already a hand-written world model. Pick one direction (motion, map prediction, clutter or planning) and find out where a learned one beats it. | about 3 days |
+| 6 | [Can an unrolled solver beat a taper?](unrolled-sparse-rd.md) | Does a learned, unrolled sparse solver separate two close targets better than a Taylor taper, at the same false-peak rate? | about 2–3 days |
+| 7 | [Does the tracker know its own uncertainty?](conformal-tracking.md) | Is the tracker's covariance honest, and when it is not, can a conformal gate or interval restore the coverage it promises? | about 2 days |
+| 8 | [Thresholds from the tail](evt-thresholds.md) | How few samples does an extreme-value fit need to set a reliable threshold at Pfa = 1e-6? | about 2 days |
+| 9 | [Learned data association](learned-association.md) | With crossing targets and false alarms, does a small graph network beat global nearest neighbour at the same false-track rate? | about 3 days |
 
 Tasks 2–4 are about **track-before-detect** (TBD), which `radar-forge` does not implement yet.
-They share [one background page](track-before-detect.md); read it before you choose. Tasks 4 and
-5 also need PyTorch, so run `uv sync --extra dev --extra viz --extra ml` instead of the setup
-command below.
+They share [one background page](track-before-detect.md); read it before you choose.
+
+Tasks 6–9 are about **AI for radar**: a learned or statistical block against the classical one
+it would replace. They share [one background page](ai-for-radar.md). It also lists further
+directions you may propose instead, if you agree one with us first.
+
+Tasks 4, 5, 6 and 9 need PyTorch, and so do the optional parts of 7 and 8. For those, run
+`uv sync --extra dev --extra viz --extra ml` instead of the setup command below.
 
 **Choose the task you find most technically interesting.** We learn more from you chasing a
 question you care about than from you finishing one you don't. Tell us briefly why you chose it.
