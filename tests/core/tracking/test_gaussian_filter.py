@@ -17,7 +17,11 @@ from scipy.stats import chi2
 
 from radar_forge.core.tracking.coordinates import Coordinate, StateEstimate, StateLayout
 from radar_forge.core.tracking.estimation import GaussianFilter
-from radar_forge.core.tracking.linearisation import Linearisation, UnscentedLinearisation
+from radar_forge.core.tracking.linearisation import (
+    Linearisation,
+    TaylorLinearisation,
+    UnscentedLinearisation,
+)
 from radar_forge.core.tracking.measurement_models import (
     BistaticRangeDopplerModel,
     CartesianPosition,
@@ -62,54 +66,56 @@ def _initial_covariance() -> NDArray[np.float64]:
 
 
 # --------------------------------------------------------------------------- #
-# Equivalence with the linear Kalman filter
+# Which models each linearisation accepts
 # --------------------------------------------------------------------------- #
+# Equivalence with the linear Kalman filter is test_linearisation.py's drift guards: the
+# unscented and Taylor linearisations against each other, through the real GaussianFilter.
 
 
-def _linear_case() -> tuple[GaussianFilter, NDArray[np.float64], NDArray[np.float64]]:
-    """Run one predict and update, and return the filter with the Kalman filter's answer."""
-    motion = CartesianMotion({"x": "CV"}, origin_lla_deg_m=ORIGIN)
-    prior = StateEstimate(
-        np.array([1.0, 2.0]), np.array([[4.0, 1.0], [1.0, 2.0]]), 0, motion.state_layout
-    )
-    ukf = _ukf(prior, motion)
-    model = CartesianPosition(motion.state_layout, ("x_m",))
-    measurement = _measurement(4.0, 0.5, 1)
-    f, q = motion.matrices(1)
-    expected_mean, expected_cov = f @ prior.mean, f @ prior.covariance @ f.T + q
-    h = np.array([[1.0, 0.0]])
-    s = h @ expected_cov @ h.T + measurement.covariance
-    gain = expected_cov @ h.T @ np.linalg.inv(s)
-    expected_mean = expected_mean + gain @ (measurement.value - h @ expected_mean)
-    expected_cov = expected_cov - gain @ s @ gain.T
-    ukf.predict_to(1)
-    ukf.update(measurement, model)
-    return ukf, expected_mean, expected_cov
+class _Drift:
+    """A periodic phase that drifts at one radian per second, and has no ``matrices``."""
+
+    state_layout = StateLayout((Coordinate("phase_rad", "rad", 2 * np.pi),))
+
+    def transition(self, state: NDArray[np.float64], dt_s: float) -> NDArray[np.float64]:
+        return state + dt_s
+
+    def process_noise(self, state: NDArray[np.float64], dt_s: float) -> NDArray[np.float64]:
+        return np.array([[0.01 * dt_s]])
 
 
-def test_with_linear_models_the_mean_is_the_kalman_filters() -> None:
-    ukf, expected_mean, _ = _linear_case()
-    # rtol and atol 1e-10: sigma-point reconstruction and linear solves accumulate roundoff.
-    np.testing.assert_allclose(ukf.state.mean, expected_mean, rtol=1e-10, atol=1e-10)
+def test_the_taylor_linearisation_rejects_a_motion_model_without_matrices() -> None:
+    motion = _Drift()
+    prior = StateEstimate(np.array([3.0]), np.array([[0.01]]), 0, motion.state_layout)
+    with pytest.raises(TypeError, match="_Drift has none"):
+        GaussianFilter(prior, motion, TaylorLinearisation())
 
 
-def test_with_linear_models_the_covariance_is_the_kalman_filters() -> None:
-    ukf, _, expected_cov = _linear_case()
-    # rtol and atol 1e-10: sigma-point reconstruction and linear solves accumulate roundoff.
-    np.testing.assert_allclose(ukf.state.covariance, expected_cov, rtol=1e-10, atol=1e-10)
+class _RangeOnly:
+    """A measurement model with ``predict`` but no ``jacobian``."""
+
+    def __init__(self, state_layout: StateLayout) -> None:
+        self.state_layout = state_layout
+        self.measurement_layout = StateLayout((Coordinate("range_m", "m"),))
+
+    def predict(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
+        return np.asarray(state, dtype=np.float64)[..., :1]
+
+
+@pytest.mark.parametrize("method", ["innovation_statistics", "update"])
+def test_the_taylor_linearisation_rejects_a_model_without_a_jacobian_before_any_change(
+    method: str,
+) -> None:
+    motion = RadialMotion()
+    prior = StateEstimate(np.array([1000.0, 10.0]), np.eye(2), 0, motion.state_layout)
+    estimator = GaussianFilter(prior, motion, TaylorLinearisation())
+    with pytest.raises(TypeError, match="_RangeOnly has none"):
+        getattr(estimator, method)(_measurement(1000.0, 1.0, 0), _RangeOnly(motion.state_layout))
+    assert estimator.state is prior
 
 
 def test_a_custom_periodic_model_needs_no_filter_changes() -> None:
-    class Drift:
-        state_layout = StateLayout((Coordinate("phase_rad", "rad", 2 * np.pi),))
-
-        def transition(self, state: NDArray[np.float64], dt_s: float) -> NDArray[np.float64]:
-            return state + dt_s
-
-        def process_noise(self, state: NDArray[np.float64], dt_s: float) -> NDArray[np.float64]:
-            return np.array([[0.01 * dt_s]])
-
-    motion = Drift()
+    motion = _Drift()
     ukf = _ukf(StateEstimate(np.array([3.0]), np.array([[0.01]]), 0, motion.state_layout), motion)
     ukf.predict_to(0.5)
     model = CartesianPosition(motion.state_layout, ("phase_rad",))

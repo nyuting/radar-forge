@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from radar_forge.core.tracking.kalman import process_noise_dwna
-from radar_forge.core.tracking.motion import CartesianMotion, RadialMotion
+from radar_forge.core.tracking.motion import CartesianMotion, LinearMotionModel, RadialMotion
 
 ORIGIN = (36.00250, -78.94100, 60.0)
 # sigma = 1 with tau = 0.5 s gives q = 2 sigma² tau = 1 exactly, so Q is the published block.
@@ -236,6 +236,22 @@ def test_a_batched_cartesian_transition_equals_one_state_at_a_time(
     np.testing.assert_allclose(model.transition(states, 0.7), one_at_a_time, rtol=1e-14, atol=1e-12)
 
 
+def test_the_radial_matrices_are_the_transition_and_the_process_noise(
+    rng: np.random.Generator,
+) -> None:
+    """F x is transition(x), and Q is process_noise: the two views of one linear model."""
+    model = RadialMotion(1.0, 0.5)
+    state = rng.normal(1000.0, 100.0, 2)
+    f, q = model.matrices(0.7)
+    # rtol 1e-15: x - v dt either way; F x adds an exact x * 1 and v * 0.
+    np.testing.assert_allclose(f @ state, model.transition(state, 0.7), rtol=1e-15)
+    np.testing.assert_array_equal(q, model.process_noise(state, 0.7))
+
+
+def test_the_radial_model_is_a_linear_motion_model() -> None:
+    assert isinstance(RadialMotion(), LinearMotionModel)
+
+
 def test_a_batched_radial_transition_equals_one_state_at_a_time(rng: np.random.Generator) -> None:
     model = RadialMotion()
     states = rng.normal(1000.0, 100.0, (5, 2))
@@ -315,7 +331,9 @@ def test_a_negative_or_infinite_cartesian_step_is_rejected(dt_s: float, call: st
 
 
 @pytest.mark.parametrize("dt_s", [-1.0, np.nan])
-@pytest.mark.parametrize("call", ["transition", "process_noise"])
+@pytest.mark.parametrize("call", ["transition", "process_noise", "matrices"])
 def test_a_negative_or_missing_radial_step_is_rejected(dt_s: float, call: str) -> None:
+    method = getattr(RadialMotion(), call)
+    args = (dt_s,) if call == "matrices" else (np.zeros(2), dt_s)
     with pytest.raises(ValueError, match="dt_s"):
-        getattr(RadialMotion(), call)(np.zeros(2), dt_s)
+        method(*args)

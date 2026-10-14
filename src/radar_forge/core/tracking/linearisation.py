@@ -8,6 +8,9 @@ covariance of the result. Then the same Kalman correction follows. The three fil
 one thing only: how they work out the mean and covariance of :math:`g(x)`. That is the
 filter's *linearisation*, and this module holds them.
 
+- :class:`TaylorLinearisation`, the KF on a linear model and the EKF otherwise: the mean
+  is :math:`g(\hat{x})`, and the covariance :math:`J P J^T`, with J the Jacobian of g at
+  :math:`\hat{x}` (H itself for a linear model).
 - :class:`UnscentedLinearisation`, the UKF: weighted sums over :math:`2n + 1` sigma points.
 
 A linearisation is handed to
@@ -51,17 +54,22 @@ from numpy.typing import NDArray
 from radar_forge.core.tracking._validation import (
     as_covariance,
     as_points,
+    as_vector,
     check_sigma_point_settings,
     cholesky_factor,
     symmetrise,
 )
 from radar_forge.core.tracking.coordinates import StateEstimate
-from radar_forge.core.tracking.measurement_models import MeasurementModel
-from radar_forge.core.tracking.motion import MotionModel
+from radar_forge.core.tracking.measurement_models import (
+    DifferentiableMeasurementModel,
+    MeasurementModel,
+)
+from radar_forge.core.tracking.motion import LinearMotionModel, MotionModel
 
 __all__ = [
     "Linearisation",
     "MeasurementMoments",
+    "TaylorLinearisation",
     "UnscentedLinearisation",
 ]
 
@@ -428,4 +436,162 @@ class UnscentedLinearisation:
             predicted_measurement=predicted,
             cross_covariance=(dx.T * wc) @ dz,
             predicted_measurement_covariance=(dz.T * wc) @ dz,
+        )
+
+
+def _linear_motion(motion_model: MotionModel) -> LinearMotionModel:
+    """Return the motion model as a linear one, or raise naming what it lacks."""
+    if not isinstance(motion_model, LinearMotionModel):
+        msg = (
+            f"TaylorLinearisation needs a linear motion model, one with matrices(dt_s) -> "
+            f"(F, Q); {type(motion_model).__name__} has none. Use UnscentedLinearisation "
+            "for a model without it."
+        )
+        raise TypeError(msg)
+    return motion_model
+
+
+def _differentiable(model: MeasurementModel) -> DifferentiableMeasurementModel:
+    """Return the measurement model as a differentiable one, or raise naming what it lacks."""
+    if not isinstance(model, DifferentiableMeasurementModel):
+        msg = (
+            f"TaylorLinearisation needs a measurement model with jacobian(state); "
+            f"{type(model).__name__} has none. Add an analytic Jacobian, or use "
+            "UnscentedLinearisation, which needs no derivatives."
+        )
+        raise TypeError(msg)
+    return model
+
+
+@dataclass(frozen=True)
+class TaylorLinearisation:
+    r"""The first-order Taylor linearisation: the KF on linear models, the EKF otherwise.
+
+    The extended Kalman filter is the Kalman filter with the measurement matrix H replaced
+    by the Jacobian of the measurement model at the prediction [2]_. So one linearisation
+    gives both: on a linear model, the Jacobian *is* H, and this is the textbook KF line for
+    line,
+
+    .. math::
+
+        \hat{x}^- = F \hat{x}, \qquad P^- = F P F^T + Q, \qquad
+        \hat{z} = H \hat{x}^-, \qquad P_{xz} = P^- H^T, \qquad S = H P^- H^T + R,
+
+    followed by the Joseph-form update
+    (:mod:`~radar_forge.core.tracking.estimation`). On a nonlinear measurement model, such
+    as the bistatic range and Doppler model, :math:`\hat{z} = h(\hat{x}^-)` and H becomes
+    :math:`J = \partial h / \partial x` at :math:`\hat{x}^-`: the EKF.
+
+    It needs F and Q, so its motion model must have ``matrices`` (a
+    :class:`~radar_forge.core.tracking.motion.LinearMotionModel`), and it needs H, so its
+    measurement model must have ``jacobian`` (a
+    :class:`~radar_forge.core.tracking.measurement_models.DifferentiableMeasurementModel`).
+    It raises ``TypeError`` otherwise, naming the model. There is no numerical fallback: a
+    finite-difference Jacobian would hide a wrong analytic one, and a student could not tell
+    which filter they were running.
+
+    References
+    ----------
+    .. [1] Särkkä (2013), ch. 5 and ch. 6; see the module References.
+    .. [2] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications to
+           Tracking and Navigation*, Wiley, 2001, §5.2.4 (the Kalman filter) and §10.3 (the
+           extended Kalman filter).
+
+    Examples
+    --------
+    >>> from radar_forge.core.tracking.motion import RadialMotion
+    >>> motion = RadialMotion(0.0)
+    >>> prior = StateEstimate(np.array([100.0, 5.0]), np.eye(2), 0.0, motion.state_layout)
+    >>> mean, _ = TaylorLinearisation().predict(motion, prior, 1.0)
+    >>> mean
+    array([95.,  5.])
+    """
+
+    def check_motion_model(self, motion_model: MotionModel) -> None:
+        """Raise unless ``motion_model`` has ``matrices``.
+
+        Parameters
+        ----------
+        motion_model : MotionModel
+            The motion model the filter is being built with.
+
+        Raises
+        ------
+        TypeError
+            If the motion model has no ``matrices``, naming the model.
+        """
+        _linear_motion(motion_model)
+
+    def predict(
+        self, motion_model: MotionModel, state: StateEstimate, dt_s: float
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        r"""Return :math:`F \hat{x}` and :math:`F P F^T + Q`.
+
+        Parameters
+        ----------
+        motion_model : MotionModel
+            A linear motion model: one with ``matrices(dt_s) -> (F, Q)``.
+        state : StateEstimate
+            The estimate to move: mean ``(n_state,)`` and covariance ``(n_state, n_state)``.
+        dt_s : float
+            The time step, in seconds.
+
+        Returns
+        -------
+        mean : numpy.ndarray
+            :math:`\hat{x}^-`, shape ``(n_state,)``.
+        covariance : numpy.ndarray
+            :math:`P^-`, shape ``(n_state, n_state)``, with Q added.
+
+        Raises
+        ------
+        TypeError
+            If the motion model has no ``matrices``.
+        ValueError
+            If F or Q has the wrong shape, or Q is not a covariance.
+        """
+        n_state = len(state.mean)
+        transition, noise = _linear_motion(motion_model).matrices(dt_s)
+        transition = as_points(transition, n_state, n_state, "transition matrix F")
+        noise = as_covariance(noise, n_state)
+        mean = transition @ state.mean
+        covariance = transition @ state.covariance @ transition.T + noise
+        return mean, symmetrise(covariance)
+
+    def measure(self, model: MeasurementModel, state: StateEstimate) -> MeasurementMoments:
+        r"""Return the measurement moments from the Jacobian at the predicted mean.
+
+        Parameters
+        ----------
+        model : MeasurementModel
+            A measurement model with ``jacobian(state)``.
+        state : StateEstimate
+            The predicted estimate.
+
+        Returns
+        -------
+        MeasurementMoments
+            :math:`\hat{z} = h(\hat{x}^-)`, :math:`P_{xz} = P^- H^T`, the predicted
+            measurement's covariance :math:`H P^- H^T`, and H itself.
+
+        Raises
+        ------
+        TypeError
+            If the model has no ``jacobian``, before anything is computed.
+        ValueError
+            If the model returns arrays of the wrong shape.
+        """
+        differentiable = _differentiable(model)
+        n_meas = model.measurement_layout.dimension
+        predicted = as_vector(model.predict(state.mean), n_meas, "predicted measurement")
+        measurement_matrix = as_points(
+            differentiable.jacobian(state.mean), n_meas, len(state.mean), "Jacobian"
+        )
+        return MeasurementMoments(
+            predicted_measurement=predicted,
+            cross_covariance=state.covariance @ measurement_matrix.T,
+            predicted_measurement_covariance=(
+                measurement_matrix @ state.covariance @ measurement_matrix.T
+            ),
+            measurement_matrix=measurement_matrix,
         )

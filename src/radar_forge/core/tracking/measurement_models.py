@@ -49,7 +49,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -70,6 +70,7 @@ if TYPE_CHECKING:
 __all__ = [
     "BistaticRangeDopplerModel",
     "CartesianPosition",
+    "DifferentiableMeasurementModel",
     "Measurement",
     "MeasurementBatch",
     "MeasurementModel",
@@ -378,6 +379,39 @@ class MeasurementModel(Protocol):
         ...
 
 
+@runtime_checkable
+class DifferentiableMeasurementModel(MeasurementModel, Protocol):
+    """A measurement model that can give its Jacobian, the matrix H of the linearised model.
+
+    The Kalman filter and the extended Kalman filter need H: for a linear model z = H x + w it
+    is the model itself, and for a nonlinear one it is the Jacobian, the first derivatives
+    of h at the state (:class:`~radar_forge.core.tracking.linearisation.TaylorLinearisation`).
+    A model without :meth:`jacobian` still works with the unscented filter, which needs no
+    derivatives. There is no numerical fallback: a finite-difference Jacobian would hide a
+    wrong analytic one.
+
+    References
+    ----------
+    .. [1] Bar-Shalom, Li and Kirubarajan (2001), §10.3 (the extended Kalman filter).
+    """
+
+    def jacobian(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Return the Jacobian of :meth:`predict` at one state.
+
+        Parameters
+        ----------
+        state : numpy.ndarray
+            One state, shape ``(n_state,)``, in ``state_layout`` order and units.
+
+        Returns
+        -------
+        numpy.ndarray
+            Shape ``(n_meas, n_state)``. Row i, column j is the derivative of measured
+            element i with respect to state element j, in the unit of i per unit of j.
+        """
+        ...
+
+
 class CartesianPosition:
     """A sensor that reports some of the state's coordinates directly.
 
@@ -467,6 +501,37 @@ class CartesianPosition:
         states = np.asarray(state, dtype=np.float64)
         check_points(states, self.state_layout.dimension, "state")
         return states[..., list(self.indices)]
+
+    def jacobian(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Return H, the matrix that picks the reported coordinates out of a state.
+
+        The model is linear, so H is the same at every state: row i has a one in the column
+        of the i-th reported coordinate, and zeros elsewhere.
+
+        Parameters
+        ----------
+        state : numpy.ndarray
+            One state, shape ``(n_state,)``. Only its shape is checked.
+
+        Returns
+        -------
+        numpy.ndarray
+            H, a new array of shape ``(n_meas, n_state)``.
+
+        Raises
+        ------
+        ValueError
+            If ``state`` has the wrong shape or is not finite.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> layout = StateLayout((Coordinate("x_m", "m"), Coordinate("xdot_mps", "m/s")))
+        >>> CartesianPosition(layout, ("x_m",)).jacobian(np.array([10.0, 2.0]))
+        array([[1., 0.]])
+        """
+        as_vector(state, self.state_layout.dimension, "state")
+        return np.eye(self.state_layout.dimension, dtype=np.float64)[list(self.indices)]
 
 
 @dataclass(frozen=True)
@@ -827,17 +892,7 @@ class BistaticRangeDopplerModel:
         states = np.asarray(state, dtype=np.float64)
         check_points(states, self.state_layout.dimension, "state")
         position_m = self._tx.values(states, "_m")
-        # A distance is exactly zero only when the two points are equal, so the
-        # test compares positions instead of computing norms just for the guard.
-        if np.any(
-            np.all(position_m == self._tx.pose.position_m, axis=-1)
-            | np.all(position_m == self._rx.pose.position_m, axis=-1)
-        ):
-            msg = (
-                "bistatic geometry is singular at an asset: a target position is exactly "
-                "on the transmitter or the receiver."
-            )
-            raise ValueError(msg)
+        self._check_off_sites(position_m)
 
         velocity_mps = self._tx.values(states, "dot_mps")
         to_target_tx_m = position_m - self._tx.pose.position_m
@@ -850,3 +905,88 @@ class BistaticRangeDopplerModel:
         unit_sum = to_target_tx_m / range_tx_m[..., None] + to_target_rx_m / range_rx_m[..., None]
         path_range_rate_mps = -np.sum(unit_sum * velocity_mps, axis=-1)
         return np.stack([path_range_m, path_range_rate_mps], axis=-1)
+
+    def _check_off_sites(self, position_m: NDArray[np.float64]) -> None:
+        """Raise if any target position is exactly on the transmitter or the receiver."""
+        # A distance is exactly zero only when the two points are equal, so the
+        # test compares positions instead of computing norms just for the guard.
+        if np.any(
+            np.all(position_m == self._tx.pose.position_m, axis=-1)
+            | np.all(position_m == self._rx.pose.position_m, axis=-1)
+        ):
+            msg = (
+                "bistatic geometry is singular at an asset: a target position is exactly "
+                "on the transmitter or the receiver."
+            )
+            raise ValueError(msg)
+
+    def jacobian(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
+        r"""Return the derivatives of the path range and path rate at one state.
+
+        Parameters
+        ----------
+        state : numpy.ndarray
+            One state, shape ``(n_state,)``.
+
+        Returns
+        -------
+        numpy.ndarray
+            Shape ``(2, n_state)``: row 0 for ``path_range_m``, row 1 for
+            ``path_range_rate_mps``. A coordinate the state lacks, held at a fixed value, has
+            no column.
+
+        Raises
+        ------
+        ValueError
+            If ``state`` has the wrong shape or is not finite, or the target is exactly on
+            a site, where the direction to it is undefined.
+
+        Notes
+        -----
+        With :math:`u_k = (p - p_k) / R_k` the unit vector from site k to the target, and v
+        the target's velocity (class Notes),
+
+        .. math::
+
+            \frac{\partial (R_{tx} + R_{rx})}{\partial p} = u_{tx} + u_{rx}, \qquad
+            \frac{\partial \dot{R}}{\partial v} = -(u_{tx} + u_{rx}), \qquad
+            \frac{\partial \dot{R}}{\partial p} = -\sum_k \frac{(I - u_k u_k^T)\, v}{R_k},
+
+        where :math:`\dot{R}` is the path rate, positive closing, and the path range does
+        not depend on v. The last term holds because moving the target turns each unit
+        vector: :math:`\partial u_k / \partial p = (I - u_k u_k^T) / R_k`, the projection
+        onto the plane across the line of sight, scaled by one over the range. The baseline
+        does not depend on the state, so ``excess_range`` changes nothing here.
+
+        References
+        ----------
+        .. [1] Bar-Shalom, Li and Kirubarajan (2001), §10.3 (the Jacobian an extended Kalman
+               filter needs).
+        """
+        x = as_vector(state, self.state_layout.dimension, "state")
+        position_m = self._tx.values(x, "_m")
+        velocity_mps = self._tx.values(x, "dot_mps")
+        self._check_off_sites(position_m)
+
+        # One row per site: the transmitter, then the receiver.
+        sites_m = np.stack([self._tx.pose.position_m, self._rx.pose.position_m])
+        to_target_m = position_m - sites_m
+        range_m = np.linalg.norm(to_target_m, axis=-1)
+        unit = to_target_m / range_m[:, None]
+        unit_sum = unit.sum(axis=0)
+        # (I - u uᵀ) v = v - u (u · v), for both sites at once, then divided by each range.
+        across_mps = velocity_mps - unit * (unit @ velocity_mps)[:, None]
+        rate_by_position = -np.sum(across_mps / range_m[:, None], axis=0)
+
+        # Derivatives with respect to east, north and up, for position and for velocity.
+        by_position = np.stack([unit_sum, rate_by_position])
+        by_velocity = np.stack([np.zeros(3), -unit_sum])
+        jacobian = np.zeros((2, self.state_layout.dimension), dtype=np.float64)
+        for derivative, suffix in ((by_position, "_m"), (by_velocity, "dot_mps")):
+            # A loop over the two kinds of coordinate: a fixed one has no state column, so
+            # only the axes the state holds are copied across, by name.
+            names = [f"{axis}{suffix}" for axis in "xyz"]
+            axes = [i for i, name in enumerate(names) if name in self.state_layout.names]
+            columns = list(self.state_layout.indices(tuple(names[i] for i in axes)))
+            jacobian[:, columns] = derivative[:, axes]
+        return jacobian

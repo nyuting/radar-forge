@@ -20,7 +20,7 @@ estimation
     :class:`GaussianFilter`: the KF, the EKF and the UKF in one flow.
 linearisation
     How the Gaussian filter carries a mean and a covariance through a model: the
-    unscented transformation (UKF).
+    Taylor linearisation (KF, EKF) and the unscented transformation (UKF).
 association
     The chi-square gate, and nearest-neighbour and global nearest-neighbour assignment.
 initiation
@@ -88,11 +88,13 @@ from radar_forge.core.tracking.lifecycle import LifecyclePolicy, TrackManager
 from radar_forge.core.tracking.linearisation import (
     Linearisation,
     MeasurementMoments,
+    TaylorLinearisation,
     UnscentedLinearisation,
 )
 from radar_forge.core.tracking.measurement_models import (
     BistaticRangeDopplerModel,
     CartesianPosition,
+    DifferentiableMeasurementModel,
     Measurement,
     MeasurementBatch,
     MeasurementModel,
@@ -101,6 +103,7 @@ from radar_forge.core.tracking.measurement_models import (
 )
 from radar_forge.core.tracking.motion import (
     CartesianMotion,
+    LinearMotionModel,
     MotionKind,
     MotionModel,
     RadialMotion,
@@ -118,6 +121,7 @@ __all__ = [
     "CartesianPosition",
     "ChiSquareGate",
     "Coordinate",
+    "DifferentiableMeasurementModel",
     "DirectStateInitiator",
     "Estimator",
     "FrameResult",
@@ -128,6 +132,7 @@ __all__ = [
     "KalmanState",
     "KalmanTracker",
     "LifecyclePolicy",
+    "LinearMotionModel",
     "Linearisation",
     "Measurement",
     "MeasurementBatch",
@@ -142,6 +147,7 @@ __all__ = [
     "StateEstimate",
     "StateLayout",
     "StateModel",
+    "TaylorLinearisation",
     "Track",
     "TrackInitiator",
     "TrackManager",

@@ -180,12 +180,14 @@ they carry a mean and a covariance through a function. That is the filter's *lin
 | `TaylorLinearisation` | the KF on a linear model, the EKF otherwise | mean g(x̂), covariance J P Jᵀ, with J = ∂g/∂x at x̂ | yes: H, or J |
 | `UnscentedLinearisation(alpha, beta, kappa)` | the UKF | weighted sums over 2n + 1 sigma points (§4.4) | no |
 
-A `Linearisation` has two methods, one per step of the filter:
+A `Linearisation` has two methods, one per step of the filter, and a third that checks the
+motion model when the filter is built:
 
 | Method | Returns |
 | :--- | :--- |
 | `predict(motion, state, dt_s)` | the predicted mean x̂⁻ `(n_state,)` and covariance P⁻ `(n_state, n_state)`, with Q(dt_s) added |
 | `measure(model, state)` | `MeasurementMoments`: ẑ `(n_meas,)`, P_xz `(n_state, n_meas)`, S without R `(n_meas, n_meas)`, and H `(n_meas, n_state)` or `None` |
+| `check_motion_model(motion)` | nothing; raises `TypeError` if the linearisation cannot use the model (no `matrices` for the Taylor one), or `ValueError` if its settings do not suit the state size (the unscented weights). It is how `GaussianFilter` refuses a bad pairing at construction without asking which linearisation it holds |
 
 `GaussianFilter` holds a `StateEstimate`, a motion model and a linearisation. Each of its
 methods is the same for all three filters:
