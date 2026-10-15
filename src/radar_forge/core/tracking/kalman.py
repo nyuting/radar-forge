@@ -1,20 +1,22 @@
-r"""Kalman filtering, validation gating, assignment and track management.
+r"""Kalman filtering and track management.
 
 This module is the tracking stack specified by
 ``spec/scenario-003-tracking.md``: a linear Kalman filter over a
-constant-velocity motion model, a chi-squared validation gate, global
-nearest-neighbour assignment, and :class:`KalmanTracker`, the frame loop that
-runs them. Track confirmation and deletion are the package's shared
+constant-velocity motion model and :class:`KalmanTracker`, the frame loop that
+runs it with a chi-squared validation gate and global nearest-neighbour
+assignment. The gate and the assignment live in
+:mod:`~radar_forge.core.tracking.association` and are re-exported here. Track
+confirmation and deletion are the package's shared
 :class:`~radar_forge.core.tracking.lifecycle.TrackManager`, and each track is
 the shared :class:`~radar_forge.core.tracking.tracks.Track`.
 
 The decomposition follows Stone Soup's vocabulary at a fraction of its surface
 area: :func:`predict` and :func:`update` are the predictor and updater,
-:func:`normalised_innovation_squared` and :func:`gate_threshold` are the gater,
-:func:`associate_gnn` is the data associator, and :class:`KalmanTracker` is the
-tracker loop. The state models are *data* -- :func:`state_model_matrices`
-returns the matrices and callables for a model rather than a subclass -- so
-adding one is a table entry, not a class hierarchy.
+:func:`normalised_innovation_squared` is the gate's distance, and
+:class:`KalmanTracker` is the tracker loop. The state models are *data* --
+:func:`state_model_matrices` returns the matrices and callables for a model
+rather than a subclass -- so adding one is a table entry, not a class
+hierarchy.
 
 Two conventions are load-bearing and easy to get wrong:
 
@@ -32,17 +34,13 @@ contract here is "you give me measurements and a model".
 References
 ----------
 .. [1] Y. Bar-Shalom and X. R. Li, *Multitarget-Multisensor Tracking: Principles
-       and Techniques*, YBS Publishing, 1995, §2.3.2 (the validation region),
-       §2.6.1 (logic-based track formation), §7.1.1 (data association as an
-       assignment problem).
+       and Techniques*, YBS Publishing, 1995, §2.6.1 (logic-based track
+       formation).
 .. [2] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with
        Applications to Tracking and Navigation*, Wiley, 2001, §5.2 (the Kalman
        filter), §5.5 (initialising the state estimate), §6.3.2 (discrete
        white-noise acceleration).
-.. [3] D. F. Crouse, "On implementing 2D rectangular assignment algorithms,"
-       *IEEE Trans. Aerosp. Electron. Syst.*, vol. 52, no. 4, pp. 1679-1696,
-       2016. The algorithm behind ``scipy.optimize.linear_sum_assignment``.
-.. [4] R. R. Labbe, *Kalman and Bayesian Filters in Python*, online book,
+.. [3] R. R. Labbe, *Kalman and Bayesian Filters in Python*, online book,
        https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python, ch. 7
        ("Kalman Filter Math": the piecewise white noise model). The FilterPy
        companion text; FilterPy's ``Q_discrete_white_noise``, which
@@ -56,9 +54,8 @@ from typing import TYPE_CHECKING, Literal, get_args
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from scipy.optimize import linear_sum_assignment
-from scipy.stats import chi2
 
+from radar_forge.core.tracking.association import associate_gnn, gate_threshold
 from radar_forge.core.tracking.lifecycle import LifecyclePolicy, TrackManager
 from radar_forge.core.tracking.tracks import Track
 
@@ -88,15 +85,6 @@ StateModel = Literal["range_1d", "enu_2d", "enu_3d"]
 """The state vectors this module can build."""
 
 STATE_MODELS: tuple[StateModel, ...] = get_args(StateModel)
-
-# An unassociated pair must be impossible for the assignment solver to pick, but
-# scipy raises "cost matrix is infeasible" whenever inf entries leave no complete
-# matching -- which gating does routinely, as soon as one track has nothing in its
-# gate or two tracks contend for one measurement. So the forbidden cost has to be
-# a large finite number instead, and pairs carrying it are dropped from the
-# result. Any value above the largest admissible d^2 works; this one is far
-# above every chi-squared quantile and still squares without overflowing float64.
-_FORBIDDEN_COST = 1e12
 
 
 @dataclass(frozen=True)
@@ -737,50 +725,6 @@ def normalised_innovation_squared(
     return float(nu @ solved)
 
 
-def gate_threshold(gate_probability: float, dim: int) -> float:
-    r"""Return the chi-squared gate threshold for a measurement dimension.
-
-    A measurement is validated when :math:`d^2 \le \chi^2_{\text{dim}}(P_G)`.
-    The gate is the validation region of [1]_ §2.3.2, and :math:`d^2` is
-    chi-squared distributed for a consistent filter ([2]_ §5.4.2). The gate is
-    a statement about the filter's own uncertainty, not a fixed number of
-    metres, and neither its width nor its *dimension* may be
-    hard-coded: the dimension varies within a single run of scenario 003,
-    because a track starts range-only and is promoted to range-and-rate once its
-    Doppler fold becomes resolvable.
-
-    Parameters
-    ----------
-    gate_probability : float
-        The probability mass the gate admits, :math:`P_G`, in ``(0, 1)``.
-    dim : int
-        Measurement dimension, the chi-squared degrees of freedom.
-
-    Returns
-    -------
-    float
-        The threshold on :math:`d^2`.
-
-    Raises
-    ------
-    ValueError
-        If ``gate_probability`` is outside ``(0, 1)`` or ``dim`` is not
-        positive.
-
-    Examples
-    --------
-    >>> bool(np.isclose(gate_threshold(0.99, 2), 9.210, atol=5e-4))
-    True
-    """
-    if not 0.0 < gate_probability < 1.0:
-        msg = f"gate_probability must lie strictly between 0 and 1; got {gate_probability}."
-        raise ValueError(msg)
-    if dim < 1:
-        msg = f"dim must be a positive measurement dimension; got {dim}."
-        raise ValueError(msg)
-    return float(chi2.ppf(gate_probability, dim))
-
-
 def update(
     state: KalmanState,
     measurement: ArrayLike,
@@ -845,83 +789,6 @@ def update(
         innovation_covariance=innovation_covariance,
         nis=nis,
     )
-
-
-def associate_gnn(
-    squared_distances: ArrayLike,
-    gate: float,
-) -> list[tuple[int, int]]:
-    r"""Assign measurements to tracks by global nearest neighbour.
-
-    Solves the rectangular assignment problem (data association posed as an
-    assignment problem, [1]_ §7.1.1) over the matrix of normalised
-    innovations, forbidding any pair that falls outside the gate, and
-    returns the minimum-total-:math:`d^2` set of one-to-one pairings. The solver
-    is ``scipy.optimize.linear_sum_assignment``, which implements the algorithm
-    of [3]_; ``scipy`` is already a core dependency, so this adds none.
-
-    Global nearest neighbour rather than JPDA is a deliberate limit. Per
-    ``spec/structure.md`` D2, a second association strategy is exactly the
-    trigger that promotes this module to a subpackage, and whoever adds one does
-    the promotion in the same change.
-
-    Parameters
-    ----------
-    squared_distances : array_like
-        Shape ``(n_tracks, n_measurements)``. Entry ``(i, j)`` is the
-        :math:`d^2` of measurement ``j`` against track ``i``. Use ``inf`` or any
-        value above ``gate`` for a pair that was never evaluated.
-    gate : float
-        The validation threshold on :math:`d^2`, from :func:`gate_threshold`. A
-        pair scoring above it is never assigned.
-
-    Returns
-    -------
-    list of (int, int)
-        ``(track_index, measurement_index)`` pairs, sorted by track index. Every
-        returned pair is inside the gate; tracks and measurements not named in
-        the list went unassociated.
-
-    Raises
-    ------
-    ValueError
-        If ``squared_distances`` is not two-dimensional, or ``gate`` is not
-        positive.
-
-    Notes
-    -----
-    With one target and a handful of false alarms per frame, the assignment is
-    almost always trivial and a greedy nearest neighbour would find the same
-    answer. It is solved properly anyway because the cases where greedy differs
-    -- two tracks contending for one measurement -- are exactly the cases worth
-    getting right, and the solver costs nothing at this size.
-
-    Examples
-    --------
-    >>> associate_gnn([[1.0, 50.0], [50.0, 2.0]], 9.21)
-    [(0, 0), (1, 1)]
-    """
-    cost = np.atleast_2d(np.asarray(squared_distances, dtype=np.float64))
-    if cost.ndim != 2:
-        msg = (
-            "squared_distances must be two-dimensional, (n_tracks, n_measurements); "
-            f"got {cost.shape}."
-        )
-        raise ValueError(msg)
-    if gate <= 0.0:
-        msg = f"gate must be a positive threshold on d^2; got {gate}."
-        raise ValueError(msg)
-    if cost.size == 0:
-        return []
-
-    gated = np.where(np.isfinite(cost) & (cost <= gate), cost, _FORBIDDEN_COST)
-    track_indices, measurement_indices = linear_sum_assignment(gated)
-
-    return [
-        (int(track_index), int(measurement_index))
-        for track_index, measurement_index in zip(track_indices, measurement_indices, strict=True)
-        if gated[track_index, measurement_index] < _FORBIDDEN_COST
-    ]
 
 
 @dataclass
