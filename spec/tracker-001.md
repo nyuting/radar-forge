@@ -655,7 +655,9 @@ it would be later. The names and module moves are TD13's.
    `InnovationStats.residual` becomes `innovation`. The `Linearisation` protocol and
    `UnscentedLinearisation` land, with today's `UKF` algorithm moved into them unchanged, and
    `GaussianFilter(motion, UnscentedLinearisation())` replaces `UKF` wherever one is built
-   (`build_tracker`, `build_tracker_enu`, the tests). The UKF's numbers do not move.
+   (`build_tracker`, `build_tracker_enu`, the tests). The UKF's numbers do not move. `UKF` and
+   `ukf.py` are deleted here, not in step 7: once nothing builds a `UKF`, it is a dead second
+   copy of the update, the drift principle 2 forbids.
    *Check:* AC2, and the existing UKF tests pass against `GaussianFilter` without a tolerance
    change.
 3. **`TaylorLinearisation`** (§4.4), with `RadialMotion.matrices`. The KF and the EKF are now
@@ -667,12 +669,12 @@ it would be later. The names and module moves are TD13's.
 5. **Scenario mechanisms in `Tracker`** (§8.3), and `assignment="joint"` (§7.3).
 6. **Scenario 003 on `Tracker`.** `pipelines/tracking.py` becomes an adapter: plots in,
    batches out, snapshots back. `TrackingConfig.state_model` is honoured (it is ignored today).
-7. **Delete the old stack:** `KalmanTracker`, `KalmanFilter`, `KalmanState`, `TrackModel`,
-   `FrameResult`, `UKF` and `ukf.py`, and the rest of TD13's renames. Two of those renames are
+7. **Delete the old stack:** `KalmanTracker`, `KalmanFilter`, `KalmanState`, `TrackModel` and
+   `FrameResult` (`UKF` and `ukf.py` went in step 2), and the rest of TD13's renames. Two of those renames are
    scenario TOML keys (TD13), so this step also updates the scenario 003 TOMLs and spec, and the data-001
-   `metadata.json` schema. Module moves (§3 target column). Refresh the stale text:
-   `kalman.py`'s "promotes this module to a subpackage", `estimation.py`'s "the one
-   implementation", and `spec/structure.md` D2. *Check:* AC1, AC7 and AC8;
+   `metadata.json` schema. Module moves (§3 target column). Refresh the stale text in
+   `spec/structure.md` D2 (steps 1 and 2 refreshed `kalman.py`'s "promotes this module to a
+   subpackage" and `estimation.py`'s "the one implementation"). *Check:* AC1, AC7 and AC8;
    `git grep -nE '^class (KalmanTracker|KalmanFilter|KalmanState|TrackModel|FrameResult|UKF)\b' -- src`
    returns nothing; and so does
    `git grep -nE 'n_reacquire_frames|\bCartesianPosition\b|\bRadialMotion\b|def normalise|\.normalise\(|\.noise_density\b[^_]|self\.noise_density\b|sigma_accel_mps2' -- src tests scripts scenarios spec/scenario-003-tracking.md docs/tracking`.
@@ -801,7 +803,7 @@ and "route" is not a tracking term a student can look up.
 | `RadialMotion` | `RadialConstantVelocity` | says which motion |
 | `UKF` | `GaussianFilter(motion, UnscentedLinearisation())` | TD2: one filter, the linearisation is an argument |
 | `kalman.KalmanFilter` (a track's estimate) | deleted (§13 step 7) | it is not a filter; `GaussianFilter(motion, TaylorLinearisation())` is the KF |
-| `build_tracker`, `build_tracker_enu` | same names, each with an `estimator_factory` argument defaulting to the unscented linearisation | both always build a UKF today. Per TD2, the filter is one argument, not one builder per filter |
+| `build_tracker`, `build_tracker_enu` | same names. `build_tracker` takes an `estimator_factory`; `build_tracker_enu` takes a `linearisation`. Both default to the unscented linearisation | both always build a UKF today. Per TD2, the filter is one argument, not one builder per filter. `build_tracker_enu` builds its motion model itself, so a caller has no model to bind into a factory, and passes the linearisation instead |
 | `UKF.predict_to(time_s)` | `predict_to(timestamp_s)` | the `Estimator` protocol's name |
 | `StateLayout.normalise` | removed | it is `wrap` under a second name |
 | `CartesianMotion.noise_density` | `acceleration_noise_density_m2ps3`, `jerk_noise_density_m2ps5` | one dict held two units |
