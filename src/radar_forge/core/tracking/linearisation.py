@@ -178,8 +178,9 @@ class UnscentedLinearisation:
     ----------
     alpha : float, default 1.0
         :math:`\alpha`, the scaling parameter of the scaled unscented transformation [3]_:
-        how far the points spread from the mean. Must be positive. See Notes for why the
-        default is 1.
+        how far the points spread from the mean. Must be positive, and close enough to 1
+        that :math:`W^{(c)}_0 \ge 0`: with :math:`\beta = 2` and :math:`\kappa = 0`, between
+        about 0.52 and 1.93. See Notes for why the default is 1.
     beta : float, default 2.0
         :math:`\beta`, prior knowledge of the distribution. 2 is the best choice for a
         Gaussian. Must not be negative.
@@ -197,8 +198,8 @@ class UnscentedLinearisation:
         W^{(m)}_i = W^{(c)}_i = \frac{1}{2c}, \; i = 1 \ldots 2n.
 
     **Why every covariance weight must be non-negative.** The filter's covariance update for
-    this linearisation is the short form :math:`P^- - K S K^T`, which is positive
-    semidefinite only if every *covariance* weight is non-negative. So settings with
+    this linearisation is the short form :math:`P^- - K S K^T`, which is guaranteed positive
+    semidefinite when every *covariance* weight is non-negative. So settings with
     :math:`W^{(c)}_0 < 0` are rejected when a filter is built
     (:func:`~radar_forge.core.tracking._validation.check_sigma_point_settings`). The mean
     weight :math:`W^{(m)}_0` may be negative. With the defaults, :math:`W^{(m)}_0 = 0`,

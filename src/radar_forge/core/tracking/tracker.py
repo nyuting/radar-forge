@@ -589,7 +589,9 @@ def build_tracker(
         ``motion`` and a default
         :class:`~radar_forge.core.tracking.linearisation.UnscentedLinearisation`.
         It is called once on ``prior`` while the tracker is built, so a filter
-        that cannot be built fails here, not at the first track's birth.
+        that cannot be built fails here, not at the first track's birth. When
+        ``initiator`` is given, the factory is checked this way and then not
+        used: the initiator builds the filters.
     initiator : TrackInitiator or None, optional
         Track-birth rule; None uses :class:`DirectStateInitiator` with ``prior``
         and ``estimator_factory``.
