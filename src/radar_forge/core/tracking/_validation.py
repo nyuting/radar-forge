@@ -194,7 +194,7 @@ def check_sigma_point_settings(alpha: float, beta: float, kappa: float, n_state:
     Parameters
     ----------
     alpha, beta, kappa : float
-        The spread :math:`lpha`, the prior-distribution correction :math:`eta` and the
+        The spread :math:`\alpha`, the prior-distribution correction :math:`\beta` and the
         secondary scaling :math:`\kappa`; see
         :class:`~radar_forge.core.tracking.linearisation.UnscentedLinearisation`.
     n_state : int
@@ -209,18 +209,20 @@ def check_sigma_point_settings(alpha: float, beta: float, kappa: float, n_state:
 
     Notes
     -----
-    The unscented filter's covariance update, :math:`P^- - K S K^T`, is positive
-    semidefinite only if every covariance weight is non-negative: a weighted sum of outer
+    The unscented filter's covariance update, :math:`P^- - K S K^T`, is guaranteed positive
+    semidefinite when every covariance weight is non-negative: a weighted sum of outer
     products with a negative weight can have a negative variance. The weights other than
-    the centre one are :math:`1 / (2 lpha^2 (n + \kappa))`, positive once
+    the centre one are :math:`1 / (2 \alpha^2 (n + \kappa))`, positive once
     :math:`n + \kappa > 0`. The centre one,
 
     .. math::
 
-        W^{(c)}_0 = 1 - rac{n}{lpha^2 (n + \kappa)} + 1 - lpha^2 + eta,
+        W^{(c)}_0 = 1 - \frac{n}{\alpha^2 (n + \kappa)} + 1 - \alpha^2 + \beta,
 
-    is checked here. A small :math:`lpha` such as 0.5 or 10⁻³ makes it negative, and is
-    rejected (``spec/tracker-001.md`` §4.4).
+    is checked here. With :math:`\kappa = 0` it is largest at :math:`\alpha = 1`, so an
+    :math:`\alpha` far from 1 either way, such as 0.5 or 10⁻³, makes it negative, and is
+    rejected. The weights are those of Wan and van der Merwe (2000), §3; see
+    :class:`~radar_forge.core.tracking.linearisation.UnscentedLinearisation`.
     """
     if not np.all(np.isfinite([alpha, beta, kappa])):
         msg = f"alpha, beta and kappa must be finite; got {alpha}, {beta}, {kappa}."
@@ -237,7 +239,7 @@ def check_sigma_point_settings(alpha: float, beta: float, kappa: float, n_state:
             "these alpha, beta and kappa give the centre sigma point a negative covariance "
             f"weight, {centre_covariance_weight:.6g}, for n_state={n_state}. The unscented "
             "update P - K S Kᵀ stays positive semidefinite only when every covariance weight "
-            "is non-negative; use a larger alpha (1 is the default) or a larger beta."
+            "is non-negative; use an alpha closer to 1 (the default) or a larger beta."
         )
         raise ValueError(msg)
 
