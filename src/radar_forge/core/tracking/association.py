@@ -332,11 +332,11 @@ class GlobalNearestNeighbour:
     This is :func:`associate_gnn`, the assignment the scenario 003 tracker
     uses, with no gate of its own: the costs arrive already gated, with
     ``+inf`` for a rejected pair.
-    ``associate_gnn`` gives each rejected pair a large finite cost, 1e12, and
-    solves with ``scipy.optimize.linear_sum_assignment``, which minimises the
-    total cost. Using a rejected pair then costs 1e12, so the solver makes as
-    many real pairs as it can, provided the real costs differ by far less than
-    1e12, as NIS and log-likelihood costs always do. Negative costs, such as a
+    ``associate_gnn`` gives each rejected pair a large finite cost,
+    ``_FORBIDDEN_COST``, and solves with ``scipy.optimize.linear_sum_assignment``,
+    which minimises the total cost. Using a rejected pair then costs that much,
+    so the solver makes as many real pairs as it can, provided the real costs
+    differ by far less than it, as NIS and log-likelihood costs always do. Negative costs, such as a
     negative log-likelihood, are allowed.
 
     The alternative is a finite non-assignment cost: leaving a track unpaired

@@ -1,20 +1,22 @@
-r"""Kalman filtering, validation gating, assignment and track management.
+r"""Kalman filtering and track management.
 
 This module is the tracking stack specified by
 ``spec/scenario-003-tracking.md``: a linear Kalman filter over a
-constant-velocity motion model, a chi-squared validation gate, global
-nearest-neighbour assignment, and :class:`KalmanTracker`, the frame loop that
-runs them. Track confirmation and deletion are the package's shared
+constant-velocity motion model and :class:`KalmanTracker`, the frame loop that
+runs it with a chi-squared validation gate and global nearest-neighbour
+assignment. The gate and the assignment live in
+:mod:`~radar_forge.core.tracking.association` and are re-exported here. Track
+confirmation and deletion are the package's shared
 :class:`~radar_forge.core.tracking.lifecycle.TrackManager`, and each track is
 the shared :class:`~radar_forge.core.tracking.tracks.Track`.
 
 The decomposition follows Stone Soup's vocabulary at a fraction of its surface
 area: :func:`predict` and :func:`update` are the predictor and updater,
-:func:`normalised_innovation_squared` and :func:`gate_threshold` are the gater,
-:func:`associate_gnn` is the data associator, and :class:`KalmanTracker` is the
-tracker loop. The state models are *data* -- :func:`state_model_matrices`
-returns the matrices and callables for a model rather than a subclass -- so
-adding one is a table entry, not a class hierarchy.
+:func:`normalised_innovation_squared` is the gate's distance, and
+:class:`KalmanTracker` is the tracker loop. The state models are *data* --
+:func:`state_model_matrices` returns the matrices and callables for a model
+rather than a subclass -- so adding one is a table entry, not a class
+hierarchy.
 
 Two conventions are load-bearing and easy to get wrong:
 
@@ -32,17 +34,13 @@ contract here is "you give me measurements and a model".
 References
 ----------
 .. [1] Y. Bar-Shalom and X. R. Li, *Multitarget-Multisensor Tracking: Principles
-       and Techniques*, YBS Publishing, 1995, §2.3.2 (the validation region),
-       §2.6.1 (logic-based track formation), §7.1.1 (data association as an
-       assignment problem).
+       and Techniques*, YBS Publishing, 1995, §2.6.1 (logic-based track
+       formation).
 .. [2] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with
        Applications to Tracking and Navigation*, Wiley, 2001, §5.2 (the Kalman
        filter), §5.5 (initialising the state estimate), §6.3.2 (discrete
        white-noise acceleration).
-.. [3] D. F. Crouse, "On implementing 2D rectangular assignment algorithms,"
-       *IEEE Trans. Aerosp. Electron. Syst.*, vol. 52, no. 4, pp. 1679-1696,
-       2016. The algorithm behind ``scipy.optimize.linear_sum_assignment``.
-.. [4] R. R. Labbe, *Kalman and Bayesian Filters in Python*, online book,
+.. [3] R. R. Labbe, *Kalman and Bayesian Filters in Python*, online book,
        https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python, ch. 7
        ("Kalman Filter Math": the piecewise white noise model). The FilterPy
        companion text; FilterPy's ``Q_discrete_white_noise``, which
