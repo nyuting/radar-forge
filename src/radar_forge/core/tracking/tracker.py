@@ -67,7 +67,7 @@ from radar_forge.core.tracking.measurement_models import (
     Measurement,
     MeasurementBatch,
     MeasurementModel,
-    SensorRoute,
+    SensorRegistration,
 )
 from radar_forge.core.tracking.motion import CartesianMotion, MotionKind, MotionModel
 from radar_forge.core.tracking.tracks import Track, TrackSnapshot
@@ -96,7 +96,7 @@ class Tracker:
     measurement_models : mapping of str to MeasurementModel
         Every measurement model, by the ID that a ``Measurement`` names in its
         ``measurement_model_id``.
-    sensors : mapping of str to SensorRoute
+    sensors : mapping of str to SensorRegistration
         Every sensor, keyed by its ``sensor_id``. A batch's ``sensor_id`` picks
         one. Each lists which measurement models that sensor may use, and may
         say which tracks the sensor can see.
@@ -176,14 +176,14 @@ class Tracker:
     >>> from radar_forge.core.tracking import (
     ...     UKF, CartesianMotion, CartesianPosition, ChiSquareGate,
     ...     DirectStateInitiator, GlobalNearestNeighbour, LifecyclePolicy,
-    ...     SensorRoute, StateEstimate)
+    ...     SensorRegistration, StateEstimate)
     >>> motion = CartesianMotion({"x": "CV"}, origin_lla_deg_m=(36.0, -78.9, 60.0))
     >>> model = CartesianPosition(motion.state_layout, ("x_m",))
     >>> prior = StateEstimate(np.zeros(2), np.diag([1.0, 100.0**2]), 0.0, motion.state_layout)
     >>> initiator = DirectStateInitiator(lambda state: UKF(state, motion), prior)
     >>> tracker = Tracker(
     ...     {"position": model},
-    ...     {"radar": SensorRoute("radar", ("position",))},
+    ...     {"radar": SensorRegistration("radar", ("position",))},
     ...     ChiSquareGate(0.997),
     ...     GlobalNearestNeighbour(),
     ...     initiator,
@@ -198,7 +198,7 @@ class Tracker:
     def __init__(
         self,
         measurement_models: Mapping[str, MeasurementModel],
-        sensors: Mapping[str, SensorRoute],
+        sensors: Mapping[str, SensorRegistration],
         gate: ChiSquareGate,
         associator: Associator,
         initiator: TrackInitiator,
@@ -210,7 +210,7 @@ class Tracker:
             raise ValueError(msg)
         _check_sensor_keys(sensors)
         self._measurement_models = dict(measurement_models)
-        self._sensors: dict[str, SensorRoute] = {}
+        self._sensors: dict[str, SensorRegistration] = {}
         # Each sensor goes through add_sensor so it gets the same checks as one added later.
         for sensor in sensors.values():
             self.add_sensor(sensor)
@@ -228,19 +228,19 @@ class Tracker:
         return MappingProxyType(self._measurement_models)
 
     @property
-    def sensors(self) -> Mapping[str, SensorRoute]:
+    def sensors(self) -> Mapping[str, SensorRegistration]:
         """The registered sensors, by ``sensor_id``. Read-only.
 
         Use :meth:`add_sensor` to register another, so that it is checked.
         """
         return MappingProxyType(self._sensors)
 
-    def add_sensor(self, sensor: SensorRoute) -> None:
+    def add_sensor(self, sensor: SensorRegistration) -> None:
         """Register one more sensor, after checking it.
 
         Parameters
         ----------
-        sensor : SensorRoute
+        sensor : SensorRegistration
             The sensor to add, registered under ``sensor.sensor_id``.
 
         Raises
@@ -348,7 +348,7 @@ class Tracker:
         A track that the sensor cannot see is left out of the scan: it is
         predicted but records neither a hit nor a miss. A track is out of
         sight when none of the sensor's models works in the track's state
-        layout, or when the sensor's ``observable`` test says so.
+        layout, or when the sensor's ``covers`` test says so.
 
         Limitations:
 
@@ -485,14 +485,14 @@ class Tracker:
             )
             raise ValueError(msg)
 
-    def _can_see(self, sensor: SensorRoute, track: Track[Estimator]) -> bool:
+    def _can_see(self, sensor: SensorRegistration, track: Track[Estimator]) -> bool:
         """Return whether this scan's sensor could have detected the track."""
         layout = track.estimator.state.state_layout
         fits = any(
             self._measurement_models[mid].state_layout == layout
             for mid in sensor.measurement_model_ids
         )
-        return fits and (sensor.observable is None or sensor.observable(track.snapshot()))
+        return fits and (sensor.covers is None or sensor.covers(track.snapshot()))
 
     def _score_pairs(
         self,
@@ -544,7 +544,7 @@ class Tracker:
         return abs(a_s - b_s) <= TIMESTAMP_TOLERANCE_S
 
 
-def _check_sensor_keys(sensors: Mapping[str, SensorRoute]) -> None:
+def _check_sensor_keys(sensors: Mapping[str, SensorRegistration]) -> None:
     """Raise unless each sensor is keyed by its own ``sensor_id``."""
     mismatched = {key: s.sensor_id for key, s in sensors.items() if key != s.sensor_id}
     if mismatched:
@@ -635,7 +635,7 @@ def build_tracker(
     birth = initiator or DirectStateInitiator(factory, prior, measured_names=measured_names)
     return Tracker(
         {model_id: observation},
-        {sensor_id: SensorRoute(sensor_id, (model_id,))},
+        {sensor_id: SensorRegistration(sensor_id, (model_id,))},
         ChiSquareGate(gate_probability),
         GlobalNearestNeighbour() if association == "GNN" else NearestNeighbour(),
         birth,

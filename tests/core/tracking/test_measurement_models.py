@@ -16,7 +16,7 @@ from radar_forge.core.tracking.measurement_models import (
     Measurement,
     MeasurementBatch,
     SensorPose,
-    SensorRoute,
+    SensorRegistration,
     _Geometry,
 )
 from radar_forge.core.tracking.motion import CartesianMotion
@@ -293,13 +293,15 @@ def test_a_pose_rejects_an_impossible_origin() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Measurement, MeasurementBatch and SensorRoute
+# Measurement, MeasurementBatch and SensorRegistration
 # --------------------------------------------------------------------------- #
 
 
 def test_a_batch_copies_the_caller_arrays() -> None:
     value, covariance = np.array([1.0, 2.0]), np.eye(2)
-    batch = SensorRoute("sensor", ("position",)).batch(1.0, [("position", value, covariance)])
+    batch = SensorRegistration("sensor", ("position",)).batch(
+        1.0, [("position", value, covariance)]
+    )
     value[:] = 0
     covariance[:] = 0
     np.testing.assert_array_equal(batch.measurements[0].value, [1.0, 2.0])
@@ -313,13 +315,13 @@ def test_a_measurement_is_read_only() -> None:
 
 
 def test_a_batch_stamps_each_measurement_with_its_sensor_and_time() -> None:
-    sensor = SensorRoute("sensor", ("position",))
+    sensor = SensorRegistration("sensor", ("position",))
     batch = sensor.batch(1.0, [("position", np.ones(1), np.eye(1))])
     assert (batch.measurements[0].sensor_id, batch.measurements[0].timestamp_s) == ("sensor", 1.0)
 
 
 def test_an_empty_scan_is_a_valid_batch() -> None:
-    assert SensorRoute("sensor", ("position",)).batch(2.0, []).measurements == ()
+    assert SensorRegistration("sensor", ("position",)).batch(2.0, []).measurements == ()
 
 
 def test_a_batch_rejects_a_measurement_with_another_timestamp() -> None:
@@ -366,12 +368,12 @@ def test_a_measurement_needs_a_sensor_and_a_model(sensor_id: str, model_id: str)
 
 def test_a_scan_rejects_a_nonfinite_time() -> None:
     with pytest.raises(ValueError, match="timestamp_s must be finite"):
-        SensorRoute("sensor", ("position",)).batch(np.nan, [])
+        SensorRegistration("sensor", ("position",)).batch(np.nan, [])
 
 
 def test_a_scan_rejects_an_unregistered_model() -> None:
     with pytest.raises(ValueError, match="not registered"):
-        SensorRoute("sensor", ("position",)).batch(1.0, [("unknown", np.ones(1), np.eye(1))])
+        SensorRegistration("sensor", ("position",)).batch(1.0, [("unknown", np.ones(1), np.eye(1))])
 
 
 @pytest.mark.parametrize(
@@ -383,7 +385,7 @@ def test_a_sensor_needs_an_id_and_unique_model_names(
     sensor_id: str, model_ids: tuple[str, ...]
 ) -> None:
     with pytest.raises(ValueError, match="unique nonempty model IDs"):
-        SensorRoute(sensor_id, model_ids)
+        SensorRegistration(sensor_id, model_ids)
 
 
 @pytest.mark.parametrize(

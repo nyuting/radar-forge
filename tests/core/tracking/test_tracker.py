@@ -16,7 +16,11 @@ import pytest
 
 from radar_forge.core.tracking.estimation import InnovationStats
 from radar_forge.core.tracking.lifecycle import LifecyclePolicy
-from radar_forge.core.tracking.measurement_models import Measurement, MeasurementBatch, SensorRoute
+from radar_forge.core.tracking.measurement_models import (
+    Measurement,
+    MeasurementBatch,
+    SensorRegistration,
+)
 from radar_forge.core.tracking.tracker import Tracker, build_tracker_enu
 from radar_forge.core.tracking.tracks import TrackSnapshot
 
@@ -267,7 +271,7 @@ def run_crossing_targets() -> tuple[list[list[int]], tuple[TrackSnapshot, ...]]:
     """Two targets crossing, seen by two sensors in turn; return IDs per scan."""
     # q = 2 sigma² tau = 0.01 m²/s³: the targets move almost exactly at constant velocity.
     tracker = one_axis_tracker(sigma_acceleration_mps2=0.1, acceleration_correlation_time_s=0.5)
-    tracker.add_sensor(SensorRoute("second", ("measurement",)))
+    tracker.add_sensor(SensorRegistration("second", ("measurement",)))
     identifiers: list[list[int]] = []
     snapshots: tuple[TrackSnapshot, ...] = ()
     # Alternate scans between the two sensors, and reverse the measurement
@@ -409,7 +413,7 @@ def test_a_measurement_of_the_wrong_dimension_is_rejected() -> None:
 
 
 def test_a_measurement_whose_model_the_sensor_does_not_list_is_rejected() -> None:
-    """A batch built by hand can skip SensorRoute.batch; process() still checks the sensor."""
+    """A hand-built batch can skip SensorRegistration.batch; process() still checks the sensor."""
     tracker = one_axis_tracker()
     stray = Measurement(np.zeros(1), np.eye(1), 0.0, "sensor", "other")
     with pytest.raises(ValueError, match="unregistered models"):
@@ -424,7 +428,7 @@ def test_a_batch_from_an_unknown_sensor_is_rejected() -> None:
 
 def test_a_track_the_sensor_cannot_see_records_no_miss() -> None:
     tracker = one_axis_tracker()
-    tracker.add_sensor(SensorRoute("blind", ("measurement",), observable=lambda _: False))
+    tracker.add_sensor(SensorRegistration("blind", ("measurement",), covers=lambda _: False))
     tracker.process(batch(tracker, 1, [100.0]))
     tracker.process(MeasurementBatch(1, "blind"))
     assert (tracker.tracks[0].n_frames, tracker.tracks[0].n_misses) == (1, 0)
@@ -432,7 +436,7 @@ def test_a_track_the_sensor_cannot_see_records_no_miss() -> None:
 
 def test_two_sensors_at_the_same_time_both_update_the_track() -> None:
     tracker = one_axis_tracker()
-    tracker.add_sensor(SensorRoute("second", ("measurement",)))
+    tracker.add_sensor(SensorRegistration("second", ("measurement",)))
     tracker.process(batch(tracker, 1, [100.0]))
     tracker.process(batch(tracker, 1, [100.0], sensor_id="second"))
     assert tracker.tracks[0].n_hits == 2
@@ -442,19 +446,19 @@ def test_the_sensor_registry_cannot_be_changed_directly() -> None:
     """Review #10: a sensor added this way would skip validation."""
     tracker = one_axis_tracker()
     with pytest.raises(TypeError):
-        tracker.sensors["other"] = SensorRoute("other", ("measurement",))  # type: ignore[index]
+        tracker.sensors["other"] = SensorRegistration("other", ("measurement",))  # type: ignore[index]
 
 
 def test_add_sensor_rejects_an_unregistered_model() -> None:
     tracker = one_axis_tracker()
     with pytest.raises(ValueError, match="registered measurement model"):
-        tracker.add_sensor(SensorRoute("other", ("nonexistent",)))
+        tracker.add_sensor(SensorRegistration("other", ("nonexistent",)))
 
 
 def test_add_sensor_rejects_a_sensor_already_registered() -> None:
     tracker = one_axis_tracker()
     with pytest.raises(ValueError, match="already registered"):
-        tracker.add_sensor(SensorRoute("sensor", ("measurement",)))
+        tracker.add_sensor(SensorRegistration("sensor", ("measurement",)))
 
 
 def test_the_constructor_rejects_a_key_that_is_not_the_sensor_id() -> None:
@@ -462,7 +466,7 @@ def test_the_constructor_rejects_a_key_that_is_not_the_sensor_id() -> None:
     with pytest.raises(ValueError, match="sensor_id"):
         Tracker(
             tracker.measurement_models,
-            {"wrong": SensorRoute("sensor", ("measurement",))},
+            {"wrong": SensorRegistration("sensor", ("measurement",))},
             tracker.gate,
             tracker.associator,
             tracker.initiator,

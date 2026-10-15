@@ -10,10 +10,10 @@ The path of a measurement into the tracker::
     raw sensor output
             │
             ▼
-    SensorRoute.batch()      checks the model names, copies the arrays
+    SensorRegistration.batch()  checks the model names, copies the arrays
             │
             ▼
-    MeasurementBatch         all measurements from one scan of one sensor
+    MeasurementBatch            all measurements from one scan of one sensor
             │
             ▼
     Tracker.process()
@@ -24,7 +24,7 @@ The classes:
   that made it, and the name of the measurement model that explains it.
 - :class:`MeasurementBatch` is every measurement from one scan of one sensor,
   possibly none.
-- :class:`SensorRoute` names a sensor, and the models its measurements may use.
+- :class:`SensorRegistration` names a sensor, and the models its measurements may use.
 - :class:`MeasurementModel` is the interface every measurement model follows.
 - :class:`CartesianPosition` reports some of the state's coordinates directly.
 - :class:`SensorPose` is where a sensor stands.
@@ -74,7 +74,7 @@ __all__ = [
     "MeasurementBatch",
     "MeasurementModel",
     "SensorPose",
-    "SensorRoute",
+    "SensorRegistration",
 ]
 
 
@@ -98,7 +98,7 @@ class Measurement:
         measurement and track.
     sensor_id : str
         The sensor that made the measurement: the ``sensor_id`` of its
-        :class:`SensorRoute`.
+        :class:`SensorRegistration`.
     measurement_model_id : str
         Name of the measurement model that explains it. The tracker uses this
         name, not the sensor, to choose the equations.
@@ -201,7 +201,7 @@ class MeasurementBatch:
     either give each time its own batch, or stamp the whole scan with one time
     and accept the error that adds.
 
-    **One sensor per batch.** The :class:`SensorRoute` of the batch's
+    **One sensor per batch.** The :class:`SensorRegistration` of the batch's
     ``sensor_id`` decides which models may explain its measurements and which
     tracks the sensor can see.
     Measurements from two sensors in one batch would need two such decisions,
@@ -229,13 +229,13 @@ class MeasurementBatch:
 
 
 @dataclass(frozen=True)
-class SensorRoute:
+class SensorRegistration:
     """A sensor's name, the measurement models it may use, and what it can see.
 
-    This describes one sensor to the tracker. It does two jobs, and only these
-    two. It routes each of the sensor's measurements to a measurement model, by
-    name: hence the class name. And it says which tracks the sensor covers on a
-    scan. It does not make detections.
+    This registers one sensor with the tracker. It does three jobs. It routes
+    each of the sensor's measurements to a measurement model, by name. It says
+    which tracks the sensor covers on a scan. And it builds the sensor's
+    batches, through :meth:`batch`. It does not make detections.
 
     Parameters
     ----------
@@ -249,7 +249,7 @@ class SensorRoute:
         to stop a measurement reaching the wrong model. For example, an angle
         measurement from this sensor cannot be sent to a range and Doppler
         model, unless this list names that model.
-    observable : callable or None, optional
+    covers : callable or None, optional
         Coverage test: given a :class:`~radar_forge.core.tracking.tracks.TrackSnapshot`,
         return True if the sensor can see that track on this scan. The tracker
         only compares this sensor's measurements against tracks it can see. Use
@@ -271,7 +271,7 @@ class SensorRoute:
     Examples
     --------
     >>> import numpy as np
-    >>> radar = SensorRoute("radar", ("position",))
+    >>> radar = SensorRegistration("radar", ("position",))
     >>> batch = radar.batch(1.0, [("position", np.array([5.0]), np.eye(1))])
     >>> batch.measurements[0].sensor_id
     'radar'
@@ -279,7 +279,7 @@ class SensorRoute:
 
     sensor_id: str
     measurement_model_ids: tuple[str, ...]
-    observable: Callable[[TrackSnapshot], bool] | None = None
+    covers: Callable[[TrackSnapshot], bool] | None = None
 
     def __post_init__(self) -> None:
         """Check the sensor name and the model names."""
