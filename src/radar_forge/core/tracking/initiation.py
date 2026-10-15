@@ -148,12 +148,15 @@ class DirectStateInitiator:
     --------
     >>> import numpy as np
     >>> from radar_forge.core.tracking.motion import CartesianMotion
-    >>> from radar_forge.core.tracking.ukf import UKF
+    >>> from radar_forge.core.tracking.estimation import GaussianFilter
+    >>> from radar_forge.core.tracking.linearisation import UnscentedLinearisation
     >>> motion = CartesianMotion({"x": "CV"}, origin_lla_deg_m=(36.0, -78.9, 60.0))
     >>> layout = motion.state_layout
     >>> prior = StateEstimate(np.zeros(2), np.diag([1.0, 100.0]), 0.0, layout)
     >>> initiator = DirectStateInitiator(
-    ...     lambda state: UKF(state, motion), prior, measured_names=("x_m",)
+    ...     lambda state: GaussianFilter(state, motion, UnscentedLinearisation()),
+    ...     prior,
+    ...     measured_names=("x_m",),
     ... )
     >>> z = Measurement(np.array([50.0]), np.array([[4.0]]), 2.0, "radar", "position")
     >>> ukf = initiator.initiate(z, CartesianPosition(layout, ("x_m",)))

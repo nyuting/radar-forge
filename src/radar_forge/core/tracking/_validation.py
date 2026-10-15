@@ -186,25 +186,43 @@ def check_frame_and_origin(
 
 
 def check_sigma_point_settings(alpha: float, beta: float, kappa: float, n_state: int) -> None:
-    r"""Raise unless the UKF's sigma-point parameters are valid for a state of ``n_state``.
+    r"""Raise unless the sigma-point parameters are valid for a state of ``n_state``.
 
-    :class:`~radar_forge.core.tracking.ukf.UKF` calls this when it is built, and
-    :func:`~radar_forge.core.tracking.tracker.build_tracker` calls it before any track exists,
-    so a bad setting fails when the tracker is built, not at the first track birth.
+    :class:`~radar_forge.core.tracking.linearisation.UnscentedLinearisation` calls this when a
+    filter is built with it, so a bad setting fails before the first prediction.
 
     Parameters
     ----------
     alpha, beta, kappa : float
         The spread :math:`\alpha`, the prior-distribution correction :math:`\beta` and the
-        secondary scaling :math:`\kappa`; see :class:`~radar_forge.core.tracking.ukf.UKF`.
+        secondary scaling :math:`\kappa`; see
+        :class:`~radar_forge.core.tracking.linearisation.UnscentedLinearisation`.
     n_state : int
         Number of state coordinates.
 
     Raises
     ------
     ValueError
-        If a parameter is not finite, ``alpha`` is not positive, ``beta`` is negative, or
-        ``n_state + kappa`` is not positive.
+        If a parameter is not finite, ``alpha`` is not positive, ``beta`` is negative,
+        ``n_state + kappa`` is not positive, or the centre point's covariance weight
+        :math:`W^{(c)}_0` is negative (see Notes).
+
+    Notes
+    -----
+    The unscented filter's covariance update, :math:`P^- - K S K^T`, is guaranteed positive
+    semidefinite when every covariance weight is non-negative: a weighted sum of outer
+    products with a negative weight can have a negative variance. The weights other than
+    the centre one are :math:`1 / (2 \alpha^2 (n + \kappa))`, positive once
+    :math:`n + \kappa > 0`. The centre one,
+
+    .. math::
+
+        W^{(c)}_0 = 1 - \frac{n}{\alpha^2 (n + \kappa)} + 1 - \alpha^2 + \beta,
+
+    is checked here. With :math:`\kappa = 0` it is largest at :math:`\alpha = 1`, so an
+    :math:`\alpha` far from 1 either way, such as 0.5 or 10⁻³, makes it negative, and is
+    rejected. The weights are those of Wan and van der Merwe (2000), §3; see
+    :class:`~radar_forge.core.tracking.linearisation.UnscentedLinearisation`.
     """
     if not np.all(np.isfinite([alpha, beta, kappa])):
         msg = f"alpha, beta and kappa must be finite; got {alpha}, {beta}, {kappa}."
@@ -215,6 +233,31 @@ def check_sigma_point_settings(alpha: float, beta: float, kappa: float, n_state:
             f"got alpha={alpha}, beta={beta}, n_state + kappa={n_state + kappa}."
         )
         raise ValueError(msg)
+    centre_covariance_weight = 1 - n_state / (alpha**2 * (n_state + kappa)) + 1 - alpha**2 + beta
+    if centre_covariance_weight < 0:
+        msg = (
+            "these alpha, beta and kappa give the centre sigma point a negative covariance "
+            f"weight, {centre_covariance_weight:.6g}, for n_state={n_state}. The unscented "
+            "update P - K S Kᵀ stays positive semidefinite only when every covariance weight "
+            "is non-negative; use an alpha closer to 1 (the default) or a larger beta."
+        )
+        raise ValueError(msg)
+
+
+def symmetrise(matrix: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Return the symmetric part of a square matrix, removing asymmetric roundoff.
+
+    Parameters
+    ----------
+    matrix : numpy.ndarray
+        A square matrix, shape ``(n, n)``.
+
+    Returns
+    -------
+    numpy.ndarray
+        :math:`(M + M^T) / 2`, shape ``(n, n)``.
+    """
+    return (matrix + matrix.T) / 2
 
 
 def _roundoff_allowance(matrix: NDArray[np.float64]) -> float:

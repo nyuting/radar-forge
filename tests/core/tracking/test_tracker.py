@@ -16,6 +16,7 @@ import pytest
 
 from radar_forge.core.tracking.estimation import InnovationStats
 from radar_forge.core.tracking.lifecycle import LifecyclePolicy
+from radar_forge.core.tracking.linearisation import UnscentedLinearisation
 from radar_forge.core.tracking.measurement_models import (
     Measurement,
     MeasurementBatch,
@@ -261,9 +262,9 @@ def test_the_update_reuses_the_innovation_computed_for_gating(
     tracker.process(batch(tracker, 1, [101.0]))
     assert len(received) == 1
     assert received[0] is not None
-    # rtol 1e-12: the residual is one subtraction, z minus the prediction.
+    # rtol 1e-12: the innovation is one subtraction, z minus the prediction.
     np.testing.assert_allclose(
-        received[0].residual, 101.0 - received[0].predicted_measurement, rtol=1e-12
+        received[0].innovation, 101.0 - received[0].predicted_measurement, rtol=1e-12
     )
 
 
@@ -513,7 +514,7 @@ def test_build_tracker_rejects_an_unknown_association() -> None:
 
 def test_build_tracker_rejects_impossible_sigma_point_settings_before_any_track() -> None:
     with pytest.raises(ValueError, match="alpha"):
-        one_axis_tracker(alpha=0.0)
+        one_axis_tracker(linearisation=UnscentedLinearisation(alpha=0.0))
 
 
 # --------------------------------------------------------------------------- #
