@@ -710,12 +710,16 @@ it would be later. The names and module moves are TD13's.
    copy of the update, the drift principle 2 forbids.
    *Check:* AC2, and the existing UKF tests pass against `GaussianFilter` without a tolerance
    change.
-3. **`TaylorLinearisation`** (§4.4), with `RadialMotion.matrices`. The KF and the EKF are now
+3. **`TaylorLinearisation`** (§4.4), with `RadialMotion.matrices` and analytic Jacobians for
+   `CartesianPosition` and `BistaticRangeDopplerModel`, so every existing model runs under
+   every linearisation and the definiteness tests cover both (AC5). The KF and the EKF are now
    `GaussianFilter(motion, TaylorLinearisation())`, and the two UKF ≡ KF guards (§4.5) land
-   here. Today's `KalmanFilter` (`kalman.py`) holds a track's estimate and is not a filter. It
+   here. `Linearisation` gains `check_motion_model` (§4.2), so a bad pairing fails at
+   construction without the filter asking which linearisation it holds. Today's `KalmanFilter` (`kalman.py`) holds a track's estimate and is not a filter. It
    keeps its name until step 7 deletes it, since no new class takes the name.
    *Check:* AC3, AC4 and AC12.
-4. **The spherical measurement model** (§6.1) with its Jacobian and the debiased initiator.
+4. **The spherical measurement model** (§6.1) with its Jacobian and the debiased initiator,
+   and the EKF ≈ UKF guard of §4.5, which runs on it.
 5. **Scenario mechanisms in `Tracker`** (§8.3), and `assignment="joint"` (§7.3).
 6. **Scenario 003 on `Tracker`.** `pipelines/tracking.py` becomes an adapter: plots in,
    batches out, snapshots back. `TrackingConfig.state_model` is honoured (it is ignored today).
