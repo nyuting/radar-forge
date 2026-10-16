@@ -599,12 +599,9 @@ class RadialMotion:
         ValueError
             If ``dt_s`` is negative or not finite, or ``state`` has the wrong shape.
         """
-        _check_dt(dt_s)
         state = np.asarray(state, dtype=np.float64)
         _check_state_shape(state, 2)
-        predicted = state.copy()
-        predicted[..., 0] -= state[..., 1] * dt_s
-        return predicted
+        return state @ self._transition_matrix(dt_s).T
 
     def matrices(self, dt_s: float) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """Return the transition matrix F and the process noise Q for a step of ``dt_s``.
@@ -634,9 +631,13 @@ class RadialMotion:
         array([[ 1., -2.],
                [ 0.,  1.]])
         """
+        # Q does not depend on the state here, so any state will do.
+        return self._transition_matrix(dt_s), self.process_noise(np.zeros(2), dt_s)
+
+    def _transition_matrix(self, dt_s: float) -> NDArray[np.float64]:
+        """Return F for a step of ``dt_s`` seconds, after checking the step."""
         _check_dt(dt_s)
-        transition = np.array([[1.0, -float(dt_s)], [0.0, 1.0]], dtype=np.float64)
-        return transition, self.process_noise(np.zeros(2), dt_s)
+        return np.array([[1.0, -float(dt_s)], [0.0, 1.0]], dtype=np.float64)
 
     def process_noise(self, state: NDArray[np.float64], dt_s: float) -> NDArray[np.float64]:
         """Return Q, the covariance a step of ``dt_s`` seconds adds.
