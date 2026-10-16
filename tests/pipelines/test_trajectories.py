@@ -41,7 +41,7 @@ TARGET_ALTITUDE_M = 1500.0
 # The spec/data-001-formats.md §6.3 header of a recorded track with an absolute epoch.
 HEADER = "time_utc,latitude_deg,longitude_deg"
 
-# Scenario 002: the Raleigh-Durham illuminator, received at the Duke Receiver.
+# Scenario 002: the Raleigh-Durham transmitter, received at the Duke Receiver.
 # A 19.6 km baseline, so the two ranges differ by kilometres, not by rounding.
 RDU_SITE = (35.87750, -78.78750, 25.0)
 _BISTATIC_PAIR = BistaticRadar(

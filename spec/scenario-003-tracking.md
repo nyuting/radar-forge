@@ -646,6 +646,11 @@ as its accuracy measure, since with multiple targets "the error" is no longer a 
 §13.2 are done, because a multi-target scenario built on a detector that cannot resolve two
 targets in Doppler and a link budget that never misses would be measuring the wrong things.
 
+> **Taken up by scenario 011** (`spec/scenario-011-terminal-area-tracking.md`). It answers the
+> objection above by working at plot level, where Pd and resolution are stated parameters
+> (its D25). It checks that plot model against this scenario's detection chain over S3 (its V5),
+> and scores with GOSPA.
+
 ### 13.4 The smaller ones
 
 | Extension | Trigger |
@@ -653,8 +658,8 @@ targets in Doppler and a link budget that never misses would be measuring the wr
 | Tracking over S3, where the waveform resolves the ambiguity and §5.3 disappears entirely | Cheap and clarifying; do it alongside §13.1 |
 | A real angle measurement, replacing §6.3's simulated one | Needs `array/`; until then `enu_2d` is a Jacobian test, not a radar |
 | A trajectory with real altitude, making `enu_3d` non-degenerate | Needs input data scenario 001 §3 does not have |
-| IMM, for the turns the circuit contains | Only once `sigma_accel_mps2` is demonstrably the binding error |
-| GLMB/LMB random-finite-set tracking | Only with a multi-target, high-clutter scenario to justify it |
+| IMM, for the turns the circuit contains | Only once `sigma_accel_mps2` is demonstrably the binding error. Specified by scenario 011 (D26, D27) |
+| GLMB/LMB random-finite-set tracking | Only with a multi-target, high-clutter scenario to justify it. Scenario 011 is that scenario; it builds PMBM as a comparison tracker (D30) |
 | Track fusion across sensors | Fires D2's promotion |
 
 ### 13.5 Two-dimensional clustering — a note

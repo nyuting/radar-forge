@@ -31,11 +31,27 @@ stitching together seven incompatible codebases.
 - [`spec/scenario-001-xband.md`](spec/scenario-001-xband.md) — the first vertical
   slice: a real aircraft trajectory to baseband IQ to a range-Doppler map, in three ambiguity variants
 - [`spec/scenario-002-bistatic.md`](spec/scenario-002-bistatic.md) — the same path
-  over a two-site geometry: the Raleigh-Durham illuminator received at the Duke Receiver
+  over a two-site geometry: the Raleigh-Durham transmitter received at the Duke Receiver
 - [`spec/scenario-003-tracking.md`](spec/scenario-003-tracking.md) — the third
   slice, stacked on it: CFAR detection, data association and Kalman tracking. Its §14 records what
   building it changed, including why velocity unfolding is only 86% reliable at S1's PRF and why a
   dual-PRF variant ships alongside
+- [`spec/scenario-004-keystone.md`](spec/scenario-004-keystone.md) — Fast sounding rocket: keystone, polynomial-phase motion compensation, datachip and fine estimation. *Specified, not
+  implemented*
+- [`spec/scenario-005-leakage-cancellation.md`](spec/scenario-005-leakage-cancellation.md) — Transmitter leakage and near-range clutter in a continuous-wave radar. *Specified, not
+  implemented*
+- [`spec/scenario-006-parallel-approach-doa.md`](spec/scenario-006-parallel-approach-doa.md) — Two aircraft on closely spaced parallel approaches in one range-Doppler cell: spatial super-resolution (MUSIC, ESPRIT, IAA). *Specified, not
+  implemented*
+- [`spec/scenario-007-interference.md`](spec/scenario-007-interference.md) — Strong RF interference against a weak target: SLC, MVDR, LCMV, mainlobe suppression. *Specified, not
+  implemented*
+- [`spec/scenario-008-stap.md`](spec/scenario-008-stap.md) — Airborne clutter ridge: space-time adaptive processing with RASPNet and MCARM radar parameters. *Specified, not
+  implemented*
+- [`spec/scenario-009-receiver-chain.md`](spec/scenario-009-receiver-chain.md) — Receiver chain: front end, DDC and polyphase filtering, hardware impairments, pilot-tone calibration. *Specified, not
+  implemented*
+- [`spec/scenario-010-self-calibration.md`](spec/scenario-010-self-calibration.md) — Array perturbations: self-calibration, self-localisation and robust beamforming. *Specified, not
+  implemented*
+- [`spec/scenario-011-terminal-area-tracking.md`](spec/scenario-011-terminal-area-tracking.md) — Dense terminal-area traffic: crossings, clutter, manoeuvres and closely spaced aircraft (IMM, JPDA, MHT, PMBM). *Specified, not
+  implemented*
 - [`spec/tracker-001.md`](spec/tracker-001.md) — tracking architecture in `core/tracking/`: one
   tracker loop with interchangeable KF, EKF and UKF filters, GNN association and explicit
   measurement models, and the path from today's two trackers to one
@@ -179,11 +195,11 @@ much can be borrowed — GPL-licensed code is treated as a **reference to reimpl
 | [Phased-Array-Antenna-Model](https://github.com/jman4162/Phased-Array-Antenna-Model) | MIT | Vectorized 2D/3D radiation pattern computation library | Fills the phased array gap: conformal geometries, Taylor/Chebyshev tapering, phase quantization, beamforming math |
 | [FMCW Radar Target Simulator](https://github.com/thomaswengerter/FMCW_Radar_Target_Simulator) | MIT | MATLAB/Phased Array System Toolbox simulator for urban traffic scenarios | Functional spec for exporting baseband data as COCO bounding boxes over range-Doppler cubes |
 | [RadarBook Software](https://github.com/RadarBook/software) | *(no licence declared)* | Companion code for *Introduction to Radar Using Python and MATLAB* | Baseline reference for canonical DSP blocks (range FFT, Doppler FFT, CFAR, SAR primitives) |
+| [pyAPRiL](https://github.com/pyapril/pyapril) | GPL-3.0 | Bistatic radar signal-processing library (BME, Budapest) | Structure reference for least-squares clutter and leakage cancellation (Wiener-SMI, ECA); GPL-3.0, so reimplemented from the papers, never vendored |
 | [RASPNet](https://github.com/shyamven/RASPNet) | *(no licence declared)* | Benchmark dataset and example code for radar adaptive signal processing (US Air Force SDMS); data hosted on the AFRL SDMS portal | Reference for ML dataset conventions — feature/label layout, scenario indexing, transfer-learning baselines for target localization — and an external benchmark for the `pipelines` exporters |
 | [torchcvnn](https://github.com/torchcvnn/torchcvnn) | MIT | Complex-valued PyTorch layers, transforms and SAR dataset loaders — MSTAR, SAMPLE, PolSF, ALOS2, UAVSAR SLC, S1SLC (CentraleSupélec, IJCNN '25) | Reference layout for complex radar data in `pipelines/datasets.py`; usable directly as an optional `cvnn` extra |
 | [complexPyTorch](https://github.com/wavefrontshaping/complexPyTorch) | MIT | Complex-valued layers, activations and batch normalisation after Trabelsi et al. (ICLR '18) | Complex batch-norm formulation and minimal layer set; the library Steinmetz builds on |
 | [Steinmetz Neural Networks](https://github.com/shyamven/SteinmetzNeuralNetworks) | *(no licence declared)* | Complex-valued networks keeping I/Q as an analytic pair (AISTATS '25) by the RASPNet author; ships a RASPNet regression notebook | Reference for the complex-valued I/Q feature convention in `pipelines/datasets.py`; paired with RASPNet as a dataset-plus-model benchmark |
-| [pyAPRiL](https://github.com/pyapril/pyapril) | GPL-3.0 | Passive radar signal processing library (BME, Budapest) | Reference for space-time clutter cancellation (Wiener-SMI, ECA) and bistatic geometries |
 | [RadarSim (GUI)](https://github.com/SpaceEngineerSS/RadarSim) | MIT | Educational pulse-Doppler visualizer with real-time PySide6 scopes | Blueprint for the interactive `viz` scopes (A-Scope, B-Scope, PPI, RHI) |
 | [Stone Soup](https://github.com/dstl/Stone-Soup) | MIT | Dstl's target-tracking and state-estimation framework: filters, gaters, data associators, initiators, OSPA/GOSPA metrics | The architectural reference for `core/tracking/` — its predictor/updater/associator seams and its `Detection`/`Track`/`Hypothesis` vocabulary, at a fraction of the surface area; the reference for JPDA and IMM when those arrive |
 | [FilterPy](https://github.com/rlabbe/filterpy) | MIT | Kalman, extended, unscented and particle filters, with the *Kalman and Bayesian Filters in Python* companion text | Reference formulation for the constant-velocity KF and the `Q_discrete_white_noise` process-noise construction, reimplemented in `core/tracking/` from the cited papers rather than depended on |
