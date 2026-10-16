@@ -374,6 +374,8 @@ class GaussianFilter:
     carry a mean and a covariance through a model. That is the ``linearisation``, and it is
     the one thing that changes between them:
 
+    - :class:`~radar_forge.core.tracking.linearisation.TaylorLinearisation` gives the KF on a
+      linear model, and the EKF on a nonlinear one.
     - :class:`~radar_forge.core.tracking.linearisation.UnscentedLinearisation` gives the UKF.
 
     The flow is the same for all of them, and this class never asks which linearisation it

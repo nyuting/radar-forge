@@ -10,15 +10,20 @@ from __future__ import annotations
 
 import pytest
 
-from radar_forge.core.tracking.linearisation import Linearisation, UnscentedLinearisation
+from radar_forge.core.tracking.linearisation import (
+    Linearisation,
+    TaylorLinearisation,
+    UnscentedLinearisation,
+)
 
 LINEARISATIONS: dict[str, Linearisation] = {
+    "taylor": TaylorLinearisation(),
     "unscented": UnscentedLinearisation(),
 }
 
 
 @pytest.fixture(scope="session", params=list(LINEARISATIONS.values()), ids=list(LINEARISATIONS))
 def linearisation(request: pytest.FixtureRequest) -> Linearisation:
-    """Each linearisation in turn, so a test runs once per filter: the UKF, and so on."""
+    """Each linearisation in turn, so a test runs once per filter: the KF/EKF and the UKF."""
     value: Linearisation = request.param
     return value

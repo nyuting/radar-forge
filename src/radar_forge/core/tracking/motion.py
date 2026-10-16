@@ -80,7 +80,7 @@ References
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Literal, Protocol
+from typing import Literal, Protocol, runtime_checkable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -90,6 +90,7 @@ from radar_forge.core.tracking.coordinates import Coordinate, StateLayout
 
 __all__ = [
     "CartesianMotion",
+    "LinearMotionModel",
     "MotionKind",
     "MotionModel",
     "RadialMotion",
@@ -150,6 +151,39 @@ class MotionModel(Protocol):
         numpy.ndarray
             Q, shape ``(n_state, n_state)``, symmetric positive semidefinite. Each element has
             the product of the units of its row and its column.
+        """
+        ...
+
+
+@runtime_checkable
+class LinearMotionModel(MotionModel, Protocol):
+    r"""A motion model that is linear, x' = F x + w, and so can say what F is.
+
+    The Kalman filter and the extended Kalman filter predict with F and Q directly:
+    :math:`\hat{x}^- = F \hat{x}`, :math:`P^- = F P F^T + Q`
+    (:class:`~radar_forge.core.tracking.linearisation.TaylorLinearisation`). Every motion
+    model in this package is linear and has :meth:`matrices`. A nonlinear one, such as a
+    coordinated turn, would add a Jacobian instead.
+
+    References
+    ----------
+    .. [1] Bar-Shalom, Li and Kirubarajan (2001), §5.2.4 and §6.2.
+    """
+
+    def matrices(self, dt_s: float) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Return the transition matrix F and the process noise Q for a step of ``dt_s``.
+
+        Parameters
+        ----------
+        dt_s : float
+            The time step, in seconds. Must be finite and not negative.
+
+        Returns
+        -------
+        transition : numpy.ndarray
+            F, shape ``(n_state, n_state)``, with ``transition(x, dt_s)`` equal to F x.
+        noise : numpy.ndarray
+            Q, shape ``(n_state, n_state)``, equal to ``process_noise(x, dt_s)``.
         """
         ...
 
@@ -565,12 +599,45 @@ class RadialMotion:
         ValueError
             If ``dt_s`` is negative or not finite, or ``state`` has the wrong shape.
         """
-        _check_dt(dt_s)
         state = np.asarray(state, dtype=np.float64)
         _check_state_shape(state, 2)
-        predicted = state.copy()
-        predicted[..., 0] -= state[..., 1] * dt_s
-        return predicted
+        return state @ self._transition_matrix(dt_s).T
+
+    def matrices(self, dt_s: float) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Return the transition matrix F and the process noise Q for a step of ``dt_s``.
+
+        Parameters
+        ----------
+        dt_s : float
+            The time step, in seconds. Must be finite and not negative.
+
+        Returns
+        -------
+        transition : numpy.ndarray
+            F = [[1, -dt_s], [0, 1]], shape ``(2, 2)``: the range falls by the closing rate
+            times the step (class Notes).
+        noise : numpy.ndarray
+            Q, shape ``(2, 2)``, as :meth:`process_noise`.
+
+        Raises
+        ------
+        ValueError
+            If ``dt_s`` is negative or not finite.
+
+        Examples
+        --------
+        >>> f, _ = RadialMotion().matrices(2.0)
+        >>> f
+        array([[ 1., -2.],
+               [ 0.,  1.]])
+        """
+        # Q does not depend on the state here, so any state will do.
+        return self._transition_matrix(dt_s), self.process_noise(np.zeros(2), dt_s)
+
+    def _transition_matrix(self, dt_s: float) -> NDArray[np.float64]:
+        """Return F for a step of ``dt_s`` seconds, after checking the step."""
+        _check_dt(dt_s)
+        return np.array([[1.0, -float(dt_s)], [0.0, 1.0]], dtype=np.float64)
 
     def process_noise(self, state: NDArray[np.float64], dt_s: float) -> NDArray[np.float64]:
         """Return Q, the covariance a step of ``dt_s`` seconds adds.

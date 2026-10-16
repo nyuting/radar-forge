@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Any
 
 import numpy as np
 import pytest
@@ -13,6 +14,7 @@ from radar_forge.core.tracking.coordinates import StateEstimate
 from radar_forge.core.tracking.measurement_models import (
     BistaticRangeDopplerModel,
     CartesianPosition,
+    DifferentiableMeasurementModel,
     Measurement,
     MeasurementBatch,
     SensorPose,
@@ -61,6 +63,20 @@ def _transmitter() -> Transmitter:
     return Transmitter(9.8e9, 2.0e6, 100.0, 30.0, 1.0e-3, 1.0e3)
 
 
+def _central_difference(model: DifferentiableMeasurementModel, state: NDArray[np.float64]) -> Any:
+    """Numerical d h / d x, column by column, to check an analytic Jacobian against."""
+    columns = []
+    for index in range(state.size):
+        # A loop over state elements: each column needs its own perturbed pair of states.
+        # A relative step: positions are kilometres and velocities tens of m/s, so one
+        # absolute step cannot suit both (as tests/core/test_tracking.py).
+        step = 1e-5 * max(1.0, abs(float(state[index])))
+        offset = np.zeros(state.size)
+        offset[index] = step
+        columns.append((model.predict(state + offset) - model.predict(state - offset)) / (2 * step))
+    return np.stack(columns, axis=-1)
+
+
 # --------------------------------------------------------------------------- #
 # CartesianPosition
 # --------------------------------------------------------------------------- #
@@ -100,6 +116,15 @@ def test_cartesian_position_rejects_bad_names_or_periods(
     _, estimate, _ = _scene("CV")
     with pytest.raises(ValueError, match=match):
         CartesianPosition(estimate.state_layout, names, periods)
+
+
+def test_the_cartesian_jacobian_picks_the_reported_coordinates() -> None:
+    motion, estimate, _ = _scene("CV")
+    model = CartesianPosition(motion.state_layout, ("z_m", "xdot_mps"))
+    expected = np.zeros((2, motion.state_layout.dimension))
+    expected[0, motion.state_layout.names.index("z_m")] = 1.0
+    expected[1, motion.state_layout.names.index("xdot_mps")] = 1.0
+    np.testing.assert_array_equal(model.jacobian(estimate.mean), expected)
 
 
 def test_cartesian_position_rejects_a_state_of_the_wrong_length() -> None:
@@ -185,6 +210,50 @@ def test_one_singular_point_in_a_stack_is_rejected() -> None:
     stack = np.stack([estimate.mean, np.zeros(estimate.state_layout.dimension)])
     with pytest.raises(ValueError, match="singular"):
         model.predict(stack)
+
+
+@pytest.mark.parametrize("excess_range", [True, False])
+@pytest.mark.parametrize(
+    ("axes", "fixed"),
+    [("xyz", None), ("xy", {"z_m": 3000.0, "zdot_mps": 0.0})],
+    ids=["3d", "2d-fixed-height"],
+)
+def test_the_bistatic_jacobian_matches_a_central_difference(
+    axes: str, fixed: dict[str, float] | None, excess_range: bool, rng: np.random.Generator
+) -> None:
+    """The analytic Jacobian of the class Notes, checked at many states."""
+    motion = CartesianMotion(dict.fromkeys(axes, "CV"), origin_lla_deg_m=ORIGIN)
+    layout = motion.state_layout
+    model = BistaticRangeDopplerModel(
+        layout,
+        _pose([0.0, 0.0, 0.0]),
+        _pose([20_000.0, 1_000.0, 50.0]),
+        excess_range=excess_range,
+        fixed_coordinates=fixed,
+    )
+    positions = list(layout.indices(tuple(f"{a}_m" for a in axes)))
+    for _ in range(50):
+        # A loop over random states: each one is its own check.
+        state = rng.uniform(-100.0, 100.0, layout.dimension)
+        state[positions] = rng.uniform(-20_000.0, 20_000.0, len(positions))
+        # rtol 1e-6, atol 1e-10: the best a central difference reaches on a norm, as in
+        # tests/core/test_tracking.py's Jacobian test.
+        np.testing.assert_allclose(
+            model.jacobian(state), _central_difference(model, state), rtol=1e-6, atol=1e-10
+        )
+
+
+@pytest.mark.parametrize("site", ["transmitter", "receiver"])
+def test_the_bistatic_jacobian_is_rejected_on_a_site(site: str) -> None:
+    motion = CartesianMotion(dict.fromkeys("xyz", "CV"), origin_lla_deg_m=ORIGIN)
+    position = [100.0, 0.0, 0.0] if site == "transmitter" else [0.0, 100.0, 0.0]
+    model = BistaticRangeDopplerModel(
+        motion.state_layout, _pose([100.0, 0.0, 0.0]), _pose([0.0, 100.0, 0.0])
+    )
+    state = np.zeros(6)
+    state[list(motion.state_layout.indices(("x_m", "y_m", "z_m")))] = position
+    with pytest.raises(ValueError, match="singular"):
+        model.jacobian(state)
 
 
 def test_bistatic_predict_rejects_a_state_of_the_wrong_length() -> None:

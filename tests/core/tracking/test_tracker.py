@@ -16,7 +16,7 @@ import pytest
 
 from radar_forge.core.tracking.estimation import InnovationStats
 from radar_forge.core.tracking.lifecycle import LifecyclePolicy
-from radar_forge.core.tracking.linearisation import UnscentedLinearisation
+from radar_forge.core.tracking.linearisation import Linearisation, UnscentedLinearisation
 from radar_forge.core.tracking.measurement_models import (
     Measurement,
     MeasurementBatch,
@@ -70,6 +70,27 @@ def confirmed_tracker(n_scans: int = 5) -> Tracker:
 # --------------------------------------------------------------------------- #
 # Confirmation, coasting and deletion through the scan loop
 # --------------------------------------------------------------------------- #
+
+
+def test_every_linearisation_confirms_coasts_and_dead_reckons_a_track(
+    linearisation: Linearisation,
+) -> None:
+    """The tracker is the same for the KF and the UKF: only the constructor argument differs.
+
+    Three noiseless scans confirm the track (3-of-5), and a scan without a detection then
+    moves it on by velocity times the step.
+    """
+    tracker = one_axis_tracker(linearisation=linearisation)
+    statuses = []
+    for time_s in range(5):
+        # Scans are processed in time order; each depends on the one before.
+        statuses.append(tracker.process(batch(tracker, time_s, [100.0 + 3.0 * time_s]))[0].status)
+    before = tracker.tracks[0].snapshot()
+    after = tracker.process(MeasurementBatch(5, "sensor"))[0]
+    assert statuses[2] == CONFIRMED
+    assert after.status == COASTING
+    # rtol 1e-9: either linearisation reproduces a linear prediction to roundoff (§4.4).
+    np.testing.assert_allclose(after.state[0], before.state[0] + before.state[1], rtol=1e-9)
 
 
 def test_a_track_is_confirmed_on_the_third_scan() -> None:
