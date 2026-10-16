@@ -707,15 +707,16 @@ it would be later. The names and module moves are TD13's.
    `GaussianFilter(motion, UnscentedLinearisation())` replaces `UKF` wherever one is built
    (`build_tracker`, `build_tracker_enu`, the tests). The UKF's numbers do not move. `UKF` and
    `ukf.py` are deleted here, not in step 7: once nothing builds a `UKF`, it is a dead second
-   copy of the update, the drift principle 2 forbids.
+   copy of the update, the drift principle 2 forbids. `Linearisation` has `check_motion_model`
+   (§4.2), so a bad pairing fails at construction without the filter asking which
+   linearisation it holds.
    *Check:* AC2, and the existing UKF tests pass against `GaussianFilter` without a tolerance
    change.
 3. **`TaylorLinearisation`** (§4.4), with `RadialMotion.matrices` and analytic Jacobians for
    `CartesianPosition` and `BistaticRangeDopplerModel`, so every existing model runs under
    every linearisation and the definiteness tests cover both (AC5). The KF and the EKF are now
    `GaussianFilter(motion, TaylorLinearisation())`, and the two UKF ≡ KF guards (§4.5) land
-   here. `Linearisation` gains `check_motion_model` (§4.2), so a bad pairing fails at
-   construction without the filter asking which linearisation it holds. Today's `KalmanFilter` (`kalman.py`) holds a track's estimate and is not a filter. It
+   here. Today's `KalmanFilter` (`kalman.py`) holds a track's estimate and is not a filter. It
    keeps its name until step 7 deletes it, since no new class takes the name.
    *Check:* AC3, AC4 and AC12.
 4. **The spherical measurement model** (§6.1) with its Jacobian and the debiased initiator,
@@ -724,11 +725,12 @@ it would be later. The names and module moves are TD13's.
 6. **Scenario 003 on `Tracker`.** `pipelines/tracking.py` becomes an adapter: plots in,
    batches out, snapshots back. `TrackingConfig.state_model` is honoured (it is ignored today).
 7. **Delete the old stack:** `KalmanTracker`, `KalmanFilter`, `KalmanState`, `TrackModel` and
-   `FrameResult` (`UKF` and `ukf.py` went in step 2), and the rest of TD13's renames. Two of those renames are
-   scenario TOML keys (TD13), so this step also updates the scenario 003 TOMLs and spec, and the data-001
-   `metadata.json` schema. Module moves (§3 target column). Refresh the stale text in
-   `spec/structure.md` D2 (steps 1 and 2 refreshed `kalman.py`'s "promotes this module to a
-   subpackage" and `estimation.py`'s "the one implementation"). *Check:* AC1, AC7 and AC8;
+   `FrameResult` (`UKF` and `ukf.py` went in step 2), and the rest of TD13's renames. Two of
+   those renames are scenario TOML keys (TD13), so this step also updates the scenario 003
+   TOMLs and spec, and the data-001 `metadata.json` schema. Module moves (§3 target
+   column). Refresh the stale text in `spec/structure.md` D2 (steps 1 and 2 refreshed
+   `kalman.py`'s "promotes this module to a subpackage" and `estimation.py`'s "the one
+   implementation"). *Check:* AC1, AC7 and AC8;
    `git grep -nE '^class (KalmanTracker|KalmanFilter|KalmanState|TrackModel|FrameResult|UKF)\b' -- src`
    returns nothing; and so does
    `git grep -nE 'n_reacquire_frames|\bCartesianPosition\b|\bRadialMotion\b|def normalise|\.normalise\(|\.noise_density\b[^_]|self\.noise_density\b|sigma_accel_mps2' -- src tests scripts scenarios spec/scenario-003-tracking.md docs/tracking`.
