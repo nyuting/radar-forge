@@ -1,4 +1,4 @@
-# Scenario 002 — Bistatic radar, Raleigh-Durham illuminator to the Duke Receiver
+# Scenario 002 — Bistatic radar, Raleigh-Durham transmitter to the Duke Receiver
 
 ## 1. Status & Purpose
 
@@ -15,9 +15,11 @@ Three reasons to make bistatic the second slice rather than breadth:
    thing every propagation model produces. Until a second model exists, that is an assertion. §4.1
    records what survived: the dataclass is unchanged, which is the strongest evidence so far that
    D1 was drawn in the right place.
-2. **It is the geometry `pyAPRiL` exists for.** `spec/starter.md` §3.1 names bistatic processing
-   as something `radar-forge` borrows, but Part B of `spec/structure.md` had no home for a two-site
-   radar. This closes that gap.
+2. **It is the next general geometry after monostatic.** Moving the transmitter away from the
+   receiver is the smallest change that makes the two ranges independent, and every multistatic
+   arrangement builds on it. `spec/starter.md` §3.1 names bistatic processing as something
+   `radar-forge` covers, but Part B of `spec/structure.md` had no home for a two-site radar. This
+   closes that gap.
 3. **It teaches a real thing badly taught.** Bistatic range resolution depends on where the target
    *is*, not only on bandwidth. Over this track the resolution degrades by up to **2.34×**, which is
    visible on the map rather than merely stated.
@@ -35,7 +37,7 @@ Three reasons to make bistatic the second slice rather than breadth:
 ## 2. Overview & Geometry
 
 A receiver at the Duke Receiver listens to the Raleigh-Durham Airport air-traffic-control
-illuminator and detects a light aircraft flying a circuit over the North Carolina Piedmont. The
+transmitter and detects a light aircraft flying a circuit over the North Carolina Piedmont. The
 transmitter and the receiver stand 19.601 km apart, so the two propagation ranges are independent.
 
 ```

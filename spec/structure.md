@@ -37,6 +37,14 @@ The scenario specifications are the vertical slices through this tree:
 | Scenario 1 | [`scenario-001-xband.md`](scenario-001-xband.md) | trajectory → IQ → range-Doppler map, in three ambiguity variants |
 | Scenario 2 | [`scenario-002-bistatic.md`](scenario-002-bistatic.md) | the same path over a two-site geometry; D6, D7, D8 |
 | Scenario 3 | [`scenario-003-tracking.md`](scenario-003-tracking.md) | CFAR detection → association → Kalman tracking, stacked on scenario 1 |
+| Scenario 4 | [`scenario-004-keystone.md`](scenario-004-keystone.md) | Fast sounding rocket: keystone, polynomial-phase motion compensation, datachip and fine estimation *(specified)* |
+| Scenario 5 | [`scenario-005-leakage-cancellation.md`](scenario-005-leakage-cancellation.md) | Transmitter leakage and near-range clutter in a continuous-wave radar: least-squares cancellation *(specified)* |
+| Scenario 6 | [`scenario-006-parallel-approach-doa.md`](scenario-006-parallel-approach-doa.md) | Two aircraft on closely spaced parallel approaches in one range-Doppler cell: spatial super-resolution (MUSIC, ESPRIT, IAA) *(specified)* |
+| Scenario 7 | [`scenario-007-interference.md`](scenario-007-interference.md) | Strong RF interference against a weak target: SLC, MVDR, LCMV, mainlobe suppression *(specified)* |
+| Scenario 8 | [`scenario-008-stap.md`](scenario-008-stap.md) | Airborne clutter ridge: space-time adaptive processing with RASPNet and MCARM radar parameters *(specified)* |
+| Scenario 9 | [`scenario-009-receiver-chain.md`](scenario-009-receiver-chain.md) | Receiver chain: front end, DDC and polyphase filtering, hardware impairments, pilot-tone calibration *(specified)* |
+| Scenario 10 | [`scenario-010-self-calibration.md`](scenario-010-self-calibration.md) | Array perturbations: self-calibration, self-localisation and robust beamforming *(specified)* |
+| Scenario 11 | [`scenario-011-terminal-area-tracking.md`](scenario-011-terminal-area-tracking.md) | Dense terminal-area traffic: crossings, clutter, manoeuvres and closely spaced aircraft (IMM, JPDA, MHT, PMBM) *(specified)* |
 
 ---
 
@@ -49,42 +57,67 @@ src/radar_forge/
 ├── core/
 │   ├── __init__.py
 │   ├── radar.py                 # Transmitter, Receiver, Radar, BistaticRadar, RadarLike
-│   ├── radar_equation.py        # range equation (monostatic + bistatic), SNR, max range, link budget
+│   ├── radar_equation.py        # range equation (monostatic + bistatic), SNR, max range, link budget, one-way (Friis) link for interferers
 │   ├── geodesy.py               # WGS-84 geodetic ↔ ECEF ↔ ENU; ENU → range/az/el
-│   ├── waveforms.py             # FMCW/LFM chirp, pulse train, CW, PMCW; ambiguity function
+│   ├── waveforms.py             # FMCW/LFM chirp, pulse train, CW, PMCW, noise (a long pseudo-random code); ambiguity function
 │   ├── targets.py               # PointTarget, ExtendedTarget, RCS + Swerling 0–4
 │   ├── propagation.py           # free-space loss, atmospheric absorption, rain attenuation (deferred)
-│   ├── signal.py                # baseband synthesis, superposition, noise, phase noise
-│   ├── dsp.py                   # range FFT, Doppler FFT, matched filter, MTI (range axis is bistatic mean range when bistatic)
+│   ├── signal.py                # baseband synthesis (single and multi-channel), superposition, noise, range-correlated
+│   │                            #   LO phase noise; polynomial radial kinematics; transmitter-leakage and static-clutter paths (004–009)
+│   ├── dsp.py                   # range FFT, Doppler FFT, matched filter, MTI, batched correlation for continuous waveforms
+│   ├── migration.py             # keystone (1st/2nd order, fold factor), Doppler-rate matched filter, RFT/GRFT; data_rfst in and out (D10)
+│   ├── datachip.py              # DataChip, crop, fine range/velocity/acceleration estimators with CRB (D9)
 │   ├── windows.py               # Taylor, Chebyshev, Hamming, Hann tapers; coherent gain, loss
 │   ├── ambiguity.py             # velocity folding; dual-PRF Doppler unfolding
 │   ├── detection.py             # CA/GO/SO/OS-CFAR (1-D), CA/OS 2-D ring, Pfa calibration, wrap-aware clustering
-│   ├── clutter.py               # land/sea clutter models; ECA / Wiener-SMI cancellation
+│   ├── clutter.py               # land/sea clutter; least-squares leakage and clutter cancellation (005); Ward clutter patch, ICM taper (008);
+│   │                            #   Poisson clutter plots per (m·rad), fixed discretes (011)
+│   ├── plots.py                 # plot-level sensor model: Pd with MTI notch, finite-resolution merging, plot noise (D25)
+│   ├── interference.py          # noise interferer sources, one-way (D15)
+│   ├── frontend.py              # real-IF front end: wideband noise, off-channel interferer, NCO/DDC, FIR and polyphase decimation (D20)
 │   └── tracking/                # one tracker, cut at Stone Soup's seams (spec/tracker-001.md §3)
 │       ├── __init__.py          # re-exports every public name; import path is radar_forge.core.tracking
 │       ├── coordinates.py       # Coordinate, StateLayout (named, unit-bearing, wrap-aware), StateEstimate
 │       ├── estimation.py        # Estimator protocol; the one correction core; NIS and log-likelihood
 │       ├── kalman.py            # linear KF and EKF as Estimators; predict/update kept as the teaching layer
 │       ├── ukf.py               # unscented Kalman filter
-│       ├── motion.py            # MotionModel: Cartesian CV/CA, range-only; DWNA process noise
+│       ├── motion.py            # MotionModel: Cartesian CV/CA, range-only, coordinated turn (D26); DWNA process noise
+│       ├── imm.py               # IMM: an Estimator of Estimators, union layout by name, expm transition (D27)
 │       ├── measurements.py      # Measurement, MeasurementBatch (planned: today in measurement_models.py)
 │       ├── measurement_models.py # MeasurementModel: Cartesian, spherical, monostatic and bistatic range-Doppler
 │       ├── sensors.py           # SensorRegistration, SensorPose (planned: today in measurement_models.py)
-│       ├── association.py       # chi-square gate; GNN and NN assignment; JPDA extension point
+│       ├── association.py       # chi-square gate; GNN and NN assignment; association weights; Murty k-best (D29)
+│       ├── jpda.py              # JPDA, JPDA*, Set-JPDA, JIPDA: clusters, exact events, weights (D28)
+│       ├── mht.py               # track-oriented MHT: TrackTree as an Estimator, N-scan pruning (D29)
+│       ├── clutter_map.py       # clutter intensity per measurement: oracle and forgetting clutter map (D28)
+│       ├── metrics.py           # GOSPA, trajectory GOSPA, swaps, coalescence ratio (011)
+│       ├── rfs/
+│       │   ├── __init__.py
+│       │   └── pmbm.py          # PmbmTracker: a comparison tracker beside Tracker, sharing models and metrics (D30)
 │       ├── initiation.py        # TrackInitiator: start a track from an unassigned measurement
-│       ├── lifecycle.py         # M-of-N confirmation; miss, coast-time and covariance deletion
+│       ├── lifecycle.py         # M-of-N confirmation; existence-based confirm/delete (JIPDA); miss, coast-time, covariance deletion
 │       ├── tracks.py            # Track, TrackStatus, TrackSnapshot
 │       ├── tracker.py           # Tracker: the one scan loop every pipeline uses
 │       └── _validation.py       # shared shape and covariance checks
 ├── array/
 │   ├── __init__.py
-│   ├── geometry.py              # ULA, URA, circular, cylindrical, spherical, conformal, sparse; subarrays
+│   ├── geometry.py              # ULA, URA, circular, cylindrical, spherical, conformal, sparse; subarrays; phase centre at
+│   │                            #   origin; site-to-array rotation (D13)
+│   ├── manifold.py              # ArrayManifold: geometry + mutual coupling + channel gain -> steering vectors (D22)
 │   ├── elements.py              # element patterns, polarization frames (Ludwig-3)
 │   ├── tapering.py              # Taylor, Chebyshev, Hamming, Hann, custom amplitude tapers
-│   ├── beamforming.py           # steering vectors, null steering, multi-beam, MVDR/Capon
-│   ├── impairments.py           # phase quantization, mutual coupling, element failures
+│   ├── beamforming.py           # steering vectors (D13), conventional, null steering, multi-beam, MVDR weights
+│   ├── adaptive.py              # SLC, SLB, SMI-MVDR, LCMV/GSC, loading, INCM, EMP-CMR (007); RCB, worst-case, robust LCMV (010);
+│   │                            #   every function returns AdaptiveWeights, never applies them (D16)
+│   ├── stap.py                  # space-time snapshot (D17), optimum/SMI/JDL/EFA/PC/MWF, KA and sparse-recovery covariance,
+│   │                            #   Doppler warping / ADC, SINR loss, Brennan rank (008)
+│   ├── calibration.py           # pilot-tone gain/phase/delay, IQ-imbalance estimators (009); known-direction LS, Friedlander–Weiss
+│   │                            #   coupling/gain, PAST drift tracking, FIM identifiability (010); returns parameters (D21, D23)
+│   ├── impairments.py           # per-channel gain/phase, group delay, IQ imbalance, LO phase (009); mutual coupling,
+│   │                            #   element-position error, channel drift (010); phase quantization, element failures
 │   ├── patterns.py              # vectorized array factor, 2D cuts, 3D/UV patterns
-│   └── doa.py                   # DoAEstimator base + MUSIC, Root-MUSIC, ESPRIT, Capon, Bartlett
+│   └── doa.py                   # DoAEstimator base + Bartlett, Capon, MUSIC, Root-MUSIC, ESPRIT, spatial smoothing, FB,
+│                                #   IAA, SPICE, deterministic ML; CRB, resolution limit (006)
 ├── raytracing/
 │   ├── __init__.py
 │   ├── base.py                  # RayTracingBackend protocol: trace(scene, radar) -> paths/baseband
@@ -102,6 +135,10 @@ src/radar_forge/
 │   ├── scenarios.py             # TOML scenario schema + loader (stdlib tomllib); frame loop
 │   ├── trajectories.py          # trajectory load/resample; monostatic and bistatic radar frames
 │   ├── tracking.py              # RD map → measurements → core.tracking.Tracker, frame by frame (scenario 3)
+│   ├── terminal_area.py         # closed-form traffic (D24), clutter layout, rotating-scan sector batches (D25) (011)
+│   ├── doa.py                   # detection → DataChip → D14 snapshot → DoA estimators (006)
+│   ├── calibration.py           # snapshots → calibration → refined manifold → robust weights (010)
+│   ├── raspnet.py               # optional RASPNet clutter loader (D19); reads, never writes
 │   ├── generate.py              # scene -> baseband -> cube orchestration, batching, seeding
 │   ├── datasets.py              # torch Dataset / DataLoader wrappers (extra: ml)
 │   └── exporters/
@@ -134,8 +171,13 @@ Notebooks are not part of the installed package. Chapter-style guided notebooks 
 | `core/waveforms.py` | RadarBook (ambiguity function); AIRadarLib `waveform_utils` (PLL quantization, phase noise); RadarSim LFM |
 | `core/targets.py` | RadarSimPy `tools` (Swerling); FMCW Target Simulator target classes |
 | `core/signal.py` | FMCW Target Simulator `modelBasebandSignal.m`; RadarSimPy simulator semantics |
-| `core/dsp.py`, `core/detection.py` | RadarBook; RadarSimPy `processing.py`; RadarSim CFAR variants; pyAPRiL `detector`/`hitProcessor` (structure only) |
-| `core/clutter.py` | pyAPRiL `clutterCancellation` (reimplemented from papers); RadarSim land/sea clutter |
+| `core/dsp.py`, `core/detection.py` | RadarBook; RadarSimPy `processing.py`; RadarSim CFAR variants |
+| `core/clutter.py` | Least-squares, batched and Wiener-SMI cancellers (Haykin 2014); sliding-window estimation (Colone et al. 2016); parallel-Hammerstein self-interference cancellation (Anttila et al. 2013), written from the papers; padasip (MIT, adaptive-filter structure); Ward TR-1015 clutter-patch model; Billingsley 2002 ICM; RadarSim land/sea clutter |
+| `core/dsp.py` batched correlation | Kulpa 2013 (noise-waveform radar processing) |
+| `core/migration.py` | Perry–DiPietro–Fante keystone; Zhu–Li–Zhu interpolation-free keystone; Huang et al. 2016 keystone + matched filtering; Kirkland second-order keystone; Xu et al. RFT/GRFT (oracle) |
+| `core/datachip.py` | Aboutanios–Mulgrew; Quinn, Jacobsen–Kootsookos, Candan (baselines); O'Shea CPF; Peleg–Porat HAF (baseline) and polynomial-phase CRB; Rife–Boorstyn |
+| `core/interference.py` | Friis (1946); Farina (1992) interference models |
+| `core/frontend.py` | Harris (2004); Harris–Dick–Rice (2003); GNU Radio `pfb_channelizer_ccf` and liquid-dsp `firpfbch` (structure only); `scipy.signal.remez` / `upfirdn` |
 | `pipelines/tracking.py` | motpy's `step(detections)` loop shape; Stone Soup's detection → gate → associate → update decomposition |
 | `viz/scopes/track_plot.py` | Tracktable's plan-view track rendering (prior art only; not a dependency) |
 | `core/tracking/` (all) | `unified-extensible-tracker`, contributed under MIT (`tracker-001.md` §1.2); Stone Soup's data model and seams |
@@ -144,8 +186,21 @@ Notebooks are not part of the installed package. Chapter-style guided notebooks 
 | `core/tracking/association.py` | Stone Soup gater and data-associator seams; `scipy.optimize.linear_sum_assignment` (Crouse 2016) |
 | `core/tracking/initiation.py`, `lifecycle.py`, `tracks.py` | Bar-Shalom & Li (1995) logic-based track formation; Stone Soup initiator/deleter split; RadarSim track management |
 | `core/tracking/tracker.py` | motpy's `step(detections)` loop shape; Stone Soup's tracker |
+| `core/plots.py`, `core/clutter.py` (clutter plots) | Koch & van Keuk (1997) resolution model; Daum & Fitzgerald (1994); Mušicki & Morelande (2005); Skolnik (2008) air-traffic-control radar, all written from the papers |
+| `core/tracking/motion.py` (coordinated turn), `imm.py` | Li & Jilkov (2003); Blom & Bar-Shalom (1988); Bar-Shalom, Li & Kirubarajan (2001) ch. 11 |
+| `core/tracking/jpda.py`, `clutter_map.py` | Bar-Shalom & Tse (1975) PDA; Fortmann, Bar-Shalom & Scheffe (1983) JPDA; Blom & Bloem (2000) JPDA\*; Svensson et al. (2011) Set-JPDA; Mušicki & Evans (2004) JIPDA |
+| `core/tracking/mht.py`, Murty k-best | Reid (1979); Kurien (1990); Blackman (2004); Murty (1968); Cox & Miller (1995) |
+| `core/tracking/rfs/pmbm.py` | García-Fernández, Williams, Granström & Svensson (2018); Williams (2015); labeledRFS (§A.13) as a structure reference |
+| `core/tracking/metrics.py` | Rahmathullah, García-Fernández & Svensson (2017) GOSPA; García-Fernández, Rahmathullah & Svensson (2020) trajectory GOSPA; Schuhmacher, Vo & Vo (2008) OSPA |
 | `array/*` | Phased-Array-Antenna-Model (near one-to-one module split) |
-| `array/doa.py` | pyroomacoustics `doa` base-class pattern; RadarSimPy and pyroomacoustics estimators as benchmarks |
+| `array/beamforming.py` | Capon (1969); Phased-Array-Antenna-Model steering vectors |
+| `array/doa.py` | pyroomacoustics `doa` base-class pattern; RadarSimPy and pyroomacoustics estimators as benchmarks; Shan–Wax–Kailath, Pillai–Kwon, Yardibi et al. (IAA), Stoica–Babu–Li (SPICE), Li–Stoica (RELAX), Stoica–Nehorai (CRB), all written from the papers |
+| `array/adaptive.py` | Howells (1965), Applebaum (1976), Maisel (1968), Frost (1972), Griffiths & Jim (1982), Buckley & Griffiths (1986), Reed–Mallett–Brennan (1974), Carlson (1988), Gu & Leshem (2012), Yang et al. (2014); Li–Stoica–Wang (RCB), Vorobyov–Gershman–Luo (worst-case), Cox–Zeskind–Owen; Phased-Array-Antenna-Model `beamforming.py` as a cross-check |
+| `array/stap.py` | Ward TR-1015; Brennan & Reed 1973; Reed–Mallett–Brennan 1974; Wang & Cai 1994 (JDL); DiPietro 1992 (EFA); Haimovich 1996 (PC); Goldstein–Reed–Scharf 1998 (MWF); Guerci & Baranoski 2006, Stoica et al. 2008 (KA); Sun et al. 2011 (SR); Borsari 1998, Himed et al. 2002 (DW, ADC) |
+| `array/impairments.py` | Tarighat et al. 2005 and Anttila et al. 2008 IQ model; Budge & Burt 1993 range-correlated phase noise; Friedlander & Weiss 1991 and Ye et al. 2009 mutual coupling |
+| `array/calibration.py` | Tarighat et al. 2005 (pilot baseline), Anttila et al. 2008 (blind IQ); Ng & See 1996; Weiss & Friedlander 1989/1990; Friedlander & Weiss 1991; Rockah & Schultheiss 1987; Yang 1995 (PAST) |
+| `array/manifold.py` | doatools.py perturbation-object pattern (MIT); Friedlander & Weiss G·C·A model |
+| `pipelines/raspnet.py` | RASPNet dataset conventions (file layout and `X_clut` shape) |
 | `raytracing/base.py`, `scene.py` | RF-Genesis pipeline staging; RadarSimPy scene/mesh API |
 | `raytracing/backends/mitsuba.py` | RF-Genesis `genesis/` Mitsuba + Dr.Jit usage |
 | `raytracing/backends/ovrtx.py` | ovrtx sensor-simulation API |
@@ -186,6 +241,7 @@ Notebooks are not part of the installed package. Chapter-style guided notebooks 
 | `cvnn` | torch, torchcvnn, complexPyTorch | complex-valued layers and SAR dataset loaders for `pipelines.datasets` |
 | `viz` | matplotlib | `viz` plots and scopes |
 | `notebooks` | jupyterlab | the top-level `notebooks/` |
+| `io` | h5py | HDF5 products ([`data-001-formats.md`](data-001-formats.md) DF8); the `.mat` v7.3 fallback of `pipelines.raspnet` |
 | `gui` | PySide6 | `viz/app.py` live scopes (added when `app.py` lands) |
 | `dev` | pytest, ruff, mypy, build tooling | development |
 
@@ -205,7 +261,7 @@ why.
 | [A.3](#a3-phased-array-antenna-model) | Phased-Array-Antenna-Model | MIT | Near one-to-one module split for `array/` |
 | [A.4](#a4-fmcw-radar-target-simulator) | FMCW Radar Target Simulator | MIT (MATLAB) | Baseband synthesis semantics and the COCO label schema |
 | [A.5](#a5-radarbook-software) | RadarBook Software | none declared | Canonical DSP blocks, written from the published equations (D4) |
-| [A.6](#a6-pyapril) | pyAPRiL | GPL-3.0 | Clutter cancellation and bistatic processing structure, reimplemented |
+| [A.6](#a6-padasip) | padasip; pyAPRiL | MIT; GPL-3.0 | Adaptive-filter structure (LMS, NLMS, RLS); least-squares and Wiener-SMI cancellation structure, reimplemented. Both as reference for `core/clutter.py` |
 | [A.7](#a7-raspnet-dataset) | RASPNet | none declared | ML dataset conventions; an evaluation benchmark |
 | [A.8](#a8-radarsim-gui) | RadarSim (GUI) | MIT | Blueprint for `viz/scopes/`; the scenario-file idea |
 | [A.9](#a9-airadarlib-pypi-optional) | AIRadarLib | unstated | Chirp generation and PyTorch dataset wrappers, as reference |
@@ -306,7 +362,24 @@ what transfers.
 CFAR, SAR primitives) and the chapter→notebook pedagogy for `notebooks/`. Implementations are
 written from the published equations, not transcribed.
 
-### A.6 pyAPRiL
+### A.6 padasip
+
+- **Link:** https://github.com/matousc89/padasip
+- **Language / licence:** Python (NumPy) · **MIT**
+
+| Module | Responsibility |
+| :--- | :--- |
+| `filters` | Adaptive filters behind one interface: LMS, NLMS, LMF, NLMF, RLS, affine projection, GNGD and variable step-size LMS |
+| `preprocess` | PCA, LDA, input standardisation |
+| `detection` | Novelty detection from adaptive-filter weight changes (ELBND, learning entropy) |
+
+**What radar-forge borrows:** the interface shape, one filter object per algorithm with the same
+`predict`/`adapt` contract, as a reference for how `core/clutter.py` exposes its cancellers. The
+least-squares, batched, sliding-window and parallel-Hammerstein cancellers of scenario 005 are block
+solutions, not recursive filters, so they are written from Haykin, Colone et al. and Anttila et
+al., not from padasip. LMS and RLS stay out of scope there (scenario 005 §4.5).
+
+#### pyAPRiL
 
 - **Link:** https://github.com/pyapril/pyapril
 - **Language / licence:** Python · **GPL-3.0** (copyleft)
@@ -318,29 +391,39 @@ written from the published equations, not transcribed.
 | `detector` | Cross-correlation detection (time, frequency, batched), Doppler windowing |
 | `hitProcessor` | CA-CFAR and target DoA estimation on detections |
 | `metricExtract` | Clutter attenuation, noise-floor reduction, SINR, dynamic-range compression |
-| `targetParameterCalculator`, `targetLocalization` | Expected range/Doppler from geodetic data; localisation |
-| `RDTools`, `sim` | Range-Doppler matrix plotting; FM-based simulator |
 
-**What radar-forge borrows:** algorithm *structure* only. GPL-3.0 is incompatible with radar-forge's MIT
-licence, so ECA and Wiener-SMI clutter cancellation are reimplemented from the published papers for
-`core/clutter.py`. No pyAPRiL code enters the tree, and it is not a runtime dependency.
+**What radar-forge borrows:** algorithm *structure* only. GPL-3.0 is incompatible with
+radar-forge's MIT licence, so the least-squares (ECA) and Wiener-SMI cancellers are reimplemented
+from the published papers for `core/clutter.py`. No pyAPRiL code enters the tree, and it is not a
+runtime dependency.
 
 ### A.7 RASPNet *(dataset)*
 
-- **Link:** https://github.com/shyamven/RASPNet
-- **Language / licence:** Python (examples) · **no LICENSE file in the repository** — treat as
-  all-rights-reserved. Dataset itself is distributed via the AFRL SDMS portal under its own terms.
+- **Link:** https://github.com/shyamven/RASPNet (example notebooks);
+  data at https://www.sdms.afrl.af.mil/index.php?collection=raspnet
+- **Paper:** Venkatasubramanian, Kang, Pezeshki, Rangaswamy, Tarokh, *RASPNet: A Benchmark Dataset
+  for Radar Adaptive Signal Processing Applications*, arXiv:2406.09638.
+- **Language / licence:** dataset **CC BY 4.0**; the GitHub repository has **no LICENSE file** —
+  treat its code as all-rights-reserved.
+
+RASPNet is a **benchmark dataset**, not a network: 100 CONUS scenarios × 10 000 RFView-simulated
+clutter realisations, over 16 TB, hosted on AFRL SDMS. The radar (paper App. G.1, Table 4) is
+X-band — 10 GHz, 5 MHz, PRF 1100 Hz — 1000 m up and **static** ("the radar was assumed as static",
+§2.1), a 48 × 5 array at 15 mm beamformed to L = 16 channels, 64 pulses, 1134 range bins, spotlight
+20 km SW. Because the platform is static the data carries no platform-motion clutter ridge;
+scenario 008 adds motion where it needs one.
 
 | Area | Responsibility |
 | :--- | :--- |
-| Processed datasets | Feature-label pairs (EXAMPLES and CVNN variants) over several numbered airborne-radar scenarios |
-| `examples/` | Radar target localization models; transfer learning from pre-trained baselines |
-| Data access | Downloaded separately from the AFRL SDMS collection portal, not bundled with the repo |
+| `CLUTTER/num{i}_lat_lon/real{j}.mat` | `X_clut`, shape `L × Λ × G`: one clutter realisation |
+| `EXAMPLES`, `CVNN` | Processed feature-label pairs for target localisation and the CVNN benchmark |
+| `examples/` (GitHub) | Localisation models; transfer learning from pre-trained baselines |
 
 **What radar-forge borrows:** the *dataset conventions* only — feature/label pair layout, scenario
 indexing, and the target-localization and transfer-learning task definitions, as a benchmark to
-check `pipelines/` exporters against. No code enters the tree and no RASPNet data is committed;
-it is not a runtime dependency. The complex-valued model trained on this dataset — Steinmetz Neural
+check `pipelines/` exporters against, and, through `pipelines/raspnet.py`, the clutter files
+themselves as an optional STAP test input (scenario 008 D19). No code enters the tree and no
+RASPNet data is committed; it is not a runtime dependency. The complex-valued model trained on this dataset — Steinmetz Neural
 Networks, by the same author — is surveyed in §A.12.
 
 ### A.8 RadarSim (GUI)
@@ -505,8 +588,8 @@ gate. Stone Soup is a framework for comparing trackers; radar-forge has one trac
 small enough to read on its own, so a student who moves on to Stone Soup recognises the cut. Its
 metric generators are the reference for acceptance criteria beyond
 `spec/scenario-003-tracking.md` §12, and its JPDA and IMM implementations are the references for
-the extension points in tracker-001 [§7.4](tracker-001.md#74-extension-point-jpda) and
-[§9](tracker-001.md#9-multiple-models-imm). MIT, so code could be borrowed with attribution; the
+JPDA and IMM in tracker-001 [§7.4](tracker-001.md#74-jpda) and
+[§9](tracker-001.md#9-multiple-models-imm), which scenario 011 specifies. MIT, so code could be borrowed with attribution; the
 reason not to is size and readability, not licence.
 
 **A.13b FilterPy**
@@ -598,9 +681,11 @@ three components `spec/scenario-003-tracking.md` §7 has to size by hand and def
 §3. That contrast is worth teaching even before the filter is implemented. Under the bar of
 [`starter.md` §1.1](starter.md#11-the-bar), random-finite-set filters (GLMB, PMBM) are the
 state of the art for high-clutter multi-target tracking, and the GNN tracker is the baseline
-they are measured against. [`tracker-001.md` §7.5](tracker-001.md#75-out-of-scope-pmbm) records
-why they are out of scope for now: implementation is gated on a multi-target, high-clutter
-scenario existing to justify it, and would be written from the papers.
+they are measured against. [`tracker-001.md` §7.5](tracker-001.md#75-pmbm-beside-the-tracker)
+records why an RFS filter cannot sit inside `Tracker`. Scenario 011 is the multi-target,
+high-clutter scenario that justifies building one: PMBM, as a comparison tracker beside
+`Tracker`, written from the papers (D30). labeledRFS's `assignment/` is the structure reference
+for `murty_k_best`. GLMB stays a reference, not an implementation.
 
 ### A.14 Licence summary
 
@@ -617,8 +702,12 @@ scenario existing to justify it, and would be written from the papers.
 | RadarSim (GUI) | MIT | reference | yes, with attribution |
 | FMCW Radar Target Simulator | MIT | no (MATLAB) | format spec only |
 | RadarSimPy | GPL-3.0 | optional extra only, arm's length | **no** |
+| padasip | MIT | no | yes, with attribution — reimplemented instead, from the cited texts |
 | pyAPRiL | GPL-3.0 | **no** | **no** — reimplement from papers |
-| RASPNet | none declared | no (data via SDMS portal) | **no** — dataset conventions only |
+| RASPNet | dataset CC BY 4.0; code none declared | no (data via SDMS) | **no** — dataset read at runtime, code never vendored |
+| doatools.py | MIT | no | pattern only (`ArrayManifold`, scenario 010) |
+| GNU Radio | GPL-3.0 | no | **no** — polyphase channeliser structure only (scenario 009) |
+| liquid-dsp | MIT | no | structure reference for `firpfbch` (scenario 009) |
 | torchcvnn | MIT | yes (extra: `cvnn`) | yes, with attribution |
 | complexPyTorch | MIT | yes (extra: `cvnn`) | yes, with attribution |
 | Steinmetz Neural Networks | none declared | no | **no** — architectural reference only |
@@ -755,6 +844,171 @@ that only for smooth bodies at small bistatic angles away from resonance, and sc
 β = 129.3°, so **absolute** power in a bistatic scenario is an approximation. Its acceptance
 criteria test range, velocity and resolution — geometry — and deliberately assert nothing about
 absolute SNR. Forward scatter is not modelled at all.
+
+### D9 — `DataChip` is a crop that remembers its parent
+
+Owned by [`scenario-004-keystone.md`](scenario-004-keystone.md) §4.1. A chip is a crop of a cube
+around a detection. It keeps:
+
+- the parent's axis order, with any trailing `n_rx` carried whole;
+- its integer offsets into the parent;
+- the parent's bin-centre axes for the span;
+- the processing metadata needed to refine.
+
+`domain` is `slow_time`, where acceleration is still observable, or `doppler`, for angle
+estimation in scenario 006. Range never wraps; Doppler wraps modulo the FFT length. The chip holds
+unwindowed data, and every estimate leaves in **parent** coordinates with its CRB.
+
+### D10 — Migration correction lives in `core/migration.py`, `data_rfst` in and out
+
+Scenario 004 §4.2. Keystone, the Doppler-rate matched filter and RFT/GRFT each take `data_rfst`
+and return `data_rfst` of the same shape; the range-frequency domain stays internal to the module.
+`PropagationPaths` widens with `doppler_rate_hzps` and `doppler_jerk_hzps2`, both defaulting to
+zero, so every earlier scenario is unchanged.
+
+### D11 — The canceller's basis is the radar's own transmitted waveform
+
+[`scenario-005-leakage-cancellation.md`](scenario-005-leakage-cancellation.md) §4.1. A
+continuous-wave radar knows what it sent, so the basis for cancelling its leakage and near-range
+clutter is the digital transmit waveform `tx_t`, carried beside the single-channel received stream
+`data_t` over the same samples, with the same lead and tail guards. It is not a column of the
+channel axis, so 005 needs no channel axis before 006's D13 creates one. `WaveformKind` gains
+`"noise"`, whose `chirp_duration_s` holds the correlation batch, so the D7 consumers apply
+unchanged.
+
+### D12 — Leakage and clutter cancellation lives in `core/clutter.py`
+
+Scenario 005 §4.2. The block least-squares, batched, sliding-window, Wiener-SMI and
+parallel-Hammerstein cancellers are written from Haykin, Colone et al. (2016) and Anttila et al.
+Each returns its residual and its weights, and none applies weights silently. Scenarios 005 and
+008 together do not trigger the D2 promotion to `core/clutter/`.
+
+### D13 — The multi-channel cube and the steering-vector convention
+
+[`scenario-006-parallel-approach-doa.md`](scenario-006-parallel-approach-doa.md) §4.1, referenced by 007–010.
+
+- **Cube:** `(n_pulses, n_samples, n_rx)`.
+- **Array frame:** x along the face, y boresight, z up.
+- **Direction:** `u = [sin az cos el, cos az cos el, sin el]`, passed as `(n_directions, 3)`. A
+  ULA observes only `u_x`, which is reported as `direction_cosine_x`.
+- **Steering vector:** `a_n = exp(+j2π p_n·u/λ)`, unnormalised. Weights apply as `y = wᴴx`.
+- **Phase centre:** the factories put it at the origin.
+- **Synthesis:** `core/signal.py` stays geometry-agnostic. Generators take an optional
+  `rx_response_linear` of shape `(n_paths, n_rx)`; without it the 2-D cube is bit-identical to
+  today's.
+- **Range axis:** pipelines pass `fast_time_axis=1` to `core/dsp.py`, which is not edited.
+
+### D14 — The estimation snapshot of a co-cell pair is one cell
+
+Scenario 006 §4.2. Two echoes in one range-Doppler cell are coherent, so a covariance built from
+pulses or neighbouring cells is rank-one in its signal part. Such a covariance is kept **only** as
+the baseline that fails. Forward-backward spatial smoothing restores the rank. IAA, SPICE and
+deterministic ML take the single peak-cell snapshot.
+
+### D15 — Interferers are one-way sources
+
+[`scenario-007-interference.md`](scenario-007-interference.md) §4.1. A noise interferer is a
+`NoiseInterfererSources` record. It gets its power from a one-way (Friis) link in
+`core/radar_equation.py`, and `PropagationPaths` itself is unchanged.
+
+### D16 — Adaptive weights are returned, never applied silently
+
+Scenario 007 §4.2. Every function in `array/adaptive.py` returns `AdaptiveWeights`: the weights,
+the covariance actually inverted, the constraints and diagnostics.
+
+- `apply_weights` is the only place `y = wᴴx` happens.
+- Unloaded SMI with fewer snapshots than channels raises.
+
+STAP (D18) and the robust beamformers (D23) reuse this type.
+
+### D17 — The space-time snapshot is temporal-outer, spatial-inner
+
+[`scenario-008-stap.md`](scenario-008-stap.md) §4.1. One range bin's `(n_pulses, n_rx)` slab is
+flattened in C order, at index `pulse_index * n_rx + rx_index`. The space-time steering vector is
+therefore `v = b(f_d) ⊗ a(u)`, Ward's ordering. One function builds `v` and one builds the
+snapshot; nothing else reshapes a slab.
+
+### D18 — STAP lives in `array/stap.py`; the clutter model in `core/clutter.py`
+
+Scenario 008 §4.2. Clutter synthesis (Ward's discrete-patch model and the ICM taper) is a signal
+model, so it sits beside the other clutter in `core/`. The adaptive filters sit with the other
+array processing and return D16's `AdaptiveWeights`.
+
+### D19 — RASPNet is optional input, never committed
+
+Scenario 008 §4.3. `pipelines/raspnet.py` reads a locally downloaded RASPNet scenario with
+`scipy.io.loadmat`, falling back to `h5py` (the `io` extra) for v7.3 files. The data is never
+committed. Its test is marked `dataset` and is skipped when `RASPNET_DIR` is unset.
+
+### D20 — The real-IF front end is an optional stage
+
+[`scenario-009-receiver-chain.md`](scenario-009-receiver-chain.md) §4.1. `core/frontend.py` owns
+the chain order and the sample-rate plumbing:
+
+IF signal + wideband noise + off-channel interferer → ADC → NCO/DDC → FIR or polyphase decimation
+
+It reuses `pulsed_baseband` at the ADC rate and draws noise from a child RNG. With `[front_end]`
+absent the cube is bit-identical.
+
+### D21 — Impairments are explicit models; calibration returns parameters
+
+Scenario 009 §4.2. Per-channel impairments are explicit models in `array/impairments.py`.
+Calibration in `array/calibration.py` returns estimated parameters, and correcting the data is a
+separate, explicit call.
+
+### D22 — One `ArrayManifold` owns the perturbed steering vector
+
+[`scenario-010-self-calibration.md`](scenario-010-self-calibration.md) §4.1. Geometry, mutual
+coupling and channel gain/phase compose in `array/manifold.py` as `a(u) = diag(g)·C·a(u; p + δ)`.
+
+- The geometric factor *is* D13's `steering_vectors`, so the sign convention lives in one place.
+- An ideal manifold reproduces it bit for bit.
+- The manifold also produces D13's `rx_response_linear` for synthesis.
+
+### D23 — Calibration is separable from the beamformer that consumes it
+
+Scenario 010 §4.2. Calibration estimators return a refined `ArrayManifold` together with its
+Fisher information and identifiability diagnostics. Beamformers (MVDR, RCB, worst-case, robust
+LCMV) take a steering vector from whatever manifold they are given. The two meet in exactly one
+place, `pipelines/calibration.py`.
+
+### D24 — Tracking truth is continuous-time and exact
+
+[`scenario-011-terminal-area-tracking.md`](scenario-011-terminal-area-tracking.md) §4.1. Truth
+trajectories are closed-form straight and constant-rate-turn arcs, evaluated at each plot's own
+time, never generated with a filter's discretisation.
+
+### D25 — The plot-level simulator: mechanism in core, scene in pipelines
+
+Scenario 011 §4.2. `core/plots.py` holds detection, finite-resolution merging and plot noise;
+`core/clutter.py` holds Poisson clutter plots in (m·rad). The scene, the clutter layout and the
+rotating-scan sector batching live in `pipelines/terminal_area.py`.
+
+### D26 — `CoordinatedTurn`, with the turn rate in the state
+
+Scenario 011 §4.3. One new `MotionModel` in `core/tracking/motion.py`, exact discretisation with a
+series form near zero turn rate.
+
+### D27 — `IMM` is an `Estimator` of `Estimator`s
+
+Scenario 011 §4.4 and `tracker-001.md` §9. Mixing by name in the union layout; the transition
+matrix is `expm(Λ T)` for the actual interval.
+
+### D28 — JPDA, JPDA\*, Set-JPDA and JIPDA fill `AssociationResult.weights`
+
+Scenario 011 §4.5 and `tracker-001.md` §7.4. Exact events per cluster, with a bound that raises;
+clutter intensity per measurement from an oracle or a clutter map; JIPDA's existence drives an
+`ExistencePolicy`.
+
+### D29 — Track-oriented MHT: the tree is the estimator
+
+Scenario 011 §4.6 and `tracker-001.md` §7.6. `TrackTree` satisfies `Estimator`;
+`TrackOrientedMHT` is an associator using Murty's k-best assignment. `Tracker`'s one loop stands.
+
+### D30 — PMBM is a comparison tracker beside `Tracker`
+
+Scenario 011 §4.7 and `tracker-001.md` §7.5, TD11. `core/tracking/rfs/pmbm.py` shares the models
+and metrics and owns its own density; it is the reference score, not a fourth associator.
 
 ---
 
