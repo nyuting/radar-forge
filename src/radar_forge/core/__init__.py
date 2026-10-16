@@ -57,8 +57,10 @@ from radar_forge.core.dsp import (
 from radar_forge.core.geodesy import (
     ecef_to_enu_m,
     enu_to_range_azimuth_elevation,
+    enu_to_range_azimuth_elevation_rad,
     geodetic_to_ecef_m,
     geodetic_to_enu_m,
+    range_azimuth_elevation_to_enu_m,
 )
 from radar_forge.core.radar import (
     BistaticRadar,
@@ -180,6 +182,7 @@ __all__ = [
     "dsp",
     "ecef_to_enu_m",
     "enu_to_range_azimuth_elevation",
+    "enu_to_range_azimuth_elevation_rad",
     "fmcw_deramp_baseband",
     "fold_velocity_mps",
     "gate_threshold",
@@ -199,6 +202,7 @@ __all__ = [
     "pulsed_baseband",
     "radar",
     "radar_equation",
+    "range_azimuth_elevation_to_enu_m",
     "range_bin_centers_m",
     "range_doppler_map",
     "range_fft",
