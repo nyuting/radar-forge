@@ -26,6 +26,7 @@ from radar_forge.core.tracking.measurement_models import (
     BistaticRangeDopplerModel,
     CartesianPosition,
     Measurement,
+    RangeAzimuthElevationRangeRate,
     SensorPose,
 )
 from radar_forge.core.tracking.motion import CartesianMotion, RadialMotion
@@ -381,6 +382,70 @@ def test_with_the_bistatic_model_the_covariance_stays_positive_definite_over_200
     smallest = [
         np.linalg.eigvalsh(covariance).min()
         for covariance in _bistatic_long_run(rng, linearisation)
+    ]
+    assert min(smallest) > 0.0
+
+
+# A monostatic radar at the origin, and a target 20 km out, 3 km up, crossing at 150 m/s. An
+# angle accuracy of 2 mrad is 40 m across the beam at that range, so the measurement noise
+# is far from round in Cartesian space, which is what the spherical model is for.
+SIGMA_SPHERICAL_RANGE_M = 20.0
+SIGMA_ANGLE_RAD = 2.0e-3
+SIGMA_RANGE_RATE_MPS = 1.0
+
+
+def _spherical_long_run(
+    rng: np.random.Generator, linearisation: Linearisation
+) -> list[NDArray[np.float64]]:
+    """Run 200 noisy spherical updates on a 3-D CV state, and return every posterior covariance.
+
+    The UKF uses its defaults, alpha = 1 and kappa = 0, as in the bistatic run.
+    """
+    motion = CartesianMotion(dict.fromkeys("xyz", "CV"), origin_lla_deg_m=ORIGIN)
+    layout = motion.state_layout
+    model = RangeAzimuthElevationRangeRate(layout, SensorPose(np.zeros(3), "ENU", ORIGIN))
+    noise = np.diag(
+        [
+            SIGMA_SPHERICAL_RANGE_M**2,
+            SIGMA_ANGLE_RAD**2,
+            SIGMA_ANGLE_RAD**2,
+            SIGMA_RANGE_RATE_MPS**2,
+        ]
+    )
+    # Default order is x_m, xdot_mps, y_m, ydot_mps, z_m, zdot_mps.
+    truth = np.array([12_000.0, -150.0, 16_000.0, 0.0, 3_000.0, 0.0])
+    prior_covariance = np.diag([200.0**2, 30.0**2, 200.0**2, 30.0**2, 200.0**2, 30.0**2])
+    start = truth + rng.multivariate_normal(np.zeros(6), prior_covariance)
+    estimator = GaussianFilter(
+        StateEstimate(start, prior_covariance, 0, layout), motion, linearisation
+    )
+    covariances = []
+    for step in range(1, 201):
+        # A loop over time: each step starts from the one before.
+        truth = motion.transition(truth, 1.0)
+        estimator.predict_to(step)
+        value = model.predict(truth) + rng.multivariate_normal(np.zeros(4), noise)
+        estimator.update(_measurement(value, noise, step), model)
+        covariances.append(np.array(estimator.state.covariance))
+    return covariances
+
+
+def test_with_the_spherical_model_the_covariance_stays_symmetric_over_200_steps(
+    rng: np.random.Generator, linearisation: Linearisation
+) -> None:
+    """A nonlinear model with a periodic component, with the default alpha and kappa."""
+    for covariance in _spherical_long_run(rng, linearisation):
+        # rtol 1e-12: the update takes the symmetric part, so any asymmetry is roundoff.
+        np.testing.assert_allclose(covariance, covariance.T, rtol=1e-12)
+
+
+def test_with_the_spherical_model_the_covariance_stays_positive_definite_over_200_steps(
+    rng: np.random.Generator, linearisation: Linearisation
+) -> None:
+    """The definiteness argument of ``_correct``'s Notes, on the spherical model."""
+    smallest = [
+        np.linalg.eigvalsh(covariance).min()
+        for covariance in _spherical_long_run(rng, linearisation)
     ]
     assert min(smallest) > 0.0
 

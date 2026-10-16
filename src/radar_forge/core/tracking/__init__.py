@@ -98,6 +98,7 @@ from radar_forge.core.tracking.measurement_models import (
     Measurement,
     MeasurementBatch,
     MeasurementModel,
+    RangeAzimuthElevationRangeRate,
     SensorPose,
     SensorRegistration,
 )
@@ -142,6 +143,7 @@ __all__ = [
     "MotionModel",
     "NearestNeighbour",
     "RadialMotion",
+    "RangeAzimuthElevationRangeRate",
     "SensorPose",
     "SensorRegistration",
     "StateEstimate",
