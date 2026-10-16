@@ -398,9 +398,13 @@ non-finite Jacobian.
 **Converted measurements, for initiation only.** One spherical measurement can seed a Cartesian
 track: position from (r, θ, φ), with a covariance from the polar-to-Cartesian Jacobian. At
 long range and coarse angle accuracy, the naive conversion is biased and its covariance is
-wrong; the initiator uses a debiased conversion instead: Lerro and Bar-Shalom (1993) for 2-D
-(r, θ), and Suchomski (1999), which extends it, for 3-D (r, θ, φ). The converted
-position seeds the prior; every later update uses the spherical model.
+wrong; the initiator uses a debiased conversion instead. It returns the mean and covariance of
+the true position given the measurement, the measurement-conditioned conversion of Duan, Han and
+Li (2004) and Bordonaro, Willett and Bar-Shalom (2014), in 2-D (r, θ) and 3-D (r, θ, φ). For
+Gaussian errors these moments are exact, and they are the posterior under a flat prior, which is
+what a new track's prior should be. Lerro and Bar-Shalom (1993) for 2-D, and Suchomski (1999)
+for 3-D, reach approximate moments by nested conditioning, which leaves a small bias. The
+converted position seeds the prior; every later update uses the spherical model.
 
 ### 6.2 Range rate in the gate
 
@@ -720,7 +724,14 @@ it would be later. The names and module moves are TD13's.
    keeps its name until step 7 deletes it, since no new class takes the name.
    *Check:* AC3, AC4 and AC12.
 4. **The spherical measurement model** (§6.1) with its Jacobian and the debiased initiator,
-   and the EKF ≈ UKF guard of §4.5, which runs on it.
+   and the EKF ≈ UKF guard of §4.5, which runs on it. The geometry is
+   `geodesy.enu_to_range_azimuth_elevation_rad`, which the degree form now calls.
+   `kalman._enu_model` keeps its own copy until step 7 deletes it. The initiator,
+   `DebiasedSphericalInitiator`, uses the measurement-conditioned conversion rather than Lerro's
+   and Suchomski's nested conditioning (§6.1). The guard scales the prior by s² over
+   s ∈ [1/8, 1], where J P Jᵀ dominates R; at much smaller s the gap falls as s⁴, and the
+   slope bound would test nothing.
+   *Check:* AC3, AC5 and AC6 for the new model; the §4.5 guard passes.
 5. **Scenario mechanisms in `Tracker`** (§8.3), and `assignment="joint"` (§7.3).
 6. **Scenario 003 on `Tracker`.** `pipelines/tracking.py` becomes an adapter: plots in,
    batches out, snapshots back. `TrackingConfig.state_model` is honoured (it is ignored today).
@@ -968,6 +979,11 @@ These hold after migration; each is stated in a docstring, not discovered by a u
 - D. Lerro and Y. Bar-Shalom, "Tracking with debiased consistent converted measurements versus
   EKF," *IEEE Trans. Aerosp. Electron. Syst.*, vol. 29, no. 3, pp. 1015-1022, 1993 (2-D polar
   measurements).
+- Z. Duan, C. Han and X. R. Li, "Comments on 'Unbiased converted measurements for tracking',"
+  *IEEE Trans. Aerosp. Electron. Syst.*, vol. 40, no. 4, pp. 1374-1377, 2004 (the
+  measurement-conditioned moments).
+- S. Bordonaro, P. Willett and Y. Bar-Shalom, "Decorrelated unbiased converted measurement
+  Kalman filter," *IEEE Trans. Aerosp. Electron. Syst.*, vol. 50, no. 2, pp. 1431-1444, 2014.
 - P. Suchomski, "Explicit expressions for debiased statistics of 3D converted measurements,"
   *IEEE Trans. Aerosp. Electron. Syst.*, vol. 35, no. 1, pp. 368-370, 1999.
 - H. A. P. Blom and Y. Bar-Shalom, "The interacting multiple model algorithm for systems with
