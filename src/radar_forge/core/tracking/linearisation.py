@@ -468,9 +468,9 @@ class TaylorLinearisation:
     r"""The first-order Taylor linearisation: the KF on linear models, the EKF otherwise.
 
     The extended Kalman filter is the Kalman filter with the measurement matrix H replaced
-    by the Jacobian of the measurement model at the prediction [2]_. So one linearisation
-    gives both: on a linear model, the Jacobian *is* H, and this is the textbook KF line for
-    line,
+    by the Jacobian of the measurement model at the prediction ([1]_ ch. 5, [2]_). So one
+    linearisation gives both: on a linear model, the Jacobian *is* H, and this is the
+    textbook KF line for line,
 
     .. math::
 
@@ -582,8 +582,8 @@ class TaylorLinearisation:
             If the model returns arrays of the wrong shape.
         """
         differentiable = _differentiable(model)
-        n_meas = model.measurement_layout.dimension
-        predicted = as_vector(model.predict(state.mean), n_meas, "predicted measurement")
+        n_meas = differentiable.measurement_layout.dimension
+        predicted = as_vector(differentiable.predict(state.mean), n_meas, "predicted measurement")
         measurement_matrix = as_points(
             differentiable.jacobian(state.mean), n_meas, len(state.mean), "Jacobian"
         )

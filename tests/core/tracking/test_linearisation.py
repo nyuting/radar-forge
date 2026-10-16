@@ -191,7 +191,6 @@ def test_the_ukf_and_the_kf_agree_over_200_steps(rng: np.random.Generator) -> No
     noise = np.diag([50.0**2] * 3)
     ukf = GaussianFilter(prior, motion, UnscentedLinearisation())
     kf = GaussianFilter(prior, motion, TaylorLinearisation())
-    sigma = _sigma(prior.covariance)
     truth = prior.mean
     for step in range(1, 201):
         # A loop over time: each step starts from the one before.
@@ -201,6 +200,10 @@ def test_the_ukf_and_the_kf_agree_over_200_steps(rng: np.random.Generator) -> No
         for estimator in (ukf, kf):
             estimator.predict_to(step)
             estimator.update(measurement, model)
+        # Judge each step on the current spread, not the prior's: the position sigma falls
+        # from 1 km to about 30 m, and a prior-scaled atol would then allow about 1e-7 of
+        # the position variances rather than 1e-10.
+        sigma = _sigma(kf.state.covariance)
         _assert_scaled_close(ukf.state.mean, kf.state.mean, sigma)
         _assert_scaled_close(ukf.state.covariance, kf.state.covariance, np.outer(sigma, sigma))
 

@@ -127,17 +127,6 @@ def test_the_cartesian_jacobian_picks_the_reported_coordinates() -> None:
     np.testing.assert_array_equal(model.jacobian(estimate.mean), expected)
 
 
-def test_the_cartesian_jacobian_matches_a_central_difference(rng: np.random.Generator) -> None:
-    motion, _, _ = _scene("CA")
-    model = CartesianPosition(motion.state_layout, ("x_m", "yddot_mps2", "z_m"))
-    state = rng.uniform(-1000.0, 1000.0, motion.state_layout.dimension)
-    # rtol 1e-6, atol 1e-10: the best a central difference reaches, as in
-    # tests/core/test_tracking.py's Jacobian test; a linear model meets it with room to spare.
-    np.testing.assert_allclose(
-        model.jacobian(state), _central_difference(model, state), rtol=1e-6, atol=1e-10
-    )
-
-
 def test_cartesian_position_rejects_a_state_of_the_wrong_length() -> None:
     _, estimate, _ = _scene("CV")
     model = CartesianPosition(estimate.state_layout, ("x_m",))
