@@ -1,5 +1,5 @@
 # Scenario 002 -- bistatic radar over the North Carolina Piedmont.
-# The Raleigh-Durham Airport ATC illuminator, received at the Duke Receiver.
+# The Raleigh-Durham Airport ATC transmitter, received at the Duke Receiver.
 # See spec/scenario-002-bistatic.md. The two variants share every
 # block below except [[burst]].f0_hz; the carrier is the whole comparison.
 
@@ -22,7 +22,7 @@ start_time_s = 13329.0
 duration_s = 120.0
 frame_rate_hz = 1.0
 
-# The illuminator. Its presence is what makes this scenario bistatic; delete
+# The transmitter. Its presence is what makes this scenario bistatic; delete
 # this table and the same file is a monostatic scenario at the Duke Receiver.
 [transmitter_site]
 latitude_deg = 35.87750   # Raleigh-Durham Airport reference point

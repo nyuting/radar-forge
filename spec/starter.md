@@ -44,6 +44,14 @@ list. The vertical slices through it are specified one document each:
 | Scenario 1 | [`scenario-001-xband.md`](scenario-001-xband.md) | trajectory -> IQ -> range-Doppler map, in three ambiguity variants |
 | Scenario 2 | [`scenario-002-bistatic.md`](scenario-002-bistatic.md) | the same path over a two-site bistatic geometry |
 | Scenario 3 | [`scenario-003-tracking.md`](scenario-003-tracking.md) | CFAR detection -> association -> Kalman tracking |
+| Scenario 4 | [`scenario-004-keystone.md`](scenario-004-keystone.md) | Fast sounding rocket: keystone, polynomial-phase motion compensation, datachip and fine estimation *(specified)* |
+| Scenario 5 | [`scenario-005-leakage-cancellation.md`](scenario-005-leakage-cancellation.md) | Transmitter leakage and near-range clutter in a continuous-wave radar: least-squares cancellation *(specified)* |
+| Scenario 6 | [`scenario-006-parallel-approach-doa.md`](scenario-006-parallel-approach-doa.md) | Two aircraft on closely spaced parallel approaches in one range-Doppler cell: spatial super-resolution (MUSIC, ESPRIT, IAA) *(specified)* |
+| Scenario 7 | [`scenario-007-interference.md`](scenario-007-interference.md) | Strong RF interference against a weak target: SLC, MVDR, LCMV, mainlobe suppression *(specified)* |
+| Scenario 8 | [`scenario-008-stap.md`](scenario-008-stap.md) | Airborne clutter ridge: space-time adaptive processing with RASPNet and MCARM radar parameters *(specified)* |
+| Scenario 9 | [`scenario-009-receiver-chain.md`](scenario-009-receiver-chain.md) | Receiver chain: front end, DDC and polyphase filtering, hardware impairments, pilot-tone calibration *(specified)* |
+| Scenario 10 | [`scenario-010-self-calibration.md`](scenario-010-self-calibration.md) | Array perturbations: self-calibration, self-localisation and robust beamforming *(specified)* |
+| Scenario 11 | [`scenario-011-terminal-area-tracking.md`](scenario-011-terminal-area-tracking.md) | Dense terminal-area traffic: crossings, clutter, manoeuvres and closely spaced aircraft (IMM, JPDA, MHT, PMBM) *(specified)* |
 
 Two documents cut across the slices: [`data-001-formats.md`](data-001-formats.md) (file formats)
 and [`tracker-001.md`](tracker-001.md) (the tracking architecture).
@@ -108,6 +116,7 @@ The comparative map for `array/`, the one subpackage with a near one-to-one upst
 | Project Name | Description | Reason for Inclusion / Core Utility |
 | :--- | :--- | :--- |
 | **Phased-Array-Antenna-Model** | Vectorized 2D/3D radiation pattern computation library. | Fills the phased array gap in existing simulators. Supplies conformal array geometries, spatial tapering (Taylor/Chebyshev), phase quantization, and beamforming math. |
+| **doatools.py** (M. Wang) | Python DOA toolbox whose arrays carry location, gain/phase and coupling perturbation objects; CRBs. | The pattern for `array/manifold.py` (scenario 010): perturbations live on the array, not in the estimator. MIT; last commit 2018, so a pattern, not a dependency. |
 
 #### 3.1.3 DSP, detection and bistatic processing
 
@@ -116,7 +125,10 @@ Canonical blocks for `core/dsp.py`, `core/detection.py` and `core/clutter.py`. P
 | Project Name | Description | Reason for Inclusion / Core Utility |
 | :--- | :--- | :--- |
 | **RadarBook Software** | Companion code for *Introduction to Radar Using Python and MATLAB*. | Used as standard baseline reference for canonical DSP blocks (range FFT, Doppler FFT, CFAR, SAR primitives). |
-| **pyapril** | Python library for passive radar signal processing (U. Budapest). | Reference implementation for space-time clutter cancellation (Wiener-SMI, ECA) and bistatic processing geometries. |
+| **padasip** | Python adaptive-filter library (LMS, NLMS, RLS, affine projection). MIT. | Interface reference for the cancellers in `core/clutter.py`, used by scenario 005. The block least-squares cancellers are written from Haykin, Colone et al. and Anttila et al.; nothing is vendored. |
+| **pyAPRiL** | Python library for bistatic radar signal processing (Pető et al., BME). GPL-3.0. | Structure reference for least-squares clutter and leakage cancellation (ECA, Wiener-SMI) in `core/clutter.py`, used by scenario 005. Reimplemented from the published papers; never vendored. |
+| **GNU Radio** | Software-radio framework; `pfb_channelizer_ccf` polyphase channeliser. GPL-3.0. | Structure reference for the polyphase decimator and channeliser in `core/frontend.py` (scenario 009); never vendored. |
+| **liquid-dsp** | C signal-processing library; `firpfbch` polyphase filter-bank channeliser. MIT. | Second, permissively licensed reference for the same channeliser (scenario 009). |
 
 #### 3.1.4 Tracking and data fusion
 
@@ -128,7 +140,7 @@ The comparative map for `core/tracking/`, first built by scenario 3 and specifie
 | **FilterPy** | Kalman, extended, unscented and particle filters with the *Kalman and Bayesian Filters in Python* companion text. | Reference formulation for the two-state constant-velocity filter and the discrete-white-noise-acceleration process noise (`Q_discrete_white_noise`), plus the NIS consistency statistic the scenario acceptance criteria assert on. MIT; reimplemented from the cited papers rather than carried as a dependency. |
 | **motpy** | Minimal tracking-by-detection multi-object tracker: predict, Hungarian assignment, update, staleness-based pruning, in about one module. | The shape reference for the scan loop: one scan in, the current tracks out, as `core.tracking.Tracker.process(batch)`. MIT; a computer-vision tracker, so only the loop structure transfers. |
 | **Tracktable** (Sandia) | C++/Python moving-object trajectory analysis: unit-aware coordinate domains, trajectory assembly, R-tree spatial indexing, DBSCAN clustering, Cartopy map rendering. | Prior art for the trajectory data model in `pipelines/trajectories.py` and for plan-view track rendering, especially the separation of coordinate domain from trajectory container. BSD-3-Clause — usable, but deliberately **not** a dependency: one matplotlib plot does not justify a C++/Boost build. |
-| **labeledRFS / VisualRFS** (Vo, ported by Linh Ma) | GLMB and LMB random-finite-set multi-target filters with joint predict-update, Gibbs-sampled ranked assignment and OSPA/OSPA(2) metrics. | The target state for high-clutter multi-target tracking: an RFS filter propagates a distribution over *sets* of targets and so needs no heuristic gate, no M-of-N initiation and no deletion logic — the three things scenario 003 must size by hand. Ports are MIT, the original MATLAB terms differ; written from the papers if implemented. |
+| **labeledRFS / VisualRFS** (Vo, ported by Linh Ma) | GLMB and LMB random-finite-set multi-target filters with joint predict-update, Gibbs-sampled ranked assignment and OSPA/OSPA(2) metrics. | The target state for high-clutter multi-target tracking: an RFS filter propagates a distribution over *sets* of targets and so needs no heuristic gate, no M-of-N initiation and no deletion logic — the three things scenario 003 must size by hand. Scenario 011 builds the PMBM member of this family as a comparison tracker beside `Tracker` (D30), with the ports' Murty k-best as the structure reference. Ports are MIT, the original MATLAB terms differ; written from the papers. |
 
 #### 3.1.5 ML datasets and complex-valued networks
 
@@ -136,7 +148,7 @@ The conventions `pipelines/datasets.py` and `pipelines/exporters/` export agains
 
 | Project Name | Description | Reason for Inclusion / Core Utility |
 | :--- | :--- | :--- |
-| **RASPNet** (SDMS) | Benchmark dataset and example code for radar adaptive signal processing, spanning multiple scenarios of airborne radar returns. Data downloaded separately from the AFRL SDMS portal. | Reference for ML dataset conventions: feature-label pair layout, scenario indexing, and transfer-learning baselines for target localization. Evaluation benchmark for the `pipelines` dataset exporters; no code vendored, no data committed. |
+| **RASPNet** (SDMS) | Benchmark **dataset** (arXiv:2406.09638): 100 CONUS scenarios × 10 000 RFView-simulated clutter realisations, CC BY 4.0, hosted on AFRL SDMS. Static X-band platform (10 GHz, 5 MHz, PRF 1100 Hz, 16 channels × 64 pulses). | Reference for ML dataset conventions (feature-label layout, scenario indexing, transfer-learning baselines for target localisation), the radar parameters of scenario 008, and an optional STAP input read by `pipelines/raspnet.py`. No code vendored, no data committed. |
 | **torchcvnn** | Complex-valued neural network library for PyTorch (CentraleSupélec, IJCNN '25): complex layers, activations and transforms, plus SAR/radar dataset loaders (MSTAR, SAMPLE, PolSF, ALOS2, UAVSAR SLC, S1SLC). | Reference layout for how complex radar data is presented to PyTorch, so `pipelines` exports drop into an existing complex-valued training loop unchanged. MIT — the one CVNN project usable directly, as an optional `cvnn` extra. |
 | **complexPyTorch** | Complex-valued layers, activations and batch normalisation for PyTorch, following Trabelsi et al. (ICLR 2018). | Reference for the complex batch-norm formulation and a minimal complex layer set; the library Steinmetz Neural Networks is built on. MIT — usable as an optional `cvnn` extra. |
 | **Steinmetz Neural Networks** | Complex-valued architecture (AISTATS '25) by the RASPNet author, keeping I/Q as an analytic pair under a Steinmetz-decomposition consistency penalty; ships a worked RASPNet regression notebook. | The complex-valued I/Q feature convention `pipelines/datasets.py` exports against — features stay complex rather than split into two real channels — and, with RASPNet, a paired dataset-plus-model benchmark. Licence undeclared; no code vendored, never a dependency. |
@@ -149,6 +161,22 @@ The blueprint for `viz/scopes/` and the intern onboarding path.
 | :--- | :--- | :--- |
 | **RadarSim (GUI)** | Educational pulse-Doppler visualizer with real-time scopes. | Blueprint for interactive educational modules (A-Scope, B-Scope, PPI display scopes) for intern onboarding. |
 
+#### 3.1.7 Published methods behind scenarios 004–010
+
+Scenarios 004–010 mostly implement papers rather than wrap repositories. Each spec's §1.1 carries
+the full upstream table; this is the summary. Under §1.1 of this document, a **baseline** is kept
+as the reference the current method is measured against, never as the end state.
+
+| Scenario | Baseline | Current |
+| :--- | :--- | :--- |
+| 004 keystone and fine estimation | plain range-Doppler processing; HAF; parabolic, Quinn, Jacobsen sub-bin interpolation | keystone (Perry–DiPietro–Fante; Zhu et al.), keystone + matched filtering (Huang et al. 2016), second-order keystone, RFT/GRFT (Xu et al.) as oracle; CPF; Aboutanios–Mulgrew; Rife–Boorstyn CRB |
+| 005 leakage cancellation | Wiener-SMI; block least squares | Batched least squares; sliding-window least squares (Colone et al. 2016); parallel-Hammerstein least squares (Anttila et al. 2013) |
+| 006 parallel-approach pair | Bartlett and monopulse; Capon; MUSIC, Root-MUSIC, ESPRIT on a sample covariance | forward-backward spatial smoothing (Shan–Wax–Kailath; Pillai–Kwon); IAA (Yardibi et al. 2010); SPICE; deterministic ML (Li–Stoica) as oracle; Stoica–Nehorai CRB |
+| 007 strong interferers | Howells–Applebaum SLC; SMI-MVDR (Reed–Mallett–Brennan); Frost LCMV; GSC | diagonal loading (Carlson); INCM reconstruction (Gu–Leshem 2012); eigen-projection mainlobe suppression (Yang et al. 2014) |
+| 008 STAP (RASPNet and MCARM parameters) | Ward TR-1015 optimum and SMI; Brennan–Reed; Doppler-only processing | JDL, EFA, principal components, multistage Wiener filter; knowledge-aided (Guerci–Baranoski; Stoica et al. 2008); sparse recovery; Doppler warping and angle-Doppler compensation |
+| 009 receiver chain | Kaiser-window FIR decimation; single-tone pilot; pilot-based IQ estimation (Tarighat et al. 2005) | Parks–McClellan polyphase decimation and channeliser (Harris); multi-tone pilot; blind circularity-based IQ compensation (Anttila et al. 2008); range-correlated phase noise (Raven; Budge–Burt) |
+| 010 self-calibration | MVDR on the nominal manifold | known-direction ML calibration (Ng–See); Friedlander–Weiss coupling and gain/phase; PAST drift tracking; RCB (Li–Stoica–Wang); worst-case (Vorobyov–Gershman–Luo); robust LCMV |
+
 ---
 
 ### 3.2 PyPI Packages & Other Sources
@@ -158,4 +186,4 @@ The codebase is also inspired by the following PyPI packages:
 | :--- | :--- | :--- |
 | **`AIRadarLib`** *(Optional)* | FMCW/OFDM radar simulation library | Reference for time-domain chirp generation and PyTorch transformer dataset wrappers. |
 | **`ovrtx`** *(Optional)* | NVIDIA Omniverse RTX Sensor SDK | High-fidelity GPU point cloud / target map simulation reference. |
-| **`pyroomacoustics`** | Spatial array processing & beamforming | Direction-of-Arrival (DoA) estimation benchmarks (MUSIC, ESPRIT). |
+| **`pyroomacoustics`** | Spatial array processing & beamforming | Direction-of-Arrival (DoA) estimation benchmarks (MUSIC, ESPRIT); the `doa` base-class pattern and MUSIC cross-check for scenario 006. MIT. |
