@@ -28,11 +28,11 @@ once `Tracker` has what the Limitations below list.
 | :-- | :-- |
 | `coordinates.py` | Named coordinates (`x_m`, `xdot_mps`, …), the state layout they form, and `StateEstimate`: a mean, a covariance and a time. x is east, y is north and z is up, so an azimuth is measured clockwise from north. |
 | `motion.py` | Motion models, which predict a state forward in time: `CartesianMotion` (constant velocity, CV, or constant acceleration, CA, per axis) and `RadialMotion` (range and range rate). |
-| `measurement_models.py` | `Measurement` (a value, its covariance, a time, a sensor and a model), `MeasurementBatch` (one scan from one sensor), `SensorRegistration` (a sensor, and the models its measurements may use), and the models that predict a measurement from a state. |
+| `measurement_models.py` | `Measurement` (a value, its covariance, a time, a sensor and a model), `MeasurementBatch` (one scan from one sensor), `SensorRegistration` (a sensor, and the models its measurements may use), and the models that predict a measurement from a state: `CartesianPosition` (coordinates reported directly), `RangeAzimuthElevationRangeRate` (a monostatic radar's range, azimuth, elevation and range rate) and `BistaticRangeDopplerModel`. |
 | `estimation.py` | The `Estimator` interface, the innovation statistics used for gating, and `GaussianFilter`: the Kalman filter (KF), the extended Kalman filter (EKF) and the unscented Kalman filter (UKF) in one predict and one update. |
 | `linearisation.py` | How `GaussianFilter` carries a mean and a covariance through a model, the one thing that differs between its filters: `TaylorLinearisation` (the KF on a linear model, the EKF otherwise) and `UnscentedLinearisation` (the UKF). |
 | `association.py` | The chi-square gate, and nearest-neighbour (NN) and global nearest-neighbour (GNN) assignment. |
-| `initiation.py` | `DirectStateInitiator`, which starts a track from a measurement no track took. |
+| `initiation.py` | Initiators, which start a track from a measurement no track took: `DirectStateInitiator` copies reported coordinates into a prior, and `DebiasedSphericalInitiator` converts a radar's range and angles to a position without the naive conversion's bias. |
 | `kalman.py` | `KalmanTracker`, scenario 003's linear Kalman tracker, and the filter functions it uses. |
 | `tracks.py` | A live `Track`, its status, and the read-only `TrackSnapshot` handed to callers. |
 | `lifecycle.py` | The M-of-N rule that confirms and deletes tracks, and the `TrackManager` that applies it. |
@@ -154,7 +154,6 @@ tracker doesn't yet have these, and the change that switches them over adds them
 - re-finding a lost target with a widened gate while keeping its track ID;
 - a per-track `measurement_dim`, as `KalmanFilter` records. Which measurement each track
   took in the scan, and its NIS, are on the scan's `TrackSnapshot`s;
-- range, azimuth and range-rate measurement models for a monostatic radar;
 - the interacting multiple model (IMM) filter and the coordinated-turn motion model;
 - Singer's motion model, which carries the acceleration in the state and is exact at every
   time step. Its white-noise limit sets the process noise now;

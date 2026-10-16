@@ -30,6 +30,8 @@ The classes:
 - :class:`SensorPose` is where a sensor stands.
 - :class:`BistaticRangeDopplerModel` predicts the path length and path rate seen
   by a transmitter and receiver at two places.
+- :class:`RangeAzimuthElevationRangeRate` predicts the range, azimuth, elevation
+  and range rate a monostatic radar reports.
 
 States use the x = east, y = north, z = up convention of
 :mod:`radar_forge.core.tracking.coordinates`.
@@ -54,7 +56,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 import numpy as np
 from numpy.typing import NDArray
 
-from radar_forge.core.geodesy import geodetic_to_enu_m
+from radar_forge.core.geodesy import enu_to_range_azimuth_elevation_rad, geodetic_to_enu_m
 from radar_forge.core.tracking._validation import (
     as_covariance,
     as_vector,
@@ -74,6 +76,7 @@ __all__ = [
     "Measurement",
     "MeasurementBatch",
     "MeasurementModel",
+    "RangeAzimuthElevationRangeRate",
     "SensorPose",
     "SensorRegistration",
 ]
@@ -989,4 +992,277 @@ class BistaticRangeDopplerModel:
             axes = [i for i, name in enumerate(names) if name in self.state_layout.names]
             columns = list(self.state_layout.indices(tuple(names[i] for i in axes)))
             jacobian[:, columns] = derivative[:, axes]
+        return jacobian
+
+
+# The four components a monostatic radar can report, in their canonical order. Only azimuth
+# wraps: elevation lies in [-pi/2, pi/2] and never crosses a period.
+_SPHERICAL_COORDINATES = (
+    Coordinate("range_m", "m"),
+    Coordinate("azimuth_rad", "rad", period=2.0 * np.pi),
+    Coordinate("elevation_rad", "rad"),
+    Coordinate("range_rate_mps", "m/s"),
+)
+_SPHERICAL_NAMES = tuple(c.name for c in _SPHERICAL_COORDINATES)
+
+
+class RangeAzimuthElevationRangeRate:
+    """Predict the range, azimuth, elevation and range rate a monostatic radar reports.
+
+    The state is Cartesian (east, north, up) and the measurement is in the radar's own
+    spherical coordinates, relative to its site:
+
+    - ``range_m``, the slant range r = |p - p_s|;
+    - ``azimuth_rad``, atan2(Δe, Δn), zero at north and clockwise, with period 2π;
+    - ``elevation_rad``, asin(Δu / r), up from the local horizontal;
+    - ``range_rate_mps``, -(p - p_s) · v / r, positive for a closing target.
+
+    The measurement stays spherical. The filter's linearisation bridges the two
+    coordinate systems: the Jacobian for the EKF, the sigma points for the UKF [1]_.
+    A measurement is converted to Cartesian only to start a track
+    (:class:`~radar_forge.core.tracking.initiation.DebiasedSphericalInitiator`).
+
+    Parameters
+    ----------
+    state_layout : StateLayout
+        Layout of the Cartesian state.
+    sensor : SensorPose
+        The radar's site. It must share the state's frame and origin.
+    components : tuple of str, optional
+        The components the radar reports, by name and in measurement order, from
+        ``range_m``, ``azimuth_rad``, ``elevation_rad`` and ``range_rate_mps``. The
+        default is all four. Drop ``elevation_rad`` for a 2-D radar, and
+        ``range_rate_mps`` for one that measures no Doppler.
+    fixed_coordinates : mapping of str to float or None, optional
+        A value, in SI units, for each of ``x_m``, ``y_m``, ``z_m`` and, when range
+        rate is reported, ``xdot_mps``, ``ydot_mps`` and ``zdot_mps``, that the state
+        does not hold. A 2-D state fixes ``z_m`` (and ``zdot_mps``).
+
+    Raises
+    ------
+    ValueError
+        If ``components`` is empty, repeats a name or names an unknown component. If
+        the site's frame or origin differs from the state's. Also if a fixed
+        coordinate is not needed or is already in the state, a needed coordinate is
+        missing from both, or a fixed value is not finite.
+
+    Notes
+    -----
+    The geometry is :func:`radar_forge.core.geodesy.enu_to_range_azimuth_elevation_rad`
+    applied to Δp = p - p_s. The tracker and the rest of the library therefore share one
+    implementation of it, and one angle convention (``spec/data-001-formats.md`` DF2).
+
+    Two places are singular. The model raises there rather than return a non-finite
+    value or Jacobian:
+
+    - **The site itself**, r = 0. Every direction is undefined, and so is every row
+      of the Jacobian.
+    - **The zenith**, a target straight above the site, where the ground range
+      g = sqrt(Δe² + Δn²) is zero. The azimuth is undefined there, and the azimuth
+      and elevation rows of the Jacobian divide by g. This is checked only when an
+      angle is reported.
+
+    Both checks compare positions exactly, as :class:`BistaticRangeDopplerModel` does.
+    Near either place the Jacobian is finite but large, and the linearisation the EKF
+    relies on holds over a small region only.
+
+    References
+    ----------
+    .. [1] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications
+           to Tracking and Navigation*, Wiley, 2001, §10.3 (the extended Kalman filter).
+    .. [2] S. Särkkä, *Bayesian Filtering and Smoothing*, Cambridge University Press,
+           2013, ch. 5 (the extended and unscented Kalman filters).
+
+    Examples
+    --------
+    A target 1 km due east of the radar, at the radar's height, flying straight at it
+    at 10 m/s:
+
+    >>> import numpy as np
+    >>> names = ("x_m", "xdot_mps", "y_m", "ydot_mps", "z_m", "zdot_mps")
+    >>> units = ("m", "m/s") * 3
+    >>> origin = (36.0, -78.9, 60.0)
+    >>> layout = StateLayout(
+    ...     tuple(Coordinate(n, u) for n, u in zip(names, units)), "ENU", origin
+    ... )
+    >>> radar = SensorPose(np.zeros(3), "ENU", origin)
+    >>> model = RangeAzimuthElevationRangeRate(layout, radar)
+    >>> z = model.predict(np.array([1000.0, -10.0, 0.0, 0.0, 0.0, 0.0]))
+    >>> [round(float(value), 6) for value in z]
+    [1000.0, 1.570796, 0.0, 10.0]
+    """
+
+    def __init__(
+        self,
+        state_layout: StateLayout,
+        sensor: SensorPose,
+        components: tuple[str, ...] = _SPHERICAL_NAMES,
+        fixed_coordinates: Mapping[str, float] | None = None,
+    ) -> None:
+        components = tuple(components)
+        unknown = set(components) - set(_SPHERICAL_NAMES)
+        if not components or len(set(components)) != len(components) or unknown:
+            msg = (
+                f"components must be nonempty and unique, from {_SPHERICAL_NAMES}; "
+                f"got {components}."
+            )
+            raise ValueError(msg)
+
+        self.state_layout = state_layout
+        self.components = components
+        self._measures_rate = "range_rate_mps" in components
+        self._measures_angle = bool({"azimuth_rad", "elevation_rad"} & set(components))
+        self._geometry = _Geometry(
+            state_layout, sensor, fixed_coordinates, include_velocity=self._measures_rate
+        )
+        # Rows of the full (range, azimuth, elevation, range rate) vector, in the order
+        # the radar reports them.
+        self._rows = [_SPHERICAL_NAMES.index(name) for name in components]
+        self.measurement_layout = StateLayout(
+            tuple(_SPHERICAL_COORDINATES[row] for row in self._rows), "spherical"
+        )
+
+    @property
+    def sensor(self) -> SensorPose:
+        """The radar's site."""
+        return self._geometry.pose
+
+    def _check_not_singular(self, to_target_m: NDArray[np.float64]) -> None:
+        """Raise if a target is on the site, or above it when an angle is reported."""
+        # Exact comparisons, as in BistaticRangeDopplerModel: a distance is zero only when
+        # the two points are equal.
+        if np.any(np.all(to_target_m == 0.0, axis=-1)):
+            msg = "spherical geometry is singular at the site: a target position is on the radar."
+            raise ValueError(msg)
+        if self._measures_angle and np.any(np.all(to_target_m[..., :2] == 0.0, axis=-1)):
+            msg = (
+                "spherical geometry is singular at the zenith: a target is straight above "
+                "the radar, where azimuth is undefined."
+            )
+            raise ValueError(msg)
+
+    def predict(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Return the reported components for one state or a stack of states.
+
+        Parameters
+        ----------
+        state : numpy.ndarray
+            One state, shape ``(n_state,)``, or a stack, shape ``(n_points, n_state)``.
+
+        Returns
+        -------
+        numpy.ndarray
+            Shape ``(n_meas,)`` for one state or ``(n_points, n_meas)`` for a stack, in
+            ``components`` order. Azimuth lies in [0, 2π).
+
+        Raises
+        ------
+        ValueError
+            If ``state`` has the wrong shape or is not finite, or a target is at a
+            singular place (class Notes).
+        """
+        states = np.asarray(state, dtype=np.float64)
+        check_points(states, self.state_layout.dimension, "state")
+        to_target_m = self._geometry.values(states, "_m") - self._geometry.pose.position_m
+        self._check_not_singular(to_target_m)
+
+        range_m, azimuth_rad, elevation_rad = enu_to_range_azimuth_elevation_rad(to_target_m)
+        if self._measures_rate:
+            velocity_mps = self._geometry.values(states, "dot_mps")
+            range_rate_mps = -np.sum(to_target_m * velocity_mps, axis=-1) / range_m
+        else:
+            # Not reported, and the state may hold no velocity; the row is dropped below.
+            range_rate_mps = np.zeros_like(range_m)
+        full = np.stack([range_m, azimuth_rad, elevation_rad, range_rate_mps], axis=-1)
+        reported: NDArray[np.float64] = full[..., self._rows]
+        return reported
+
+    def jacobian(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
+        r"""Return the derivatives of the reported components at one state.
+
+        Parameters
+        ----------
+        state : numpy.ndarray
+            One state, shape ``(n_state,)``.
+
+        Returns
+        -------
+        numpy.ndarray
+            Shape ``(n_meas, n_state)``, one row per component in ``components``
+            order. A coordinate the state lacks, held at a fixed value, has no column.
+
+        Raises
+        ------
+        ValueError
+            If ``state`` has the wrong shape or is not finite, or a target is at a
+            singular place (class Notes).
+
+        Notes
+        -----
+        Write Δp = (Δe, Δn, Δu) = p - p_s, r = |Δp|, u = Δp / r for the unit vector to
+        the target, g = sqrt(Δe² + Δn²) for the ground range, and v for the velocity.
+        The derivatives with respect to position are
+
+        .. math::
+
+            \frac{\partial r}{\partial p} &= u^T, \\
+            \frac{\partial\, \mathrm{az}}{\partial p} &=
+                \frac{1}{g^2} \begin{pmatrix} \Delta n & -\Delta e & 0 \end{pmatrix}, \\
+            \frac{\partial\, \mathrm{el}}{\partial p} &=
+                \frac{1}{r^2 g}
+                \begin{pmatrix} -\Delta e\, \Delta u & -\Delta n\, \Delta u & g^2
+                \end{pmatrix}, \\
+            \frac{\partial \dot{r}}{\partial p} &= -\frac{(I - u u^T)\, v}{r},
+
+        and the only derivative with respect to velocity is
+        :math:`\partial \dot{r} / \partial v = -u^T`.
+
+        - The azimuth row is the derivative of atan2(Δe, Δn).
+        - The elevation row is that of atan2(Δu, g), which equals asin(Δu / r) and is
+          easier to differentiate.
+        - The range-rate row on position holds because moving the target turns u:
+          :math:`\partial u / \partial p = (I - u u^T) / r`, as in
+          :meth:`BistaticRangeDopplerModel.jacobian`.
+
+        Angles are in radians, so the angle rows are in rad/m.
+
+        References
+        ----------
+        .. [1] Bar-Shalom, Li and Kirubarajan (2001), §10.3 (the Jacobian an extended
+               Kalman filter needs).
+        """
+        x = as_vector(state, self.state_layout.dimension, "state")
+        to_target_m = self._geometry.values(x, "_m") - self._geometry.pose.position_m
+        self._check_not_singular(to_target_m)
+
+        east_m, north_m, up_m = to_target_m
+        range_m = float(np.linalg.norm(to_target_m))
+        ground_m = float(np.hypot(east_m, north_m))
+        unit = to_target_m / range_m
+
+        # One row per component in canonical order; the reported rows are picked out below.
+        # A row that is not reported may be undefined here (the azimuth at the zenith when
+        # only range is reported), so it is built only when needed.
+        by_position = np.zeros((4, 3), dtype=np.float64)
+        by_velocity = np.zeros((4, 3), dtype=np.float64)
+        by_position[0] = unit
+        if self._measures_angle:
+            by_position[1] = np.array([north_m, -east_m, 0.0]) / ground_m**2
+            by_position[2] = np.array([-east_m * up_m, -north_m * up_m, ground_m**2]) / (
+                range_m**2 * ground_m
+            )
+        if self._measures_rate:
+            velocity_mps = self._geometry.values(x, "dot_mps")
+            # (I - u uᵀ) v = v - u (u · v), divided by the range.
+            by_position[3] = -(velocity_mps - unit * (unit @ velocity_mps)) / range_m
+            by_velocity[3] = -unit
+
+        jacobian = np.zeros((len(self._rows), self.state_layout.dimension), dtype=np.float64)
+        for derivative, suffix in ((by_position, "_m"), (by_velocity, "dot_mps")):
+            # A loop over the two kinds of coordinate: a fixed one has no state column, so
+            # only the axes the state holds are copied across, by name.
+            names = [f"{axis}{suffix}" for axis in "xyz"]
+            axes = [i for i, name in enumerate(names) if name in self.state_layout.names]
+            columns = list(self.state_layout.indices(tuple(names[i] for i in axes)))
+            jacobian[:, columns] = derivative[self._rows][:, axes]
         return jacobian

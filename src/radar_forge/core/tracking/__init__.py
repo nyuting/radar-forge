@@ -65,7 +65,12 @@ from radar_forge.core.tracking.estimation import (
     InnovationStats,
     innovation_stats,
 )
-from radar_forge.core.tracking.initiation import DirectStateInitiator, TrackInitiator
+from radar_forge.core.tracking.initiation import (
+    DebiasedSphericalInitiator,
+    DirectStateInitiator,
+    TrackInitiator,
+    debiased_spherical_to_enu,
+)
 from radar_forge.core.tracking.kalman import (
     STATE_MODELS,
     FrameResult,
@@ -98,6 +103,7 @@ from radar_forge.core.tracking.measurement_models import (
     Measurement,
     MeasurementBatch,
     MeasurementModel,
+    RangeAzimuthElevationRangeRate,
     SensorPose,
     SensorRegistration,
 )
@@ -121,6 +127,7 @@ __all__ = [
     "CartesianPosition",
     "ChiSquareGate",
     "Coordinate",
+    "DebiasedSphericalInitiator",
     "DifferentiableMeasurementModel",
     "DirectStateInitiator",
     "Estimator",
@@ -142,6 +149,7 @@ __all__ = [
     "MotionModel",
     "NearestNeighbour",
     "RadialMotion",
+    "RangeAzimuthElevationRangeRate",
     "SensorPose",
     "SensorRegistration",
     "StateEstimate",
@@ -162,6 +170,7 @@ __all__ = [
     "build_tracker",
     "build_tracker_enu",
     "coordinates",
+    "debiased_spherical_to_enu",
     "estimation",
     "gate_threshold",
     "initiation",

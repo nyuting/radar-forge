@@ -52,8 +52,10 @@ from radar_forge.core.constants import WGS84_FLATTENING, WGS84_SEMI_MAJOR_AXIS_M
 __all__ = [
     "ecef_to_enu_m",
     "enu_to_range_azimuth_elevation",
+    "enu_to_range_azimuth_elevation_rad",
     "geodetic_to_ecef_m",
     "geodetic_to_enu_m",
+    "range_azimuth_elevation_to_enu_m",
 ]
 
 # First eccentricity squared, e^2 = f(2 - f). Derived from the two defining
@@ -276,22 +278,28 @@ def geodetic_to_enu_m(
     )
 
 
-def enu_to_range_azimuth_elevation(
+def enu_to_range_azimuth_elevation_rad(
     enu_m: ArrayLike,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    r"""Convert local ENU metres to the spherical coordinates a radar measures.
+    r"""Convert local ENU metres to range, azimuth and elevation in radians.
 
     .. math::
 
-        R &= \sqrt{e^2 + n^2 + u^2} \\
-        \mathrm{az} &= \operatorname{atan2}(e, n) \\
-        \mathrm{el} &= \arcsin(u / R)
+        R &= \sqrt{e^2 + n^2 + u^2} \
+        \mathrm{az} &= \operatorname{atan2}(e, n) \
+        \mathrm{el} &= rcsin(u / R)
 
     Note the argument order of :func:`numpy.arctan2`: ``atan2(east, north)``,
     not the usual ``atan2(y, x)``. That is what puts zero azimuth at **true
     north** and makes it increase **clockwise** towards the east, which is the
     compass convention used throughout the library and by ``azimuth_deg`` in
     ``spec/data-001-formats.md`` DF2.
+
+    This is the one implementation of the spherical geometry. The degree form,
+    :func:`enu_to_range_azimuth_elevation`, and the tracker's spherical
+    measurement model
+    (:class:`~radar_forge.core.tracking.measurement_models.RangeAzimuthElevationRangeRate`)
+    both call it.
 
     Parameters
     ----------
@@ -303,10 +311,12 @@ def enu_to_range_azimuth_elevation(
     range_m : numpy.ndarray
         Slant range in metres, shape ``(...,)``. This is the straight-line
         distance, so it is the quantity that sets the two-way delay.
-    azimuth_deg : numpy.ndarray
-        Azimuth in degrees, wrapped to [0, 360), zero at north, clockwise.
-    elevation_deg : numpy.ndarray
-        Elevation in degrees above the local horizontal, in [-90, 90].
+    azimuth_rad : numpy.ndarray
+        Azimuth in radians, wrapped to [0, 2π), zero at north, clockwise,
+        shape ``(...,)``.
+    elevation_rad : numpy.ndarray
+        Elevation in radians above the local horizontal, in [-π/2, π/2],
+        shape ``(...,)``.
 
     Raises
     ------
@@ -319,6 +329,20 @@ def enu_to_range_azimuth_elevation(
     ill-defined at zero range. Neither is guarded here: a radar target at zero
     range is a modelling error to be caught where the geometry is built, not a
     value to be silently substituted.
+
+    References
+    ----------
+    .. [1] P. Misra and P. Enge, *Global Positioning System: Signals,
+           Measurements, and Performance*, 2nd ed., Ganga-Jamuna Press, 2006,
+           app. 4.A (azimuth and elevation from local ENU coordinates).
+
+    Examples
+    --------
+    >>> range_m, azimuth_rad, elevation_rad = enu_to_range_azimuth_elevation_rad(
+    ...     (1000.0, 0.0, 0.0)
+    ... )
+    >>> float(range_m), round(float(azimuth_rad), 12), float(elevation_rad)
+    (1000.0, 1.570796326795, 0.0)
     """
     enu_arr = np.asarray(enu_m, dtype=np.float64)
     if enu_arr.shape[-1] != 3:
@@ -331,7 +355,106 @@ def enu_to_range_azimuth_elevation(
 
     range_m = np.sqrt(east_m**2 + north_m**2 + up_m**2)
     # atan2(east, north), not atan2(north, east): zero at north, clockwise.
-    azimuth_deg = np.degrees(np.arctan2(east_m, north_m)) % 360.0
-    elevation_deg = np.degrees(np.arcsin(np.divide(up_m, range_m)))
+    azimuth_rad = np.mod(np.arctan2(east_m, north_m), 2.0 * np.pi)
+    # A tiny negative angle wraps to 2π - ε, which can round to exactly 2π.
+    azimuth_rad = np.where(azimuth_rad >= 2.0 * np.pi, 0.0, azimuth_rad)
+    elevation_rad = np.arcsin(np.divide(up_m, range_m))
 
-    return range_m, azimuth_deg, elevation_deg
+    return range_m, azimuth_rad, elevation_rad
+
+
+def enu_to_range_azimuth_elevation(
+    enu_m: ArrayLike,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    """Convert local ENU metres to the spherical coordinates a radar measures, in degrees.
+
+    The degree form of :func:`enu_to_range_azimuth_elevation_rad`, which holds
+    the geometry and its conventions: zero azimuth at true north, increasing
+    clockwise; elevation up from the local horizontal.
+
+    Parameters
+    ----------
+    enu_m : array_like
+        Local east, north, up in metres, shape ``(..., 3)``.
+
+    Returns
+    -------
+    range_m : numpy.ndarray
+        Slant range in metres, shape ``(...,)``.
+    azimuth_deg : numpy.ndarray
+        Azimuth in degrees, wrapped to [0, 360), zero at north, clockwise.
+    elevation_deg : numpy.ndarray
+        Elevation in degrees above the local horizontal, in [-90, 90].
+
+    Raises
+    ------
+    ValueError
+        If ``enu_m`` does not have length 3 on its last axis.
+
+    References
+    ----------
+    .. [1] P. Misra and P. Enge, *Global Positioning System: Signals,
+           Measurements, and Performance*, 2nd ed., Ganga-Jamuna Press, 2006,
+           app. 4.A (azimuth and elevation from local ENU coordinates).
+    """
+    range_m, azimuth_rad, elevation_rad = enu_to_range_azimuth_elevation_rad(enu_m)
+    # The modulo catches an angle just under 2π that rounds to 360.0 in degrees.
+    return range_m, np.degrees(azimuth_rad) % 360.0, np.degrees(elevation_rad)
+
+
+def range_azimuth_elevation_to_enu_m(
+    range_m: ArrayLike, azimuth_rad: ArrayLike, elevation_rad: ArrayLike
+) -> NDArray[np.float64]:
+    r"""Convert range, azimuth and elevation in radians to local ENU metres.
+
+    The inverse of :func:`enu_to_range_azimuth_elevation_rad`:
+
+    .. math::
+
+        e &= R \cos(\mathrm{el}) \sin(\mathrm{az}) \
+        n &= R \cos(\mathrm{el}) \cos(\mathrm{az}) \
+        u &= R \sin(\mathrm{el})
+
+    Azimuth is zero at true north and increases clockwise, so it enters the
+    east component through its sine.
+
+    Parameters
+    ----------
+    range_m : array_like
+        Slant range in metres, any shape ``(...)`` that broadcasts with the
+        two angles.
+    azimuth_rad : array_like
+        Azimuth in radians, zero at north, clockwise.
+    elevation_rad : array_like
+        Elevation in radians above the local horizontal.
+
+    Returns
+    -------
+    numpy.ndarray
+        Local east, north, up in metres, shape ``(..., 3)``.
+
+    References
+    ----------
+    .. [1] P. Misra and P. Enge, *Global Positioning System: Signals,
+           Measurements, and Performance*, 2nd ed., Ganga-Jamuna Press, 2006,
+           app. 4.A (azimuth and elevation from local ENU coordinates).
+
+    Examples
+    --------
+    >>> enu_m = range_azimuth_elevation_to_enu_m(1000.0, np.pi / 2, 0.0)
+    >>> bool(np.allclose(enu_m, [1000.0, 0.0, 0.0]))
+    True
+    """
+    range_arr = np.asarray(range_m, dtype=np.float64)
+    azimuth_arr = np.asarray(azimuth_rad, dtype=np.float64)
+    elevation_arr = np.asarray(elevation_rad, dtype=np.float64)
+    ground_range_m = range_arr * np.cos(elevation_arr)
+    enu_m: NDArray[np.float64] = np.stack(
+        np.broadcast_arrays(
+            ground_range_m * np.sin(azimuth_arr),
+            ground_range_m * np.cos(azimuth_arr),
+            range_arr * np.sin(elevation_arr),
+        ),
+        axis=-1,
+    )
+    return enu_m

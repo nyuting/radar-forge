@@ -3,7 +3,8 @@
 The sigma points must reproduce the estimate's mean and covariance, and the weights must be the
 ones the docstring derives. The drift guards of ``spec/tracker-001.md`` §4.5 check that on
 linear models the unscented and Taylor linearisations agree, so the UKF is the KF; they replace
-an older test that compared the UKF with a hand-coded third copy of the Kalman update.
+an older test that compared the UKF with a hand-coded third copy of the Kalman update. On the
+nonlinear spherical model they must differ, but only at second order in the prior's spread.
 """
 
 from __future__ import annotations
@@ -17,7 +18,12 @@ from numpy.typing import NDArray
 from radar_forge.core.tracking.coordinates import StateEstimate
 from radar_forge.core.tracking.estimation import GaussianFilter
 from radar_forge.core.tracking.linearisation import TaylorLinearisation, UnscentedLinearisation
-from radar_forge.core.tracking.measurement_models import CartesianPosition, Measurement
+from radar_forge.core.tracking.measurement_models import (
+    CartesianPosition,
+    Measurement,
+    RangeAzimuthElevationRangeRate,
+    SensorPose,
+)
 from radar_forge.core.tracking.motion import CartesianMotion
 
 ORIGIN = (36.00250, -78.94100, 60.0)
@@ -206,6 +212,53 @@ def test_the_ukf_and_the_kf_agree_over_200_steps(rng: np.random.Generator) -> No
         sigma = _sigma(kf.state.covariance)
         _assert_scaled_close(ukf.state.mean, kf.state.mean, sigma)
         _assert_scaled_close(ukf.state.covariance, kf.state.covariance, np.outer(sigma, sigma))
+
+
+# --------------------------------------------------------------------------- #
+# Drift guard: on a nonlinear model the EKF and the UKF differ at second order
+# --------------------------------------------------------------------------- #
+
+# The prior's spread is far wider than the radar's noise: 2 km against 20 m in range and
+# 2 mrad (40 m) in angle at 20 km. J P Jᵀ then dominates R across the whole s range below,
+# which keeps the gain of order one, so the gap is the s² term itself. At much smaller s, R
+# dominates, the gain falls as s², the gap as s⁴, and the slope bound would pass without
+# testing anything.
+SECOND_ORDER_SCALES = np.geomspace(1 / 8, 1, 7)
+SECOND_ORDER_SLOPE = 1.8
+
+
+def test_the_ekf_and_the_ukf_differ_at_second_order_on_the_spherical_model() -> None:
+    """§4.5: scale the prior covariance by s²; the gap in the updated mean shrinks as s².
+
+    The EKF takes h(x̂) as the predicted measurement and the UKF the sigma-point mean, which
+    is h(x̂) + ½ tr(∇²h P) to leading order (Särkkä 2013, ch. 5). Their first-order terms
+    are the same, J x, so the two updated means differ by a term in P, of order s². A wrong
+    Jacobian leaves a first-order gap, slope about 1, and fails. The measurement is fixed,
+    so the innovation does not move with s; the gap is judged on the unscaled prior's
+    standard deviations, so its units are the same at every s.
+    """
+    motion = _guard_motion()
+    layout = motion.state_layout
+    model = RangeAzimuthElevationRangeRate(layout, SensorPose(np.zeros(3), "ENU", ORIGIN))
+    mean = np.array([12_000.0, -150.0, 16_000.0, 20.0, 3_000.0, 5.0])
+    sigma = np.array([2_000.0, 100.0] * 3)
+    noise = np.diag([20.0**2, 2e-3**2, 2e-3**2, 1.0**2])
+    value = model.predict(mean) + np.array([30.0, 2e-3, -2e-3, 1.0])
+    measurement = Measurement(value, noise, 0.0, "radar", "spherical")
+
+    gaps = []
+    for s in SECOND_ORDER_SCALES:
+        # A loop over prior scales: each is its own pair of updates.
+        prior = StateEstimate(mean, s**2 * np.diag(sigma**2), 0.0, layout)
+        updated = []
+        for linearisation in (TaylorLinearisation(), UnscentedLinearisation()):
+            # A loop over the two linearisations being compared.
+            estimator = GaussianFilter(prior, motion, linearisation)
+            estimator.update(measurement, model)
+            updated.append(estimator.state.mean)
+        gaps.append(np.linalg.norm((updated[0] - updated[1]) / sigma))
+    slope = np.polyfit(np.log(SECOND_ORDER_SCALES), np.log(gaps), 1)[0]
+    assert slope >= SECOND_ORDER_SLOPE
 
 
 # --------------------------------------------------------------------------- #

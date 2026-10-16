@@ -13,15 +13,22 @@ from collections.abc import Sequence
 
 import numpy as np
 import pytest
+from scipy.stats import chi2
 
-from radar_forge.core.tracking.estimation import InnovationStats
+from radar_forge.core.tracking.association import ChiSquareGate, GlobalNearestNeighbour
+from radar_forge.core.tracking.coordinates import StateEstimate
+from radar_forge.core.tracking.estimation import GaussianFilter, InnovationStats
+from radar_forge.core.tracking.initiation import DebiasedSphericalInitiator
 from radar_forge.core.tracking.lifecycle import LifecyclePolicy
 from radar_forge.core.tracking.linearisation import Linearisation, UnscentedLinearisation
 from radar_forge.core.tracking.measurement_models import (
     Measurement,
     MeasurementBatch,
+    RangeAzimuthElevationRangeRate,
+    SensorPose,
     SensorRegistration,
 )
+from radar_forge.core.tracking.motion import CartesianMotion
 from radar_forge.core.tracking.tracker import Tracker, build_tracker_enu
 from radar_forge.core.tracking.tracks import TrackSnapshot
 
@@ -91,6 +98,51 @@ def test_every_linearisation_confirms_coasts_and_dead_reckons_a_track(
     assert after.status == COASTING
     # rtol 1e-9: either linearisation reproduces a linear prediction to roundoff (§4.4).
     np.testing.assert_allclose(after.state[0], before.state[0] + before.state[1], rtol=1e-9)
+
+
+def test_every_linearisation_tracks_a_target_from_spherical_measurements(
+    linearisation: Linearisation, rng: np.random.Generator
+) -> None:
+    """A radar reporting range, azimuth, elevation and range rate, end to end.
+
+    The debiased initiator starts the track, every update uses the spherical model, and
+    the track is confirmed on the third scan (3-of-5). After 20 noisy scans of a target
+    flying straight at 150 m/s, 20 km out, the position error must be consistent with the
+    track's own covariance: its NEES is inside the chi-square 99.9 % bound for 3 degrees
+    of freedom, on this fixed seed.
+    """
+    motion = CartesianMotion(dict.fromkeys("xyz", "CV"), origin_lla_deg_m=ORIGIN)
+    layout = motion.state_layout
+    model = RangeAzimuthElevationRangeRate(layout, SensorPose(np.zeros(3), "ENU", ORIGIN))
+    prior = StateEstimate(np.zeros(6), np.diag([1.0, 200.0**2] * 3), 0.0, layout)
+    tracker = Tracker(
+        {"spherical": model},
+        {"radar": SensorRegistration("radar", ("spherical",))},
+        ChiSquareGate(0.997),
+        GlobalNearestNeighbour(),
+        DebiasedSphericalInitiator(
+            lambda state: GaussianFilter(state, motion, linearisation), prior
+        ),
+    )
+    noise = np.diag([20.0**2, 2e-3**2, 2e-3**2, 1.0**2])
+    # Default order is x_m, xdot_mps, y_m, ydot_mps, z_m, zdot_mps.
+    truth = np.array([12_000.0, -150.0, 16_000.0, 0.0, 3_000.0, 0.0])
+    statuses = []
+    for time_s in range(20):
+        # Scans are processed in time order; each depends on the one before.
+        if time_s:
+            truth = motion.transition(truth, 1.0)
+        value = model.predict(truth) + rng.multivariate_normal(np.zeros(4), noise)
+        scan = tracker.sensors["radar"].batch(time_s, [("spherical", value, noise)])
+        statuses.append(tracker.process(scan)[0].status)
+    (snapshot,) = tracker.process(MeasurementBatch(20, "radar"))
+    truth = motion.transition(truth, 1.0)
+    assert statuses[:3] == [TENTATIVE, TENTATIVE, CONFIRMED]
+    rows = list(layout.indices(("x_m", "y_m", "z_m")))
+    error_m = snapshot.estimate.mean[rows] - truth[rows]
+    covariance_m2 = snapshot.estimate.covariance[np.ix_(rows, rows)]
+    nees = float(error_m @ np.linalg.solve(covariance_m2, error_m))
+    assert nees < chi2.ppf(0.999, 3)
 
 
 def test_a_track_is_confirmed_on_the_third_scan() -> None:
