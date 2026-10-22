@@ -41,13 +41,17 @@ tracker, and how to choose its process noise, are in the user guide,
   spherical-to-Cartesian geometry.
 - Chi-square gating, global nearest-neighbour (GNN) and nearest-neighbour (NN) assignment.
 - M-of-N track confirmation, miss-count, coast-time and covariance-based deletion.
-- Extension points for the interacting multiple model (IMM) filter and for joint probabilistic
-  data association (JPDA).
+- The interacting multiple model (IMM) filter, joint probabilistic data association (JPDA and
+  its JPDA\*, Set-JPDA and JIPDA forms) and track-oriented multiple hypothesis tracking (MHT),
+  specified by the first scenario that needs them,
+  [`scenario-011-terminal-area-tracking.md`](scenario-011-terminal-area-tracking.md) (§7.4, §7.6,
+  §9).
+- One random-finite-set tracker, PMBM, as a **comparison tracker** beside `Tracker`, not inside
+  it (§7.5).
 
 **Out of scope.**
 
-- Implementing IMM and JPDA. Each waits for the first scenario that needs it (§9, §7.4).
-- Random-finite-set trackers such as PMBM. §7.5 says why.
+- Random-finite-set trackers inside `Tracker`'s loop, and GLMB. §7.5 says why.
 - Track-to-track fusion across sensors. One `Tracker` already takes every sensor's
   measurements, which is measurement-level fusion; fusing tracks from separate trackers is
   a later spec.
@@ -462,10 +466,10 @@ fold selection 82 % against 86 %). A confirmed track whose gate is widened for r
 (§8.3) outbids tentative tracks for false alarms. So scenario 003 sets `"joint"` in its TOML.
 Changing either default needs a measurement, recorded in the docstring. TD8.
 
-### 7.4 Extension point: JPDA
+### 7.4 JPDA
 
 JPDA (Fortmann, Bar-Shalom and Scheffe 1983) updates each track with a weighted mixture of the
-measurements in its gate, instead of one. To admit it without changing `Tracker`'s loop:
+measurements in its gate, instead of one. It is admitted without changing `Tracker`'s loop:
 
 - `AssociationResult` gains optional association weights, shape (n_tracks, n_measurements + 1),
   the last column for "no measurement". GNN and NN leave it empty.
@@ -473,17 +477,50 @@ measurements in its gate, instead of one. To admit it without changing `Tracker`
   computed from each pair's `InnovationStats` by a helper in `association.py`, and applied
   through the correction core.
 
-JPDA itself is deferred to the first multi-target scenario: scenario 003 §7 records GNN as a
-deliberate limit, and its §13.3 names a second target as what makes JPDA or MHT necessary.
+Scenario 003 §7 records GNN as a deliberate limit, and its §13.3 names a second target as what
+makes JPDA or MHT necessary. That scenario is
+[`scenario-011-terminal-area-tracking.md`](scenario-011-terminal-area-tracking.md), and its D28
+specifies JPDA in `core/tracking/jpda.py`:
 
-### 7.5 Out of scope: PMBM
+- Tracks are clustered by shared gated measurements, and each cluster's feasible events are
+  enumerated exactly, with a bound that raises rather than approximates.
+- `coalescence` selects textbook JPDA, JPDA\* (Blom and Bloem 2000) or Set-JPDA (Svensson et al.
+  2011).
+- The clutter intensity is passed per measurement, from an oracle or a clutter map.
+- JIPDA (Mušicki and Evans 2004) propagates `Track.existence_probability`, which drives the
+  `ExistencePolicy` of §8.2.
 
-The Poisson multi-Bernoulli mixture filter (García-Fernández et al. 2018) models clutter,
-missed detections and the birth of new targets inside the filter itself. It is out of scope, for a structural reason: it replaces the split
-this spec is built on. In PMBM, association hypotheses, track existence and birth are all part
-of the filter's density, so there is no separate associator, initiator or lifecycle to swap.
-It would be a second tracker, not a fourth filter, and belongs in a library built on random
-finite sets.
+### 7.5 PMBM, beside the tracker
+
+The Poisson multi-Bernoulli mixture filter (García-Fernández et al. 2018) models clutter, missed
+detections and the birth of new targets inside the filter itself. It cannot sit inside
+`Tracker`, for a structural reason: it replaces the split this spec is built on. In PMBM,
+association hypotheses, track existence and birth are all part of the filter's density, so
+there is no separate associator, initiator or lifecycle to swap. It is a second tracker, not a
+fourth filter.
+
+Scenario 011 (D30) builds it as exactly that: `PmbmTracker` in `core/tracking/rfs/pmbm.py`, a
+**comparison tracker** beside `Tracker`. It shares the motion and measurement models,
+`innovation_stats`, Murty's k-best assignment, the clutter intensity and the metrics, and owns
+its density. It earns its place as the reference score. Williams (2015) shows MHT and JIPDA
+approximate the same conjugate prior, so PMBM measures what they lose. GLMB stays out: one RFS
+reference is enough to score against.
+
+### 7.6 MHT
+
+Track-oriented MHT (Reid 1979; Kurien 1990; Blackman 2004) defers association by keeping
+several association histories per target. Scenario 011 (D29) fits it inside `Tracker`'s one
+loop:
+
+- `TrackTree` satisfies `Estimator`: its leaves are estimators, and its `state` is the leaf in
+  the current best global hypothesis.
+- `TrackOrientedMHT` is an associator that finds the k best global hypotheses per cluster by
+  Murty's algorithm over `linear_sum_assignment`, branches the trees, and prunes by N-scan.
+- Score-based confirmation replaces M-of-N for MHT, through the selector of §8.3.
+
+The estimate reported at a scan is the best hypothesis at that scan; MHT may later prefer
+another, and reported tracks are not rewritten. With `n_scan = 1` and `k_best = 1` it reduces to
+GNN with a finite non-assignment cost (§7.2), which is its first test.
 
 ## 8. Track lifecycle
 
@@ -510,6 +547,7 @@ scan, is the only one the specs use (`spec/data-001-formats.md` §5 Vocabulary).
 | Re-acquisition window for confirmed tracks | `n_reacquire_misses` (renamed, TD13) | the count exists (`LifecyclePolicy`); the velocity reset that widens the gate is new in `Tracker` (§8.3) |
 | Deletion after a coast time | `max_coast_time_s` | exists |
 | **Covariance-based deletion** | `max_position_sigma_m` | **new** |
+| **Existence-based confirm and delete** (JIPDA only) | `ExistencePolicy(confirm, delete)` | **new**, scenario 011 D28 |
 
 **Covariance-based deletion.** A track is deleted when the square root of the largest
 eigenvalue of its position covariance exceeds `max_position_sigma_m`, whatever its miss count.
@@ -522,7 +560,11 @@ trace of the covariance (optionally over chosen components), which mixes units u
 all positions. A standard deviation in metres is a number an intern can choose.
 
 `Track.score`, `age` and `existence_probability` (unused in any decision,
-`docs/reviews/pr1-review.md` #24) stay out of `Track` until a decision uses them.
+`docs/reviews/pr1-review.md` #24) stay out of `Track` until a decision uses them. Scenario 011
+supplies the first two such decisions: JIPDA's existence drives `ExistencePolicy` (confirm at
+0.95, delete below 0.05 in that scenario), and MHT's score drives its Wald-threshold
+confirmation (§7.6). `existence_probability` and `score` enter `Track` with them, optional and
+`None` for every other associator. `age` stays out.
 
 ### 8.3 Range-only bootstrap, retry and re-acquisition reset
 
@@ -543,7 +585,7 @@ sees no change. The reset finds its coordinates by name, never by slicing (princ
 ## 9. Multiple models (IMM)
 
 IMM runs a bank of filters with different motion models and mixes them by mode probability
-(Blom and Bar-Shalom 1988; Bar-Shalom, Li and Kirubarajan 2001, ch. 11). It is specified here only as an extension point:
+(Blom and Bar-Shalom 1988; Bar-Shalom, Li and Kirubarajan 2001, ch. 11). Its shape:
 
 - `IMM` is an `Estimator` that holds `Estimator`s. `Tracker` sees one estimator per track, so
   nothing outside `IMM` changes.
@@ -557,7 +599,13 @@ IMM runs a bank of filters with different motion models and mixes them by mode p
 
 It is built with the first manoeuvring scenario, together with the coordinated-turn motion
 model, as the PR #1 review planned. Scenario 003 §13.4 sets the same bar from the other side:
-IMM only once `sigma_accel_mps2` is shown to be the binding error on the circuit's turns.
+IMM only once `sigma_accel_mps2` is shown to be the binding error on the circuit's turns. That
+scenario is [`scenario-011-terminal-area-tracking.md`](scenario-011-terminal-area-tracking.md):
+D26 specifies `CoordinatedTurn` (turn rate in the state) and D27 the `IMM`. Two details it adds:
+
+- The mode transition matrix is `expm(Λ T)` from a generator in s⁻¹, formed for each actual
+  interval, because a rotating radar's sector batches make intervals unequal.
+- Mode probabilities are exposed as an intermediate quantity and written to `tracks.csv`.
 
 ## 10. Integration with the rest of radar-forge
 
@@ -766,10 +814,18 @@ scenario features (couples core to one scenario); leaving them in `pipelines/` a
 §8.2. *Rejected:* relying on miss counts and coast time alone; they need retuning whenever the
 scan rate or target speed changes.
 
-### TD11 — IMM and JPDA as extension points; PMBM out of scope
+### TD11 — IMM, JPDA and MHT inside the loop; PMBM beside it
 
-§7.4, §7.5, §9. *Rejected:* implementing them now (no scenario needs them; each would be
-untested against real data); implementing PMBM at all (§7.5).
+§7.4, §7.5, §7.6, §9. *Amended by scenario 011.* As first written, this decision kept IMM and
+JPDA as extension points and ruled PMBM out, because no scenario needed them. Scenario 011 is
+the scenario that needs them, so they are specified there (D26–D30):
+
+- IMM, JPDA and MHT fit `Tracker`'s one loop, as an estimator, an associator and a
+  tree-as-estimator respectively.
+- PMBM does not fit (§7.5) and is built as a comparison tracker beside it.
+
+*Rejected:* PMBM inside `Tracker` (it has no associator, initiator or lifecycle to swap); GLMB as
+a second RFS reference (one is enough to score against).
 
 ### TD12 — `Plot` for the pipeline's detection report
 
@@ -838,7 +894,7 @@ NumPy is the limit).
 | Strict decoupling of models, filters, association, lifecycle | **Adopted.** Already the shape; §3 makes it a rule | §3, TD2 |
 | Polar/spherical to Cartesian | **Adopted.** Spherical model with Jacobian; debiased conversion for initiation only | §6.1, TD6 |
 | Doppler in the state vector | **Adopted as corrected:** in the measurement and the gate, not the state | §1.3, §6.2, TD7 |
-| GNN, JPDA, PMBM | **GNN adopted** (exists); **JPDA** as an extension point; **PMBM** out of scope | §7, TD11 |
+| GNN, JPDA, PMBM | **GNN adopted** (exists); **JPDA** and MHT specified by scenario 011; **PMBM** as a comparison tracker beside `Tracker` | §7, TD11 |
 | M-of-N lifecycle, covariance deletion | **Adopted.** M-of-N exists; covariance deletion is new | §8, TD10 |
 | High-performance implementation | **Adopted:** batched across tracks and measurements, with a benchmark budget; readable and fast | §11, TD14 |
 | Validation strategies | **Adopted:** analytic, statistical, drift guards, end to end | §4.5, §12 |
@@ -874,7 +930,8 @@ These hold after migration; each is stated in a docstring, not discovered by a u
 - No initiator for the bistatic model: one bistatic measurement cannot fix a position. Seed
   such tracks with `Tracker.seed`.
 - Expect track fragmentation with the default settings; it is measured once the runner returns.
-- No IMM, coordinated turn, Singer model, JPDA or MHT (§7.4, §9).
+- No Singer model. IMM, the coordinated turn, JPDA, MHT and PMBM are specified by scenario 011
+  and not yet implemented (§7.4–§7.6, §9).
 
 ## References
 

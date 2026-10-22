@@ -15,7 +15,7 @@ end, then processing. TOML does not care about the order; a reader does.
 ``[scenario]``          name, description, seed
 ``[target]``            RCS and altitude
 ``[trajectory]``        the ADS-B track and the window played from it
-``[transmitter_site]``  where the illuminator stands -- bistatic only
+``[transmitter_site]``  where the transmitter stands -- bistatic only
 ``[[burst]]``           one waveform and CPI, shared by both ends
 ``[receiver_site]``     where the receiver stands
 ``[receiver]``          the receive chain: gain and noise figure
@@ -380,7 +380,7 @@ def _burst_radar(
     """Build one burst's radar, letting its own validation report bad physics.
 
     When ``transmitter_site`` is given the
-    illuminator stands elsewhere and the result is a
+    transmitter stands elsewhere and the result is a
     :class:`~radar_forge.core.radar.BistaticRadar`; otherwise one site does both
     jobs and the result is a :class:`~radar_forge.core.radar.Radar`.
     """
