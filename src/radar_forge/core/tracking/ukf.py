@@ -224,19 +224,19 @@ class UKF:
             self._points = s.state_layout.normalise(s.mean + deviations)
         return self._points
 
-    def predict_to(self, time_s: float) -> None:
-        r"""Move the estimate forward to ``time_s``.
+    def predict_to(self, timestamp_s: float) -> None:
+        r"""Move the estimate forward to ``timestamp_s``.
 
         Parameters
         ----------
-        time_s : float
+        timestamp_s : float
             The new time, in seconds. If it is within 1e-6 s of the current time, nothing
             changes.
 
         Raises
         ------
         ValueError
-            If ``time_s`` is not finite, or is earlier than the current estimate
+            If ``timestamp_s`` is not finite, or is earlier than the current estimate
             ("out-of-sequence"). Also if the motion model returns arrays of the wrong shape, or a
             process noise that is not a covariance.
 
@@ -251,17 +251,17 @@ class UKF:
             P^- = \sum_i W^{(c)}_i (\mathcal{X}'_i - \hat{x}^-)(\mathcal{X}'_i -
             \hat{x}^-)^T + Q.
         """
-        time_s = float(time_s)
-        if not np.isfinite(time_s):
-            msg = f"timestamp_s must be finite; got {time_s}."
+        timestamp_s = float(timestamp_s)
+        if not np.isfinite(timestamp_s):
+            msg = f"timestamp_s must be finite; got {timestamp_s}."
             raise ValueError(msg)
-        dt_s = time_s - self._state.timestamp_s
+        dt_s = timestamp_s - self._state.timestamp_s
         if abs(dt_s) <= TIMESTAMP_TOLERANCE_S:
             return
         if dt_s < 0:
             msg = (
                 "out-of-sequence prediction is not supported: "
-                f"{time_s} s is before the estimate's {self._state.timestamp_s} s."
+                f"{timestamp_s} s is before the estimate's {self._state.timestamp_s} s."
             )
             raise ValueError(msg)
 
@@ -278,7 +278,9 @@ class UKF:
         mean = s.state_layout.weighted_mean(points, self.wm)
         deviations = s.state_layout.residual(points, mean)
         covariance = (deviations.T * self.wc) @ deviations + noise
-        self._replace_state(StateEstimate(mean, _symmetrise(covariance), time_s, s.state_layout))
+        self._replace_state(
+            StateEstimate(mean, _symmetrise(covariance), timestamp_s, s.state_layout)
+        )
 
     def _innovation(
         self, measurement: Measurement, model: MeasurementModel
