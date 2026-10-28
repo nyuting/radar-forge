@@ -343,6 +343,28 @@ def resample(trajectory: Trajectory, times_s: ArrayLike) -> Trajectory:
     )
 
 
+def _reject_targets_on_site(
+    enu_m: NDArray[np.float64], time_s: NDArray[np.float64], site: str
+) -> None:
+    """Raise if any sample sits exactly on a site, where the look angles are undefined.
+
+    :func:`~radar_forge.core.geodesy.enu_to_range_azimuth_elevation` leaves this
+    case unguarded on purpose and asks for it to be caught where the geometry is
+    built, which is here. Unguarded it is 0/0 in the elevation and comes back NaN
+    with a floating-point warning, far from the trajectory that caused it.
+    """
+    # Exact comparison: geodetic_to_enu_m returns zero only for the site itself.
+    on_site = np.all(enu_m == 0.0, axis=-1)
+    if np.any(on_site):
+        index = int(np.argmax(on_site))
+        msg = (
+            f"a target position is on the {site} at sample {index} "
+            f"(t = {float(time_s[index])} s): range is zero there and the look angles "
+            "are undefined."
+        )
+        raise ValueError(msg)
+
+
 def to_radar_frame(trajectory: Trajectory, radar: Radar) -> TargetTrack:
     r"""Express a trajectory as the range, angles and closing rate a radar sees.
 
@@ -359,6 +381,11 @@ def to_radar_frame(trajectory: Trajectory, radar: Radar) -> TargetTrack:
     TargetTrack
         Range, azimuth, elevation and radial velocity, shape ``(n_frames,)``
         each.
+
+    Raises
+    ------
+    ValueError
+        If a trajectory position is exactly on the radar site.
 
     Notes
     -----
@@ -387,6 +414,7 @@ def to_radar_frame(trajectory: Trajectory, radar: Radar) -> TargetTrack:
         radar.longitude_deg,
         radar.altitude_m,
     )
+    _reject_targets_on_site(enu_m, trajectory.time_s, "radar site")
     range_m, azimuth_deg, elevation_deg = enu_to_range_azimuth_elevation(enu_m)
     radial_velocity_mps = -np.gradient(range_m, trajectory.time_s)
 
@@ -484,6 +512,12 @@ def to_bistatic_radar_frame(trajectory: Trajectory, radar: BistaticRadar) -> Bis
         Both ranges, both sets of look angles, the bistatic angle and the
         bisector rate, shape ``(n_frames,)`` each.
 
+    Raises
+    ------
+    ValueError
+        If a trajectory position is exactly on the transmitter or the receiver
+        site.
+
     Notes
     -----
     The bisector velocity is minus **half** the central difference of the total
@@ -525,25 +559,29 @@ def to_bistatic_radar_frame(trajectory: Trajectory, radar: BistaticRadar) -> Bis
     >>> bool(np.all(track.bisector_velocity_mps == 0.0))  # a stationary target
     True
     """
+    transmit_enu_m = geodetic_to_enu_m(
+        trajectory.latitude_deg,
+        trajectory.longitude_deg,
+        trajectory.altitude_m,
+        radar.transmitter_latitude_deg,
+        radar.transmitter_longitude_deg,
+        radar.transmitter_altitude_m,
+    )
+    receive_enu_m = geodetic_to_enu_m(
+        trajectory.latitude_deg,
+        trajectory.longitude_deg,
+        trajectory.altitude_m,
+        radar.receiver_latitude_deg,
+        radar.receiver_longitude_deg,
+        radar.receiver_altitude_m,
+    )
+    _reject_targets_on_site(transmit_enu_m, trajectory.time_s, "transmitter site")
+    _reject_targets_on_site(receive_enu_m, trajectory.time_s, "receiver site")
     range_tx_m, transmit_azimuth_deg, transmit_elevation_deg = enu_to_range_azimuth_elevation(
-        geodetic_to_enu_m(
-            trajectory.latitude_deg,
-            trajectory.longitude_deg,
-            trajectory.altitude_m,
-            radar.transmitter_latitude_deg,
-            radar.transmitter_longitude_deg,
-            radar.transmitter_altitude_m,
-        )
+        transmit_enu_m
     )
     range_rx_m, receive_azimuth_deg, receive_elevation_deg = enu_to_range_azimuth_elevation(
-        geodetic_to_enu_m(
-            trajectory.latitude_deg,
-            trajectory.longitude_deg,
-            trajectory.altitude_m,
-            radar.receiver_latitude_deg,
-            radar.receiver_longitude_deg,
-            radar.receiver_altitude_m,
-        )
+        receive_enu_m
     )
     bisector_velocity_mps = -np.gradient(range_tx_m + range_rx_m, trajectory.time_s) / 2.0
 
