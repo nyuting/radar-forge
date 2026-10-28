@@ -873,6 +873,23 @@ class TestEnuMeasurementModel:
         innovation, _, _ = innovation_of(KalmanState(state, np.eye(4)), measurement, model)
         assert abs(innovation[1]) < 0.01
 
+    @pytest.mark.parametrize(
+        ("state_model", "position_m", "match"),
+        [
+            ("enu_2d", [0.0, 0.0], "on the radar"),
+            ("enu_3d", [0.0, 0.0, 0.0], "on the radar"),
+            ("enu_3d", [0.0, 0.0, 5_000.0], "zenith"),
+        ],
+    )
+    def test_a_singular_state_is_rejected(self, state_model, position_m, match):
+        """A ValueError, not a ZeroDivisionError or an inf in the Jacobian."""
+        model = enu_model(state_model)
+        state = np.concatenate([position_m, np.full(len(position_m), 10.0)])
+        with pytest.raises(ValueError, match=match):
+            model.measurement_function(state)
+        with pytest.raises(ValueError, match=match):
+            model.measurement_jacobian(state)
+
     def test_rejects_a_negative_angle_sigma(self):
         with pytest.raises(ValueError, match="sigma_azimuth_deg"):
             enu_model("enu_2d", sigma_azimuth_deg=-1.0)

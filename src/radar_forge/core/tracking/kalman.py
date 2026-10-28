@@ -398,7 +398,9 @@ def state_model_matrices(
     ------
     ValueError
         If ``state_model`` is not a known model, or any standard deviation is
-        negative.
+        negative. For the ENU models, the returned ``measurement_function`` and
+        ``measurement_jacobian`` also raise it for a state on the radar or
+        straight above it, where the spherical geometry is singular.
 
     Notes
     -----
@@ -497,9 +499,24 @@ def _enu_model(
     n_axes = 3 if state_model == "enu_3d" else 2
     measures_elevation = state_model == "enu_3d"
 
+    def check_not_singular(position: NDArray[np.float64]) -> None:
+        # The same guard as RangeAzimuthElevationRangeRate._check_not_singular. Unguarded,
+        # the origin is a bare ZeroDivisionError and the zenith puts inf in the Jacobian.
+        # Exact comparisons: a distance is zero only when the two points are equal.
+        if np.all(position == 0.0):
+            msg = "spherical geometry is singular at the site: a target position is on the radar."
+            raise ValueError(msg)
+        if np.all(position[:2] == 0.0):
+            msg = (
+                "spherical geometry is singular at the zenith: a target is straight above "
+                "the radar, where azimuth is undefined."
+            )
+            raise ValueError(msg)
+
     def measurement_function(state: NDArray[np.float64]) -> NDArray[np.float64]:
         position = state[:n_axes]
         velocity = state[n_axes:]
+        check_not_singular(position)
         range_m = float(np.linalg.norm(position))
         # atan2(east, north): zero at true north, increasing clockwise, per
         # spec/data-001-formats.md DF2 and core.geodesy. The mathematical convention
@@ -520,6 +537,7 @@ def _enu_model(
     def measurement_jacobian(state: NDArray[np.float64]) -> NDArray[np.float64]:
         position = state[:n_axes]
         velocity = state[n_axes:]
+        check_not_singular(position)
         range_m = float(np.linalg.norm(position))
         ground_m = float(np.hypot(position[0], position[1]))
         opening_mps = float(position @ velocity) / range_m
