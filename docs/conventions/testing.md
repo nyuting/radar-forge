@@ -318,7 +318,7 @@ Monopulse slope and MUSIC/ESPRIT resolution tests arrive with those estimators.
 
 | Property | Truth | Bug it catches |
 | :--- | :--- | :--- |
-| NEES, NIS | Sum over N runs inside the 99.9 % χ² interval, parametrised over every estimator; runs shared through a fixture, `slow` (`tests/core/tracking/test_ukf.py`) | A filter that tracks well but is overconfident |
+| NEES, NIS | Sum over N runs inside the 99.9 % χ² interval, parametrised over every estimator; runs shared through a fixture, `slow` (`tests/core/tracking/test_gaussian_filter.py`) | A filter that tracks well but is overconfident |
 | Gate | Accepts the fraction of true measurements it claims (`test_association.py`) | Gate on the wrong dimension or the wrong quantile |
 | Lifecycle | Confirms on exactly the M-th of N hits; deletes on exactly the K-th miss | Off-by-one in the counters |
 | Crossing targets | IDs kept, on geometry where the right answer is unambiguous | Cost matrix transposed |

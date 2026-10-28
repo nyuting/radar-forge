@@ -16,9 +16,11 @@ motion
 measurement_models
     Measurements, the sensors they arrive from, and the models that predict them.
 estimation
-    The estimator interface and the innovation statistics used for gating.
-ukf
-    The unscented Kalman filter (UKF).
+    The estimator interface, the innovation statistics used for gating, and
+    :class:`GaussianFilter`: the KF, the EKF and the UKF in one flow.
+linearisation
+    How the Gaussian filter carries a mean and a covariance through a model: the
+    Taylor linearisation (KF, EKF) and the unscented transformation (UKF).
 association
     The chi-square gate, and nearest-neighbour and global nearest-neighbour assignment.
 initiation
@@ -43,11 +45,11 @@ from radar_forge.core.tracking import (
     initiation,
     kalman,
     lifecycle,
+    linearisation,
     measurement_models,
     motion,
     tracker,
     tracks,
-    ukf,
 )
 from radar_forge.core.tracking.association import (
     AssociationResult,
@@ -57,8 +59,18 @@ from radar_forge.core.tracking.association import (
     NearestNeighbour,
 )
 from radar_forge.core.tracking.coordinates import Coordinate, StateEstimate, StateLayout
-from radar_forge.core.tracking.estimation import Estimator, InnovationStats, innovation_stats
-from radar_forge.core.tracking.initiation import DirectStateInitiator, TrackInitiator
+from radar_forge.core.tracking.estimation import (
+    Estimator,
+    GaussianFilter,
+    InnovationStats,
+    innovation_stats,
+)
+from radar_forge.core.tracking.initiation import (
+    DebiasedSphericalInitiator,
+    DirectStateInitiator,
+    TrackInitiator,
+    debiased_spherical_to_enu,
+)
 from radar_forge.core.tracking.kalman import (
     STATE_MODELS,
     FrameResult,
@@ -78,29 +90,36 @@ from radar_forge.core.tracking.kalman import (
     update,
 )
 from radar_forge.core.tracking.lifecycle import LifecyclePolicy, TrackManager
+from radar_forge.core.tracking.linearisation import (
+    Linearisation,
+    MeasurementMoments,
+    TaylorLinearisation,
+    UnscentedLinearisation,
+)
 from radar_forge.core.tracking.measurement_models import (
     BistaticRangeDopplerModel,
     CartesianPosition,
+    DifferentiableMeasurementModel,
     Measurement,
     MeasurementBatch,
     MeasurementModel,
+    RangeAzimuthElevationRangeRate,
     SensorPose,
     SensorRegistration,
 )
 from radar_forge.core.tracking.motion import (
     CartesianMotion,
+    LinearMotionModel,
     MotionKind,
     MotionModel,
     RadialMotion,
 )
 from radar_forge.core.tracking.tracker import Tracker, build_tracker, build_tracker_enu
 from radar_forge.core.tracking.tracks import TRACK_STATUSES, Track, TrackSnapshot, TrackStatus
-from radar_forge.core.tracking.ukf import UKF
 
 __all__ = [
     "STATE_MODELS",
     "TRACK_STATUSES",
-    "UKF",
     "AssociationResult",
     "Associator",
     "BistaticRangeDopplerModel",
@@ -108,27 +127,35 @@ __all__ = [
     "CartesianPosition",
     "ChiSquareGate",
     "Coordinate",
+    "DebiasedSphericalInitiator",
+    "DifferentiableMeasurementModel",
     "DirectStateInitiator",
     "Estimator",
     "FrameResult",
+    "GaussianFilter",
     "GlobalNearestNeighbour",
     "InnovationStats",
     "KalmanFilter",
     "KalmanState",
     "KalmanTracker",
     "LifecyclePolicy",
+    "LinearMotionModel",
+    "Linearisation",
     "Measurement",
     "MeasurementBatch",
     "MeasurementModel",
+    "MeasurementMoments",
     "MotionKind",
     "MotionModel",
     "NearestNeighbour",
     "RadialMotion",
+    "RangeAzimuthElevationRangeRate",
     "SensorPose",
     "SensorRegistration",
     "StateEstimate",
     "StateLayout",
     "StateModel",
+    "TaylorLinearisation",
     "Track",
     "TrackInitiator",
     "TrackManager",
@@ -136,12 +163,14 @@ __all__ = [
     "TrackSnapshot",
     "TrackStatus",
     "Tracker",
+    "UnscentedLinearisation",
     "UpdateResult",
     "associate_gnn",
     "association",
     "build_tracker",
     "build_tracker_enu",
     "coordinates",
+    "debiased_spherical_to_enu",
     "estimation",
     "gate_threshold",
     "initiation",
@@ -149,6 +178,7 @@ __all__ = [
     "innovation_stats",
     "kalman",
     "lifecycle",
+    "linearisation",
     "measurement_models",
     "motion",
     "normalised_innovation_squared",
@@ -157,6 +187,5 @@ __all__ = [
     "state_model_matrices",
     "tracker",
     "tracks",
-    "ukf",
     "update",
 ]

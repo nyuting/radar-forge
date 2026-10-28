@@ -184,12 +184,14 @@ they carry a mean and a covariance through a function. That is the filter's *lin
 | `TaylorLinearisation` | the KF on a linear model, the EKF otherwise | mean g(x̂), covariance J P Jᵀ, with J = ∂g/∂x at x̂ | yes: H, or J |
 | `UnscentedLinearisation(alpha, beta, kappa)` | the UKF | weighted sums over 2n + 1 sigma points (§4.4) | no |
 
-A `Linearisation` has two methods, one per step of the filter:
+A `Linearisation` has two methods, one per step of the filter, and a third that checks the
+motion model when the filter is built:
 
 | Method | Returns |
 | :--- | :--- |
 | `predict(motion, state, dt_s)` | the predicted mean x̂⁻ `(n_state,)` and covariance P⁻ `(n_state, n_state)`, with Q(dt_s) added |
 | `measure(model, state)` | `MeasurementMoments`: ẑ `(n_meas,)`, P_xz `(n_state, n_meas)`, S without R `(n_meas, n_meas)`, and H `(n_meas, n_state)` or `None` |
+| `check_motion_model(motion)` | nothing; raises `TypeError` if the linearisation cannot use the model (no `matrices` for the Taylor one), or `ValueError` if its settings do not suit the state size (the unscented weights). It is how `GaussianFilter` refuses a bad pairing at construction without asking which linearisation it holds |
 
 `GaussianFilter` holds a `StateEstimate`, a motion model and a linearisation. Each of its
 methods is the same for all three filters:
@@ -396,9 +398,13 @@ non-finite Jacobian.
 **Converted measurements, for initiation only.** One spherical measurement can seed a Cartesian
 track: position from (r, θ, φ), with a covariance from the polar-to-Cartesian Jacobian. At
 long range and coarse angle accuracy, the naive conversion is biased and its covariance is
-wrong; the initiator uses a debiased conversion instead: Lerro and Bar-Shalom (1993) for 2-D
-(r, θ), and Suchomski (1999), which extends it, for 3-D (r, θ, φ). The converted
-position seeds the prior; every later update uses the spherical model.
+wrong; the initiator uses a debiased conversion instead. It returns the mean and covariance of
+the true position given the measurement, the measurement-conditioned conversion of Duan, Han and
+Li (2004) and Bordonaro, Willett and Bar-Shalom (2014), in 2-D (r, θ) and 3-D (r, θ, φ). For
+Gaussian errors these moments are exact, and they are the posterior under a flat prior, which is
+what a new track's prior should be. Lerro and Bar-Shalom (1993) for 2-D, and Suchomski (1999)
+for 3-D, reach approximate moments by nested conditioning, which leaves a small bias. The
+converted position seeds the prior; every later update uses the spherical model.
 
 ### 6.2 Range rate in the gate
 
@@ -703,24 +709,39 @@ it would be later. The names and module moves are TD13's.
    `InnovationStats.residual` becomes `innovation`. The `Linearisation` protocol and
    `UnscentedLinearisation` land, with today's `UKF` algorithm moved into them unchanged, and
    `GaussianFilter(motion, UnscentedLinearisation())` replaces `UKF` wherever one is built
-   (`build_tracker`, `build_tracker_enu`, the tests). The UKF's numbers do not move.
+   (`build_tracker`, `build_tracker_enu`, the tests). The UKF's numbers do not move. `UKF` and
+   `ukf.py` are deleted here, not in step 7: once nothing builds a `UKF`, it is a dead second
+   copy of the update, the drift principle 2 forbids. `Linearisation` has `check_motion_model`
+   (§4.2), so a bad pairing fails at construction without the filter asking which
+   linearisation it holds.
    *Check:* AC2, and the existing UKF tests pass against `GaussianFilter` without a tolerance
    change.
-3. **`TaylorLinearisation`** (§4.4), with `RadialMotion.matrices`. The KF and the EKF are now
+3. **`TaylorLinearisation`** (§4.4), with `RadialMotion.matrices` and analytic Jacobians for
+   `CartesianPosition` and `BistaticRangeDopplerModel`, so every existing model runs under
+   every linearisation and the definiteness tests cover both (AC5). The KF and the EKF are now
    `GaussianFilter(motion, TaylorLinearisation())`, and the two UKF ≡ KF guards (§4.5) land
    here. Today's `KalmanFilter` (`kalman.py`) holds a track's estimate and is not a filter. It
    keeps its name until step 7 deletes it, since no new class takes the name.
    *Check:* AC3, AC4 and AC12.
-4. **The spherical measurement model** (§6.1) with its Jacobian and the debiased initiator.
+4. **The spherical measurement model** (§6.1) with its Jacobian and the debiased initiator,
+   and the EKF ≈ UKF guard of §4.5, which runs on it. The geometry is
+   `geodesy.enu_to_range_azimuth_elevation_rad`, which the degree form now calls.
+   `kalman._enu_model` keeps its own copy until step 7 deletes it. The initiator,
+   `DebiasedSphericalInitiator`, uses the measurement-conditioned conversion rather than Lerro's
+   and Suchomski's nested conditioning (§6.1). The guard scales the prior by s² over
+   s ∈ [1/8, 1], where J P Jᵀ dominates R; at much smaller s the gap falls as s⁴, and the
+   slope bound would test nothing.
+   *Check:* AC3, AC5 and AC6 for the new model; the §4.5 guard passes.
 5. **Scenario mechanisms in `Tracker`** (§8.3), and `assignment="joint"` (§7.3).
 6. **Scenario 003 on `Tracker`.** `pipelines/tracking.py` becomes an adapter: plots in,
    batches out, snapshots back. `TrackingConfig.state_model` is honoured (it is ignored today).
-7. **Delete the old stack:** `KalmanTracker`, `KalmanFilter`, `KalmanState`, `TrackModel`,
-   `FrameResult`, `UKF` and `ukf.py`, and the rest of TD13's renames. Two of those renames are
-   scenario TOML keys (TD13), so this step also updates the scenario 003 TOMLs and spec, and the data-001
-   `metadata.json` schema. Module moves (§3 target column). Refresh the stale text:
-   `kalman.py`'s "promotes this module to a subpackage", `estimation.py`'s "the one
-   implementation", and `spec/structure.md` D2. *Check:* AC1, AC7 and AC8;
+7. **Delete the old stack:** `KalmanTracker`, `KalmanFilter`, `KalmanState`, `TrackModel` and
+   `FrameResult` (`UKF` and `ukf.py` went in step 2), and the rest of TD13's renames. Two of
+   those renames are scenario TOML keys (TD13), so this step also updates the scenario 003
+   TOMLs and spec, and the data-001 `metadata.json` schema. Module moves (§3 target
+   column). Refresh the stale text in `spec/structure.md` D2 (steps 1 and 2 refreshed
+   `kalman.py`'s "promotes this module to a subpackage" and `estimation.py`'s "the one
+   implementation"). *Check:* AC1, AC7 and AC8;
    `git grep -nE '^class (KalmanTracker|KalmanFilter|KalmanState|TrackModel|FrameResult|UKF)\b' -- src`
    returns nothing; and so does
    `git grep -nE 'n_reacquire_frames|\bCartesianPosition\b|\bRadialMotion\b|def normalise|\.normalise\(|\.noise_density\b[^_]|self\.noise_density\b|sigma_accel_mps2' -- src tests scripts scenarios spec/scenario-003-tracking.md docs/tracking`.
@@ -858,7 +879,7 @@ and "route" is not a tracking term a student can look up.
 | `RadialMotion` | `RadialConstantVelocity` | says which motion |
 | `UKF` | `GaussianFilter(motion, UnscentedLinearisation())` | TD2: one filter, the linearisation is an argument |
 | `kalman.KalmanFilter` (a track's estimate) | deleted (§13 step 7) | it is not a filter; `GaussianFilter(motion, TaylorLinearisation())` is the KF |
-| `build_tracker`, `build_tracker_enu` | same names, each with an `estimator_factory` argument defaulting to the unscented linearisation | both always build a UKF today. Per TD2, the filter is one argument, not one builder per filter |
+| `build_tracker`, `build_tracker_enu` | same names. `build_tracker` takes an `estimator_factory`; `build_tracker_enu` takes a `linearisation`. Both default to the unscented linearisation | both always build a UKF today. Per TD2, the filter is one argument, not one builder per filter. `build_tracker_enu` builds its motion model itself, so a caller has no model to bind into a factory, and passes the linearisation instead |
 | `UKF.predict_to(time_s)` | `predict_to(timestamp_s)` | the `Estimator` protocol's name |
 | `StateLayout.normalise` | removed | it is `wrap` under a second name |
 | `CartesianMotion.noise_density` | `acceleration_noise_density_m2ps3`, `jerk_noise_density_m2ps5` | one dict held two units |
@@ -958,6 +979,11 @@ These hold after migration; each is stated in a docstring, not discovered by a u
 - D. Lerro and Y. Bar-Shalom, "Tracking with debiased consistent converted measurements versus
   EKF," *IEEE Trans. Aerosp. Electron. Syst.*, vol. 29, no. 3, pp. 1015-1022, 1993 (2-D polar
   measurements).
+- Z. Duan, C. Han and X. R. Li, "Comments on 'Unbiased converted measurements for tracking',"
+  *IEEE Trans. Aerosp. Electron. Syst.*, vol. 40, no. 4, pp. 1374-1377, 2004 (the
+  measurement-conditioned moments).
+- S. Bordonaro, P. Willett and Y. Bar-Shalom, "Decorrelated unbiased converted measurement
+  Kalman filter," *IEEE Trans. Aerosp. Electron. Syst.*, vol. 50, no. 2, pp. 1431-1444, 2014.
 - P. Suchomski, "Explicit expressions for debiased statistics of 3D converted measurements,"
   *IEEE Trans. Aerosp. Electron. Syst.*, vol. 35, no. 1, pp. 368-370, 1999.
 - H. A. P. Blom and Y. Bar-Shalom, "The interacting multiple model algorithm for systems with

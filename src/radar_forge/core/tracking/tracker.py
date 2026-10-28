@@ -41,17 +41,14 @@ References
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from types import MappingProxyType
 from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
 
-from radar_forge.core.tracking._validation import (
-    TIMESTAMP_TOLERANCE_S,
-    check_sigma_point_settings,
-)
+from radar_forge.core.tracking._validation import TIMESTAMP_TOLERANCE_S
 from radar_forge.core.tracking.association import (
     Associator,
     ChiSquareGate,
@@ -59,9 +56,10 @@ from radar_forge.core.tracking.association import (
     NearestNeighbour,
 )
 from radar_forge.core.tracking.coordinates import StateEstimate
-from radar_forge.core.tracking.estimation import Estimator, InnovationStats
+from radar_forge.core.tracking.estimation import Estimator, GaussianFilter, InnovationStats
 from radar_forge.core.tracking.initiation import DirectStateInitiator, TrackInitiator
 from radar_forge.core.tracking.lifecycle import LifecyclePolicy, TrackManager
+from radar_forge.core.tracking.linearisation import Linearisation, UnscentedLinearisation
 from radar_forge.core.tracking.measurement_models import (
     CartesianPosition,
     Measurement,
@@ -71,7 +69,6 @@ from radar_forge.core.tracking.measurement_models import (
 )
 from radar_forge.core.tracking.motion import CartesianMotion, MotionKind, MotionModel
 from radar_forge.core.tracking.tracks import Track, TrackSnapshot
-from radar_forge.core.tracking.ukf import UKF
 
 __all__ = [
     "Tracker",
@@ -174,13 +171,14 @@ class Tracker:
 
     >>> import numpy as np
     >>> from radar_forge.core.tracking import (
-    ...     UKF, CartesianMotion, CartesianPosition, ChiSquareGate,
-    ...     DirectStateInitiator, GlobalNearestNeighbour, LifecyclePolicy,
-    ...     SensorRegistration, StateEstimate)
+    ...     CartesianMotion, CartesianPosition, ChiSquareGate, DirectStateInitiator,
+    ...     GaussianFilter, GlobalNearestNeighbour, LifecyclePolicy, SensorRegistration,
+    ...     StateEstimate, UnscentedLinearisation)
     >>> motion = CartesianMotion({"x": "CV"}, origin_lla_deg_m=(36.0, -78.9, 60.0))
     >>> model = CartesianPosition(motion.state_layout, ("x_m",))
     >>> prior = StateEstimate(np.zeros(2), np.diag([1.0, 100.0**2]), 0.0, motion.state_layout)
-    >>> initiator = DirectStateInitiator(lambda state: UKF(state, motion), prior)
+    >>> initiator = DirectStateInitiator(
+    ...     lambda state: GaussianFilter(state, motion, UnscentedLinearisation()), prior)
     >>> tracker = Tracker(
     ...     {"position": model},
     ...     {"radar": SensorRegistration("radar", ("position",))},
@@ -560,14 +558,12 @@ def build_tracker(
     policy: LifecyclePolicy | None = None,
     gate_probability: float = 0.997,
     association: Literal["GNN", "NN"] = "GNN",
-    alpha: float = 1.0,
-    beta: float = 2.0,
-    kappa: float = 0.0,
+    estimator_factory: Callable[[StateEstimate], Estimator] | None = None,
     initiator: TrackInitiator | None = None,
     sensor_id: str = "sensor",
     model_id: str = "measurement",
 ) -> Tracker:
-    r"""Build a UKF tracker for one sensor and one measurement model.
+    r"""Build a tracker for one sensor and one measurement model.
 
     Parameters
     ----------
@@ -586,13 +582,19 @@ def build_tracker(
     association : {"GNN", "NN"}, optional
         Global nearest neighbour or greedy nearest neighbour. Both score pairs
         by NIS.
-    alpha, beta, kappa : float, optional
-        The scaled sigma-point parameters of the UKF: the spread :math:`\alpha`,
-        the prior-distribution correction :math:`\beta` (2 suits a Gaussian) and
-        the secondary scaling :math:`\kappa`. The defaults, 1, 2 and 0, match
-        :class:`UKF`'s, whose Notes explain the choice.
+    estimator_factory : callable or None, optional
+        Builds each new track's filter from its first estimate, with the motion
+        model and the linearisation bound in. None gives the UKF,
+        :class:`~radar_forge.core.tracking.estimation.GaussianFilter` with
+        ``motion`` and a default
+        :class:`~radar_forge.core.tracking.linearisation.UnscentedLinearisation`.
+        It is called once on ``prior`` while the tracker is built, so a filter
+        that cannot be built fails here, not at the first track's birth. When
+        ``initiator`` is given, the factory is checked this way and then not
+        used: the initiator builds the filters.
     initiator : TrackInitiator or None, optional
-        Track-birth rule; None uses :class:`DirectStateInitiator` with ``prior``.
+        Track-birth rule; None uses :class:`DirectStateInitiator` with ``prior``
+        and ``estimator_factory``.
     sensor_id, model_id : str, optional
         Sensor and measurement-model IDs the measurements must carry.
 
@@ -604,16 +606,17 @@ def build_tracker(
     Raises
     ------
     ValueError
-        If the three layouts differ, ``association`` is not GNN or NN, or the
-        UKF or gate parameters are invalid. Also, with the default initiator and
+        If the three layouts differ, ``association`` is not GNN or NN, the gate
+        probability is invalid, or the factory cannot build a filter from
+        ``prior``. Also, with the default initiator and
         a :class:`CartesianPosition` observation, if the prior correlates the
         measured coordinates with the unmeasured ones.
 
     References
     ----------
-    .. [1] E. A. Wan and R. van der Merwe, "The unscented Kalman filter for
-           nonlinear estimation," *Proc. IEEE AS-SPCC Symposium*, 2000, §3,
-           Eq. (15) (the parameters alpha, beta and kappa).
+    .. [1] S. Särkkä, *Bayesian Filtering and Smoothing*, Cambridge University
+           Press, 2013, ch. 6 (one Gaussian filter, with the linearisation as
+           its one choice).
     """
     if motion.state_layout != observation.state_layout or prior.state_layout != motion.state_layout:
         msg = "motion, observation and prior require the same StateLayout."
@@ -621,10 +624,13 @@ def build_tracker(
     if association not in ("GNN", "NN"):
         msg = f"association must be GNN or NN; got {association!r}."
         raise ValueError(msg)
-    check_sigma_point_settings(alpha, beta, kappa, motion.state_layout.dimension)
 
-    def factory(state: StateEstimate) -> UKF:
-        return UKF(state, motion, alpha, beta, kappa)
+    def default_factory(state: StateEstimate) -> Estimator:
+        return GaussianFilter(state, motion, UnscentedLinearisation())
+
+    factory = estimator_factory or default_factory
+    # Build one filter now, so a bad setting fails when the tracker is built.
+    factory(prior)
 
     # A position model's measured names are state names, so the initiator can
     # check now that the prior does not tie them to the unmeasured coordinates.
@@ -655,9 +661,7 @@ def build_tracker_enu(
     policy: LifecyclePolicy | None = None,
     gate_probability: float = 0.997,
     association: Literal["GNN", "NN"] = "GNN",
-    alpha: float = 1.0,
-    beta: float = 2.0,
-    kappa: float = 0.0,
+    linearisation: Linearisation | None = None,
 ) -> Tracker:
     """Build a tracker that measures x/y/z position and estimates the motion.
 
@@ -681,8 +685,15 @@ def build_tracker_enu(
     sigma_velocity_mps : float, optional
         Prior standard deviation of each unobserved velocity at a track's birth, m/s. Unlike
         ``sigma_acceleration_mps2``, this describes the first estimate, not the target.
-    policy, gate_probability, association, alpha, beta, kappa
+    policy, gate_probability, association
         As for :func:`build_tracker`.
+    linearisation : Linearisation or None, optional
+        How each track's :class:`~radar_forge.core.tracking.estimation.GaussianFilter`
+        carries its estimate through the models; None gives the UKF, a default
+        :class:`~radar_forge.core.tracking.linearisation.UnscentedLinearisation`. This
+        builder takes a linearisation rather than :func:`build_tracker`'s
+        ``estimator_factory`` because it builds the motion model itself, so a caller
+        could not bind it into a factory.
 
     Returns
     -------
@@ -745,7 +756,7 @@ def build_tracker_enu(
         policy=policy,
         gate_probability=gate_probability,
         association=association,
-        alpha=alpha,
-        beta=beta,
-        kappa=kappa,
+        estimator_factory=lambda state: GaussianFilter(
+            state, motion, linearisation or UnscentedLinearisation()
+        ),
     )

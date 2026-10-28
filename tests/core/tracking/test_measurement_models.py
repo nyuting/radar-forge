@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Any
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+from radar_forge.core.geodesy import enu_to_range_azimuth_elevation
 from radar_forge.core.radar import BistaticRadar, Radar, Receiver, Transmitter
-from radar_forge.core.tracking.coordinates import StateEstimate
+from radar_forge.core.tracking.coordinates import Coordinate, StateEstimate, StateLayout
 from radar_forge.core.tracking.measurement_models import (
     BistaticRangeDopplerModel,
     CartesianPosition,
+    DifferentiableMeasurementModel,
     Measurement,
     MeasurementBatch,
+    RangeAzimuthElevationRangeRate,
     SensorPose,
     SensorRegistration,
     _Geometry,
@@ -61,6 +65,20 @@ def _transmitter() -> Transmitter:
     return Transmitter(9.8e9, 2.0e6, 100.0, 30.0, 1.0e-3, 1.0e3)
 
 
+def _central_difference(model: DifferentiableMeasurementModel, state: NDArray[np.float64]) -> Any:
+    """Numerical d h / d x, column by column, to check an analytic Jacobian against."""
+    columns = []
+    for index in range(state.size):
+        # A loop over state elements: each column needs its own perturbed pair of states.
+        # A relative step: positions are kilometres and velocities tens of m/s, so one
+        # absolute step cannot suit both (as tests/core/test_tracking.py).
+        step = 1e-5 * max(1.0, abs(float(state[index])))
+        offset = np.zeros(state.size)
+        offset[index] = step
+        columns.append((model.predict(state + offset) - model.predict(state - offset)) / (2 * step))
+    return np.stack(columns, axis=-1)
+
+
 # --------------------------------------------------------------------------- #
 # CartesianPosition
 # --------------------------------------------------------------------------- #
@@ -100,6 +118,15 @@ def test_cartesian_position_rejects_bad_names_or_periods(
     _, estimate, _ = _scene("CV")
     with pytest.raises(ValueError, match=match):
         CartesianPosition(estimate.state_layout, names, periods)
+
+
+def test_the_cartesian_jacobian_picks_the_reported_coordinates() -> None:
+    motion, estimate, _ = _scene("CV")
+    model = CartesianPosition(motion.state_layout, ("z_m", "xdot_mps"))
+    expected = np.zeros((2, motion.state_layout.dimension))
+    expected[0, motion.state_layout.names.index("z_m")] = 1.0
+    expected[1, motion.state_layout.names.index("xdot_mps")] = 1.0
+    np.testing.assert_array_equal(model.jacobian(estimate.mean), expected)
 
 
 def test_cartesian_position_rejects_a_state_of_the_wrong_length() -> None:
@@ -185,6 +212,50 @@ def test_one_singular_point_in_a_stack_is_rejected() -> None:
     stack = np.stack([estimate.mean, np.zeros(estimate.state_layout.dimension)])
     with pytest.raises(ValueError, match="singular"):
         model.predict(stack)
+
+
+@pytest.mark.parametrize("excess_range", [True, False])
+@pytest.mark.parametrize(
+    ("axes", "fixed"),
+    [("xyz", None), ("xy", {"z_m": 3000.0, "zdot_mps": 0.0})],
+    ids=["3d", "2d-fixed-height"],
+)
+def test_the_bistatic_jacobian_matches_a_central_difference(
+    axes: str, fixed: dict[str, float] | None, excess_range: bool, rng: np.random.Generator
+) -> None:
+    """The analytic Jacobian of the class Notes, checked at many states."""
+    motion = CartesianMotion(dict.fromkeys(axes, "CV"), origin_lla_deg_m=ORIGIN)
+    layout = motion.state_layout
+    model = BistaticRangeDopplerModel(
+        layout,
+        _pose([0.0, 0.0, 0.0]),
+        _pose([20_000.0, 1_000.0, 50.0]),
+        excess_range=excess_range,
+        fixed_coordinates=fixed,
+    )
+    positions = list(layout.indices(tuple(f"{a}_m" for a in axes)))
+    for _ in range(50):
+        # A loop over random states: each one is its own check.
+        state = rng.uniform(-100.0, 100.0, layout.dimension)
+        state[positions] = rng.uniform(-20_000.0, 20_000.0, len(positions))
+        # rtol 1e-6, atol 1e-10: the best a central difference reaches on a norm, as in
+        # tests/core/test_tracking.py's Jacobian test.
+        np.testing.assert_allclose(
+            model.jacobian(state), _central_difference(model, state), rtol=1e-6, atol=1e-10
+        )
+
+
+@pytest.mark.parametrize("site", ["transmitter", "receiver"])
+def test_the_bistatic_jacobian_is_rejected_on_a_site(site: str) -> None:
+    motion = CartesianMotion(dict.fromkeys("xyz", "CV"), origin_lla_deg_m=ORIGIN)
+    position = [100.0, 0.0, 0.0] if site == "transmitter" else [0.0, 100.0, 0.0]
+    model = BistaticRangeDopplerModel(
+        motion.state_layout, _pose([100.0, 0.0, 0.0]), _pose([0.0, 100.0, 0.0])
+    )
+    state = np.zeros(6)
+    state[list(motion.state_layout.indices(("x_m", "y_m", "z_m")))] = position
+    with pytest.raises(ValueError, match="singular"):
+        model.jacobian(state)
 
 
 def test_bistatic_predict_rejects_a_state_of_the_wrong_length() -> None:
@@ -398,3 +469,205 @@ def test_a_sensor_pose_checks_its_frame_and_origin_as_a_layout_does(
 ) -> None:
     with pytest.raises(ValueError, match=match):
         SensorPose(np.zeros(3), frame, origin)
+
+
+# --------------------------------------------------------------------------- #
+# RangeAzimuthElevationRangeRate
+# --------------------------------------------------------------------------- #
+
+
+def _spherical_state(
+    layout: StateLayout, position_m: list[float], velocity_mps: list[float]
+) -> NDArray[np.float64]:
+    """A state with the given position and velocity, placed by name."""
+    state = np.zeros(layout.dimension)
+    state[list(layout.indices(("x_m", "y_m", "z_m")))] = position_m
+    state[list(layout.indices(("xdot_mps", "ydot_mps", "zdot_mps")))] = velocity_mps
+    return state
+
+
+def test_spherical_azimuth_is_clockwise_from_north_and_elevation_is_up() -> None:
+    """Catches the mathematical azimuth convention, a sign flip, or elevation from the zenith.
+
+    Due north, east, south and west of a site 1 km up give azimuths 0, pi/2, pi and
+    3 pi/2 and elevation 0. The 3-4-12 point gives range 13 and elevation asin(12/13).
+    """
+    _, estimate, _ = _scene("CV")
+    layout = estimate.state_layout
+    site = [100.0, -50.0, 1000.0]
+    model = RangeAzimuthElevationRangeRate(layout, _pose(site))
+    offsets = [[0, 500, 0], [500, 0, 0], [0, -500, 0], [-500, 0, 0], [3, 4, 12]]
+    states = np.stack(
+        [_spherical_state(layout, list(np.add(site, o)), [0.0, 0.0, 0.0]) for o in offsets]
+    )
+    z = model.predict(states)
+    # atol 1e-12 rad: one atan2 or asin of exact inputs.
+    np.testing.assert_allclose(z[:4, 1], [0.0, np.pi / 2, np.pi, 3 * np.pi / 2], atol=1e-12)
+    np.testing.assert_allclose(z[:4, 2], 0.0, atol=1e-12)
+    # rtol 1e-12: a norm and one inverse trig function.
+    np.testing.assert_allclose(z[4, 0], 13.0, rtol=1e-12)
+    np.testing.assert_allclose(z[4, 2], np.arcsin(12 / 13), rtol=1e-12)
+
+
+@pytest.mark.parametrize(("velocity_sign", "rate_sign"), [(-1.0, 1.0), (1.0, -1.0)])
+def test_spherical_range_rate_is_positive_when_closing(
+    velocity_sign: float, rate_sign: float
+) -> None:
+    """Catches the receding-positive sign, which passes every test using one direction only.
+
+    The target at (3, 4, 12) moves along its line of sight at 13 m/s, so the range rate
+    is 13 m/s in size: positive inbound, negative outbound.
+    """
+    _, estimate, pose = _scene("CV")
+    layout = estimate.state_layout
+    model = RangeAzimuthElevationRangeRate(layout, pose)
+    velocity = list(velocity_sign * np.array([3.0, 4.0, 12.0]))
+    state = _spherical_state(layout, [3.0, 4.0, 12.0], velocity)
+    np.testing.assert_allclose(model.predict(state)[3], rate_sign * 13.0, rtol=1e-12)
+
+
+def test_spherical_model_agrees_with_geodesy_about_an_offset_site() -> None:
+    """Catches the site offset left out: geodesy is given p - p_s by hand here."""
+    _, estimate, _ = _scene("CV")
+    layout = estimate.state_layout
+    site = np.array([-700.0, 250.0, 30.0])
+    position = np.array([4000.0, -2500.0, 900.0])
+    model = RangeAzimuthElevationRangeRate(
+        layout, _pose(list(site)), ("range_m", "azimuth_rad", "elevation_rad")
+    )
+    range_m, azimuth_deg, elevation_deg = enu_to_range_azimuth_elevation(position - site)
+    z = model.predict(_spherical_state(layout, list(position), [0.0, 0.0, 0.0]))
+    expected = np.array([range_m, np.radians(azimuth_deg), np.radians(elevation_deg)])
+    np.testing.assert_allclose(z, expected, rtol=1e-12)
+
+
+def test_spherical_components_are_chosen_by_name_in_order() -> None:
+    """Catches rows picked by position: the reported order differs from the canonical one."""
+    _, estimate, pose = _scene("CV")
+    layout = estimate.state_layout
+    full = RangeAzimuthElevationRangeRate(layout, pose)
+    chosen = ("range_rate_mps", "azimuth_rad", "range_m")
+    model = RangeAzimuthElevationRangeRate(layout, pose, chosen)
+    assert model.measurement_layout.names == chosen
+    np.testing.assert_array_equal(
+        model.predict(estimate.mean), full.predict(estimate.mean)[[3, 1, 0]]
+    )
+    np.testing.assert_array_equal(
+        model.jacobian(estimate.mean), full.jacobian(estimate.mean)[[3, 1, 0]]
+    )
+
+
+def test_only_spherical_azimuth_wraps() -> None:
+    """Catches a missing period on azimuth (no wrap in the innovation) or one on elevation."""
+    _, estimate, pose = _scene("CV")
+    layout = RangeAzimuthElevationRangeRate(estimate.state_layout, pose).measurement_layout
+    periods = {c.name: c.period for c in layout.coordinates}
+    assert periods == {
+        "range_m": None,
+        "azimuth_rad": 2 * np.pi,
+        "elevation_rad": None,
+        "range_rate_mps": None,
+    }
+
+
+def test_a_spherical_model_without_range_rate_needs_no_velocity() -> None:
+    """A radar without Doppler works on a state that holds no velocity."""
+    layout = StateLayout(tuple(Coordinate(n, "m") for n in ("x_m", "y_m", "z_m")), "ENU", ORIGIN)
+    model = RangeAzimuthElevationRangeRate(
+        layout, _pose([0.0, 0.0, 0.0]), ("range_m", "azimuth_rad")
+    )
+    np.testing.assert_allclose(
+        model.predict(np.array([3.0, 4.0, 12.0])), [13.0, np.arctan2(3.0, 4.0)], rtol=1e-12
+    )
+
+
+def test_spherical_predict_of_a_stack_equals_the_stacked_single_predictions(
+    rng: np.random.Generator,
+) -> None:
+    _, estimate, _ = _scene("CA")
+    model = RangeAzimuthElevationRangeRate(estimate.state_layout, _pose([20.0, -30.0, 5.0]))
+    states = rng.normal(0.0, 1000.0, (9, estimate.state_layout.dimension))
+    expected = np.array([model.predict(s) for s in states])
+    batched = model.predict(states)
+    assert batched.shape == (9, 4)
+    # The same operations in a different order of reduction; a few ulps at most.
+    np.testing.assert_allclose(batched, expected, rtol=1e-12, atol=1e-9)
+
+
+@pytest.mark.parametrize(
+    ("axes", "fixed", "components"),
+    [
+        ("xyz", None, ("range_m", "azimuth_rad", "elevation_rad", "range_rate_mps")),
+        ("xy", {"z_m": 3000.0, "zdot_mps": 0.0}, ("range_m", "azimuth_rad", "range_rate_mps")),
+        ("xyz", None, ("elevation_rad", "range_m")),
+    ],
+    ids=["3d", "2d-fixed-height", "no-rate"],
+)
+def test_the_spherical_jacobian_matches_a_central_difference(
+    axes: str,
+    fixed: dict[str, float] | None,
+    components: tuple[str, ...],
+    rng: np.random.Generator,
+) -> None:
+    """The analytic Jacobian of the jacobian Notes, checked at many states.
+
+    East positions stay in [1, 20] km, so azimuth stays in (0, pi), away from its wrap
+    at north, where a central difference straddling 0 and 2 pi would be meaningless.
+    """
+    motion = CartesianMotion(dict.fromkeys(axes, "CV"), origin_lla_deg_m=ORIGIN)
+    layout = motion.state_layout
+    model = RangeAzimuthElevationRangeRate(
+        layout, _pose([0.0, 0.0, 0.0]), components, fixed_coordinates=fixed
+    )
+    positions = list(layout.indices(tuple(f"{a}_m" for a in axes)))
+    for _ in range(50):
+        # A loop over random states: each one is its own check.
+        state = rng.uniform(-100.0, 100.0, layout.dimension)
+        state[positions] = rng.uniform(-20_000.0, 20_000.0, len(positions))
+        state[positions[0]] = rng.uniform(1_000.0, 20_000.0)
+        # rtol 1e-6, atol 1e-10: the best a central difference reaches on a norm, as in
+        # the Jacobian test of tests/core/test_tracking.py.
+        np.testing.assert_allclose(
+            model.jacobian(state), _central_difference(model, state), rtol=1e-6, atol=1e-10
+        )
+
+
+def test_the_spherical_model_is_differentiable() -> None:
+    _, estimate, pose = _scene("CV")
+    model = RangeAzimuthElevationRangeRate(estimate.state_layout, pose)
+    assert isinstance(model, DifferentiableMeasurementModel)
+
+
+@pytest.mark.parametrize("method", ["predict", "jacobian"])
+def test_a_target_on_the_radar_is_a_singular_geometry(method: str) -> None:
+    _, estimate, _ = _scene("CV")
+    layout = estimate.state_layout
+    model = RangeAzimuthElevationRangeRate(
+        layout, _pose([10.0, 20.0, 30.0]), ("range_m", "range_rate_mps")
+    )
+    state = _spherical_state(layout, [10.0, 20.0, 30.0], [1.0, 0.0, 0.0])
+    with pytest.raises(ValueError, match="singular at the site"):
+        getattr(model, method)(state)
+
+
+@pytest.mark.parametrize("method", ["predict", "jacobian"])
+def test_the_zenith_is_singular_only_when_an_angle_is_reported(method: str) -> None:
+    """Catches a guard that is missing, or one that also rejects the valid range-only case."""
+    _, estimate, pose = _scene("CV")
+    layout = estimate.state_layout
+    overhead = _spherical_state(layout, [0.0, 0.0, 5000.0], [1.0, 0.0, -2.0])
+    with pytest.raises(ValueError, match="zenith"):
+        getattr(RangeAzimuthElevationRangeRate(layout, pose), method)(overhead)
+    range_only = RangeAzimuthElevationRangeRate(layout, pose, ("range_m", "range_rate_mps"))
+    assert np.all(np.isfinite(getattr(range_only, method)(overhead)))
+
+
+@pytest.mark.parametrize(
+    "components",
+    [(), ("range_m", "range_m"), ("range_m", "bearing_rad")],
+    ids=["empty", "repeated", "unknown"],
+)
+def test_spherical_components_must_be_known_and_unique(components: tuple[str, ...]) -> None:
+    _, estimate, pose = _scene("CV")
+    with pytest.raises(ValueError, match="components must be nonempty and unique"):
+        RangeAzimuthElevationRangeRate(estimate.state_layout, pose, components)

@@ -13,10 +13,11 @@ import numpy as np
 import pytest
 
 from radar_forge.core.tracking.coordinates import StateEstimate
+from radar_forge.core.tracking.estimation import GaussianFilter
 from radar_forge.core.tracking.lifecycle import LifecyclePolicy, TrackManager
+from radar_forge.core.tracking.linearisation import UnscentedLinearisation
 from radar_forge.core.tracking.motion import CartesianMotion
 from radar_forge.core.tracking.tracks import Track, TrackStatus
-from radar_forge.core.tracking.ukf import UKF
 
 ORIGIN = (36.00250, -78.94100, 60.0)
 MOTION = CartesianMotion({"x": "CV"}, origin_lla_deg_m=ORIGIN)
@@ -28,12 +29,14 @@ def manager(**policy: int | float) -> TrackManager:
     return TrackManager(LifecyclePolicy(**policy))  # type: ignore[arg-type]
 
 
-def run(track_manager: TrackManager, scans: str) -> tuple[Track[UKF], list[TrackStatus]]:
+def run(track_manager: TrackManager, scans: str) -> tuple[Track[GaussianFilter], list[TrackStatus]]:
     """Seed a track at 0 s, then record ``scans`` ("h" hit, "m" miss), one per second.
 
     Returns the track and its statuses: the first at birth, the rest one per scan.
     """
-    track = track_manager.seed(UKF(PRIOR, MOTION), 0.0, "sensor")
+    track = track_manager.seed(
+        GaussianFilter(PRIOR, MOTION, UnscentedLinearisation()), 0.0, "sensor"
+    )
     statuses = [track.status]
     # Each record depends on the counts the previous one left behind.
     for scan, kind in enumerate(scans, start=1):
@@ -131,7 +134,10 @@ def test_a_one_of_n_policy_confirms_a_track_at_birth() -> None:
 
 def test_track_ids_count_up_from_one() -> None:
     track_manager = manager()
-    ids = [track_manager.seed(UKF(PRIOR, MOTION), 0.0).track_id for _ in range(3)]
+    ids = [
+        track_manager.seed(GaussianFilter(PRIOR, MOTION, UnscentedLinearisation()), 0.0).track_id
+        for _ in range(3)
+    ]
     assert ids == [1, 2, 3]
 
 

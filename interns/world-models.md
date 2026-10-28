@@ -74,8 +74,9 @@ a different false-alarm rate. Your job is to find out on a problem we control.
     `score_primary_track`. This is the classical baseline.
   - `radar_forge.pipelines.trajectories`: `load_flight_csv`, `resample`, `to_radar_frame`.
   - `radar_forge.core.tracking.motion.MotionModel`: the interface a motion model follows.
-    `radar_forge.core.tracking.tracker.build_tracker` and the `UKF` accept **any** object that
-    follows it, so you can put your own transition into the library's tracker from your script.
+    `radar_forge.core.tracking.tracker.build_tracker` and
+    `radar_forge.core.tracking.estimation.GaussianFilter` accept **any** object that follows
+    it, so you can put your own transition into the library's tracker from your script.
   - `radar_forge.core.signal.thermal_noise`: noise-only data, as in the
     [track-before-detect background](track-before-detect.md#noise-only-maps).
 - **Data.** `data/flight_coordinates.csv` is about 16,500 s of real ADS-B fixes for one light

@@ -14,8 +14,9 @@ The package runs two tracker loops for now. Both keep their tracks as the same `
 - **`KalmanTracker`** (`kalman.py`) is the linear Kalman tracker. Each of its tracks carries a
   `KalmanFilter`. Scenario 003's own runs use it: `estimator = "kalman"` in the scenario's
   `[tracking]` table, read by `pipelines/tracking.py`.
-- **`Tracker`** (`tracker.py`) is the UKF tracker. Each of its tracks carries an `Estimator`,
-  the UKF. It is built from small, swappable pieces, and it is multi-sensor: one `Tracker`
+- **`Tracker`** (`tracker.py`) is the scan-loop tracker. Each of its tracks carries an
+  `Estimator`: by default a `GaussianFilter` with the unscented linearisation, which is the UKF.
+  It is built from small, swappable pieces, and it is multi-sensor: one `Tracker`
   should handle every sensor in a scenario, each registered with `Tracker.add_sensor`, so
   that each target has one track whichever sensor sees it. The scenario-003 runs over
   scenario 001's S1, S2 and S3 use it: `estimator = "ukf"`.
@@ -27,11 +28,11 @@ once `Tracker` has what the Limitations below list.
 | :-- | :-- |
 | `coordinates.py` | Named coordinates (`x_m`, `xdot_mps`, …), the state layout they form, and `StateEstimate`: a mean, a covariance and a time. x is east, y is north and z is up, so an azimuth is measured clockwise from north. |
 | `motion.py` | Motion models, which predict a state forward in time: `CartesianMotion` (constant velocity, CV, or constant acceleration, CA, per axis) and `RadialMotion` (range and range rate). |
-| `measurement_models.py` | `Measurement` (a value, its covariance, a time, a sensor and a model), `MeasurementBatch` (one scan from one sensor), `SensorRegistration` (a sensor, and the models its measurements may use), and the models that predict a measurement from a state. |
-| `estimation.py` | The `Estimator` interface, and the innovation statistics used for gating. |
-| `ukf.py` | The unscented Kalman filter (UKF), the estimator every track uses. |
+| `measurement_models.py` | `Measurement` (a value, its covariance, a time, a sensor and a model), `MeasurementBatch` (one scan from one sensor), `SensorRegistration` (a sensor, and the models its measurements may use), and the models that predict a measurement from a state: `CartesianPosition` (coordinates reported directly), `RangeAzimuthElevationRangeRate` (a monostatic radar's range, azimuth, elevation and range rate) and `BistaticRangeDopplerModel`. |
+| `estimation.py` | The `Estimator` interface, the innovation statistics used for gating, and `GaussianFilter`: the Kalman filter (KF), the extended Kalman filter (EKF) and the unscented Kalman filter (UKF) in one predict and one update. |
+| `linearisation.py` | How `GaussianFilter` carries a mean and a covariance through a model, the one thing that differs between its filters: `TaylorLinearisation` (the KF on a linear model, the EKF otherwise) and `UnscentedLinearisation` (the UKF). |
 | `association.py` | The chi-square gate, and nearest-neighbour (NN) and global nearest-neighbour (GNN) assignment. |
-| `initiation.py` | `DirectStateInitiator`, which starts a track from a measurement no track took. |
+| `initiation.py` | Initiators, which start a track from a measurement no track took: `DirectStateInitiator` copies reported coordinates into a prior, and `DebiasedSphericalInitiator` converts a radar's range and angles to a position without the naive conversion's bias. |
 | `kalman.py` | `KalmanTracker`, scenario 003's linear Kalman tracker, and the filter functions it uses. |
 | `tracks.py` | A live `Track`, its status, and the read-only `TrackSnapshot` handed to callers. |
 | `lifecycle.py` | The M-of-N rule that confirms and deletes tracks, and the `TrackManager` that applies it. |
@@ -48,18 +49,18 @@ says so.
 `Tracker.process(batch)` takes one scan, meaning every measurement from one sensor at one time.
 It does these five steps in order:
 
-1. **Predict.** Move every track forward to the scan time (`UKF.predict_to`). A track that has
+1. **Predict.** Move every track forward to the scan time (`GaussianFilter.predict_to`). A track that has
    gone longer than `max_coast_time_s` without a measurement is deleted.
 2. **Gate and score.** For each track and measurement, work out the **innovation**: the
    difference between the measurement and what the track expected to see
-   (`UKF.innovation_statistics`). From it comes the **NIS**, the normalised innovation squared,
+   (`GaussianFilter.innovation_statistics`). From it comes the **NIS**, the normalised innovation squared,
    which measures how surprising the measurement is; its square root is the *Mahalanobis
    distance*. A pair fails the *chi-square gate* (`ChiSquareGate.accepts`) when its NIS is
    larger than a true measurement's would be, at the gate probability, and is dropped.
 3. **Assign.** Pair measurements with tracks, in two stages. Confirmed tracks pick first, from
    all the measurements. Tentative tracks then pick from what is left (`GlobalNearestNeighbour`).
 4. **Update, and confirm or delete.** Correct each track that got a measurement
-   (`UKF.update`), reusing the innovation from step 2. Then count a hit or a miss for every
+   (`GaussianFilter.update`), reusing the innovation from step 2. Then count a hit or a miss for every
    track the sensor can see (`TrackManager.record_hit`, `TrackManager.record_miss`), and apply
    the M-of-N rule as it is counted:
    - A tentative track is confirmed once it has M hits within its first N scans.
@@ -153,7 +154,6 @@ tracker doesn't yet have these, and the change that switches them over adds them
 - re-finding a lost target with a widened gate while keeping its track ID;
 - a per-track `measurement_dim`, as `KalmanFilter` records. Which measurement each track
   took in the scan, and its NIS, are on the scan's `TrackSnapshot`s;
-- range, azimuth and range-rate measurement models for a monostatic radar;
 - the interacting multiple model (IMM) filter and the coordinated-turn motion model;
 - Singer's motion model, which carries the acceleration in the state and is exact at every
   time step. Its white-noise limit sets the process noise now;

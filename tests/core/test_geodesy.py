@@ -138,3 +138,57 @@ class TestEnuToRangeAzimuthElevation:
     def test_rejects_a_last_axis_that_is_not_three(self) -> None:
         with pytest.raises(ValueError, match=r"shape \(\.\.\., 3\)"):
             geodesy.enu_to_range_azimuth_elevation(np.zeros((4, 2)))
+
+
+class TestRadiansAndInverse:
+    def test_the_degree_form_is_the_radian_form_converted(self) -> None:
+        """Catches the two forms drifting apart, which is why the degree form calls the other.
+
+        The points span all four quadrants and both signs of elevation, so a wrap
+        applied in one form and not the other shows up.
+        """
+        enu_m = np.array(
+            [[300.0, 400.0, 1200.0], [-250.0, 80.0, -40.0], [-10.0, -900.0, 5.0], [7.0, -3.0, 2.0]]
+        )
+        range_m, azimuth_deg, elevation_deg = geodesy.enu_to_range_azimuth_elevation(enu_m)
+        range_rad_m, azimuth_rad, elevation_rad = geodesy.enu_to_range_azimuth_elevation_rad(enu_m)
+        # rtol 1e-15: the degree form is the radian form times one constant.
+        np.testing.assert_allclose(range_m, range_rad_m, rtol=1e-15)
+        np.testing.assert_allclose(azimuth_deg, np.degrees(azimuth_rad), rtol=1e-15)
+        np.testing.assert_allclose(elevation_deg, np.degrees(elevation_rad), rtol=1e-15)
+
+    def test_radian_azimuth_lies_in_zero_to_two_pi(self) -> None:
+        """Catches a centred wrap, which would put west at -pi/2, not 3 pi/2."""
+        _, azimuth_rad, _ = geodesy.enu_to_range_azimuth_elevation_rad(
+            [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [-1.0, 0.0, 0.0]]
+        )
+        np.testing.assert_allclose(azimuth_rad, [0.0, np.pi / 2, np.pi, 3 * np.pi / 2], atol=1e-15)
+
+    def test_the_inverse_puts_cardinal_azimuths_on_the_axes(self) -> None:
+        """Catches sine and cosine swapped, which turns north into east.
+
+        Azimuth pi/2 is due east, (1000, 0, 0); azimuth 0 is due north; elevation
+        pi/2 is straight up whatever the azimuth.
+        """
+        enu_m = geodesy.range_azimuth_elevation_to_enu_m(
+            1000.0, np.array([np.pi / 2, 0.0, 1.0]), np.array([0.0, 0.0, np.pi / 2])
+        )
+        # atol 1e-9 m: cos(pi/2) is 6e-17, times 1000 m.
+        np.testing.assert_allclose(
+            enu_m, [[1000.0, 0.0, 0.0], [0.0, 1000.0, 0.0], [0.0, 0.0, 1000.0]], atol=1e-9
+        )
+
+    def test_the_inverse_round_trips(self) -> None:
+        """Catches any mismatch between the two directions' conventions.
+
+        Points in all four quadrants, above and below the horizon, map to
+        spherical and back to themselves.
+        """
+        enu_m = np.array(
+            [[300.0, 400.0, 1200.0], [-250.0, 80.0, -40.0], [-10.0, -900.0, 5.0], [7.0, -3.0, 2.0]]
+        )
+        recovered_m = geodesy.range_azimuth_elevation_to_enu_m(
+            *geodesy.enu_to_range_azimuth_elevation_rad(enu_m)
+        )
+        # rtol 1e-12: one round trip through trigonometric functions.
+        np.testing.assert_allclose(recovered_m, enu_m, rtol=1e-12, atol=1e-12)
