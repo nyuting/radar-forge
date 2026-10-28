@@ -80,6 +80,7 @@ from radar_forge.core.dsp import (
     range_bin_centers_m,
     range_doppler_map,
 )
+from radar_forge.core.propagation import bistatic_line_of_sight_paths, line_of_sight_paths
 from radar_forge.core.radar import (
     BistaticRadar,
     Radar,
@@ -88,12 +89,7 @@ from radar_forge.core.radar import (
     Transmitter,
     WaveformKind,
 )
-from radar_forge.core.signal import (
-    bistatic_line_of_sight_paths,
-    fmcw_deramp_baseband,
-    line_of_sight_paths,
-    pulsed_baseband,
-)
+from radar_forge.core.signal import fmcw_deramp_baseband, pulsed_baseband
 from radar_forge.core.targets import PointTarget
 from radar_forge.core.waveforms import lfm_chirp
 from radar_forge.pipelines.trajectories import (

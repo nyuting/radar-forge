@@ -108,7 +108,7 @@ The chain this slice builds. New stages are in capitals; everything else exists:
   pipelines/trajectories.py    polynomial radial history -> truth at CPI centre
             |
             v
-  core/signal.py  line_of_sight_paths(+accel, +jerk) -> PropagationPaths (+2 defaulted fields)
+  core/propagation.py  line_of_sight_paths(+accel, +jerk) -> PropagationPaths (+2 defaulted fields)
             |
             v
      pulsed_baseband(..., range gate)  + thermal_noise    -> data_ftst (n_pulses, n_gate)
@@ -447,7 +447,8 @@ This scenario claims:
 scenarios/scenario_004_keystone_{k1,k2,k3}.toml
 spec/scenario-004-keystone.md, docs/scenarios/scenario-004-keystone.md
 src/radar_forge/core/{migration,datachip}.py                       (new)
-src/radar_forge/core/signal.py        (widened: two path fields, kinematics, range gate)
+src/radar_forge/core/propagation.py   (widened: two path fields, kinematics)
+src/radar_forge/core/signal.py        (widened: polynomial range, range gate)
 src/radar_forge/core/dsp.py           (additive: delay_bin_centers_m only)
 src/radar_forge/pipelines/{trajectories,scenarios}.py   (polynomial trajectory, gate keys)
 tests/core/test_{migration,datachip}.py, tests/pipelines/test_scenario_004.py
@@ -465,8 +466,8 @@ change to both specs.
 ```
   0. scripts/check_conventions.py   + _mps2 _mps3 _hzps _hzps2   (shared, additive)
              |
-  1. core/signal.py (widen)          PropagationPaths +2 defaulted fields; line_of_sight_paths
-             |                        +accel/jerk; pulsed_baseband polynomial range + range gate
+  1. core/propagation.py (widen)     PropagationPaths +2 defaulted fields; line_of_sight_paths
+             |                        +accel/jerk; core/signal.py pulsed_baseband polynomial range + range gate
   2. core/dsp.py (additive)          delay_bin_centers_m
              |
   3. core/migration.py (new)         range_spectrum -> keystone (czt | sinc | dft oracle)
@@ -483,7 +484,7 @@ change to both specs.
 | Step | Module | Consumes / widens / untouched |
 | :--- | :--- | :--- |
 | 0 | `scripts/check_conventions.py` | Widened (suffix list) |
-| 1 | `core/signal.py` | **Widened.** `PropagationPaths`, `line_of_sight_paths`, `pulsed_baseband`; `fmcw_deramp_baseband` untouched (its stop-and-hop warning stays) |
+| 1 | `core/propagation.py`, `core/signal.py` | **Widened.** `PropagationPaths`, `line_of_sight_paths` (propagation); `pulsed_baseband` (signal); `fmcw_deramp_baseband` untouched (its stop-and-hop warning stays) |
 | 2 | `core/dsp.py` | **Widened** by one helper; `matched_filter`, `doppler_fft`, `doppler_bin_centers_mps` consumed |
 | 3 | `core/migration.py` | New. Uses `scipy.signal.czt`, already a dependency |
 | 4 | `core/datachip.py` | New. Consumes `core/windows.py` (window record only) and `core/detection.py` (`cfar_detect_2d`, `cluster_detections` give the crop centre) |

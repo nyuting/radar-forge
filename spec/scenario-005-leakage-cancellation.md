@@ -112,7 +112,7 @@ The processing chain. New blocks are marked `+`. Everything else is scenario 001
   pipelines/trajectories.py  to_radar_frame  (001, unchanged)
             |
             v
-  core/signal.py  line_of_sight_paths (001)   + leakage_paths, static_clutter_paths
+  core/propagation.py  line_of_sight_paths (001)   + leakage_paths, static_clutter_paths
             |
             v
   + core/signal.py  stream_baseband  ->  data_t (n_stream_samples,), tx_t (n_stream_samples,)
@@ -438,7 +438,8 @@ belongs to scenario 008, and `array/` to 006 onward.
 ```
   1. core/waveforms.py   + noise_waveform                  (new function)
   2. core/radar.py       WaveformKind += "noise"; unambiguous_range_m branch   (widen)
-  3. core/signal.py      + leakage_paths, static_clutter_paths, stream_baseband (amplifier model optional)
+  3. core/propagation.py + leakage_paths, static_clutter_paths;
+     core/signal.py      + stream_baseband (amplifier model optional)
   4. core/dsp.py         + batched_correlation, correlation range axis   (doppler_fft unchanged)
   5. core/clutter.py     + delay_basis_gram, ls_weights, wiener_smi, ls_cancel,
                            ls_cancel_batched, ls_cancel_sliding, parallel_hammerstein_basis,
@@ -454,7 +455,7 @@ belongs to scenario 008, and `array/` to 006 onward.
 | :--- | :--- | :--- |
 | 1 | `core/waveforms.py` | New. Unit-power complex Gaussian from a passed `rng` |
 | 2 | `core/radar.py` | Widened. `Transmitter` validation is unchanged: duty cycle 1, as FMCW |
-| 3 | `core/signal.py` | **Consumes** `PropagationPaths` unchanged (D1, D6). Leakage and clutter are paths with `bounce_count = 1` and zero Doppler (P2 adds one with 2 Hz). The target comes from 001's `line_of_sight_paths`. `thermal_noise` is consumed. A loop over paths (fewer than ten) applies each FFT delay. The comment says why |
+| 3 | `core/propagation.py`, `core/signal.py` | **Consumes** `PropagationPaths` unchanged (D1, D6). Leakage and clutter are paths built in `core/propagation.py` with `bounce_count = 1` and zero Doppler (P2 adds one with 2 Hz). The target comes from 001's `line_of_sight_paths`. `thermal_noise` is consumed. A loop over paths (fewer than ten) applies each FFT delay. The comment says why |
 | 4 | `core/dsp.py` | New function. `doppler_fft` and `doppler_bin_centers_mps` are consumed |
 | 5 | `core/clutter.py` | New cancellation half; `scipy.linalg.cho_factor`. No new dependency |
 | 7 | `pipelines/scenarios.py` | No `[transmitter_site]`, so `Radar` (monostatic). `iterate_frames` dispatches `"noise"` to `stream_baseband` (today it falls through to the FMCW generator) and yields the stream |

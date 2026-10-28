@@ -31,7 +31,7 @@ Know this before you choose. Each item is something you may have to build in you
 - **No clutter.** The background is thermal noise only. Any clutter is clutter you add yourself,
   with parameters justified from a cited source on real radar data.
 - **One target per scenario, one receive channel.** Two targets, or crossing tracks, are yours to
-  synthesise. `radar_forge.core.signal.line_of_sight_paths` takes arrays of ranges, velocities
+  synthesise. `radar_forge.core.propagation.line_of_sight_paths` takes arrays of ranges, velocities
   and RCS, so one call can place several targets in one IQ cube.
 - **One tracker.** A UKF with constant-velocity or constant-acceleration motion
   (`radar_forge.core.tracking.motion.CartesianMotion`), a chi-square gate, and global or greedy

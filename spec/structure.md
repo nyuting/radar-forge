@@ -61,9 +61,11 @@ src/radar_forge/
 │   ├── geodesy.py               # WGS-84 geodetic ↔ ECEF ↔ ENU; ENU → range/az/el
 │   ├── waveforms.py             # FMCW/LFM chirp, pulse train, CW, PMCW, noise (a long pseudo-random code); ambiguity function
 │   ├── targets.py               # PointTarget, ExtendedTarget, RCS + Swerling 0–4
-│   ├── propagation.py           # free-space loss, atmospheric absorption, rain attenuation (deferred)
-│   ├── signal.py                # baseband synthesis (single and multi-channel), superposition, noise, range-correlated
-│   │                            #   LO phase noise; polynomial radial kinematics; transmitter-leakage and static-clutter paths (004–009)
+│   ├── propagation.py           # PropagationPaths (D1); monostatic and bistatic line-of-sight paths, bistatic Doppler;
+│   │                            #   polynomial radial kinematics; transmitter-leakage and static-clutter paths (004–005);
+│   │                            #   atmospheric absorption, rain attenuation (deferred)
+│   ├── signal.py                # baseband synthesis from paths (single and multi-channel), superposition, noise,
+│   │                            #   range gate, range-correlated LO phase noise (004–009)
 │   ├── dsp.py                   # range FFT, Doppler FFT, matched filter, MTI, batched correlation for continuous waveforms
 │   ├── migration.py             # keystone (1st/2nd order, fold factor), Doppler-rate matched filter, RFT/GRFT; data_rfst in and out (D10)
 │   ├── datachip.py              # DataChip, crop, fine range/velocity/acceleration estimators with CRB (D9)
@@ -126,7 +128,7 @@ src/radar_forge/
 │   └── backends/
 │       ├── __init__.py          # lazy registry; missing deps degrade to a clear error, never ImportError at import
 │       ├── analytic.py          # always-available fallback: point-target / specular approximation,
-│       │                        #   built on core.signal.line_of_sight_paths rather than duplicating it
+│       │                        #   built on core.propagation.line_of_sight_paths rather than duplicating it
 │       ├── radarsimpy.py        # RadarSimPy backend (extra: radarsimpy)
 │       ├── mitsuba.py           # Mitsuba/Dr.Jit backend, RF-Genesis-style (extra: mitsuba)
 │       └── ovrtx.py             # NVIDIA Omniverse RTX backend (extra: ovrtx)
@@ -737,7 +739,8 @@ class PropagationPaths:
     bounce_count: np.ndarray
 ```
 
-`core/signal.py` owns the path→baseband synthesis for every backend. This keeps waveform changes in one
+`core/propagation.py` defines `PropagationPaths` and the analytic path builders that are the zeroth-order
+backend. `core/signal.py` owns the path→baseband synthesis for every backend. This keeps waveform changes in one
 place, makes backends comparable on identical geometry, and makes them testable without synthesising
 signals. Backends that natively produce baseband (RadarSimPy, ovrtx) may additionally implement an
 optional `trace_baseband()` fast path; `base.py` declares it, and `generate.py` prefers it only when the
