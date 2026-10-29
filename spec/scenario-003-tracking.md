@@ -78,10 +78,8 @@ begins at the map.
             boolean detection map, (256, 1000)
             |
             v
-  pipelines/tracking.py  roll to the quietest Doppler row   <-- §14.2, the wrap
-            |
-            v
-  core/detection.py   cluster_detections -> Detection(peak_index,
+  core/detection.py   cluster_detections, wrap_axes = (0,)   <-- §14.2, the wrap
+            |             -> Detection(peak_index,
             |             centroid_index, peak_power_w, total_power_w, n_cells)
             v
   keep only the strongest detection per range cell   <-- §14.3, the sidelobes
@@ -683,8 +681,11 @@ roll. It pairs naturally with §13.2.
 takes the centroid relative to the peak, so a target on the wrap centres between bin `n - 1` and
 bin `n`, reported modulo `n`. It also takes an optional `noise_estimate_w`, so each `Detection`
 carries the CFAR estimate at its peak as `cfar_noise_estimate_w`. That is not the burst's thermal
-`noise_power_w`, against which data-001 §6.5 defines `snr_db`. `pipelines/tracking.py` still uses
-its quiet-row roll until it adopts `wrap_axes`.
+`noise_power_w`, against which data-001 §6.5 defines `snr_db`. `pipelines/tracking.py` now
+clusters with the Doppler axis in `wrap_axes`, and the range axis too when `wrap_range` is set;
+the quiet-row roll is gone. A centroid between bin `n - 1` and the wrap is converted with the
+uniform axis's formula (`RangeDopplerProduct.velocity_at_index_mps`), not `np.interp`, which
+clamped it to the last bin centre: up to one bin low for a target just below +v_ua.
 
 ---
 
@@ -847,9 +848,10 @@ axis, and the power-weighted mean of the pair is nowhere near the target. At S1
 frame 0 the split is 58 cells at +7.493 m/s and 37 at −7.511 m/s, against a true
 folded velocity of +7.502 m/s.
 
-`pipelines/tracking.py` rolls the map so its array edge falls on the quietest
-Doppler row before clustering, then maps the indices back. The clean fix is a
-`wrap_axes` option on `cluster_detections` itself — see §13.5.
+`pipelines/tracking.py` first rolled the map so its array edge fell on the
+quietest Doppler row before clustering, then mapped the indices back. That is
+now replaced by the `wrap_axes` option on `cluster_detections` itself — see
+§13.5.
 
 ### 14.3 The target's own sidelobes become extra detections
 

@@ -46,8 +46,8 @@ Outputs, on top of scenario 001's: `track_{frame:05d}.png` (range against time),
             boolean detection map, (256, 1000)
             |
             v
-  roll the map so its edge falls on the quietest Doppler row, then cluster
-            |    (the Doppler axis wraps and cluster_detections does not)
+  cluster, joining cells across the Doppler wrap
+            |    (the Doppler axis is a circle: cluster_detections' wrap_axes)
             v
   keep only the strongest detection per range cell
             |    (one point target cannot give two returns at one range)
