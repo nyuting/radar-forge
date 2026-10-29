@@ -28,13 +28,16 @@ from radar_forge.core.detection import (
     cfar_noise_estimate_2d_w,
     cfar_noise_estimate_w,
     cfar_probability_of_false_alarm,
+    cfar_ring_reference_count,
     cfar_threshold_2d_w,
     cfar_threshold_factor,
+    cfar_threshold_factor_2d,
     cfar_threshold_w,
     cfar_valid_mask,
     cfar_valid_mask_2d,
     cluster_detections,
     default_os_rank,
+    label_connected_cells,
 )
 from radar_forge.core.dsp import range_doppler_map
 from radar_forge.core.windows import taper
@@ -557,6 +560,77 @@ def test_cfar_runs_along_the_requested_axis(rng):
     assert not cfar_valid_mask(power_w.shape, n_train=4, n_guard=1, axis=-1).any()
 
 
+@pytest.mark.parametrize("variant", ["ca", "os"])
+def test_wrapped_window_equals_the_explicit_circular_window(variant):
+    """On a circular axis the end cells take their window from the far end.
+
+    Cells 0 and 19 are where an off-by-one in the wrap would show; cell 10 is an
+    interior cell, which wrapping must leave alone.
+    """
+    rng = np.random.default_rng(20261029)
+    power_w = rng.exponential(1.0, size=20)
+    n_train, n_guard, rank = 3, 1, 4
+    estimate_w = cfar_noise_estimate_w(
+        power_w, n_train=n_train, n_guard=n_guard, variant=variant, rank=rank, wrap=True
+    )
+    margin = n_guard + n_train
+    for cut in (0, 1, 10, 19):
+        offsets = [*range(-margin, -n_guard), *range(n_guard + 1, margin + 1)]
+        reference = power_w[[(cut + offset) % power_w.size for offset in offsets]]
+        expected = reference.mean() if variant == "ca" else np.sort(reference)[rank - 1]
+        # Roundoff only for CA, a running sum of a few unit-mean terms.
+        np.testing.assert_allclose(estimate_w[cut], expected, rtol=1e-12)
+
+
+def test_wrapped_valid_mask_tests_every_cell_unless_the_axis_is_too_short():
+    """Wrapping tests every cell, but a window longer than the axis would overlap itself."""
+    assert cfar_valid_mask((4, 20), n_train=3, n_guard=1, axis=-1, wrap=True).all()
+    assert not cfar_valid_mask((4, 8), n_train=3, n_guard=1, axis=-1, wrap=True).any()
+
+
+@pytest.mark.parametrize("variant", ["ca", "os"])
+def test_wrap_matches_padding_the_map_by_hand(rng, variant):
+    """``wrap=True`` gives exactly what padding with wrapped cells and cropping gave.
+
+    That hand padding is what ``pipelines.tracking.frame_detections`` did before
+    the option existed, so this pins its behaviour across the change.
+    """
+    power_w = rng.exponential(1.0, size=(16, 96))
+    n_train, n_guard = 8, 2
+    margin = n_train + n_guard
+    padded_w = np.pad(power_w, ((0, 0), (margin, margin)), mode="wrap")
+    settings = {"pfa": 1e-2, "n_train": n_train, "n_guard": n_guard, "variant": variant}
+    by_hand = cfar_detect(padded_w, **settings)[:, margin:-margin]
+    np.testing.assert_array_equal(cfar_detect(power_w, wrap=True, **settings), by_hand)
+
+
+@pytest.mark.parametrize("dimensions", [1, 2])
+def test_a_cell_120_db_above_the_floor_barely_moves_other_estimates(dimensions):
+    """Pins the module notes' running-sum bound at 120 dB of dynamic range.
+
+    The cell-averaging estimates are differences of running sums, which carry an
+    error of order eps * P after a cell of power P. At P = 1e12 times the floor
+    the notes promise at most about 1e-4 relative; measured 1.2e-5 for the ring
+    and 3.9e-5 for the window at this seed.
+    """
+    rng = np.random.default_rng(1)
+    power_w = rng.exponential(1.0, size=(32, 256))
+    loud_w = power_w.copy()
+    loud_w[16, 20] = 1e12
+    if dimensions == 1:
+        settings = {"n_train": 8, "n_guard": 2}
+        quiet_estimate_w = cfar_noise_estimate_w(power_w, **settings)
+        loud_estimate_w = cfar_noise_estimate_w(loud_w, **settings)
+    else:
+        settings = {"n_train": (2, 4), "n_guard": (1, 2)}
+        quiet_estimate_w = cfar_noise_estimate_2d_w(power_w, **settings)
+        loud_estimate_w = cfar_noise_estimate_2d_w(loud_w, **settings)
+    # Range cells 40 on are outside every window that holds the loud cell.
+    far = (slice(None), slice(40, None))
+    relative = np.abs(loud_estimate_w[far] / quiet_estimate_w[far] - 1.0)
+    assert np.nanmax(relative) < 1e-4
+
+
 # --------------------------------------------------------------------------- #
 # Clustering
 # --------------------------------------------------------------------------- #
@@ -602,6 +676,43 @@ def test_clusters_are_connected_in_two_dimensions():
     assert len(face_connected) == 2
     assert len(fully_connected) == 1
     assert fully_connected[0].n_cells == 5
+
+
+def test_labels_are_the_connected_components_of_the_mask():
+    """The label map, by hand: an L, a lone cell, and a cell touching the L at a corner.
+
+    Labels are numbered in raster order of each group's first cell, as
+    scipy.ndimage.label numbers them.
+    """
+    mask = np.array(
+        [
+            [1, 0, 0, 1],
+            [1, 1, 0, 0],
+            [0, 0, 1, 0],
+        ],
+        dtype=bool,
+    )
+    labels, n_groups = label_connected_cells(mask)
+    assert n_groups == 3
+    np.testing.assert_array_equal(labels, [[1, 0, 0, 2], [1, 1, 0, 0], [0, 0, 3, 0]])
+
+    labels, n_groups = label_connected_cells(mask, connectivity=2)
+    assert n_groups == 2
+    np.testing.assert_array_equal(labels, [[1, 0, 0, 2], [1, 1, 0, 0], [0, 0, 1, 0]])
+
+
+def test_each_detection_summarises_exactly_one_label():
+    """cluster_detections reports one detection per label, over that label's cells."""
+    rng = np.random.default_rng(20261029)
+    power_w = rng.exponential(1.0, size=(32, 64))
+    mask = power_w > 3.0
+    labels, n_groups = label_connected_cells(mask, wrap_axes=(0,))
+    found = cluster_detections(mask, power_w, wrap_axes=(0,))
+    assert len(found) == n_groups
+    assert sorted(d.n_cells for d in found) == sorted(np.bincount(labels.ravel())[1:].tolist())
+    for detection in found:
+        group = labels == labels[detection.peak_index]
+        assert detection.peak_power_w == power_w[group].max()
 
 
 def test_clustering_an_empty_mask_returns_nothing():
@@ -865,8 +976,15 @@ def test_valid_mask_2d_is_empty_when_an_axis_is_shorter_than_the_ring():
     assert not valid.any()
 
 
+def test_ring_reference_count_matches_the_explicit_ring():
+    """M from the formula is the number of cells the explicit enumeration visits."""
+    power_w = np.ones((24, 40))
+    ring = explicit_ring(power_w, (12, 20), wrap_doppler=False)
+    assert cfar_ring_reference_count(RING_N_TRAIN, RING_N_GUARD) == ring.size == RING_N_REFERENCE
+
+
 def test_ring_threshold_factor_satisfies_the_cell_averaging_closed_form():
-    """In a unit floor the threshold is alpha, and (1 + alpha / M) ** -M is pfa.
+    """(1 + alpha / M) ** -M is pfa, and the ring's threshold on a unit floor is alpha.
 
     The closed form is the Gamma moment-generating function for M cells, which
     shares no code with the calibration, so this checks that the ring is
@@ -878,14 +996,102 @@ def test_ring_threshold_factor_satisfies_the_cell_averaging_closed_form():
     CA threshold factor changes slowly once M is large.
     """
     pfa = 1e-4
-    threshold_w = cfar_threshold_2d_w(
-        np.ones((32, 64)), pfa=pfa, n_train=RING_N_TRAIN, n_guard=RING_N_GUARD
-    )
-    alpha_linear = float(np.nanmax(threshold_w))
+    alpha_linear = cfar_threshold_factor_2d(pfa=pfa, n_train=RING_N_TRAIN, n_guard=RING_N_GUARD)
     # Roundoff only: a closed form evaluated at its own inverse.
     np.testing.assert_allclose(
         (1.0 + alpha_linear / RING_N_REFERENCE) ** -RING_N_REFERENCE, pfa, rtol=1e-10
     )
+    threshold_w = cfar_threshold_2d_w(
+        np.ones((32, 64)), pfa=pfa, n_train=RING_N_TRAIN, n_guard=RING_N_GUARD
+    )
+    # Roundoff only: a ring mean of ones, times alpha.
+    np.testing.assert_allclose(np.nanmax(threshold_w), alpha_linear, rtol=1e-12)
+
+
+def test_default_ring_rank_is_three_quarters_of_the_ring():
+    """With no rank given, the OS ring uses round(3M / 4), in calibration and estimate alike."""
+    default_rank = round(0.75 * RING_N_REFERENCE)
+    ring = {"n_train": RING_N_TRAIN, "n_guard": RING_N_GUARD, "variant": "os"}
+    assert cfar_threshold_factor_2d(pfa=1e-3, **ring) == cfar_threshold_factor_2d(
+        pfa=1e-3, rank=default_rank, **ring
+    )
+    power_w = np.random.default_rng(20261029).exponential(1.0, size=(24, 40))
+    np.testing.assert_array_equal(
+        cfar_noise_estimate_2d_w(power_w, **ring),
+        cfar_noise_estimate_2d_w(power_w, rank=default_rank, **ring),
+    )
+
+
+@pytest.mark.parametrize("variant", ["ca", "os"])
+def test_ring_threshold_scales_exactly_with_the_noise_floor(rng, variant):
+    """The CFAR property, exactly: scale the map by 2**20 and the threshold scales with it.
+
+    A power of two scales every float exactly, so the sums and the selection
+    inside the ring see the same numbers shifted in exponent, and the mask
+    cannot change by even one cell.
+    """
+    power_w = rng.exponential(1.0, size=(32, 64))
+    scale = 2.0**20
+    settings = {
+        "pfa": 1e-2,
+        "n_train": RING_N_TRAIN,
+        "n_guard": RING_N_GUARD,
+        "variant": variant,
+        "wrap_axes": (0,),
+    }
+    np.testing.assert_array_equal(
+        cfar_threshold_2d_w(scale * power_w, **settings),
+        scale * cfar_threshold_2d_w(power_w, **settings),
+    )
+    np.testing.assert_array_equal(
+        cfar_detect_2d(scale * power_w, **settings), cfar_detect_2d(power_w, **settings)
+    )
+
+
+def test_ring_mean_of_a_sloping_floor_is_the_floor_at_the_cell_under_test():
+    """A floor that is linear in both axes is tracked exactly by the ring's mean.
+
+    The ring is symmetric about its cell under test, so the linear terms of a
+    plane cancel and the mean is the plane's value at the centre. That holds
+    whatever the slopes, which makes it a ground truth for a floor varying along
+    Doppler and range at once.
+    """
+    doppler, range_ = np.meshgrid(np.arange(24), np.arange(40), indexing="ij")
+    floor_w = 1.0 + 0.5 * doppler + 0.25 * range_
+    estimate_w = cfar_noise_estimate_2d_w(floor_w, n_train=RING_N_TRAIN, n_guard=RING_N_GUARD)
+    valid = cfar_valid_mask_2d(floor_w.shape, n_train=RING_N_TRAIN, n_guard=RING_N_GUARD)
+    # Roundoff only: running sums of a few hundred terms of order ten.
+    np.testing.assert_allclose(estimate_w[valid], floor_w[valid], rtol=1e-12)
+
+
+def test_a_doppler_spread_target_masks_itself_unless_the_doppler_guard_covers_it():
+    """The 2-D form of the guard-band test: the spill that matters runs along Doppler.
+
+    A target spread over five Doppler bins at 1000, on a unit floor. With no
+    Doppler guard, n_train = (2, 1) gives a 5 x 3 box less the cell itself,
+    M = 14 cells, four of them the target's own spill: the mean is
+    (10 + 4000) / 14 = 286 and alpha(1e-4, M = 14) = 13.0, a threshold of 3727
+    against 1000. A Doppler guard of 2, the spread's half-width, leaves only
+    floor cells (M = 22) and a threshold of alpha = 11.4.
+    """
+    power_w = np.ones((32, 64))
+    power_w[14:19, 32] = 1000.0
+    settings = {"pfa": 1e-4, "n_train": (2, 1)}
+    assert not cfar_detect_2d(power_w, n_guard=(0, 0), **settings)[16, 32]
+    assert cfar_detect_2d(power_w, n_guard=(2, 0), **settings)[16, 32]
+
+
+@pytest.mark.parametrize("variant", ["ca", "os"])
+def test_ring_spans_axes_that_are_not_adjacent(variant):
+    """A ring over axes (0, 2) of a 3-D array is the 2-D ring of each slice along axis 1."""
+    power_w = np.random.default_rng(20261029).exponential(1.0, size=(24, 3, 40))
+    settings = {"n_train": RING_N_TRAIN, "n_guard": RING_N_GUARD, "variant": variant}
+    estimate_w = cfar_noise_estimate_2d_w(power_w, axes=(0, 2), wrap_axes=(0,), **settings)
+    for index in range(power_w.shape[1]):
+        expected_w = cfar_noise_estimate_2d_w(power_w[:, index, :], wrap_axes=(0,), **settings)
+        np.testing.assert_array_equal(np.isnan(estimate_w[:, index, :]), np.isnan(expected_w))
+        # Roundoff only: the same running sums over the same lines.
+        np.testing.assert_allclose(estimate_w[:, index, :], expected_w, rtol=1e-12)
 
 
 def test_a_ring_has_less_cfar_loss_than_a_line_of_the_same_reach():
@@ -1124,6 +1330,9 @@ def test_ring_rejects_a_pair_that_is_not_two_integers(name, arguments):
         cfar_noise_estimate_2d_w(np.ones((32, 64)), **arguments)
     with pytest.raises(ValueError, match=f"{name} must be two integers"):
         cfar_valid_mask_2d((32, 64), **arguments)
+    if name != "axes":
+        with pytest.raises(ValueError, match=f"{name} must be two integers"):
+            cfar_ring_reference_count(arguments["n_train"], arguments["n_guard"])
 
 
 def test_ring_accepts_numpy_integer_counts():
