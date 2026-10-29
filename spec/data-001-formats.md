@@ -26,7 +26,7 @@
 
 ## 1. Status, purpose and scope
 
-Status: **proposed**. Schema version **1.1.0**. `scripts/run_scenario.py` writes `metadata.json`
+Status: **proposed**. Schema version **1.2.0**. `scripts/run_scenario.py` writes `metadata.json`
 (§6.1, all but `files`), `detections.csv` (§6.5), `tracks.csv` (§6.6, for the `range_1d` state
 model) and `metrics.csv` (§6.9). Nothing else below is implemented yet except where §12 says
 today's writer already matches.
@@ -187,7 +187,7 @@ the ones marked *new*.
 
 | Key | Type | Content |
 | :--- | :--- | :--- |
-| `schema_version` *new* | string | Semver of this spec, `"1.1.0"` |
+| `schema_version` *new* | string | Semver of this spec, `"1.2.0"` |
 | `run_id` *new* | string | `<scenario-name>-<created_utc as YYYYMMDDTHHMMSSZ>` unless the caller overrides it. The run directory is named after it |
 | `created_utc` *new* | string | ISO 8601 UTC instant the run started |
 | `epoch_utc` *new* | string or null | §5 Time |
@@ -289,6 +289,7 @@ polar position, a Doppler speed and an amplitude. The units are SI, not ASTERIX'
 | `burst_index` | int | — | R | *new*. The burst whose map the detection was found in, `0` for a single-burst run. `range_index` and `velocity_index` index that burst's map |
 | `status` | enum | — | R | *new*. What became of the detection on its way to the tracker: `accepted` (passed to it); or, for a dual-PRF pair, `missing_pair` (no detection in the other burst within the range tolerance), `ambiguous_pair` (one within it, but not mutually nearest) or `unresolved_velocity` (paired, but the two folded velocities agree on no unfolded one). Only the first burst's `accepted` detections reach the tracker |
 | `pair_id` | int | — | R | *new*. The same integer on the two detections of a dual-PRF pair, unique within the frame. Empty for a detection that was not paired |
+| `range_unfolded_m` | float64 | m | R | *new*. The true range the two detections of an `accepted` dual-PRF pair agree on, from `core.ambiguity.unfold_range_dual_prf`; the same on both. `range_m` stays each burst's own folded reading. Empty for any other detection |
 
 ### 6.6 `tracks.csv`
 
@@ -673,6 +674,7 @@ item 5. Only rule R7, which AC8 cites, is in place.
 | :--- | :--- | :--- |
 | 1.0.0 | 2026-09-29 | First proposal |
 | 1.1.0 | 2026-10-07 | `detections.csv` adds `burst_index`, `status` and `pair_id`; `metadata.json` `tracking` adds `range_period_m` and `unused`, and records the resolved settings, defaults included, beside the `[tracking]` table's own keys |
+| 1.2.0 | 2026-10-29 | `detections.csv` adds `range_unfolded_m` |
 
 ## References
 

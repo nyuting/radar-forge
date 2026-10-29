@@ -76,7 +76,8 @@ BISTATIC_TRUTH_COLUMNS = ["range_tx_m", "range_rx_m", "bistatic_angle_deg"]
 # `associated_track_id` is empty for a detection no track claimed, which is how
 # the plots tell a false alarm from a hit without rerunning the associator.
 # `burst_index`, `status` and `pair_id` say what became of each detection on
-# its way to the tracker, which matters for a dual-PRF pair.
+# its way to the tracker, which matters for a dual-PRF pair, and
+# `range_unfolded_m` is the true range an accepted pair agrees on.
 DETECTION_COLUMNS = (
     "frame",
     "time_s",
@@ -97,6 +98,7 @@ DETECTION_COLUMNS = (
     "burst_index",
     "status",
     "pair_id",
+    "range_unfolded_m",
 )
 # §6.6, for the range_1d state model: the state *is* `range_m` and
 # `range_rate_mps`, and `cov_0_1` is their one off-diagonal covariance, in
@@ -134,7 +136,7 @@ CONVENTIONS = {
     "cube_layout": "frame,pulse,sample[,rx]",
     "rd_layout": "frame,doppler,range",
 }
-SCHEMA_VERSION = "1.1.0"
+SCHEMA_VERSION = "1.2.0"
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -410,6 +412,7 @@ def detection_rows(
                 "burst_index": measurement.burst_index,
                 "status": measurement.status,
                 "pair_id": measurement.pair_id,
+                "range_unfolded_m": measurement.range_unfolded_m,
             }
 
 

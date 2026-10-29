@@ -307,12 +307,12 @@ class TestDualPrf:
 @pytest.mark.parametrize(
     "name", ["scenario_003_tracking_dual_prf", "scenario_003_ukf_fmcw_dual_prf"]
 )
-def test_the_target_stays_inside_both_dual_prf_maps(name):
-    """dual_prf_detections pairs on the assumption that both maps see the true range.
+def test_the_target_stays_inside_the_dual_prf_range_bound(name):
+    """dual_prf_detections unfolds range up to the larger map's span by default.
 
-    The two bursts' range axes span different ranges, and a target beyond the
-    shorter would read differently on each and never pair. Nothing checks this
-    at run time, so it is checked here, from the truth, over each window.
+    A target beyond that bound would alias onto a wrong range that still pairs.
+    Nothing checks this at run time, so it is checked here, from the truth,
+    over each window.
     """
     scenario = load_scenario(SCENARIOS_DIR / f"{name}.toml")
     trajectory = load_flight_csv(scenario.trajectory_path, altitude_m=scenario.target_altitude_m)
@@ -321,7 +321,7 @@ def test_the_target_stays_inside_both_dual_prf_maps(name):
     ).range_m
     spans_m = [range_layout(burst).coordinates[0].period for burst in scenario.bursts]
     assert None not in spans_m
-    assert float(np.max(truth_m)) < min(span_m for span_m in spans_m if span_m is not None)
+    assert float(np.max(truth_m)) < max(span_m for span_m in spans_m if span_m is not None)
 
 
 # Criterion C4 (spec/scenario-003-tracking.md §14.11): frames, of the 120, in

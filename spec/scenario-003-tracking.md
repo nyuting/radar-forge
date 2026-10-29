@@ -1084,11 +1084,17 @@ figure that matches a real radar is `min(c f_s / 2α, c T / 2)`. The target stay
 change. Correcting `Radar.unambiguous_range_m` is a follow-up in `core/radar.py`.
 
 **Dual-PRF pairing, both trackers.** Two detections, one per burst, are paired when they are within
-the range tolerance and each is the other's nearest in range. On the UKF path the range gap is
-taken the short way round the smaller map's circle, so a target at its wrap edge still pairs. The
-two bursts' maps span different ranges, 60.0 and 50.0 km, so pairing assumes the target is inside
-both; `test_the_target_stays_inside_both_dual_prf_maps` checks it over each shipped window. Every detection is written with a
-`status` and the pair's `pair_id` (`spec/data-001-formats.md` §6.5). An earlier draft required
+the range tolerance and each is the other's nearest in range. The two bursts' maps span different
+ranges, 60.0 and 50.0 km, so a target past 50 km reads differently on each. Range is therefore
+unfolded as velocity is, by the one period-agnostic solver in `core/ambiguity.py`
+(`unfold_range_dual_prf`): the gap between two detections is the residual of the best true range
+for the pair, measured round the second map's circle, so a target at either map's wrap edge still
+pairs. The search bound defaults to the larger span, 60.0 km; a caller may raise it as far as the
+pair's 300 km repeat, though an FMCW sweep cannot see past `c T / 2` (above), so the reach matters
+mainly for pulsed multi-PRF designs. `test_the_target_stays_inside_the_dual_prf_range_bound`
+checks each shipped window against the default bound. The Kalman path measures the pair's unfolded
+range, the UKF path the first burst's own reading. Every detection is written with a `status`, the
+pair's `pair_id` and, for an accepted pair, `range_unfolded_m` (`spec/data-001-formats.md` §6.5). An earlier draft required
 each detection to have exactly one detection of the other burst within the tolerance. On the S3
 scenario-003 run that refused the target's pair in two of the first five frames, because a
 one-cell false alarm lay 80–140 m away, and delayed confirmation from frame 3 to frame 8. Mutual

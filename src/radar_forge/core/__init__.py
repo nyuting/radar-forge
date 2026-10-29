@@ -17,7 +17,13 @@ from radar_forge.core import (
     waveforms,
     windows,
 )
-from radar_forge.core.ambiguity import fold_velocity_mps, unfold_doppler_dual_prf
+from radar_forge.core.ambiguity import (
+    fold_into_period,
+    fold_velocity_mps,
+    unfold_doppler_dual_prf,
+    unfold_dual_period,
+    unfold_range_dual_prf,
+)
 from radar_forge.core.constants import (
     BOLTZMANN_JPK,
     EARTH_RADIUS_M,
@@ -188,6 +194,7 @@ __all__ = [
     "enu_to_range_azimuth_elevation",
     "enu_to_range_azimuth_elevation_rad",
     "fmcw_deramp_baseband",
+    "fold_into_period",
     "fold_velocity_mps",
     "gate_threshold",
     "geodesy",
@@ -223,6 +230,8 @@ __all__ = [
     "thermal_noise",
     "tracking",
     "unfold_doppler_dual_prf",
+    "unfold_dual_period",
+    "unfold_range_dual_prf",
     "update",
     "waveforms",
     "windows",
