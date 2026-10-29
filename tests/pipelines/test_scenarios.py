@@ -19,6 +19,7 @@ import pytest
 from radar_forge.core.radar import BistaticRadar, Radar
 from radar_forge.core.tracking import state_model_matrices
 from radar_forge.pipelines.scenarios import (
+    RangeDopplerProduct,
     Scenario,
     form_range_doppler_map,
     iterate_frames,
@@ -378,6 +379,45 @@ class TestBurstRangeDoppler:
         expected_range_m = true_range_m % burst.unambiguous_range_m
         assert abs(peak_range_m - expected_range_m) < burst.range_resolution_m
         np.testing.assert_allclose(peak_velocity_mps, 0.0, atol=1e-12)
+
+
+class TestCircularAxes:
+    """A fractional index converts on the circle, including across the wrap."""
+
+    @staticmethod
+    def product(n_doppler_bins: int) -> RangeDopplerProduct:
+        bin_mps = 0.5
+        return RangeDopplerProduct(
+            rd_map=np.zeros((n_doppler_bins, 8), dtype=np.complex128),
+            range_axis_m=np.arange(8, dtype=np.float64) * 10.0,
+            velocity_axis_mps=(np.arange(n_doppler_bins) - n_doppler_bins // 2) * bin_mps,
+        )
+
+    def test_periods_are_bins_times_bin_width(self):
+        product = self.product(16)
+        assert product.range_period_m == 80.0
+        assert product.velocity_period_mps == 8.0
+
+    def test_bin_centres_match_the_axes(self):
+        product = self.product(16)
+        for index in range(16):
+            assert product.velocity_at_index_mps(index) == product.velocity_axis_mps[index]
+        for index in range(8):
+            assert product.range_at_index_m(index) == product.range_axis_m[index]
+
+    def test_an_index_past_the_last_bin_lies_between_it_and_the_wrap(self):
+        # Last centre +3.5 m/s, wrap at +4 = -4 m/s: halfway is +3.75 m/s, not
+        # the clamped +3.5.
+        product = self.product(16)
+        assert product.velocity_at_index_mps(15.5) == pytest.approx(3.75)
+        assert product.range_at_index_m(7.5) == pytest.approx(75.0)
+
+    def test_an_odd_axis_folds_into_the_half_open_interval(self):
+        # Odd n: centres are symmetric, -3.5 .. +3.5 for n = 15, and the wrap
+        # sits at +-3.75. Half a bin past the last centre is exactly the wrap,
+        # which folds to the interval's closed end, -3.75.
+        product = self.product(15)
+        assert product.velocity_at_index_mps(14.5) == pytest.approx(-3.75)
 
 
 class TestVelocityIsIndependentOfTheWindow:

@@ -356,6 +356,28 @@ class TestFrameDetections:
         error_mps = abs(float(fold_velocity_mps(found - (-half_span + 0.05), half_span)))
         assert error_mps < 2.0 * FOLD_SPAN_MPS / 256
 
+    @pytest.mark.parametrize("fraction_of_bin", [0.2, 0.5, 0.9])
+    def test_a_target_in_the_last_bin_before_the_wrap_keeps_its_velocity(self, fraction_of_bin):
+        """A centroid between the last bin centre and the wrap is not clamped.
+
+        The target sits ``fraction_of_bin`` of a bin below +v_ua, so its
+        centroid lies in ``(n - 1, n)``: past the last bin centre, short of bin 0
+        across the wrap. ``np.interp`` clamped it to the last bin centre, which
+        put it 0.2, 0.5 and 0.9 of a bin low.
+        """
+        n_doppler_bins = 256
+        bin_mps = FOLD_SPAN_MPS / n_doppler_bins
+        true_mps = FOLD_SPAN_MPS / 2.0 - fraction_of_bin * bin_mps
+        product = synthetic_product(15_000.0, true_mps, n_doppler_bins=n_doppler_bins)
+
+        near_target = [m for m in frame_detections(product) if abs(m.range_m - 15_000.0) < 150.0]
+        assert len(near_target) == 1
+
+        error_mps = float(
+            fold_velocity_mps(near_target[0].velocity_folded_mps - true_mps, FOLD_SPAN_MPS / 2.0)
+        )
+        assert abs(error_mps) < 0.1 * bin_mps
+
     def test_range_sidelobes_of_one_target_do_not_become_several_detections(self):
         """One point target cannot produce two returns at one range."""
         product = synthetic_product(15_000.0, 2.0)

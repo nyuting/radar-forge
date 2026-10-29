@@ -32,18 +32,17 @@ model", and where a measurement came from is not its business.
 Two departures from the specification as written, both recorded in its §14.2 and
 §14.4 and both found by running it:
 
-**The Doppler axis is circular, and clustering here does not yet treat it so.**
+**The Doppler axis is circular, and clustering must treat it so.**
 Clustered as a straight line, a target whose response straddles the
 :math:`\pm v_{\text{unamb}}` wrap is returned as *two* clusters at opposite
 ends of the axis, and a centroid over the pair is meaningless. In scenario
 001's S1 at frame 0 the split is 58 cells at +7.493 m/s and 37 cells at
 -7.511 m/s, against a true folded velocity of +7.502 m/s.
-:func:`frame_detections` rolls the map so the array edge falls on the quietest
-Doppler row before clustering, and maps the indices back afterwards.
-:func:`~radar_forge.core.detection.cluster_detections` has since gained a
-``wrap_axes`` option (§13.5), which :func:`frame_detections` already uses for
-the range axis when ``wrap_range`` is set. The roll stays until the Doppler
-axis adopts ``wrap_axes`` too.
+:func:`frame_detections` clusters with the Doppler axis in
+:func:`~radar_forge.core.detection.cluster_detections`' ``wrap_axes`` (§13.5),
+and the range axis too when ``wrap_range`` is set. It converts a centroid to
+physical units with the product's own circular-axis formulas, never
+``np.interp``, which clamps a centroid that lies across the wrap.
 
 **A track's readiness to unfold is a batch statistic, not the filter's
 covariance.** §5.3 gives the ten-frame crossing in terms of the standard
@@ -404,15 +403,6 @@ def _suppress_range_sidelobes(
     return kept
 
 
-def _quietest_doppler_row(power_w: NDArray[np.float64]) -> int:
-    """Index of the Doppler row carrying the least total power.
-
-    The wrap has to be moved somewhere before clustering, and the quietest row
-    is the place a real target is least likely to be sitting.
-    """
-    return int(np.argmin(power_w.sum(axis=1)))
-
-
 def frame_detections(
     product: RangeDopplerProduct,
     config: DetectionConfig | None = None,
@@ -422,12 +412,15 @@ def frame_detections(
     r"""Detect targets in one range-Doppler map and return them in physical units.
 
     Runs cell-averaging CFAR along the **range** axis, clusters the crossings,
-    and interpolates each cluster's power-weighted centroid onto the product's
-    own range and velocity axes. Interpolating onto those axes rather than
-    deriving a bin spacing locally is what keeps the unshifted-range /
-    fftshifted-Doppler asymmetry in one place; a tracker that reinvents the
-    Doppler axis produces closing targets that open, and the picture still
-    looks plausible.
+    and converts each cluster's power-weighted centroid to metres and metres
+    per second with the product's own
+    :meth:`~radar_forge.pipelines.scenarios.RangeDopplerProduct.range_at_index_m`
+    and
+    :meth:`~radar_forge.pipelines.scenarios.RangeDopplerProduct.velocity_at_index_mps`.
+    Converting on those axes rather than deriving a bin spacing locally is what
+    keeps the unshifted-range / fftshifted-Doppler asymmetry in one place; a
+    tracker that reinvents the Doppler axis produces closing targets that open,
+    and the picture still looks plausible.
 
     Parameters
     ----------
@@ -441,10 +434,8 @@ def frame_detections(
         beyond its last bin lands back near its first (see
         :func:`~radar_forge.pipelines.scenarios.range_axis_m`). Then the CFAR
         window wraps round the ends instead of leaving the end cells untested,
-        a cluster may straddle the ends, and a range is
-        ``range_axis_m[0] + range_index * bin`` for any index in
-        ``[0, n_range_bins)``. Default False, which tests no cell within
-        ``n_train + n_guard`` of either end.
+        and a cluster may straddle the ends. Default False, which tests no cell
+        within ``n_train + n_guard`` of either end.
 
     Returns
     -------
@@ -454,14 +445,14 @@ def frame_detections(
 
     Notes
     -----
-    The map is rolled along the Doppler axis so that its array edge falls on the
-    quietest Doppler row, clustered there, and the indices mapped back. Without
-    this a target straddling the velocity wrap is split into two clusters at
-    opposite ends of the axis and neither centroid is the target's velocity.
-    ``cluster_detections`` can join clusters across a circular axis
-    (``wrap_axes``), and the range axis uses it when ``wrap_range`` is set. The
-    Doppler axis does not yet, so the roll stays until it does (scenario 003
-    §13.5).
+    The Doppler axis is always clustered as a circle (``wrap_axes``), and range
+    too when ``wrap_range`` is set. Clustered as a line, a target straddling the
+    velocity wrap would split into two clusters at opposite ends of the axis,
+    and neither centroid would be the target's velocity (scenario 003 §13.5,
+    §14.2). A centroid on a circular axis may lie between the last bin centre
+    and the first, which is why it is converted with the uniform axis's formula
+    and not ``np.interp``: interpolation would clamp it to the last bin, up to
+    a whole bin away.
 
     Detections within ``merge_range_bins`` of a stronger one are then discarded.
     Scenario 001 applies no Doppler taper, so a target at the 45-69 dB
@@ -480,7 +471,7 @@ def frame_detections(
     """
     settings = config if config is not None else DetectionConfig()
     power_w = np.abs(product.rd_map) ** 2
-    n_doppler_bins, n_range_bins = power_w.shape
+    n_range_bins = power_w.shape[1]
     mask = cfar_detect(
         power_w,
         pfa=settings.pfa,
@@ -491,32 +482,15 @@ def frame_detections(
         wrap=wrap_range,
     )
 
-    shift = _quietest_doppler_row(power_w)
-    rolled_power_w = np.roll(power_w, -shift, axis=0)
-    rolled_mask = np.roll(mask, -shift, axis=0)
-
-    range_indices = np.arange(n_range_bins, dtype=np.float64)
-    velocity_indices = np.arange(n_doppler_bins, dtype=np.float64)
-    range_bin_m = float(product.range_axis_m[1] - product.range_axis_m[0])
-
+    # The Doppler axis is always circular; range is when wrap_range says so.
+    clusters = cluster_detections(mask, power_w, wrap_axes=(0, 1) if wrap_range else (0,))
     measurements: list[Measurement] = []
-    clusters = cluster_detections(rolled_mask, rolled_power_w, wrap_axes=(1,) if wrap_range else ())
     for detection in clusters:
-        velocity_index = float((detection.centroid_index[0] + shift) % n_doppler_bins)
-        range_index = float(detection.centroid_index[1])
-        # On a circular axis a centroid can lie past the last bin centre, where
-        # np.interp would clamp; the uniform axis's own formula does not.
-        range_m = (
-            float(product.range_axis_m[0]) + range_index * range_bin_m
-            if wrap_range
-            else float(np.interp(range_index, range_indices, product.range_axis_m))
-        )
+        velocity_index, range_index = (float(index) for index in detection.centroid_index)
         measurements.append(
             Measurement(
-                range_m=range_m,
-                velocity_folded_mps=float(
-                    np.interp(velocity_index, velocity_indices, product.velocity_axis_mps)
-                ),
+                range_m=product.range_at_index_m(range_index),
+                velocity_folded_mps=product.velocity_at_index_mps(velocity_index),
                 peak_power_w=detection.peak_power_w,
                 total_power_w=detection.total_power_w,
                 n_cells=detection.n_cells,
@@ -732,9 +706,7 @@ def dual_prf_detections(
         span_a / products[0].rd_map.shape[0], span_b / products[1].rd_map.shape[0]
     )
     bins_m = [abs(float(product.range_axis_m[1] - product.range_axis_m[0])) for product in products]
-    span_a_m, span_b_m = (
-        product.range_axis_m.size * bin_m for product, bin_m in zip(products, bins_m, strict=True)
-    )
+    span_a_m, span_b_m = (product.range_period_m for product in products)
     if range_tolerance_m is None:
         # The same rule in range: two bins of the coarser map.
         range_tolerance_m = 2.0 * max(bins_m)
@@ -820,6 +792,7 @@ def dual_prf_measurements(
     max_velocity_mps: float,
     max_range_m: float | None = None,
     range_tolerance_m: float | None = None,
+    wrap_range: bool = False,
 ) -> list[Measurement]:
     """Detect in a coprime pair of bursts and return the measurements to track.
 
@@ -831,7 +804,7 @@ def dual_prf_measurements(
 
     Parameters
     ----------
-    products, fold_spans_mps, config, max_velocity_mps, max_range_m, range_tolerance_m
+    products, fold_spans_mps, config, max_velocity_mps, max_range_m, range_tolerance_m, wrap_range
         As for :func:`dual_prf_detections`.
 
     Returns
@@ -854,6 +827,7 @@ def dual_prf_measurements(
             max_velocity_mps=max_velocity_mps,
             max_range_m=max_range_m,
             range_tolerance_m=range_tolerance_m,
+            wrap_range=wrap_range,
         )
         if measurement.burst_index == 0 and measurement.status == "accepted"
     ]
