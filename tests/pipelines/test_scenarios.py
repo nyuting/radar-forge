@@ -353,7 +353,8 @@ class TestBurstRangeDoppler:
 
     def test_a_synthetic_fmcw_target_lands_at_its_true_range_and_velocity(self) -> None:
         """Closed-form ground truth, bypassing the trajectory entirely."""
-        from radar_forge.core.signal import fmcw_deramp_baseband, line_of_sight_paths
+        from radar_forge.core.propagation import line_of_sight_paths
+        from radar_forge.core.signal import fmcw_deramp_baseband
 
         burst = load_scenario(S1_TOML).bursts[0]
         true_range_m = 10_000.0
@@ -366,7 +367,8 @@ class TestBurstRangeDoppler:
 
     def test_a_synthetic_pulsed_target_folds_into_the_unambiguous_range(self) -> None:
         """S2's defining behaviour, through the pipeline's own receive chain."""
-        from radar_forge.core.signal import line_of_sight_paths, pulsed_baseband
+        from radar_forge.core.propagation import line_of_sight_paths
+        from radar_forge.core.signal import pulsed_baseband
 
         burst = load_scenario(S2_TOML).bursts[0]
         true_range_m = 15_000.0

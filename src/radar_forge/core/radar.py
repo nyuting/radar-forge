@@ -27,7 +27,7 @@ transmitter and receiver share it. :class:`BistaticRadar` puts them at two
 different sites, which is what a bistatic or multistatic scenario needs.
 
 Naming of the two ranges, used by this module, by
-:mod:`radar_forge.core.radar_equation` and by :mod:`radar_forge.core.signal`:
+:mod:`radar_forge.core.radar_equation` and by :mod:`radar_forge.core.propagation`:
 
 ``range_tx_m``
     The **transmit range** :math:`R_t`, from the transmitter site to the target.
@@ -39,7 +39,7 @@ measured to*, exactly as it names the antenna in ``gain_tx_linear`` and
 ``gain_rx_linear``. It is not a property of the transmitter itself. For a
 monostatic radar the two are the same number and neither name is needed. These
 two ranges are never called "legs" or "paths": a path in
-:mod:`radar_forge.core.signal` is the whole transmitter-target-receiver route,
+:mod:`radar_forge.core.propagation` is the whole transmitter-target-receiver route,
 and a burst is a waveform configuration, so both terms are already taken.
 
 References
@@ -69,7 +69,7 @@ from radar_forge.core.constants import (
     STANDARD_NOISE_TEMPERATURE_K,
 )
 from radar_forge.core.geodesy import geodetic_to_enu_m
-from radar_forge.core.waveforms import sweep_rate_hzps
+from radar_forge.core.waveforms import range_resolution_m, sweep_rate_hzps
 
 __all__ = ["BistaticRadar", "Radar", "RadarLike", "Receiver", "Transmitter", "WaveformKind"]
 
@@ -285,7 +285,7 @@ class Radar:
     @property
     def range_resolution_m(self) -> float:
         """Range resolution :math:`c/2B`, m. Set by bandwidth alone."""
-        return SPEED_OF_LIGHT_MPS / (2.0 * self.transmitter.bandwidth_hz)
+        return float(range_resolution_m(self.transmitter.bandwidth_hz))
 
     @property
     def unambiguous_range_m(self) -> float:
@@ -488,7 +488,7 @@ class BistaticRadar:
         :meth:`range_resolution_at_bistatic_angle_m` gives the value that
         actually applies to a target.
         """
-        return SPEED_OF_LIGHT_MPS / (2.0 * self.transmitter.bandwidth_hz)
+        return float(range_resolution_m(self.transmitter.bandwidth_hz))
 
     @property
     def unambiguous_range_m(self) -> float:
@@ -520,7 +520,7 @@ class BistaticRadar:
 
         Identical in form to :attr:`Radar.unambiguous_velocity_mps`, because slow
         time is sampled once per pulse either way. What folds is the bisector
-        range rate of :func:`radar_forge.core.signal.bistatic_doppler_hz`, not a
+        range rate of :func:`radar_forge.core.propagation.bistatic_doppler_hz`, not a
         radial velocity towards either site.
         """
         return self.wavelength_m * self.transmitter.prf_hz / 4.0

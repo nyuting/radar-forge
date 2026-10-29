@@ -285,9 +285,9 @@ def enu_to_range_azimuth_elevation_rad(
 
     .. math::
 
-        R &= \sqrt{e^2 + n^2 + u^2} \
-        \mathrm{az} &= \operatorname{atan2}(e, n) \
-        \mathrm{el} &= rcsin(u / R)
+        R &= \sqrt{e^2 + n^2 + u^2} \\
+        \mathrm{az} &= \operatorname{atan2}(e, n) \\
+        \mathrm{el} &= \arcsin(u / R)
 
     Note the argument order of :func:`numpy.arctan2`: ``atan2(east, north)``,
     not the usual ``atan2(y, x)``. That is what puts zero azimuth at **true

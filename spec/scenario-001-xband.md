@@ -58,7 +58,7 @@ The DSP path this scenario builds, end to end:
         TargetTrack (range_m, az, el, v_r)  <--  pipelines/scenarios.py
                |                                  iterate_frames()
                v
-  core/signal.py   line_of_sight_paths -> PropagationPaths
+  core/propagation.py  line_of_sight_paths -> PropagationPaths
                |          (delay_s, doppler_hz, amplitude)
                v
       fmcw_deramp_baseband  |  pulsed_baseband     + thermal_noise
@@ -363,7 +363,9 @@ why each is load-bearing.
    geometry, nor in `config.py`, which is units and global settings. It is a `core` concern.
 2. **`core/propagation.py` is deferred.** This slice is free-space only, via the existing
    `received_power_w`. Atmospheric and rain attenuation are negligible for a clear X-band path at
-   22 km, and implementing them here would ship untested code.
+   22 km, and implementing them here would ship untested code. *Later:* the module now exists and
+   holds `PropagationPaths` and the line-of-sight builders, split out of `core/signal.py`;
+   attenuation is still deferred. The build sequence below records where they first landed.
 3. **`line_of_sight_paths` is the zeroth-order analytic backend.** It produces a `PropagationPaths`
    with `bounce_count == 1` and no multipath. Whoever builds `raytracing/backends/analytic.py`
    should build on it rather than duplicate it — D1's decision that `core/signal.py` owns

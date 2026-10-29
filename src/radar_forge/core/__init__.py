@@ -8,6 +8,7 @@ from radar_forge.core import (
     detection,
     dsp,
     geodesy,
+    propagation,
     radar,
     radar_equation,
     signal,
@@ -62,6 +63,12 @@ from radar_forge.core.geodesy import (
     geodetic_to_enu_m,
     range_azimuth_elevation_to_enu_m,
 )
+from radar_forge.core.propagation import (
+    PropagationPaths,
+    bistatic_doppler_hz,
+    bistatic_line_of_sight_paths,
+    line_of_sight_paths,
+)
 from radar_forge.core.radar import (
     BistaticRadar,
     Radar,
@@ -71,15 +78,7 @@ from radar_forge.core.radar import (
     WaveformKind,
 )
 from radar_forge.core.radar_equation import bistatic_received_power_w, received_power_w
-from radar_forge.core.signal import (
-    PropagationPaths,
-    bistatic_doppler_hz,
-    bistatic_line_of_sight_paths,
-    fmcw_deramp_baseband,
-    line_of_sight_paths,
-    pulsed_baseband,
-    thermal_noise,
-)
+from radar_forge.core.signal import fmcw_deramp_baseband, pulsed_baseband, thermal_noise
 from radar_forge.core.targets import PointTarget, dbsm_to_m2, m2_to_dbsm
 from radar_forge.core.tracking import (
     STATE_MODELS,
@@ -199,6 +198,7 @@ __all__ = [
     "predict",
     "process_noise_dwna",
     "processing_loss_db",
+    "propagation",
     "pulsed_baseband",
     "radar",
     "radar_equation",

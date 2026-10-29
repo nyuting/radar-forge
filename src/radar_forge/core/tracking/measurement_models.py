@@ -828,7 +828,7 @@ class BistaticRangeDopplerModel:
         geodetic positions. Not used here: the tracking state is in local ENU
         metres, and converting every sigma point back to latitude, longitude and
         altitude would only add work and roundoff.
-    radar_forge.core.signal.bistatic_doppler_hz : The same path rate, divided by
+    radar_forge.core.propagation.bistatic_doppler_hz : The same path rate, divided by
         the wavelength, in Hz. Not used here: the measurement is the path rate in
         m/s, which needs no wavelength.
 

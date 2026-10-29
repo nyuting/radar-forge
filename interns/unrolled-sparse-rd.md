@@ -41,9 +41,9 @@ script. Leave `src/` alone.
 - Useful entry points:
   - `radar_forge.pipelines.scenarios`: `load_scenario` (for scenario 003's waveform in
     `scenario.bursts[0]`), `form_range_doppler_map`.
-  - `radar_forge.core.signal`: `line_of_sight_paths` takes arrays, so one call places two
-    targets. `fmcw_deramp_baseband` turns the paths into IQ, and `thermal_noise` gives
-    noise-only data.
+  - `radar_forge.core.propagation.line_of_sight_paths` takes arrays, so one call places two
+    targets. `radar_forge.core.signal.fmcw_deramp_baseband` turns the paths into IQ, and
+    `thermal_noise` gives noise-only data.
   - `radar_forge.core.dsp.range_doppler_map`: the same FFT chain, with `fast_time_window` and
     `slow_time_window` arguments for a taper.
   - `radar_forge.core.windows`: `taper`, `coherent_gain_linear`, `processing_loss_db`.

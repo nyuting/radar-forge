@@ -84,7 +84,7 @@ The processing chain is scenario 001's unchanged. Only the geometry block differ
                        bisector_velocity_mps, tx/rx az and el)
             |
             v
-  core/signal.py  bistatic_line_of_sight_paths -> PropagationPaths
+  core/propagation.py  bistatic_line_of_sight_paths -> PropagationPaths
             |        delay_s = (R_t + R_r)/c,  doppler_hz = 2*v_bisector/lambda
             v
      fmcw_deramp_baseband  (RadarLike; no bistatic twin)      + thermal_noise
@@ -252,7 +252,7 @@ The `tx`/`rx` token names **the site the range is measured to**, exactly as it n
 - `range_rx_m` — the receive range `R_r`, target to receiver site.
 
 Neither name is needed for a monostatic radar, where the two are the same number. These are never
-called "legs" or "paths": a path in `core/signal.py` is the whole transmitter–target–receiver route,
+called "legs" or "paths": a path in `core/propagation.py` is the whole transmitter–target–receiver route,
 and a burst is a waveform configuration, so both terms are taken.
 
 ### 4.5 Why the carrier is the only difference between B1 and B2

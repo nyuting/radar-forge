@@ -100,7 +100,7 @@ cell, so the only lever is the array.
   scenarios/scenario_007_interference_*.toml
           |  [target] fixed geometry   [[noise_interferer]]
           v
-  core/signal.py        line_of_sight_paths ------> PropagationPaths (two-way, aircraft)
+  core/propagation.py   line_of_sight_paths ------> PropagationPaths (two-way, aircraft)
   core/interference.py  noise_interferer_sources -> NoiseInterfererSources (one-way power, aoa)  D15
           |
           v

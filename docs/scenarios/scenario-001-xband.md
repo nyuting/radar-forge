@@ -49,7 +49,8 @@ closes or opens at up to 55 m/s.
   pipelines/trajectories.py   ---->  pipelines/scenarios.py  iterate_frames()
       load -> resample 1 Hz -> ENU              |
                                                 v
-  core/signal.py   line_of_sight_paths -> PropagationPaths -> baseband + noise
+  core/propagation.py  line_of_sight_paths -> PropagationPaths
+  core/signal.py       PropagationPaths -> baseband + noise
                                                 |
                                                 v
                               IQ cube (n_pulses, n_samples) complex128
