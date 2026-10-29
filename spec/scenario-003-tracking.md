@@ -633,6 +633,15 @@ this one.
 > the CA threshold factor uses `expm1`, which moves only its last bits, and power that is not finite
 > is now rejected.
 
+> **Revised by the 2-D consistency pass.** "A ring does not have two half-windows" was too strong.
+> A ring can be split in two along one axis (leading and lagging in range, with the centre column
+> left out), and the 1-D GO and SO closed forms then apply to each half. Leaving GO and SO out of
+> 2-D is a scope decision, and the variability-index CFAR, which needs that split, is a follow-up
+> recorded in the module notes. The same pass made the ring's calibration public as
+> `cfar_ring_reference_count` and `cfar_threshold_factor_2d`, and gave the 1-D functions a `wrap`
+> argument. `frame_detections` now uses `wrap` in place of padding the range axis by hand, and its
+> output is unchanged (`test_wrap_matches_padding_the_map_by_hand`).
+
 ### 13.3 Multiple targets — a note only
 
 Everything in §7 that makes GNN sufficient depends on there being one target: gates never overlap,
