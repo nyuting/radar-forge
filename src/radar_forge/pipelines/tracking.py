@@ -475,18 +475,15 @@ def frame_detections(
     settings = config if config is not None else DetectionConfig()
     power_w = np.abs(product.rd_map) ** 2
     n_doppler_bins, n_range_bins = power_w.shape
-    # With a circular range axis, pad each end with the other end's cells, so
-    # every cell has a whole reference window, then cut the padding off again.
-    margin = settings.n_train + settings.n_guard if wrap_range else 0
-    padded_w = np.pad(power_w, ((0, 0), (margin, margin)), mode="wrap")
     mask = cfar_detect(
-        padded_w,
+        power_w,
         pfa=settings.pfa,
         n_train=settings.n_train,
         n_guard=settings.n_guard,
         variant=settings.variant,
         axis=-1,
-    )[:, margin : margin + n_range_bins]
+        wrap=wrap_range,
+    )
 
     shift = _quietest_doppler_row(power_w)
     rolled_power_w = np.roll(power_w, -shift, axis=0)
