@@ -220,7 +220,23 @@ class TestResample:
             resample(trajectory, np.array([bad_time_s]))
 
 
+def _track_through(site: tuple[float, float, float]) -> Trajectory:
+    """Three fixes, the middle one exactly on ``site`` and the others 1 km above it."""
+    latitude_deg, longitude_deg, altitude_m = site
+    return Trajectory(
+        time_s=np.array([0.0, 1.0, 2.0]),
+        latitude_deg=np.full(3, latitude_deg),
+        longitude_deg=np.full(3, longitude_deg),
+        altitude_m=np.array([altitude_m + 1000.0, altitude_m, altitude_m + 1000.0]),
+    )
+
+
 class TestToRadarFrame:
+    def test_a_target_on_the_radar_site_is_rejected(self) -> None:
+        """Zero range: the look angles are 0/0, which must not come back as a NaN."""
+        with pytest.raises(ValueError, match=r"on the radar site at sample 1 \(t = 1.0 s\)"):
+            to_radar_frame(_track_through(DUKE_SITE), S1_RADAR)
+
     def test_a_target_over_the_radar_site_is_at_its_own_height(self) -> None:
         """The known null of the geodesy: zero horizontal offset, range is height."""
         time_s = np.array([0.0, 1.0, 2.0])
@@ -386,6 +402,16 @@ class TestToBistaticRadarFrame:
             receiver_longitude_deg=S1_RADAR.longitude_deg,
             receiver_altitude_m=S1_RADAR.altitude_m + offset_m,
         )
+
+    @pytest.mark.parametrize(
+        ("site", "name"), [(RDU_SITE, "transmitter site"), (DUKE_SITE, "receiver site")]
+    )
+    def test_a_target_on_either_site_is_rejected(
+        self, site: tuple[float, float, float], name: str
+    ) -> None:
+        """Rejected by name, before bistatic_angle_rad sees a zero range."""
+        with pytest.raises(ValueError, match=f"on the {name} at sample 1"):
+            to_bistatic_radar_frame(_track_through(site), _BISTATIC_PAIR)
 
     def test_a_collapsed_baseline_reproduces_the_monostatic_track(self) -> None:
         """The headline equivalence, at the trajectory layer."""

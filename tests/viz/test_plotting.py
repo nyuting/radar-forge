@@ -53,6 +53,12 @@ class TestMagnitudeDb:
         with pytest.raises(ValueError, match="reference_linear"):
             magnitude_db(np.ones(3), reference_linear=0.0)
 
+    @pytest.mark.parametrize("bad", [np.inf, np.nan])
+    def test_rejects_a_non_finite_value(self, bad: float) -> None:
+        """An inf peak would make the reference inf, and inf / inf is a NaN."""
+        with pytest.raises(ValueError, match="finite"):
+            magnitude_db(np.array([1.0, bad]))
+
 
 class TestRequirePyplot:
     def test_the_message_gives_a_command_to_run(self, monkeypatch: pytest.MonkeyPatch) -> None:

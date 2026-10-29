@@ -379,6 +379,25 @@ change in any release.
   optional in a dataset-synthesis library.
 - Prefer `np.pi`-based expressions in a named constant when reused (`_FOUR_PI_CUBED`), so
   the reader sees the equation rather than a magic number.
+- **A floating-point warning is a finding, not noise** **[review]**. pytest turns every
+  `RuntimeWarning` into an error, so a divide-by-zero or invalid-value warning stops the
+  suite at the operation that went wrong. Before silencing one, decide whether the NaN or
+  inf is the right answer or a sign of bad input:
+  - *It is the right answer and the docstring says so.* Mask it explicitly and say why in a
+    comment, as CFAR does for cells with an incomplete reference window
+    (`np.greater(..., where=tested)` in `core/detection.py`). Or scope the narrowest
+    `np.errstate` category to the one expression that produces it, as
+    `BistaticRadar.range_resolution_m` does with `divide="ignore"` at forward scatter. Name
+    the NaN in `Returns` and test that it appears where it should.
+  - *It can be avoided by rearranging the maths.* Do that instead.
+    `BistaticRadar.target_ranges_m` takes norms rather than going through an `arcsin` that is
+    0/0 for a target on a site.
+  - *It means the input is singular or invalid.* Raise `ValueError` at the boundary
+    (see [§8](#8-errors)). Then the caller sees what is wrong rather than a NaN three calls
+    later.
+
+  Never use `np.errstate(all=...)`, `np.seterr` or a `warnings` filter in `src/`. Each one
+  hides the next real bug along with the warning it was added for.
 
 ---
 

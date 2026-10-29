@@ -92,7 +92,8 @@ def magnitude_db(
     Raises
     ------
     ValueError
-        If ``reference_linear`` is not strictly positive.
+        If ``values`` holds a nan or inf, or ``reference_linear`` is not
+        strictly positive.
 
     Notes
     -----
@@ -106,6 +107,11 @@ def magnitude_db(
     -6.020599913279624
     """
     magnitudes = np.abs(np.asarray(values))
+    if not np.all(np.isfinite(magnitudes)):
+        # An inf peak makes the reference inf, and inf / inf is a NaN that the
+        # divide-only errstate below does not cover.
+        msg = "values must be finite; a nan or inf has no place on a decibel scale."
+        raise ValueError(msg)
     if reference_linear is None:
         peak_linear = float(magnitudes.max()) if magnitudes.size else 0.0
         reference_linear = peak_linear if peak_linear > 0.0 else 1.0
