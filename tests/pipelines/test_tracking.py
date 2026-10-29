@@ -521,6 +521,25 @@ def dual_products(targets_a, targets_b, *, seed=7):
     ]
 
 
+def s3_range_products(targets, *, seed=7):
+    """One map per S3 burst with S3's own range axes: 800 bins (60.0 km) and 667 (50.0 km).
+
+    dual_products gives both maps burst A's axis; this one does not, so a
+    target past 50 km reads differently on the two.
+    """
+    burst_b = bursts("fmcw_dual_prf")[1]
+    return [
+        targets_product(targets, fold_span_mps=S3_SPANS_MPS[0], seed=seed),
+        targets_product(
+            targets,
+            fold_span_mps=S3_SPANS_MPS[1],
+            n_range_bins=burst_b.n_samples_per_pri,
+            range_bin_m=range_bin_m(burst_b),
+            seed=seed + 1,
+        ),
+    ]
+
+
 class TestDualPrfDetections:
     """Pairing across a dual-PRF pair, and the status each detection gets."""
 
@@ -603,6 +622,45 @@ class TestDualPrfDetections:
         assert sorted(r.burst_index for r in edge) == [0, 1]
         assert {r.status for r in edge} == {"accepted"}
         assert len({r.pair_id for r in edge}) == 1
+
+    def test_a_target_past_the_shorter_span_pairs_at_its_true_range(self):
+        """55 km reads 55 km on the 60 km map and about 5 km on the 50 km map.
+
+        Compared straight, the two readings are 50 km apart and never pair.
+        Unfolded, they agree on 55 km, and each detection keeps its own reading.
+        """
+        from radar_forge.pipelines.tracking import dual_prf_detections
+
+        true_m = 55_000.0
+        products = s3_range_products([(true_m, -30.4)])
+        span_b_m = products[1].range_axis_m.size * range_bin_m(bursts("fmcw_dual_prf")[1])
+        records = dual_prf_detections(products, S3_SPANS_MPS, max_velocity_mps=S3_V_MAX_MPS)
+        target = [r for r in records if r.status == "accepted"]
+
+        assert sorted(r.burst_index for r in target) == [0, 1]
+        assert len({r.pair_id for r in target}) == 1
+        by_burst = {r.burst_index: r for r in target}
+        assert by_burst[0].range_m == pytest.approx(true_m, abs=S3_RANGE_BIN_M)
+        assert by_burst[1].range_m == pytest.approx(true_m - span_b_m, abs=S3_RANGE_BIN_M)
+        for record in target:
+            assert record.range_unfolded_m == pytest.approx(true_m, abs=S3_RANGE_BIN_M)
+
+    def test_a_wider_bound_reaches_beyond_both_spans(self):
+        """130 km is past both maps; a 250 km bound recovers it from the pair."""
+        from radar_forge.pipelines.tracking import dual_prf_detections
+
+        true_m = 130_000.0
+        records = dual_prf_detections(
+            s3_range_products([(true_m, -30.4)]),
+            S3_SPANS_MPS,
+            max_velocity_mps=S3_V_MAX_MPS,
+            max_range_m=250_000.0,
+        )
+        target = [r for r in records if r.status == "accepted"]
+
+        assert sorted(r.burst_index for r in target) == [0, 1]
+        for record in target:
+            assert record.range_unfolded_m == pytest.approx(true_m, abs=S3_RANGE_BIN_M)
 
     def test_a_tie_is_nearest_for_neither(self):
         """Tested on the helper directly, as an exception to testing.md.

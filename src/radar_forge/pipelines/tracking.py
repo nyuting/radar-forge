@@ -72,7 +72,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast, get_args, get_type_hints
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from radar_forge.core.ambiguity import unfold_doppler_dual_prf
+from radar_forge.core.ambiguity import unfold_doppler_dual_prf, unfold_range_dual_prf
 from radar_forge.core.detection import (
     CFAR_VARIANTS,
     CfarVariant,
@@ -207,6 +207,11 @@ class Measurement:
     pair_id : int or None, default None
         Dual-PRF only: the same integer on the two detections that were paired,
         unique within the frame. ``None`` for a detection that was not paired.
+    range_unfolded_m : float or None, default None
+        Dual-PRF only: the true range both detections of an accepted pair agree
+        on, from :func:`~radar_forge.core.ambiguity.unfold_range_dual_prf`.
+        ``range_m`` stays what this burst's map shows. ``None`` for a detection
+        that was not accepted.
     """
 
     range_m: float
@@ -221,6 +226,7 @@ class Measurement:
     burst_index: int = 0
     status: DetectionStatus = "accepted"
     pair_id: int | None = None
+    range_unfolded_m: float | None = None
 
 
 @dataclass(frozen=True)
@@ -617,10 +623,11 @@ def dual_prf_detections(
     *,
     config: DetectionConfig | None = None,
     max_velocity_mps: float,
+    max_range_m: float | None = None,
     range_tolerance_m: float | None = None,
     wrap_range: bool = False,
 ) -> list[Measurement]:
-    r"""Detect in a coprime pair of bursts, pair the detections and unfold their velocity.
+    r"""Detect in a coprime pair of bursts, pair the detections and unfold them.
 
     The dual-PRF alternative to §5.3. Two bursts at coprime pulse repetition
     frequencies fold the same true velocity differently, and the pair of folded
@@ -631,11 +638,14 @@ def dual_prf_detections(
     first frame and needs no bootstrap, no fold selector and no consistency
     monitor.
 
-    Two detections, one from each burst, are compatible when their ranges
-    differ by at most ``range_tolerance_m``, the shorter way round when
-    ``wrap_range`` is set. This assumes that the target's range is inside the
-    span of both bursts' maps, so that both measure the same range: nothing
-    here can check it, and :class:`ScenarioTracker`'s Notes say where it holds. They are paired when
+    Range folds too, at each map's span, and the two spans may differ (60 and
+    50 km for scenario 001 S3). So range is unfolded the same way as velocity,
+    by :func:`radar_forge.core.ambiguity.unfold_range_dual_prf`: for every
+    detection of the first burst, the true ranges up to ``max_range_m`` that
+    its reading allows are folded into the second burst's map, and the gap to
+    each of the second burst's detections is the shortest of those, measured
+    round that map's circle. Two detections are compatible when that gap is at
+    most ``range_tolerance_m``. They are paired when
     each is the other's nearest in range (mutual nearest neighbours), so no
     detection is used twice. A strong target's two detections pair even with a
     one-cell false alarm or sidelobe close by in one burst, and the false alarm
@@ -669,22 +679,29 @@ def dual_prf_detections(
         target, not about the pair, so it has no default. It should not exceed
         the pair's own unambiguous span, beyond which a velocity aliases onto a
         wrong one.
+    max_range_m : float, optional
+        The largest range the target can have, in metres: the search bound
+        passed to ``unfold_range_dual_prf``. By default the larger of the two
+        maps' spans, which is as far as a target can be and still be inside
+        one map unfolded. A wider bound reaches the pair's repeat (300 km for
+        S3), but only a pulsed radar can see that far; an FMCW sweep cannot
+        see beyond :math:`cT/2` (``unfold_range_dual_prf``'s Notes).
     range_tolerance_m : float, optional
         How close two detections must be in range to be called the same
         target. By default two range bins of the coarser map, as the velocity
         tolerance is two Doppler bins.
     wrap_range : bool, optional
-        Passed to :func:`frame_detections` for both bursts. When set, range
-        gaps are also measured round the circle of the smaller map's range
-        axis, so a target at its wrap edge still pairs.
+        Passed to :func:`frame_detections` for both bursts, so that CFAR and
+        clustering treat each range axis as a circle. Pairing always does.
 
     Returns
     -------
     list of Measurement
         Every detection from both bursts, the first burst's first, each with
         ``burst_index`` and ``status`` set. The two detections of a pair share
-        a ``pair_id`` and the unfolded velocity, whose ``fold_index`` is
-        counted in the first burst's fold span.
+        a ``pair_id``. An accepted pair also shares the unfolded velocity,
+        whose ``fold_index`` is counted in the first burst's fold span, and
+        the unfolded range, ``range_unfolded_m``.
 
     Raises
     ------
@@ -714,31 +731,29 @@ def dual_prf_detections(
     tolerance_mps = 2.0 * max(
         span_a / products[0].rd_map.shape[0], span_b / products[1].rd_map.shape[0]
     )
+    bins_m = [abs(float(product.range_axis_m[1] - product.range_axis_m[0])) for product in products]
+    span_a_m, span_b_m = (
+        product.range_axis_m.size * bin_m for product, bin_m in zip(products, bins_m, strict=True)
+    )
     if range_tolerance_m is None:
         # The same rule in range: two bins of the coarser map.
-        range_tolerance_m = 2.0 * max(
-            abs(float(product.range_axis_m[1] - product.range_axis_m[0])) for product in products
-        )
+        range_tolerance_m = 2.0 * max(bins_m)
+    if max_range_m is None:
+        max_range_m = max(span_a_m, span_b_m)
 
     ranges_a_m = np.asarray([m.range_m for m in first], dtype=np.float64)
     ranges_b_m = np.asarray([m.range_m for m in second], dtype=np.float64)
-    # gap_m[i, j]: range gap between first-burst detection i and second-burst
-    # detection j. Shape (n_first, n_second).
-    gap_m = ranges_a_m[:, None] - ranges_b_m[None, :]
-    if wrap_range:
-        # Each map's range axis is a circle, so the gap takes the shorter way
-        # round, with the one wrap rule (StateLayout.wrap). The two circles may
-        # differ (60 km and 50 km for S3), and the smaller is used: a target
-        # inside both reads the same on both, except at the smaller circle's
-        # edge, where one map shows it near zero and the other near the span.
-        period_m = min(
-            product.range_axis_m.size
-            * abs(float(product.range_axis_m[1] - product.range_axis_m[0]))
-            for product in products
-        )
-        layout = StateLayout((Coordinate("range_m", "m", period=period_m),), frame="radial")
-        gap_m = layout.wrap(gap_m.reshape(-1, 1)).reshape(gap_m.shape)
-    distance_m = np.abs(gap_m)
+    # Every first-burst detection i against every second-burst detection j:
+    # shape (n_first, n_second). distance_m is the residual of the best true
+    # range for the pair, so it is nan-free even where unfolded_m is nan.
+    unfolded_m, distance_m = unfold_range_dual_prf(
+        ranges_a_m[:, None],
+        ranges_b_m[None, :],
+        span_a_m,
+        span_b_m,
+        max_range_m=max_range_m,
+        tolerance_m=range_tolerance_m,
+    )
     compatible = distance_m <= range_tolerance_m
     # i and j are mutually nearest when j is strictly the nearest to i among
     # the second burst's detections, and i strictly the nearest to j among the
@@ -777,6 +792,7 @@ def dual_prf_detections(
                     replace_measurement(records[k], float(velocity_mps), fold_index),
                     status="accepted",
                     pair_id=pair_id,
+                    range_unfolded_m=float(unfolded_m[i, j]),
                 )
         else:
             for k in (a, b):
@@ -802,6 +818,7 @@ def dual_prf_measurements(
     *,
     config: DetectionConfig | None = None,
     max_velocity_mps: float,
+    max_range_m: float | None = None,
     range_tolerance_m: float | None = None,
 ) -> list[Measurement]:
     """Detect in a coprime pair of bursts and return the measurements to track.
@@ -814,13 +831,14 @@ def dual_prf_measurements(
 
     Parameters
     ----------
-    products, fold_spans_mps, config, max_velocity_mps, range_tolerance_m
+    products, fold_spans_mps, config, max_velocity_mps, max_range_m, range_tolerance_m
         As for :func:`dual_prf_detections`.
 
     Returns
     -------
     list of Measurement
-        One per resolved pair, at the first burst's range.
+        One per resolved pair, at the first burst's range, carrying
+        ``range_unfolded_m``.
 
     Raises
     ------
@@ -834,6 +852,7 @@ def dual_prf_measurements(
             fold_spans_mps,
             config=config,
             max_velocity_mps=max_velocity_mps,
+            max_range_m=max_range_m,
             range_tolerance_m=range_tolerance_m,
         )
         if measurement.burst_index == 0 and measurement.status == "accepted"
@@ -1307,10 +1326,12 @@ class ScenarioTracker:
       the scenario's window, so each run's figures are in
       ``spec/scenario-003-tracking.md`` §14.11, beside the window they hold
       for. The ``"kalman"`` path treats range as unambiguous.
-    - Two bursts: their maps may span different ranges, and
-      :func:`dual_prf_detections` pairs their detections on the assumption
-      that the target is inside both spans, so that both measure the same
-      range. The tracker cannot check that, since it does not know the truth.
+    - Two bursts: their maps may span different ranges, so
+      :func:`dual_prf_detections` unfolds range as it does velocity, up to the
+      larger of the two spans. The ``"kalman"`` path measures that unfolded
+      range; the ``"ukf"`` path measures the first burst's own reading, as its
+      model says. A target beyond the larger span would alias, and the tracker
+      cannot check that, since it does not know the truth.
       ``tests/pipelines/test_scenario_003.py`` checks it over each shipped
       scenario's window.
     - Range rate: with two bursts it is unfolded by
@@ -1725,7 +1746,10 @@ class ScenarioTracker:
         if len(self.bursts) == 2:
             # The dual-PRF path: the waveform has resolved the ambiguity, so
             # there is no bootstrap to serve out and no fold to select. Every
-            # track measures range and range rate from its first frame.
+            # track measures range and range rate from its first frame, and
+            # this path treats range as unambiguous, so it takes the pair's
+            # unfolded range rather than the first burst's folded reading.
+            # dual_prf_detections sets it on every accepted detection.
             accepted = [
                 index
                 for index, measurement in enumerate(detections)
@@ -1733,7 +1757,13 @@ class ScenarioTracker:
             ]
             associations, records = self._advance(
                 tracker,
-                [detections[index] for index in accepted],
+                [
+                    replace(
+                        detections[index],
+                        range_m=cast(float, detections[index].range_unfolded_m),
+                    )
+                    for index in accepted
+                ],
                 frame_index,
                 time_s,
                 unfolded=True,
