@@ -27,6 +27,8 @@ The classes:
 - :class:`SensorRegistration` names a sensor, and the models its measurements may use.
 - :class:`MeasurementModel` is the interface every measurement model follows.
 - :class:`CartesianPosition` reports some of the state's coordinates directly.
+- :class:`MarginalModel`, built by :func:`marginal`, keeps some of another
+  model's components, so that a track can use part of a measurement.
 - :class:`SensorPose` is where a sensor stands.
 - :class:`BistaticRangeDopplerModel` predicts the path length and path rate seen
   by a transmitter and receiver at two places.
@@ -72,13 +74,16 @@ if TYPE_CHECKING:
 __all__ = [
     "BistaticRangeDopplerModel",
     "CartesianPosition",
+    "DifferentiableMarginalModel",
     "DifferentiableMeasurementModel",
+    "MarginalModel",
     "Measurement",
     "MeasurementBatch",
     "MeasurementModel",
     "RangeAzimuthElevationRangeRate",
     "SensorPose",
     "SensorRegistration",
+    "marginal",
 ]
 
 
@@ -535,6 +540,198 @@ class CartesianPosition:
         """
         as_vector(state, self.state_layout.dimension, "state")
         return np.eye(self.state_layout.dimension, dtype=np.float64)[list(self.indices)]
+
+
+class MarginalModel:
+    """Some of another measurement model's components, chosen by name.
+
+    The marginal of a Gaussian vector over some of its components is those
+    components of the mean and that block of the covariance [1]_. So a
+    marginal model predicts the chosen components of its ``base`` model's
+    prediction and nothing else, and :meth:`marginalise` cuts a measurement of
+    the base model down to the same components.
+
+    It is how a track uses part of a measurement. A track that cannot yet trust
+    a measured range rate updates on the range alone, through the marginal of
+    a range and range-rate model over ``("range_m",)``
+    (``spec/tracker-001.md`` §8.3). Build one with :func:`marginal`, which
+    keeps the Jacobian when the base model has one.
+
+    Parameters
+    ----------
+    base : MeasurementModel
+        The full model.
+    names : tuple of str
+        The components to keep, in the order wanted. Each must be a component
+        of ``base.measurement_layout``.
+
+    Attributes
+    ----------
+    base : MeasurementModel
+        As given.
+    indices : tuple of int
+        Where each kept component sits in the base model's measurement.
+    state_layout : StateLayout
+        The base model's.
+    measurement_layout : StateLayout
+        The kept components, with their units and periods, in the base model's
+        frame.
+
+    Raises
+    ------
+    ValueError
+        If ``names`` is empty, repeats a name, or names a component the base
+        model does not measure.
+
+    References
+    ----------
+    .. [1] S. Särkkä, *Bayesian Filtering and Smoothing*, Cambridge University
+           Press, 2013, Appendix A.1, Lemma A.2 (the marginals of a joint
+           Gaussian).
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> layout = StateLayout((Coordinate("x_m", "m"), Coordinate("xdot_mps", "m/s")))
+    >>> both = CartesianPosition(layout, ("x_m", "xdot_mps"))
+    >>> position = marginal(both, ("x_m",))
+    >>> position.predict(np.array([10.0, 2.0]))
+    array([10.])
+    >>> z = Measurement(np.array([9.0, 1.5]), np.diag([4.0, 0.25]), 0.0, "radar", "both")
+    >>> part = position.marginalise(z, "position")
+    >>> part.value, part.covariance, part.measurement_model_id
+    (array([9.]), array([[4.]]), 'position')
+    """
+
+    def __init__(self, base: MeasurementModel, names: tuple[str, ...]) -> None:
+        if not names or len(set(names)) != len(names):
+            msg = f"marginal component names must be nonempty and unique; got {names}."
+            raise ValueError(msg)
+        self.base = base
+        self.indices = base.measurement_layout.indices(names)
+        self.state_layout = base.state_layout
+        full = base.measurement_layout
+        self.measurement_layout = StateLayout(
+            tuple(full.coordinates[i] for i in self.indices), full.frame, full.origin_lla_deg_m
+        )
+
+    def predict(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Return the kept components of the base model's prediction.
+
+        Parameters
+        ----------
+        state : numpy.ndarray
+            One state, shape ``(n_state,)``, or a stack, shape ``(n_points, n_state)``.
+
+        Returns
+        -------
+        numpy.ndarray
+            Shape ``(n_kept,)`` or ``(n_points, n_kept)``, in the order of ``names``.
+
+        Raises
+        ------
+        ValueError
+            As the base model's ``predict`` does.
+        """
+        predicted: NDArray[np.float64] = self.base.predict(state)[..., list(self.indices)]
+        return predicted
+
+    def marginalise(self, measurement: Measurement, model_id: str) -> Measurement:
+        """Return the kept components of a measurement of the base model.
+
+        Parameters
+        ----------
+        measurement : Measurement
+            A measurement the base model explains: value ``(n_meas,)`` and
+            covariance ``(n_meas, n_meas)``.
+        model_id : str
+            The ID this marginal model is registered under, which the new
+            measurement names as its ``measurement_model_id``.
+
+        Returns
+        -------
+        Measurement
+            Value ``(n_kept,)``, covariance ``(n_kept, n_kept)``, and the same time
+            and sensor.
+
+        Raises
+        ------
+        ValueError
+            If the measurement's length is not the base model's dimension.
+        """
+        if len(measurement.value) != self.base.measurement_layout.dimension:
+            msg = (
+                f"a measurement of the base model has {self.base.measurement_layout.dimension} "
+                f"components; got {len(measurement.value)}."
+            )
+            raise ValueError(msg)
+        rows = list(self.indices)
+        return Measurement(
+            measurement.value[rows],
+            measurement.covariance[np.ix_(rows, rows)],
+            measurement.timestamp_s,
+            measurement.sensor_id,
+            model_id,
+        )
+
+
+class DifferentiableMarginalModel(MarginalModel):
+    """A :class:`MarginalModel` of a model that has a Jacobian, so it has one too.
+
+    It exists so that a marginal is a
+    :class:`DifferentiableMeasurementModel` exactly when its base model is one.
+    :func:`marginal` picks the class.
+    """
+
+    base: DifferentiableMeasurementModel
+
+    def jacobian(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Return the kept rows of the base model's Jacobian.
+
+        Parameters
+        ----------
+        state : numpy.ndarray
+            One state, shape ``(n_state,)``.
+
+        Returns
+        -------
+        numpy.ndarray
+            Shape ``(n_kept, n_state)``.
+
+        Raises
+        ------
+        ValueError
+            As the base model's ``jacobian`` does.
+        """
+        rows: NDArray[np.float64] = self.base.jacobian(state)[list(self.indices)]
+        return rows
+
+
+def marginal(model: MeasurementModel, names: tuple[str, ...]) -> MarginalModel:
+    """Return the marginal of a measurement model over the named components.
+
+    Parameters
+    ----------
+    model : MeasurementModel
+        The full model.
+    names : tuple of str
+        The components to keep, in the order wanted.
+
+    Returns
+    -------
+    MarginalModel
+        A :class:`DifferentiableMarginalModel` if ``model`` has a Jacobian, so
+        that the KF and the EKF can use it; a plain :class:`MarginalModel`
+        otherwise, which the UKF can use.
+
+    Raises
+    ------
+    ValueError
+        As for :class:`MarginalModel`.
+    """
+    if isinstance(model, DifferentiableMeasurementModel):
+        return DifferentiableMarginalModel(model, names)
+    return MarginalModel(model, names)
 
 
 @dataclass(frozen=True)
