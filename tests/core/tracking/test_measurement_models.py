@@ -16,12 +16,14 @@ from radar_forge.core.tracking.measurement_models import (
     BistaticRangeDopplerModel,
     CartesianPosition,
     DifferentiableMeasurementModel,
+    MarginalModel,
     Measurement,
     MeasurementBatch,
     RangeAzimuthElevationRangeRate,
     SensorPose,
     SensorRegistration,
     _Geometry,
+    marginal,
 )
 from radar_forge.core.tracking.motion import CartesianMotion
 
@@ -671,3 +673,87 @@ def test_spherical_components_must_be_known_and_unique(components: tuple[str, ..
     _, estimate, pose = _scene("CV")
     with pytest.raises(ValueError, match="components must be nonempty and unique"):
         RangeAzimuthElevationRangeRate(estimate.state_layout, pose, components)
+
+
+# --------------------------------------------------------------------------- #
+# Marginal models (spec/tracker-001.md §8.3)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_marginal_predicts_the_kept_components_of_its_base() -> None:
+    """The marginal over range rate and range, in that order, of the full spherical model."""
+    _, estimate, pose = _scene("CV")
+    full = RangeAzimuthElevationRangeRate(estimate.state_layout, pose)
+    part = marginal(full, ("range_rate_mps", "range_m"))
+    names = full.measurement_layout.names
+    expected = full.predict(estimate.mean)[[names.index("range_rate_mps"), names.index("range_m")]]
+    # Exact: the marginal slices the base model's own output.
+    np.testing.assert_array_equal(part.predict(estimate.mean), expected)
+    stacked = np.stack([estimate.mean, 2.0 * estimate.mean])
+    assert part.predict(stacked).shape == (2, 2)
+    assert part.measurement_layout.names == ("range_rate_mps", "range_m")
+    assert part.state_layout == full.state_layout
+
+
+def test_a_marginal_keeps_the_kept_rows_of_its_bases_jacobian() -> None:
+    _, estimate, pose = _scene("CV")
+    full = RangeAzimuthElevationRangeRate(estimate.state_layout, pose)
+    part = marginal(full, ("azimuth_rad",))
+    assert isinstance(part, DifferentiableMeasurementModel)
+    row = full.measurement_layout.names.index("azimuth_rad")
+    # Exact: the same row of the same matrix.
+    np.testing.assert_array_equal(part.jacobian(estimate.mean), full.jacobian(estimate.mean)[[row]])
+
+
+def test_a_marginal_of_a_model_without_a_jacobian_has_none() -> None:
+    """So that the Taylor linearisation refuses it at its first check, as it does the base."""
+    layout = StateLayout((Coordinate("x_m", "m"), Coordinate("xdot_mps", "m/s")))
+
+    class NoJacobian:
+        state_layout = layout
+        measurement_layout = layout
+
+        def predict(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
+            return np.asarray(state, dtype=np.float64)
+
+    part = marginal(NoJacobian(), ("x_m",))
+    assert isinstance(part, MarginalModel)
+    assert not isinstance(part, DifferentiableMeasurementModel)
+
+
+def test_a_marginal_keeps_a_components_period() -> None:
+    """A folded range stays folded: the period goes with the kept coordinate."""
+    layout = StateLayout((Coordinate("range_m", "m"), Coordinate("range_rate_mps", "m/s")))
+    full = CartesianPosition(layout, ("range_m", "range_rate_mps"), {"range_m": 5996.0})
+    (kept,) = marginal(full, ("range_m",)).measurement_layout.coordinates
+    assert kept.period == 5996.0
+
+
+def test_marginalise_keeps_the_values_and_their_covariance_block() -> None:
+    layout = StateLayout((Coordinate("a_m", "m"), Coordinate("b_m", "m"), Coordinate("c_m", "m")))
+    full = CartesianPosition(layout, ("a_m", "b_m", "c_m"))
+    covariance = np.array([[4.0, 1.0, 0.5], [1.0, 9.0, 2.0], [0.5, 2.0, 16.0]])
+    z = Measurement(np.array([1.0, 2.0, 3.0]), covariance, 7.0, "radar", "full")
+    part = marginal(full, ("c_m", "a_m")).marginalise(z, "ca")
+    np.testing.assert_array_equal(part.value, [3.0, 1.0])
+    np.testing.assert_array_equal(part.covariance, [[16.0, 0.5], [0.5, 4.0]])
+    assert (part.timestamp_s, part.sensor_id, part.measurement_model_id) == (7.0, "radar", "ca")
+
+
+def test_marginalise_rejects_a_measurement_of_another_dimension() -> None:
+    layout = StateLayout((Coordinate("a_m", "m"), Coordinate("b_m", "m")))
+    part = marginal(CartesianPosition(layout, ("a_m", "b_m")), ("a_m",))
+    z = Measurement(np.array([1.0]), np.eye(1), 0.0, "radar", "full")
+    with pytest.raises(ValueError, match="2 components"):
+        part.marginalise(z, "a")
+
+
+@pytest.mark.parametrize(
+    ("names", "match"),
+    [((), "nonempty and unique"), (("a_m", "a_m"), "nonempty and unique"), (("z_m",), "z_m")],
+    ids=["empty", "repeated", "unknown"],
+)
+def test_a_marginal_needs_known_unique_components(names: tuple[str, ...], match: str) -> None:
+    layout = StateLayout((Coordinate("a_m", "m"), Coordinate("b_m", "m")))
+    with pytest.raises(ValueError, match=match):
+        marginal(CartesianPosition(layout, ("a_m", "b_m")), names)

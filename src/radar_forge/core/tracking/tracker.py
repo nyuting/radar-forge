@@ -9,24 +9,39 @@ from one sensor at one time it does five steps:
    gate is a *chi-square gate*: a pair passes if its NIS (normalised
    innovation squared) is below the chi-square quantile for the gate
    probability (see :class:`~radar_forge.core.tracking.association.ChiSquareGate`).
-3. **Assign** measurements to tracks in two stages. Confirmed tracks pick
-   first, from all the measurements. Tentative tracks then pick from the
-   measurements that are left.
+   A model selector may offer a pair more than one model, such as range and
+   range rate and then range alone; the pair is gated against each in turn
+   and keeps the first that passes.
+3. **Assign** measurements to tracks. By default this is done in two stages.
+   Confirmed tracks pick first, from all the measurements. Tentative tracks
+   then pick from the measurements that are left. With ``assignment="joint"``
+   every track picks in one solve.
 4. **Update** each track that got a measurement, and count a hit or a miss
    for every track the sensor can see. Counting is when a track is confirmed
    or deleted, by the M-of-N rule in :mod:`~radar_forge.core.tracking.lifecycle`.
    Each innovation, the difference between a measurement and what the track
-   expected to see, is computed once, in step 2, and reused here.
-5. **Start** a tentative track from each measurement that no track took,
-   unless it lies inside a confirmed track's gate.
+   expected to see, is computed once, in step 2, and reused here. A confirmed
+   track that starts its re-acquisition window forgets the coordinates the
+   policy names (``LifecyclePolicy.reacquire_reset``).
+5. **Start** a tentative track from each measurement that no track took. In
+   two-stage assignment, a measurement inside a confirmed track's gate starts
+   none.
 
-Steps 3 and 5 are there so that a new, unproven track cannot take a
-confirmed track's measurement. A tentative track is young, so its covariance
-is large, and by NIS it matches almost anything. In a single joint assignment
-it can win the detection that belongs to the confirmed track. The confirmed
-track then misses and is eventually deleted, and the target's identity passes
-to a newer track. Giving confirmed tracks first pick, and not starting tracks
-inside their gates, are this library's remedies for that.
+The two stages of step 3, and the rule of step 5, are there so that a new,
+unproven track cannot take a confirmed track's measurement. A tentative track
+is young, so its covariance is large, and by NIS it matches almost anything.
+In a single joint assignment it can win the detection that belongs to the
+confirmed track. The confirmed track then misses and is eventually deleted,
+and the target's identity passes to a newer track. Giving confirmed tracks
+first pick, and not starting tracks inside their gates, are this library's
+remedies for that. They are the default, not the rule: a confirmed track
+whose gate has widened to re-acquire its target also outbids tentative tracks
+for false alarms, and on scenario 003 one joint solve was measured better
+(``spec/tracker-001.md`` §7.3).
+
+The selector and the re-acquisition reset are mechanisms, named by
+coordinate. Which models to offer which track, and which coordinates to
+forget, are the caller's policy (``spec/tracker-001.md`` §8.3).
 
 Two builders cover the common cases: :func:`build_tracker` for one sensor and
 one measurement model, and :func:`build_tracker_enu` for position
@@ -43,7 +58,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from types import MappingProxyType
-from typing import Literal
+from typing import Literal, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
@@ -62,19 +77,59 @@ from radar_forge.core.tracking.lifecycle import LifecyclePolicy, TrackManager
 from radar_forge.core.tracking.linearisation import Linearisation, UnscentedLinearisation
 from radar_forge.core.tracking.measurement_models import (
     CartesianPosition,
+    MarginalModel,
     Measurement,
     MeasurementBatch,
     MeasurementModel,
     SensorRegistration,
 )
 from radar_forge.core.tracking.motion import CartesianMotion, MotionKind, MotionModel
-from radar_forge.core.tracking.tracks import Track, TrackSnapshot
+from radar_forge.core.tracking.tracks import Track, TrackSnapshot, TrackStatus
 
 __all__ = [
+    "ModelSelector",
     "Tracker",
     "build_tracker",
     "build_tracker_enu",
 ]
+
+
+class ModelSelector(Protocol):
+    """Which models a track may use a measurement through, best first.
+
+    Any function with this signature will do. Scenario 003's returns range and
+    range rate, then range alone, so that a track whose Doppler fold is wrong
+    keeps its range (``spec/tracker-001.md`` §8.3).
+    """
+
+    def __call__(self, snapshot: TrackSnapshot, measurement: Measurement) -> Sequence[str]:
+        """Return the model IDs to gate the pair against, in order.
+
+        Parameters
+        ----------
+        snapshot : TrackSnapshot
+            The track, predicted to the scan time.
+        measurement : Measurement
+            One measurement of the scan.
+
+        Returns
+        -------
+        sequence of str
+            Model IDs registered with the tracker. Each must be the
+            measurement's own model or a
+            :class:`~radar_forge.core.tracking.measurement_models.MarginalModel`
+            of it. The pair keeps the first that passes the gate; an empty
+            sequence gates it out.
+        """
+        ...
+
+
+# What step 2 keeps for a pair that passed: its innovation, and the measurement
+# and model it was scored through, which step 4 hands back to the filter.
+_GatedPair = tuple[InnovationStats, Measurement, MeasurementModel]
+
+# A track as it stood before a scan, which an error while gating puts back.
+_SavedTrack = tuple[Track[Estimator], StateEstimate, TrackStatus]
 
 # Prior standard deviation of an unobserved acceleration coordinate, m/s^2, used
 # by build_tracker_enu. It is carried over unchanged from the original builder
@@ -122,9 +177,24 @@ class Tracker:
         nearby. The :math:`\ln|S|` term charges a track for being uncertain,
         so the negative log-likelihood favours the better-placed track.
 
+        NIS cannot compare pairs of different measurement dimensions, since
+        its expected value is the dimension: a pair that fell back to range
+        alone would undercut every two-component pair. A scan that would mix
+        them raises, and needs ``"negative_log_likelihood"``
+        (``spec/tracker-001.md`` §7.2).
+    assignment : {"confirmed_first", "joint"}, default "confirmed_first"
+        Who picks measurements first. ``"confirmed_first"`` assigns in two
+        stages, confirmed tracks then tentative ones, and starts no track
+        inside a confirmed track's gate. ``"joint"`` solves once over every
+        track and starts a track from every measurement left over. See the
+        module docstring for why both exist.
+    model_selector : ModelSelector or None, optional
+        The models each track-measurement pair is gated against, in order; see
+        :data:`ModelSelector`. None offers each measurement's own model only.
+
     Attributes
     ----------
-    gate, associator, initiator, cost
+    gate, associator, initiator, cost, assignment, model_selector
         As given.
     manager : TrackManager
         Hands out track identifiers and confirms and deletes tracks, by
@@ -137,16 +207,18 @@ class Tracker:
     Raises
     ------
     ValueError
-        If ``cost`` is not one of the two names, a key of ``sensors`` is not
-        its sensor's ``sensor_id``, or a sensor is invalid (see
-        :meth:`add_sensor`).
+        If ``cost`` or ``assignment`` is not one of its names, a key of
+        ``sensors`` is not its sensor's ``sensor_id``, a sensor is invalid
+        (see :meth:`add_sensor`), or the policy's ``reacquire_reset`` names a
+        coordinate the initiator's prior does not have.
 
     Notes
     -----
     Each track owns its own estimator, which should start from a prior that can
-    be justified for the target. The tracker is single-threaded. If a
-    user-supplied component raises in the middle of a scan, the tracks already
-    changed in that scan are not rolled back.
+    be justified for the target. The tracker is single-threaded. If anything
+    raises while a scan predicts and gates, every track is put back as it was
+    before the scan. An error in a later step, from an update or a birth, is
+    not rolled back.
 
     This is the class Stone Soup calls ``MultiTargetTracker``. Stone Soup
     builds it from a detector, an initiator, deleters, a data associator and an
@@ -202,9 +274,14 @@ class Tracker:
         initiator: TrackInitiator,
         policy: LifecyclePolicy | None = None,
         cost: Literal["nis", "negative_log_likelihood"] = "nis",
+        assignment: Literal["confirmed_first", "joint"] = "confirmed_first",
+        model_selector: ModelSelector | None = None,
     ) -> None:
         if cost not in ("nis", "negative_log_likelihood"):
             msg = f"cost must be 'nis' or 'negative_log_likelihood'; got {cost!r}."
+            raise ValueError(msg)
+        if assignment not in ("confirmed_first", "joint"):
+            msg = f"assignment must be 'confirmed_first' or 'joint'; got {assignment!r}."
             raise ValueError(msg)
         _check_sensor_keys(sensors)
         self._measurement_models = dict(measurement_models)
@@ -216,7 +293,12 @@ class Tracker:
         self.associator = associator
         self.initiator = initiator
         self.manager = TrackManager(policy)
+        # Find the coordinates to forget now, so that a misspelt name fails here
+        # and not on the first track that loses its target.
+        initiator.prior.state_layout.indices(self.manager.policy.reacquire_reset)
         self.cost = cost
+        self.assignment = assignment
+        self.model_selector = model_selector
         self.tracks: list[Track[Estimator]] = []
         self.last_timestamp_s: float | None = None
 
@@ -339,7 +421,11 @@ class Tracker:
             microsecond ("out-of-sequence"), older than a seeded track, or from
             an unknown sensor. Also if a measurement's model is not registered
             for that sensor, or its length does not match its model's
-            dimension. These checks run before any track changes.
+            dimension. These checks run before any track changes. Also if the
+            model selector returns a model that is neither the measurement's
+            own nor a registered marginal of it, or if ``cost="nis"`` and the
+            pairs that pass the gate differ in measurement dimension. Those
+            are found while gating, and every track is put back as it was.
 
         Notes
         -----
@@ -367,24 +453,40 @@ class Tracker:
         if self.last_timestamp_s is not None and self._same_time(time_s, self.last_timestamp_s):
             time_s = self.last_timestamp_s
 
+        # The tracks as they stand, so that an error while predicting or gating
+        # leaves them untouched. A StateEstimate is frozen, so keeping the
+        # object keeps the estimate.
+        before: list[_SavedTrack] = [
+            (track, track.estimator.state, track.status) for track in self.tracks
+        ]
         reported: list[TrackSnapshot] = []
-        # Each track is a Python object with its own filter state, so there is
-        # no array of tracks to vectorise over.
-        for track in self.tracks:
-            track.estimator.predict_to(max(time_s, track.estimator.state.timestamp_s))
-            self.manager.expire(track, time_s)
-            if not track.is_alive:
-                reported.append(track.snapshot())
-        self.tracks = [track for track in self.tracks if track.is_alive]
+        try:
+            # Each track is a Python object with its own filter state, so there
+            # is no array of tracks to vectorise over.
+            for track in self.tracks:
+                track.estimator.predict_to(max(time_s, track.estimator.state.timestamp_s))
+                self.manager.expire(track, time_s)
+                if not track.is_alive:
+                    reported.append(track.snapshot())
+            self.tracks = [track for track in self.tracks if track.is_alive]
 
-        visible = [track for track in self.tracks if self._can_see(sensor, track)]
-        costs, innovations = self._score_pairs(visible, batch, models)
+            visible = [track for track in self.tracks if self._can_see(sensor, track)]
+            costs, gated = self._score_pairs(visible, batch, models)
+        except Exception:
+            self._restore(before)
+            raise
+
         confirmed = [i for i, track in enumerate(visible) if track.is_confirmed]
-        tentative = [i for i, track in enumerate(visible) if not track.is_confirmed]
-        matches = self._assign(costs, confirmed)
-        taken = {j for _, j in matches}
-        free = [j for j in range(costs.shape[1]) if j not in taken]
-        matches += self._assign(costs, tentative, free)
+        if self.assignment == "joint":
+            matches = self._assign(costs, range(len(visible)))
+            inside_confirmed = np.zeros(costs.shape[1], dtype=np.bool_)
+        else:
+            tentative = [i for i, track in enumerate(visible) if not track.is_confirmed]
+            matches = self._assign(costs, confirmed)
+            taken = {j for _, j in matches}
+            free = [j for j in range(costs.shape[1]) if j not in taken]
+            matches += self._assign(costs, tentative, free)
+            inside_confirmed = np.asarray(np.isfinite(costs[confirmed]).any(axis=0), dtype=np.bool_)
 
         hit = dict(matches)
         # took[track_id]: (measurement index, NIS) for each track that took a
@@ -396,14 +498,22 @@ class Tracker:
             j = hit.get(i)
             if j is None:
                 self.manager.record_miss(track)
+                # The miss that starts the re-acquisition window, and only that
+                # one: each later miss would undo what the coast has learned.
+                if track.status == "coasting" and (
+                    track.n_misses == self.manager.policy.n_delete_misses
+                ):
+                    self._forget(track)
                 continue
-            measurement = batch.measurements[j]
-            track.estimator.update(measurement, models[j], innovation=innovations[i, j])
-            took[track.track_id] = (j, innovations[i, j].nis)
+            # The pair may have gated through a marginal of the measurement's
+            # model, so the update uses the measurement and model it was scored
+            # with, and reuses that innovation.
+            stats, measurement, model = gated[i, j]
+            track.estimator.update(measurement, model, innovation=stats)
+            took[track.track_id] = (j, stats.nis)
             self.manager.record_hit(track, measurement.timestamp_s, measurement.sensor_id)
 
         claimed = set(hit.values())
-        inside_confirmed = np.asarray(np.isfinite(costs[confirmed]).any(axis=0), dtype=np.bool_)
         # Each birth builds a new filter object from one measurement, so births
         # are made one at a time.
         for j, (measurement, model) in enumerate(zip(batch.measurements, models, strict=True)):
@@ -497,28 +607,106 @@ class Tracker:
         tracks: Sequence[Track[Estimator]],
         batch: MeasurementBatch,
         models: Sequence[MeasurementModel],
-    ) -> tuple[NDArray[np.float64], dict[tuple[int, int], InnovationStats]]:
+    ) -> tuple[NDArray[np.float64], dict[tuple[int, int], _GatedPair]]:
         """Gate and score every track-measurement pair.
 
         Returns two things. The first is the cost matrix, shape
         ``(n_tracks, n_measurements)``, with ``+inf`` for a pair that is gated
-        out or whose layouts differ. The second is the innovation of each pair
-        that passed, keyed by ``(track, measurement)``.
+        out under every model offered, or whose layouts differ. The second is,
+        for each pair that passed, its innovation and the measurement and model
+        it passed through, keyed by ``(track, measurement)``.
         """
         costs = np.full((len(tracks), len(models)), np.inf)
-        innovations: dict[tuple[int, int], InnovationStats] = {}
+        dims = np.zeros((len(tracks), len(models)), dtype=np.intp)
+        gated: dict[tuple[int, int], _GatedPair] = {}
+        # Each marginal measurement is built once, however many tracks try it.
+        views: dict[tuple[int, str], tuple[Measurement, MeasurementModel]] = {}
         # Each innovation runs one track's own filter through one measurement's
         # model, and both can differ from pair to pair, so pairs are scored one
         # at a time.
+        selector = self.model_selector
         for i, track in enumerate(tracks):
+            snapshot = None if selector is None else track.snapshot()
             for j, (measurement, model) in enumerate(zip(batch.measurements, models, strict=True)):
-                if track.estimator.state.state_layout != model.state_layout:
-                    continue
-                stats = track.estimator.innovation_statistics(measurement, model)
-                if self.gate.accepts(stats):
-                    costs[i, j] = stats.nis if self.cost == "nis" else -stats.log_likelihood
-                    innovations[i, j] = stats
-        return costs, innovations
+                model_ids = (
+                    (measurement.measurement_model_id,)
+                    if selector is None or snapshot is None
+                    else selector(snapshot, measurement)
+                )
+                for model_id in model_ids:
+                    if (j, model_id) not in views:
+                        views[j, model_id] = self._view(measurement, model, model_id)
+                    view, view_model = views[j, model_id]
+                    if track.estimator.state.state_layout != view_model.state_layout:
+                        continue
+                    stats = track.estimator.innovation_statistics(view, view_model)
+                    if self.gate.accepts(stats):
+                        costs[i, j] = stats.nis if self.cost == "nis" else -stats.log_likelihood
+                        dims[i, j] = len(view.value)
+                        gated[i, j] = (stats, view, view_model)
+                        break
+        mixed = np.unique(dims[np.isfinite(costs)])
+        if self.cost == "nis" and mixed.size > 1:
+            msg = (
+                f"cost 'nis' cannot compare pairs of measurement dimensions {mixed.tolist()} "
+                "in one scan, since its expected value is the dimension; use "
+                "cost='negative_log_likelihood' (spec/tracker-001.md §7.2)."
+            )
+            raise ValueError(msg)
+        return costs, gated
+
+    def _view(
+        self, measurement: Measurement, model: MeasurementModel, model_id: str
+    ) -> tuple[Measurement, MeasurementModel]:
+        """Return a measurement as the model ``model_id`` sees it, with that model.
+
+        ``model_id`` must be the measurement's own model, or a registered
+        :class:`MarginalModel` of it, which sees part of it.
+        """
+        if model_id == measurement.measurement_model_id:
+            return measurement, model
+        candidate = self._measurement_models.get(model_id)
+        if not isinstance(candidate, MarginalModel) or candidate.base is not model:
+            msg = (
+                f"the model selector offered {model_id!r} for a measurement of "
+                f"{measurement.measurement_model_id!r}; it may offer only that model or a "
+                "registered marginal of it."
+            )
+            raise ValueError(msg)
+        return candidate.marginalise(measurement, model_id), candidate
+
+    def _forget(self, track: Track[Estimator]) -> None:
+        """Reset the policy's ``reacquire_reset`` coordinates of a track to the prior.
+
+        Their variances, and the covariances among them, become the
+        initiator's prior's; their covariances with every other coordinate
+        become zero. The mean is kept. The covariance stays positive
+        semidefinite, since it is then block diagonal in two blocks that each
+        are. This is ``spec/tracker-001.md`` §8.3's velocity reset, found by
+        name, so it works whatever the state's order.
+        """
+        names = self.manager.policy.reacquire_reset
+        if not names:
+            return
+        state = track.estimator.state
+        prior = self.initiator.prior
+        rows = list(state.state_layout.indices(names))
+        prior_rows = list(prior.state_layout.indices(names))
+        covariance = state.covariance.copy()
+        covariance[rows, :] = 0.0
+        covariance[:, rows] = 0.0
+        covariance[np.ix_(rows, rows)] = prior.covariance[np.ix_(prior_rows, prior_rows)]
+        track.estimator.set_state(
+            StateEstimate(state.mean, covariance, state.timestamp_s, state.state_layout)
+        )
+
+    def _restore(self, before: Sequence[_SavedTrack]) -> None:
+        """Put every track back to the estimate and status it had before this scan."""
+        # Each track holds its own filter, so each is restored on its own.
+        for track, state, status in before:
+            track.estimator.set_state(state)
+            track.status = status
+        self.tracks = [track for track, _, _ in before]
 
     def _assign(
         self,

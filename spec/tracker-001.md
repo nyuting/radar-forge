@@ -550,7 +550,7 @@ scan, is the only one the specs use (`spec/data-001-formats.md` §5 Vocabulary).
 | M-of-N confirmation, counted from birth | `n_confirm_hits`, `n_confirm_frames` | exists |
 | Tentative deletion once M is unreachable | (derived) | exists |
 | Deletion after misses in a row | `n_delete_misses` | exists |
-| Re-acquisition window for confirmed tracks | `n_reacquire_misses` (renamed, TD13) | the count exists (`LifecyclePolicy`); the velocity reset that widens the gate is new in `Tracker` (§8.3) |
+| Re-acquisition window for confirmed tracks | `n_reacquire_misses` (renamed, TD13) | exists: the count in `LifecyclePolicy`, and the reset that widens the gate in `Tracker` (§8.3, step 5) |
 | Deletion after a coast time | `max_coast_time_s` | exists |
 | **Covariance-based deletion** | `max_position_sigma_m` | **new** |
 | **Existence-based confirm and delete** (JIPDA only) | `ExistencePolicy(confirm, delete)` | **new**, scenario 011 D28 |
@@ -733,6 +733,17 @@ it would be later. The names and module moves are TD13's.
    slope bound would test nothing.
    *Check:* AC3, AC5 and AC6 for the new model; the §4.5 guard passes.
 5. **Scenario mechanisms in `Tracker`** (§8.3), and `assignment="joint"` (§7.3).
+   The marginal is a wrapper, `marginal(model, names)` in `measurement_models.py`, not a method
+   every model must implement: it is a `DifferentiableMarginalModel` exactly when its base has
+   a Jacobian, so the KF and the EKF can use it. The selector may offer only a measurement's own
+   model or a registered marginal of that model (`MarginalModel.base is model`), so a model that
+   merely shares component names cannot stand in. The reset reads the prior from the
+   initiator, so `TrackInitiator` gains a `prior` attribute, which both initiators already had.
+   `"joint"` also starts a track from every measurement left over, inside a confirmed gate or
+   not, as `KalmanTracker` does; the no-birth rule belongs to `"confirmed_first"`. An error
+   while predicting or gating, such as the §7.2 refusal to compare NIS across dimensions, puts
+   every track back as it was (principle 8); before this step an error there left the
+   predictions already made.
 6. **Scenario 003 on `Tracker`.** `pipelines/tracking.py` becomes an adapter: plots in,
    batches out, snapshots back. `TrackingConfig.state_model` is honoured (it is ignored today).
 7. **Delete the old stack:** `KalmanTracker`, `KalmanFilter`, `KalmanState`, `TrackModel` and

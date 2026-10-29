@@ -18,17 +18,19 @@ from scipy.stats import chi2
 from radar_forge.core.tracking.association import ChiSquareGate, GlobalNearestNeighbour
 from radar_forge.core.tracking.coordinates import StateEstimate
 from radar_forge.core.tracking.estimation import GaussianFilter, InnovationStats
-from radar_forge.core.tracking.initiation import DebiasedSphericalInitiator
+from radar_forge.core.tracking.initiation import DebiasedSphericalInitiator, DirectStateInitiator
 from radar_forge.core.tracking.lifecycle import LifecyclePolicy
 from radar_forge.core.tracking.linearisation import Linearisation, UnscentedLinearisation
 from radar_forge.core.tracking.measurement_models import (
+    CartesianPosition,
     Measurement,
     MeasurementBatch,
     RangeAzimuthElevationRangeRate,
     SensorPose,
     SensorRegistration,
+    marginal,
 )
-from radar_forge.core.tracking.motion import CartesianMotion
+from radar_forge.core.tracking.motion import CartesianMotion, RadialMotion
 from radar_forge.core.tracking.tracker import Tracker, build_tracker_enu
 from radar_forge.core.tracking.tracks import TrackSnapshot
 
@@ -634,3 +636,250 @@ def test_a_track_that_missed_took_no_measurement() -> None:
     missed = snapshots[track.track_id]
     assert (missed.measurement_index, missed.nis) == (None, None)
     assert missed.n_misses == 1
+
+
+# --------------------------------------------------------------------------- #
+# Scenario mechanisms (spec/tracker-001.md §7.3 and §8.3): the model selector
+# and its range-only retry, joint assignment, and the re-acquisition reset
+# --------------------------------------------------------------------------- #
+
+# A range and range-rate radar. The process noise is pinned at q = 1 m²/s³, so a
+# settled track's rate gate is about a metre per second wide: a detection whose
+# rate is 40 m/s out, as a wrong Doppler fold would be, fails it by far.
+RADIAL = RadialMotion(1.0, 0.5)
+RANGE_AND_RATE = CartesianPosition(RADIAL.state_layout, ("range_m", "range_rate_mps"))
+RADIAL_PRIOR = StateEstimate(np.zeros(2), np.diag([1.0, 100.0**2]), 0.0, RADIAL.state_layout)
+
+
+def full_then_range(snapshot: TrackSnapshot, measurement: Measurement) -> tuple[str, ...]:
+    """Scenario 003's selector: range and rate first, then range alone."""
+    return ("range_and_rate", "range")
+
+
+def radial_tracker(policy: LifecyclePolicy | None = None, **kwargs: object) -> Tracker:
+    """A tracker whose radar measures range and range rate, with a range-only marginal."""
+    initiator = DirectStateInitiator(
+        lambda state: GaussianFilter(state, RADIAL, UnscentedLinearisation()), RADIAL_PRIOR
+    )
+    return Tracker(
+        {"range_and_rate": RANGE_AND_RATE, "range": marginal(RANGE_AND_RATE, ("range_m",))},
+        {"radar": SensorRegistration("radar", ("range_and_rate",))},
+        ChiSquareGate(0.997),
+        GlobalNearestNeighbour(),
+        initiator,
+        policy,
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+def radial_scan(
+    tracker: Tracker, time_s: float, detections: Sequence[tuple[float, float]]
+) -> MeasurementBatch:
+    """One scan of (range, range rate) detections, sigmas 5 m and 0.5 m/s."""
+    covariance = np.diag([25.0, 0.25])
+    return tracker.sensors["radar"].batch(
+        time_s,
+        [("range_and_rate", np.array(detection), covariance) for detection in detections],
+    )
+
+
+def settled_radial_tracker(policy: LifecyclePolicy | None = None, **kwargs: object) -> Tracker:
+    """A confirmed track on a target holding still at 5 km, after six scans."""
+    tracker = radial_tracker(policy, **kwargs)
+    # Scans are processed in time order; each depends on the one before.
+    for time_s in range(6):
+        tracker.process(radial_scan(tracker, time_s, [(5000.0, 0.0)]))
+    assert [track.status for track in tracker.tracks] == [CONFIRMED]
+    return tracker
+
+
+def test_a_pair_that_fails_its_rate_gate_is_kept_through_range_alone() -> None:
+    """§8.3's retry: a wrong fold costs the rate, not the range.
+
+    The detection's range is right and its rate is 40 m/s out. Without a
+    selector the track misses it; with one it takes the range, and its rate
+    estimate is not pulled toward the 40 m/s it was offered.
+    """
+    plain = settled_radial_tracker(cost="negative_log_likelihood")
+    retrying = settled_radial_tracker(
+        cost="negative_log_likelihood", model_selector=full_then_range
+    )
+    missed = plain.process(radial_scan(plain, 6, [(5000.0, 40.0)]))[0]
+    kept = retrying.process(radial_scan(retrying, 6, [(5000.0, 40.0)]))[0]
+
+    assert (missed.status, missed.measurement_index) == (COASTING, None)
+    assert (kept.status, kept.measurement_index) == (CONFIRMED, 0)
+    assert abs(kept.state[1]) < 1.0
+
+
+def test_the_retry_uses_the_full_model_when_it_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Range alone is a fallback: a detection that agrees in rate updates on both."""
+    tracker = settled_radial_tracker(cost="negative_log_likelihood", model_selector=full_then_range)
+    estimator = tracker.tracks[0].estimator
+    dimensions: list[int] = []
+    original = estimator.update
+
+    def spy(
+        measurement: Measurement, model: object, *, innovation: InnovationStats | None = None
+    ) -> None:
+        dimensions.append(len(measurement.value))
+        original(measurement, model, innovation=innovation)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(estimator, "update", spy)
+    tracker.process(radial_scan(tracker, 6, [(5001.0, 0.2)]))
+    tracker.process(radial_scan(tracker, 7, [(5001.0, 40.0)]))
+    assert dimensions == [2, 1]
+
+
+def test_a_range_only_update_reports_its_one_dimensional_nis() -> None:
+    """The snapshot's NIS is the one the pair was gated on: range alone, here."""
+    tracker = settled_radial_tracker(cost="negative_log_likelihood", model_selector=full_then_range)
+    estimator = copy.deepcopy(tracker.tracks[0].estimator)
+    estimator.predict_to(6.0)
+    range_only = tracker.measurement_models["range"]
+    detection = Measurement(np.array([5003.0]), np.array([[25.0]]), 6.0, "radar", "range")
+    expected = estimator.innovation_statistics(detection, range_only).nis
+
+    (snapshot,) = tracker.process(radial_scan(tracker, 6, [(5003.0, 40.0)]))
+    assert snapshot.nis == pytest.approx(expected, rel=1e-12)
+
+
+def test_nis_costs_of_two_dimensions_in_one_scan_are_refused() -> None:
+    """§7.2: a 1-D NIS undercuts a 2-D one, so the scan raises and changes nothing.
+
+    One detection agrees in rate and gates at two components; the other gates
+    through range alone.
+    """
+    tracker = settled_radial_tracker(model_selector=full_then_range)
+    (track,) = tracker.tracks
+    before = track.estimator.state
+    n_frames = track.n_frames
+    with pytest.raises(ValueError, match="negative_log_likelihood"):
+        tracker.process(radial_scan(tracker, 6, [(5000.0, 0.0), (5004.0, 40.0)]))
+
+    assert tracker.tracks == [track]
+    assert track.estimator.state is before
+    assert (track.status, track.n_frames, tracker.last_timestamp_s) == (CONFIRMED, n_frames, 5.0)
+
+
+def test_the_selector_may_offer_only_the_measurements_model_or_a_marginal_of_it() -> None:
+    """A model that merely has the right components is not a marginal of this one."""
+    initiator = DirectStateInitiator(
+        lambda state: GaussianFilter(state, RADIAL, UnscentedLinearisation()), RADIAL_PRIOR
+    )
+    tracker = Tracker(
+        {
+            "range_and_rate": RANGE_AND_RATE,
+            "range": CartesianPosition(RADIAL.state_layout, ("range_m",)),
+        },
+        {"radar": SensorRegistration("radar", ("range_and_rate",))},
+        ChiSquareGate(0.997),
+        GlobalNearestNeighbour(),
+        initiator,
+        cost="negative_log_likelihood",
+        model_selector=full_then_range,
+    )
+    for time_s in range(3):
+        tracker.process(radial_scan(tracker, time_s, [(5000.0, 0.0)]))
+    before = tracker.tracks[0].estimator.state
+    with pytest.raises(ValueError, match="marginal"):
+        tracker.process(radial_scan(tracker, 3, [(5000.0, 40.0)]))
+    assert tracker.tracks[0].estimator.state is before
+
+
+def test_a_selector_offering_nothing_gates_the_pair_out() -> None:
+    tracker = settled_radial_tracker()
+    tracker.model_selector = lambda snapshot, measurement: ()
+    snapshots = tracker.process(radial_scan(tracker, 6, [(5000.0, 0.0)]))
+    assert [snapshot.status for snapshot in snapshots] == [COASTING, TENTATIVE]
+
+
+def test_joint_assignment_starts_a_track_inside_a_confirmed_gate() -> None:
+    """§7.3: two-stage assignment protects a confirmed gate; one joint solve does not."""
+    detections = [(5000.0, 0.0), (5003.0, 0.0)]
+    two_stage = settled_radial_tracker()
+    joint = settled_radial_tracker(assignment="joint")
+    assert len(two_stage.process(radial_scan(two_stage, 6, detections))) == 1
+    assert [s.status for s in joint.process(radial_scan(joint, 6, detections))] == [
+        CONFIRMED,
+        TENTATIVE,
+    ]
+
+
+def test_joint_assignment_lets_the_smaller_cost_win() -> None:
+    """In one solve a tentative track can take a detection a confirmed track also gates.
+
+    The same geometry as
+    :func:`test_a_confirmed_track_gets_first_pick_over_a_tentative_one`, under
+    ``assignment="joint"``: the tentative track's NIS is the smaller, so it wins.
+    """
+    built = one_axis_tracker(sigma_acceleration_mps2=1.0, acceleration_correlation_time_s=0.5)
+    tracker = Tracker(
+        dict(built.measurement_models),
+        dict(built.sensors),
+        built.gate,
+        built.associator,
+        built.initiator,
+        built.manager.policy,
+        assignment="joint",
+    )
+    # Scans are processed in time order; each depends on the one before.
+    for time_s in range(6):
+        tracker.process(batch(tracker, time_s, [1000.0], variance_m2=1.0))
+    tracker.process(batch(tracker, 6, [1000.0, 1015.0], variance_m2=1.0))
+    confirmed, tentative = tracker.tracks
+    tracker.process(batch(tracker, 7, [1003.0], variance_m2=1.0))
+    assert (confirmed.last_measurement_time_s, tentative.last_measurement_time_s) == (6.0, 7.0)
+
+
+def test_the_constructor_rejects_an_unknown_assignment() -> None:
+    with pytest.raises(ValueError, match="assignment"):
+        radial_tracker(assignment="greedy")
+
+
+def reacquiring_policy(reacquire_reset: tuple[str, ...] = ()) -> LifecyclePolicy:
+    """Delete at 2 misses, and give a confirmed track 3 more to re-acquire."""
+    return LifecyclePolicy(n_delete_misses=2, n_reacquire_frames=3, reacquire_reset=reacquire_reset)
+
+
+def test_the_reset_forgets_the_rate_on_the_miss_that_starts_reacquisition() -> None:
+    """§8.3: on the n_delete_misses-th miss, the rate goes back to the prior.
+
+    Its variance becomes the prior's, its covariance with range zero, and
+    nothing else changes: the twin tracker without the reset has the same mean
+    and range variance.
+    """
+    reset = settled_radial_tracker(reacquiring_policy(("range_rate_mps",)))
+    twin = settled_radial_tracker(reacquiring_policy())
+    first = reset.process(MeasurementBatch(6, "radar"))[0]
+    twin.process(MeasurementBatch(6, "radar"))
+    kept = reset.process(MeasurementBatch(7, "radar"))[0]
+    plain = twin.process(MeasurementBatch(7, "radar"))[0]
+
+    assert first.covariance[0, 1] != 0.0
+    assert kept.status == COASTING
+    assert kept.covariance[1, 1] == RADIAL_PRIOR.covariance[1, 1]
+    assert kept.covariance[0, 1] == kept.covariance[1, 0] == 0.0
+    # rtol 1e-12: the reset touches neither the mean nor the range variance.
+    np.testing.assert_allclose(kept.state, plain.state, rtol=1e-12)
+    np.testing.assert_allclose(kept.covariance[0, 0], plain.covariance[0, 0], rtol=1e-12)
+
+
+def test_the_reset_happens_once_and_the_gate_then_widens() -> None:
+    """The next miss predicts from the reset, so the rate is coupled to range again.
+
+    One second at the prior's 100 m/s spread adds about 100² m² to the range
+    variance, the widening that lets the track find its target again.
+    """
+    tracker = settled_radial_tracker(reacquiring_policy(("range_rate_mps",)))
+    # Scans are processed in time order; each depends on the one before.
+    snapshots = [tracker.process(MeasurementBatch(t, "radar"))[0] for t in (6, 7, 8)]
+    at_reset, after = snapshots[1], snapshots[2]
+    assert after.status == COASTING
+    assert after.covariance[0, 1] != 0.0
+    assert after.covariance[0, 0] > at_reset.covariance[0, 0] + 100.0**2 / 2
+
+
+def test_the_constructor_rejects_a_reset_coordinate_the_prior_lacks() -> None:
+    with pytest.raises(ValueError, match="xdot_mps"):
+        radial_tracker(reacquiring_policy(("xdot_mps",)))

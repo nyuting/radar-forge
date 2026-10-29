@@ -99,13 +99,16 @@ from radar_forge.core.tracking.linearisation import (
 from radar_forge.core.tracking.measurement_models import (
     BistaticRangeDopplerModel,
     CartesianPosition,
+    DifferentiableMarginalModel,
     DifferentiableMeasurementModel,
+    MarginalModel,
     Measurement,
     MeasurementBatch,
     MeasurementModel,
     RangeAzimuthElevationRangeRate,
     SensorPose,
     SensorRegistration,
+    marginal,
 )
 from radar_forge.core.tracking.motion import (
     CartesianMotion,
@@ -114,7 +117,12 @@ from radar_forge.core.tracking.motion import (
     MotionModel,
     RadialMotion,
 )
-from radar_forge.core.tracking.tracker import Tracker, build_tracker, build_tracker_enu
+from radar_forge.core.tracking.tracker import (
+    ModelSelector,
+    Tracker,
+    build_tracker,
+    build_tracker_enu,
+)
 from radar_forge.core.tracking.tracks import TRACK_STATUSES, Track, TrackSnapshot, TrackStatus
 
 __all__ = [
@@ -128,6 +136,7 @@ __all__ = [
     "ChiSquareGate",
     "Coordinate",
     "DebiasedSphericalInitiator",
+    "DifferentiableMarginalModel",
     "DifferentiableMeasurementModel",
     "DirectStateInitiator",
     "Estimator",
@@ -141,10 +150,12 @@ __all__ = [
     "LifecyclePolicy",
     "LinearMotionModel",
     "Linearisation",
+    "MarginalModel",
     "Measurement",
     "MeasurementBatch",
     "MeasurementModel",
     "MeasurementMoments",
+    "ModelSelector",
     "MotionKind",
     "MotionModel",
     "NearestNeighbour",
@@ -179,6 +190,7 @@ __all__ = [
     "kalman",
     "lifecycle",
     "linearisation",
+    "marginal",
     "measurement_models",
     "motion",
     "normalised_innovation_squared",
