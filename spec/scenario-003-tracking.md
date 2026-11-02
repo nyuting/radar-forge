@@ -428,7 +428,11 @@ exercise to set an intern, and a bad default.
 > untested, so this table counted 245,760 cells and 2.46 false alarms per frame. It now tests them
 > with a one-sided window calibrated to the same `pfa` (`core/detection.py` module Notes), which
 > adds 10,240 cells and 0.10 false alarms per frame. The per-cell rate, and with it the gate and
-> confirmation rows, is unchanged. The same pass re-derived the rows from their formulas and
+> confirmation rows, is unchanged. Measured over S1's 120 frames, the run gains 17 detections
+> (366 to 383), all in the edge cells: 0.14 per frame against 0.10 expected, a Poisson tail of
+> about 0.1. Every tracking metric is unchanged to full precision. Only the primary track's ID
+> moves, from 71 to 76, because the extra false alarms start tentative tracks first. The same pass
+> re-derived the rows from their formulas and
 > corrected three figures that were already off: the confirmation probability, 1.0e-5 rather than
 > 1.2e-5; one run in about 300 (322 now, 336 before) rather than four hundred; and the 1e-4
 > factor, about 9,000 rather than 7,000.
