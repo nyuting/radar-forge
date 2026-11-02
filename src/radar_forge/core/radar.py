@@ -219,8 +219,14 @@ class Receiver:
 
 
 @dataclass(frozen=True)
-class Radar:
-    """A transmitter and receiver at a fixed geodetic site.
+class _RadarChain:
+    """A transmitter paired with a receiver, wherever the two are sited.
+
+    The base of :class:`Radar` and :class:`BistaticRadar`. It holds every
+    quantity set by the waveform and the receive chain alone, so that each is
+    written once and the two sitings cannot drift apart. What the siting
+    changes, such as which range the unambiguous delay bounds, lives in the
+    subclass.
 
     Parameters
     ----------
@@ -228,44 +234,13 @@ class Radar:
         The transmit chain.
     receiver : Receiver
         The receive chain.
-    latitude_deg, longitude_deg : float
-        Antenna geodetic position, degrees.
-    altitude_m : float
-        Antenna height above the WGS-84 ellipsoid, metres.
-
-    Raises
-    ------
-    ValueError
-        If the site latitude is outside [-90, 90], or if a pulsed receiver
-        samples below the transmitted bandwidth.
-
-    Notes
-    -----
-    The radar is stationary. A moving platform would add a velocity to the
-    Doppler of every path, including the clutter, and is out of scope for
-    scenario 001.
-
-    Examples
-    --------
-    >>> tx = Transmitter(9.8e9, 2.0e6, 100.0, 30.0, 1.0e-3, 1.0e3)
-    >>> radar = Radar(tx, Receiver(1.0e6, 30.0, 3.0), 36.0025, -78.941, 60.0)
-    >>> round(radar.wavelength_m * 1e3, 3)  # millimetres
-    30.591
-    >>> round(radar.unambiguous_velocity_mps, 2)
-    7.65
     """
 
     transmitter: Transmitter
     receiver: Receiver
-    latitude_deg: float
-    longitude_deg: float
-    altitude_m: float
 
-    def __post_init__(self) -> None:
-        """Validate the site and the transmitter/receiver pairing."""
-        if abs(self.latitude_deg) > 90.0:
-            msg = f"latitude_deg must lie in [-90, 90]; got {self.latitude_deg!r}."
-            raise ValueError(msg)
+    def _validate_sample_rate(self) -> None:
+        """Reject a pulsed receiver that samples below the transmitted bandwidth."""
         if (
             self.transmitter.waveform == "pulsed"
             and self.receiver.sample_rate_hz < self.transmitter.bandwidth_hz
@@ -284,41 +259,47 @@ class Radar:
 
     @property
     def range_resolution_m(self) -> float:
-        """Range resolution :math:`c/2B`, m. Set by bandwidth alone."""
+        r"""Range resolution :math:`c/2B`, m. Set by bandwidth alone.
+
+        For a bistatic pair this is the best case, at zero bistatic angle; see
+        :meth:`BistaticRadar.range_resolution_at_bistatic_angle_m`.
+        """
         return float(range_resolution_m(self.transmitter.bandwidth_hz))
 
     @property
-    def unambiguous_range_m(self) -> float:
-        r"""Maximum range that is not folded, m.
+    def unambiguous_delay_s(self) -> float:
+        r"""Longest echo delay that is not folded, s.
 
         The two waveform families arrive at this differently [1]_, [2]_:
 
         .. math::
 
-            R_{ua} = \frac{c}{2\,\mathrm{PRF}} \quad\text{(pulsed)},
+            \tau_{ua} = \frac{1}{\mathrm{PRF}} \quad\text{(pulsed)},
             \qquad
-            R_{ua} = \frac{c\, f_s}{4\alpha} \quad\text{(FMCW deramp)}
+            \tau_{ua} = \frac{f_s}{2\alpha} \quad\text{(FMCW deramp)}
 
-        For FMCW the limit is the highest beat frequency the receiver can
-        represent without aliasing, :math:`f_s/2`, converted to range through the
-        sweep rate. Note this makes FMCW unambiguous range a *receiver* property.
+        A pulsed echo folds once it arrives after the next pulse. An FMCW echo
+        folds once its beat frequency :math:`\alpha\tau` passes :math:`f_s/2`,
+        the highest the receiver can represent, which makes FMCW unambiguous
+        delay a *receiver* property. :attr:`Radar.unambiguous_range_m` and
+        :attr:`BistaticRadar.unambiguous_range_m` convert this one delay to a
+        range for their siting.
         """
         if self.transmitter.waveform == "pulsed":
-            return SPEED_OF_LIGHT_MPS / (2.0 * self.transmitter.prf_hz)
+            return self.transmitter.pulse_repetition_interval_s
         highest_beat_frequency_hz = self.receiver.sample_rate_hz / 2.0
-        return (
-            SPEED_OF_LIGHT_MPS
-            * highest_beat_frequency_hz
-            / (2.0 * self.transmitter.sweep_rate_hzps)
-        )
+        return highest_beat_frequency_hz / self.transmitter.sweep_rate_hzps
 
     @property
     def unambiguous_velocity_mps(self) -> float:
-        r"""Maximum unaliased radial speed, m/s, as a half-interval.
+        r"""Maximum unaliased range rate, m/s, as a half-interval.
 
         Slow time is sampled once per chirp, so Doppler is unambiguous over
         :math:`\pm \mathrm{PRF}/2`, which is :math:`\pm \lambda\,\mathrm{PRF}/4`
-        in velocity. Targets outside this fold back into it.
+        in velocity. Targets outside this fold back into it. For a monostatic
+        radar the rate is the radial velocity; for a bistatic pair it is the
+        bisector range rate of
+        :func:`radar_forge.core.propagation.bistatic_doppler_hz`.
         """
         return self.wavelength_m * self.transmitter.prf_hz / 4.0
 
@@ -358,7 +339,72 @@ class Radar:
 
 
 @dataclass(frozen=True)
-class BistaticRadar:
+class Radar(_RadarChain):
+    """A transmitter and receiver at a fixed geodetic site.
+
+    Parameters
+    ----------
+    transmitter : Transmitter
+        The transmit chain.
+    receiver : Receiver
+        The receive chain.
+    latitude_deg, longitude_deg : float
+        Antenna geodetic position, degrees.
+    altitude_m : float
+        Antenna height above the WGS-84 ellipsoid, metres.
+
+    Raises
+    ------
+    ValueError
+        If the site latitude is outside [-90, 90], or if a pulsed receiver
+        samples below the transmitted bandwidth.
+
+    Notes
+    -----
+    The radar is stationary. A moving platform would add a velocity to the
+    Doppler of every path, including the clutter, and is out of scope for
+    scenario 001.
+
+    Examples
+    --------
+    >>> tx = Transmitter(9.8e9, 2.0e6, 100.0, 30.0, 1.0e-3, 1.0e3)
+    >>> radar = Radar(tx, Receiver(1.0e6, 30.0, 3.0), 36.0025, -78.941, 60.0)
+    >>> round(radar.wavelength_m * 1e3, 3)  # millimetres
+    30.591
+    >>> round(radar.unambiguous_velocity_mps, 2)
+    7.65
+    """
+
+    latitude_deg: float
+    longitude_deg: float
+    altitude_m: float
+
+    def __post_init__(self) -> None:
+        """Validate the site and the transmitter/receiver pairing."""
+        if abs(self.latitude_deg) > 90.0:
+            msg = f"latitude_deg must lie in [-90, 90]; got {self.latitude_deg!r}."
+            raise ValueError(msg)
+        self._validate_sample_rate()
+
+    @property
+    def unambiguous_range_m(self) -> float:
+        r"""Maximum range that is not folded, m.
+
+        The echo travels out and back, so the range is half the distance light
+        covers in :attr:`unambiguous_delay_s` [1]_, [2]_:
+
+        .. math::
+
+            R_{ua} = \frac{c\,\tau_{ua}}{2}
+            = \frac{c}{2\,\mathrm{PRF}} \quad\text{(pulsed)},
+            \qquad
+            R_{ua} = \frac{c\, f_s}{4\alpha} \quad\text{(FMCW deramp)}
+        """
+        return SPEED_OF_LIGHT_MPS * self.unambiguous_delay_s / 2.0
+
+
+@dataclass(frozen=True)
+class BistaticRadar(_RadarChain):
     """A transmitter and receiver at two different geodetic sites.
 
     The bistatic counterpart of :class:`Radar`. Everything set by the waveform
@@ -416,8 +462,6 @@ class BistaticRadar:
     30.591
     """
 
-    transmitter: Transmitter
-    receiver: Receiver
     transmitter_latitude_deg: float
     transmitter_longitude_deg: float
     transmitter_altitude_m: float
@@ -435,16 +479,7 @@ class BistaticRadar:
             if abs(value) > 90.0:
                 msg = f"{name} must lie in [-90, 90]; got {value!r}."
                 raise ValueError(msg)
-        if (
-            self.transmitter.waveform == "pulsed"
-            and self.receiver.sample_rate_hz < self.transmitter.bandwidth_hz
-        ):
-            msg = (
-                f"sample_rate_hz {self.receiver.sample_rate_hz:.4g} Hz is below the transmitted "
-                f"bandwidth {self.transmitter.bandwidth_hz:.4g} Hz; the pulse would alias. "
-                "An FMCW receiver may sample below the bandwidth because it deramps first."
-            )
-            raise ValueError(msg)
+        self._validate_sample_rate()
         if self.baseline_m <= 0.0:
             msg = (
                 "the transmitter and receiver sites coincide, so the baseline is zero and the "
@@ -474,34 +509,17 @@ class BistaticRadar:
         return float(np.linalg.norm(self.receiver_enu_m))
 
     @property
-    def wavelength_m(self) -> float:
-        """Carrier wavelength, m."""
-        return self.transmitter.wavelength_m
-
-    @property
-    def range_resolution_m(self) -> float:
-        r"""Best-case range resolution :math:`c/2B`, m.
-
-        This is the value at zero bistatic angle only, where the geometry is
-        effectively monostatic. It is the *floor*: resolution degrades
-        everywhere else, and
-        :meth:`range_resolution_at_bistatic_angle_m` gives the value that
-        actually applies to a target.
-        """
-        return float(range_resolution_m(self.transmitter.bandwidth_hz))
-
-    @property
     def unambiguous_range_m(self) -> float:
         r"""Maximum **range sum** :math:`R_t + R_r` that is not folded, m.
 
-        The same two waveform rules as :attr:`Radar.unambiguous_range_m` [1]_,
-        [2]_, but the quantity they bound is the sum of the two ranges rather
-        than a single range, because a bistatic echo is delayed by
-        :math:`(R_t + R_r)/c` and not by :math:`2R/c`:
+        A bistatic echo is delayed by :math:`(R_t + R_r)/c` and not by
+        :math:`2R/c`, so :attr:`unambiguous_delay_s` bounds the sum of the two
+        ranges rather than a single range [1]_, [2]_:
 
         .. math::
 
-            (R_t + R_r)_{ua} = \frac{c}{\mathrm{PRF}} \quad\text{(pulsed)},
+            (R_t + R_r)_{ua} = c\,\tau_{ua}
+            = \frac{c}{\mathrm{PRF}} \quad\text{(pulsed)},
             \qquad
             (R_t + R_r)_{ua} = \frac{c\, f_s}{2\alpha} \quad\text{(FMCW deramp)}
 
@@ -509,45 +527,7 @@ class BistaticRadar:
         the sum they bound is itself roughly twice a one-way range, so a target
         folds at about the same distance from the pair.
         """
-        if self.transmitter.waveform == "pulsed":
-            return SPEED_OF_LIGHT_MPS / self.transmitter.prf_hz
-        highest_beat_frequency_hz = self.receiver.sample_rate_hz / 2.0
-        return SPEED_OF_LIGHT_MPS * highest_beat_frequency_hz / self.transmitter.sweep_rate_hzps
-
-    @property
-    def unambiguous_velocity_mps(self) -> float:
-        r"""Maximum unaliased **bisector** range rate, m/s, as a half-interval.
-
-        Identical in form to :attr:`Radar.unambiguous_velocity_mps`, because slow
-        time is sampled once per pulse either way. What folds is the bisector
-        range rate of :func:`radar_forge.core.propagation.bistatic_doppler_hz`, not a
-        radial velocity towards either site.
-        """
-        return self.wavelength_m * self.transmitter.prf_hz / 4.0
-
-    @property
-    def noise_power_w(self) -> float:
-        r"""Receiver thermal noise power :math:`k T_0 B F`, W.
-
-        A property of the receive chain alone, so it is unchanged from
-        :attr:`Radar.noise_power_w`.
-        """
-        return (
-            BOLTZMANN_JPK
-            * STANDARD_NOISE_TEMPERATURE_K
-            * self.transmitter.bandwidth_hz
-            * self.receiver.noise_figure_linear
-        )
-
-    @property
-    def n_samples_per_chirp(self) -> int:
-        """Fast-time samples spanning one chirp or pulse, from the receive rate."""
-        return round(self.transmitter.chirp_duration_s * self.receiver.sample_rate_hz)
-
-    @property
-    def n_samples_per_pri(self) -> int:
-        """Fast-time samples in one full repetition interval — the IQ row length."""
-        return round(self.transmitter.pulse_repetition_interval_s * self.receiver.sample_rate_hz)
+        return SPEED_OF_LIGHT_MPS * self.unambiguous_delay_s
 
     def bistatic_angle_rad(
         self, range_tx_m: ArrayLike, range_rx_m: ArrayLike
