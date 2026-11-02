@@ -311,9 +311,10 @@ References
        McGraw-Hill, 2014, §2.2.1 (the simple point-target radar range equation).
 ```
 
-**Write a docstring that holds LaTeX as a raw string** **[review]**: `r"""…"""`. In a plain
-string `\alpha`, `\beta` and `\frac` become the control bytes BEL, BS and FF, which ruff does
-not flag and the rendered formula silently loses (cd568eb, 23a0ccd).
+**Write a docstring that holds LaTeX as a raw string** **[review]**: `r"""…"""`. And never
+write source through a string that reads escapes, such as Python in a shell heredoc: `\alpha`,
+`\beta` and `\frac` then land in the file as the control bytes BEL, BS and FF. No linter shows
+them, and the rendered formula silently loses its symbols (cd568eb, 23a0ccd).
 
 **Write out array shapes** **[review]**. Every array parameter and return states its shape using the
 `n_` names, and says what the axes *mean*:
