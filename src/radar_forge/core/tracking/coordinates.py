@@ -28,6 +28,9 @@ References
 .. [2] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications
        to Tracking and Navigation*, Wiley, 2001, §5.2.1 (the dynamic estimation
        problem: the state estimate and its covariance).
+.. [3] S. Särkkä, *Bayesian Filtering and Smoothing*, Cambridge University Press, 2013,
+       ch. 5 (the unscented transform, whose mean
+       :meth:`StateLayout.weighted_mean_about` forms).
 """
 
 from __future__ import annotations
@@ -329,6 +332,11 @@ class StateLayout:
         (cos phase, sin phase), turned back into the coordinate's unit [1]_.
         This is why +179° and -179° average to 180°, not to 0°.
 
+        Use it for a general average of values on a circle. Use
+        :meth:`weighted_mean_about` instead for the mean of an unscented
+        transform: on a circle this mean is not the weighted sum of the values,
+        so it does not reproduce a linear model's mean.
+
         Parameters
         ----------
         points : array_like
@@ -370,18 +378,7 @@ class StateLayout:
         >>> bool(np.isclose(abs(mean[0]), 180.0))
         True
         """
-        array = np.asarray(points, dtype=np.float64)
-        if array.ndim != 2 or array.shape[1] != self.dimension or not np.all(np.isfinite(array)):
-            msg = (
-                f"points must be finite with shape (n_points, {self.dimension}); "
-                f"got shape {array.shape}."
-            )
-            raise ValueError(msg)
-        weight = as_vector(weights, len(array), "weights")
-        if not np.isclose(weight.sum(), 1.0, rtol=_WEIGHT_SUM_RTOL, atol=_WEIGHT_SUM_ATOL):
-            msg = f"mean weights must sum to one; got {weight.sum()!r}."
-            raise ValueError(msg)
-
+        array, weight = self._mean_inputs(points, weights)
         periodic = np.array([c.period is not None for c in self.coordinates])
         period = np.array([c.period for c in self.coordinates if c.period is not None])
         phase_rad = array[:, periodic] * (2 * np.pi / period)
@@ -394,6 +391,94 @@ class StateLayout:
         result = weight @ array
         result[periodic] = np.arctan2(sine, cosine) * period / (2 * np.pi)
         return np.asarray(result, dtype=np.float64)
+
+    def weighted_mean_about(
+        self, points: ArrayLike, weights: ArrayLike, reference: ArrayLike
+    ) -> NDArray[np.float64]:
+        r"""Return the weighted mean of many vectors, as a weighted offset from a reference.
+
+        Each point is written as its shorter-way-round offset from ``reference``
+        (:meth:`residual`), the offsets are averaged with the plain weighted sum,
+        and the result is added back to the reference and wrapped [1]_:
+
+        .. math::
+
+            \bar{x} = \mathrm{wrap}\Big(r + \sum_i w_i\,
+            \mathrm{residual}(x_i, r)\Big).
+
+        Use it for the mean of an unscented transform, with the centre sigma
+        point as the reference. When every point lies within half a period of
+        the reference, this is exactly the weighted sum the transform defines,
+        so a linear model gives the same mean as a Kalman filter, wrap or no
+        wrap. It handles negative weights, and it never fails the way
+        :meth:`weighted_mean` does when the unit vectors cancel. For a general
+        average of values on a circle, with no natural reference, use
+        :meth:`weighted_mean`.
+
+        Parameters
+        ----------
+        points : array_like
+            The vectors, shape ``(n_points, n_state)``.
+        weights : array_like
+            One weight per vector, shape ``(n_points,)``. They must sum to one,
+            and may be negative.
+        reference : array_like
+            The vector the offsets are taken from, shape ``(n_state,)``. It
+            should lie near the points: an offset of more than half a period
+            is taken the other way round.
+
+        Returns
+        -------
+        numpy.ndarray
+            The mean, shape ``(n_state,)``. Periodic entries lie in
+            [-period/2, period/2).
+
+        Raises
+        ------
+        ValueError
+            If ``points`` is not finite with shape ``(n_points, n_state)``,
+            ``weights`` has the wrong shape or does not sum to one, or
+            ``reference`` has the wrong shape or is not finite.
+
+        References
+        ----------
+        .. [1] Särkkä (2013), ch. 5, the unscented transform's mean as a weighted
+               sum; see the module References. The offset form is derived here:
+               within half a period of the reference, ``residual`` is the plain
+               difference, so the sum is unchanged.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> layout = StateLayout((Coordinate("azimuth_deg", "deg", period=360.0),))
+        >>> mean = layout.weighted_mean_about([[179.0], [-179.0]], [0.75, 0.25], [179.0])
+        >>> bool(np.isclose(mean[0], 179.5))
+        True
+        """
+        array, weight = self._mean_inputs(points, weights)
+        centre = np.asarray(reference, dtype=np.float64)
+        check_points(centre, self.dimension, "reference")
+        if centre.ndim != 1:
+            msg = f"reference must have shape ({self.dimension},); got shape {centre.shape}."
+            raise ValueError(msg)
+        return self.wrap(centre + weight @ self.residual(array, centre))
+
+    def _mean_inputs(
+        self, points: ArrayLike, weights: ArrayLike
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Check the points and weights of a mean, and return them as float64 arrays."""
+        array = np.asarray(points, dtype=np.float64)
+        if array.ndim != 2 or array.shape[1] != self.dimension or not np.all(np.isfinite(array)):
+            msg = (
+                f"points must be finite with shape (n_points, {self.dimension}); "
+                f"got shape {array.shape}."
+            )
+            raise ValueError(msg)
+        weight = as_vector(weights, len(array), "weights")
+        if not np.isclose(weight.sum(), 1.0, rtol=_WEIGHT_SUM_RTOL, atol=_WEIGHT_SUM_ATOL):
+            msg = f"mean weights must sum to one; got {weight.sum()!r}."
+            raise ValueError(msg)
+        return array, weight
 
 
 @dataclass(frozen=True)

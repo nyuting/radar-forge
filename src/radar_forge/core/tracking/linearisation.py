@@ -245,9 +245,10 @@ class UnscentedLinearisation:
     So on linear models the UKF *is* the KF, up to roundoff. The weights matter only once
     the function bends, as the bistatic range and Doppler model does.
 
-    Periodic coordinates are averaged with :meth:`StateLayout.weighted_mean` and differenced
-    with :meth:`StateLayout.residual`, so sigma points that straddle a wrap (an azimuth
-    near ±π) are taken the short way round.
+    Periodic coordinates are averaged with :meth:`StateLayout.weighted_mean_about`, as
+    offsets from the centre sigma point, and differenced with :meth:`StateLayout.residual`,
+    so sigma points that straddle a wrap (an azimuth near ±π) are taken the short way round
+    and a linear model still gives the KF's mean.
 
     References
     ----------
@@ -385,7 +386,9 @@ class UnscentedLinearisation:
         )
         noise = as_covariance(motion_model.process_noise(state.mean, dt_s), len(state.mean))
 
-        mean = layout.weighted_mean(points, wm)
+        # Row 0 is the moved centre sigma point, the reference the others are
+        # averaged as offsets from.
+        mean = layout.weighted_mean_about(points, wm, points[0])
         deviations = layout.residual(points, mean)
         covariance = (deviations.T * wc) @ deviations + noise
         return mean, symmetrise(covariance)
@@ -429,7 +432,7 @@ class UnscentedLinearisation:
         predicted_points = as_points(
             model.predict(points), len(wm), layout.dimension, "predicted measurement"
         )
-        predicted = layout.weighted_mean(predicted_points, wm)
+        predicted = layout.weighted_mean_about(predicted_points, wm, predicted_points[0])
         dz = layout.residual(predicted_points, predicted)
         dx = state.state_layout.residual(points, state.mean)
         return MeasurementMoments(
