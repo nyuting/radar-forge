@@ -41,7 +41,7 @@ Outputs, on top of scenario 001's: `track_{frame:05d}.png` (range against time),
             v
   core/detection.py   cfar_detect (CA, along range)  +  cfar_valid_mask
             |             pfa = 1e-5, n_train = 16, n_guard = 4 -> alpha = 11.417 dB
-            |             all 256,000 cells tested; one-sided window in 20 at each end
+            |             all 256,000 cells tested (one-sided at the ends if range is not wrapped)
             v
             boolean detection map, (256, 1000)
             |
