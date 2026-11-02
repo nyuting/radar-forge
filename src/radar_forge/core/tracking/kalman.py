@@ -946,7 +946,7 @@ class KalmanTracker:
     -----
     The M-of-N parameters are sized against the false-alarm rate in the
     specification's §3, not chosen for taste: at ``pfa = 1e-5`` they make a
-    spurious confirmed track roughly a once-in-four-hundred-runs event. The
+    spurious confirmed track about a once-in-three-hundred-runs event. The
     deletion count is sized against the coast time a reader can see on the plot,
     and is not derived.
 
