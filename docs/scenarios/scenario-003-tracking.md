@@ -41,7 +41,7 @@ Outputs, on top of scenario 001's: `track_{frame:05d}.png` (range against time),
             v
   core/detection.py   cfar_detect (CA, along range)  +  cfar_valid_mask
             |             pfa = 1e-5, n_train = 16, n_guard = 4 -> alpha = 11.417 dB
-            |             245,760 of 256,000 cells carry a full reference window
+            |             all 256,000 cells tested; one-sided window in 20 at each end
             v
             boolean detection map, (256, 1000)
             |
@@ -114,7 +114,7 @@ The frame at which it steps from 1 to 2 is the frame the track became unfoldable
 
 | Knob | Value | Why |
 | :--- | :--- | :--- |
-| `pfa` | 1e-5 | Sets the *difficulty*, not a detector detail: about 2.46 false alarms per frame in front of the associator, while a spurious confirmed track is a once-in-400-runs event. Raise it to 1e-4 and that last number goes up ~7000×. |
+| `pfa` | 1e-5 | Sets the *difficulty*, not a detector detail: about 2.56 false alarms per frame in front of the associator, while a spurious confirmed track is about a once-in-300-runs event. Raise it to 1e-4 and that last number goes up ~9000×. |
 | `sigma_range_m` | 21.636 m | One range bin over √12. Quantisation-limited, not SNR-limited. |
 | `sigma_velocity_mps` | 0.017248 m/s | One velocity bin over √12. **Five orders of magnitude** below the range sigma — that is what a range-Doppler radar looks like: a coarse ranging measurement and an exquisite velocity one. |
 | `sigma_accel_mps2` | 5.0 | Not the 2.0 a light aircraft's lateral acceleration suggests. The target is *simulated* from a CSV with 2-3 s fixes and ADS-B noise, so its range rate moves 3.4 m/s between frames and by as much as 11 m/s. The filter tracks the target as simulated, not as flown. |
