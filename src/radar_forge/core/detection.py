@@ -781,7 +781,7 @@ def cfar_noise_estimate_w(
     estimate_w[tuple(index)] = interior_w
     if not wrap:
         index[axis] = np.r_[0:margin, n_cells - margin : n_cells]
-        estimate_w[tuple(index)] = _one_sided_estimate(
+        estimate_w[tuple(index)] = _edge_noise_estimate_w(
             unpadded_w, n_train, n_guard, variant, math.ceil(k / 2), axis
         )
     return estimate_w
@@ -1738,7 +1738,7 @@ def _slice_along(
     return values[tuple(index)]
 
 
-def _one_sided_estimate(
+def _edge_noise_estimate_w(
     values_w: NDArray[np.float64],
     n_train: int,
     n_guard: int,
@@ -1746,13 +1746,14 @@ def _one_sided_estimate(
     edge_rank: int,
     axis: int,
 ) -> NDArray[np.float64]:
-    """Return the one-sided estimate of the ``n_guard + n_train`` cells at each end of ``axis``.
+    """Return the noise estimate of the ``n_guard + n_train`` cells at each end of ``axis``.
 
-    The result runs along ``axis`` as the first ``margin`` cells, then the last
-    ``margin``. A start cell ``i`` takes its leading band, cells
-    ``i + n_guard + 1 .. i + margin``; an end cell its lagging band, cells
-    ``i - margin .. i - n_guard - 1``. CA, GO and SO all reduce the band to its
-    mean, and OS to its ``edge_rank``-th smallest cell.
+    The estimate is in watts, from a one-sided window. The result runs along
+    ``axis`` as the first ``margin`` cells, then the last ``margin``. A start
+    cell ``i`` takes its leading band, cells ``i + n_guard + 1 .. i + margin``;
+    an end cell its lagging band, cells ``i - margin .. i - n_guard - 1``. CA,
+    GO and SO all reduce the band to its mean, and OS to its ``edge_rank``-th
+    smallest cell.
     """
     margin = n_guard + n_train
     n_cells = values_w.shape[axis]
