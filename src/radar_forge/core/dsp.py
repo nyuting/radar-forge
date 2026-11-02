@@ -38,6 +38,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.signal import fftconvolve
 
+from radar_forge.core._validation import _normalize_axis
 from radar_forge.core.waveforms import range_from_beat_frequency_m
 from radar_forge.core.windows import apply_taper
 
@@ -616,11 +617,3 @@ def _prepare_transform(
         )
         raise ValueError(msg)
     return samples_arr, n_fft, axis
-
-
-def _normalize_axis(axis: int, ndim: int) -> int:
-    """Return ``axis`` as a non-negative index into an ``ndim``-dimensional array."""
-    if not -ndim <= axis < ndim:
-        msg = f"axis ({axis}) is out of range for an array of {ndim} dimension(s)."
-        raise ValueError(msg)
-    return axis % ndim

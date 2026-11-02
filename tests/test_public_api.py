@@ -146,12 +146,16 @@ PACKAGE_NAMES = ["radar_forge.core", "radar_forge.pipelines"]
 
 
 def _submodule_files(package_name: str) -> set[str]:
-    """Every ``.py`` submodule of a package, by bare name."""
+    """Every public ``.py`` submodule of a package, by bare name.
+
+    A wholly private module (``_validation``) is left out, as in ``PUBLIC_MODULE_NAMES``.
+    """
     package = importlib.import_module(package_name)
-    return {
+    names = {
         info.name.rsplit(".", 1)[-1]
         for info in pkgutil.iter_modules(package.__path__, prefix=f"{package_name}.")
     }
+    return {name for name in names if not name.startswith("_")}
 
 
 @pytest.mark.parametrize("package_name", PACKAGE_NAMES)

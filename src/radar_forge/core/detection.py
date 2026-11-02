@@ -170,6 +170,8 @@ from numpy.typing import ArrayLike, NDArray
 from scipy import ndimage, sparse
 from scipy.sparse import csgraph
 
+from radar_forge.core._validation import _normalize_axis
+
 __all__ = [
     "CFAR_VARIANTS",
     "CFAR_VARIANTS_2D",
@@ -1696,14 +1698,6 @@ def _validate_rank(rank: int, n_ref: int) -> None:
             f"i.e. in 1..{n_ref}, got {rank!r}."
         )
         raise ValueError(msg)
-
-
-def _normalize_axis(axis: int, ndim: int) -> int:
-    """Return ``axis`` as a non-negative index into an ``ndim``-dimensional array."""
-    if not -ndim <= axis < ndim:
-        msg = f"axis {axis} is out of bounds for an array with {ndim} dimensions."
-        raise ValueError(msg)
-    return axis % ndim
 
 
 def _band_mean(

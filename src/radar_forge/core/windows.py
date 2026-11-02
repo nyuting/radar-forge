@@ -32,6 +32,8 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.signal import windows as _scipy_windows
 
+from radar_forge.core._validation import _normalize_axis
+
 __all__ = [
     "TAPER_NAMES",
     "TaperName",
@@ -373,11 +375,3 @@ def _validated_window(window: ArrayLike) -> NDArray[np.float64]:
         msg = "window must not be empty."
         raise ValueError(msg)
     return window_arr
-
-
-def _normalize_axis(axis: int, ndim: int) -> int:
-    """Return ``axis`` as a non-negative index into an ``ndim``-dimensional array."""
-    if not -ndim <= axis < ndim:
-        msg = f"axis ({axis}) is out of range for an array of {ndim} dimension(s)."
-        raise ValueError(msg)
-    return axis % ndim
