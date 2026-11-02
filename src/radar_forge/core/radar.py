@@ -325,9 +325,9 @@ class _RadarChain:
         Slow time is sampled once per chirp, so Doppler is unambiguous over
         :math:`\pm \mathrm{PRF}/2`, which is :math:`\pm \lambda\,\mathrm{PRF}/4`
         in velocity. Targets outside this fold back into it. For a monostatic
-        radar the rate is the radial velocity; for a bistatic pair it is the
-        bisector range rate of
-        :func:`radar_forge.core.propagation.bistatic_doppler_hz`.
+        radar the rate is the radial velocity; for a bistatic pair it is half
+        the range-sum rate of
+        :func:`radar_forge.core.propagation.range_sum_rate_mps`.
         """
         return self.wavelength_m * self.transmitter.prf_hz / 4.0
 

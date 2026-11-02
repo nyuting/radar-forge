@@ -829,10 +829,13 @@ transmitter and the receiver at different sites. D1's dataclass survives without
 | Field | Monostatic reading | Bistatic reading |
 | :--- | :--- | :--- |
 | `delay_s` | `2R/c` | `(R_t + R_r)/c` |
-| `range_m` property, `delay_s·c/2` | `R` | the **bistatic mean range** `(R_t + R_r)/2` |
-| `doppler_hz` | `2v/λ` | `(Ṙ_t + Ṙ_r)/λ` — the same expression over the bisector range rate |
+| `range_sum_m` property, `delay_s·c` | `2R` | the **range sum** `R_t + R_r` |
+| `doppler_hz` | `2v/λ` | `L̇_c/λ`, with `L̇_c = −d(R_t + R_r)/dt` the range-sum rate, positive closing |
 
-Both monostatic forms are the special case `R_t = R_r`. `range_tx_m` and `range_rx_m` are
+Both monostatic forms are the special case `R_t = R_r`, and `core/propagation.py` writes each
+relation once, as a function of the range sum and its rate, for both sitings. Range-Doppler map
+axes keep the monostatic labelling, half the range sum and half its rate; that halving is display,
+and lives with the axes in `core/dsp.py`. `range_tx_m` and `range_rx_m` are
 deliberately **not** fields: the two ranges are geometry, and geometry belongs to `BistaticRadar`.
 A path set records what a propagation model produced, not how the radar was arranged. This is the
 strongest evidence so far that D1 was drawn in the right place, because it was drawn before the

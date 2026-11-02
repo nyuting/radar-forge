@@ -17,9 +17,9 @@ The generators implement two receive architectures:
     filter downstream. Range appears as a delay, and delays beyond one interval
     wrap, which is where the pulsed variant's range folding comes from.
 
-Both consume monostatic and bistatic path sets alike; the
-:mod:`radar_forge.core.propagation` docstring explains why no bistatic twin is
-needed.
+Both consume monostatic and bistatic path sets alike. A path carries its total
+delay and Doppler shift whatever the siting, so the generators work in the range
+sum throughout and need no bistatic twin; see :mod:`radar_forge.core.propagation`.
 
 Sign conventions
 ----------------
@@ -41,8 +41,8 @@ physically consistent and compliant with D5 — and the reason
 :func:`radar_forge.core.waveforms.lfm_chirp` takes an ``up_sweep`` flag.
 
 The pulsed generator needs no such care: standard baseband downconversion carries
-the two-way phase :math:`e^{-j 4\pi R/\lambda}` directly, and a closing target is
-positive without adjustment.
+the propagation phase :math:`e^{-j 2\pi L/\lambda}` directly, :math:`L` being the
+range sum, and a closing target is positive without adjustment.
 
 Approximations
 --------------
@@ -75,7 +75,12 @@ import numpy as np
 from numpy.typing import NDArray
 
 from radar_forge.core.constants import SPEED_OF_LIGHT_MPS
-from radar_forge.core.propagation import PropagationPaths
+from radar_forge.core.propagation import (
+    PropagationPaths,
+    propagation_delay_s,
+    propagation_phase_rad,
+    range_sum_rate_from_doppler_mps,
+)
 from radar_forge.core.radar import RadarLike
 
 __all__ = [
@@ -150,9 +155,10 @@ def fmcw_deramp_baseband(
             \exp\!\left(-j 2\pi \left(f_c + \tfrac{B}{2}\right) \tau_p[m]\right)\,
             \exp\!\left(+j 2\pi \alpha \tau_p[m]\, t_n\right)
 
-    with :math:`\tau_p[m] = 2 R_p[m]/c` held constant across chirp :math:`m`
-    (stop-and-hop) and :math:`t_n = n/f_s`. The first exponential is the residual
-    phase that becomes Doppler across slow time; the second is the beat frequency
+    with :math:`\tau_p[m] = L_p[m]/c`, :math:`L_p[m]` being the path's range
+    sum, held constant across chirp :math:`m` (stop-and-hop) and
+    :math:`t_n = n/f_s`. The first exponential is the residual phase that
+    becomes Doppler across slow time; the second is the beat frequency
     that becomes range across fast time. See the module docstring for why the
     sweep must descend for both to carry the library's sign convention.
 
@@ -214,27 +220,30 @@ def fmcw_deramp_baseband(
         raise ValueError(msg)
 
     pulse_repetition_interval_s = radar.transmitter.pulse_repetition_interval_s
-    closing_velocity_mps = paths.doppler_hz * radar.wavelength_m / 2.0
-    _warn_if_stop_and_hop_is_strained(closing_velocity_mps, radar)
+    range_sum_rate_mps = range_sum_rate_from_doppler_mps(paths.doppler_hz, radar.wavelength_m)
+    _warn_if_stop_and_hop_is_strained(range_sum_rate_mps, radar)
 
-    # (n_pulses, n_paths): range held constant within a chirp, advancing between
-    # them. Broadcasting an outer difference, not tiling.
+    # (n_pulses, n_paths): range sum held constant within a chirp, advancing
+    # between them. Broadcasting an outer difference, not tiling.
     chirp_index = np.arange(n_pulses, dtype=np.float64)[:, None]
-    range_m = (
-        paths.range_m[None, :]
-        - closing_velocity_mps[None, :] * chirp_index * pulse_repetition_interval_s
+    range_sum_m = (
+        paths.range_sum_m[None, :]
+        - range_sum_rate_mps[None, :] * chirp_index * pulse_repetition_interval_s
     )
-    delay_s = 2.0 * range_m / SPEED_OF_LIGHT_MPS
+    delay_s = propagation_delay_s(range_sum_m)
 
     n_samples = radar.n_samples_per_pri
     fast_time_s = np.arange(n_samples, dtype=np.float64) / radar.receiver.sample_rate_hz
 
     # (n_pulses, n_paths, 1) against (n_samples,) broadcasts to the full cube
     # without materialising an intermediate of that size per path.
+    # The residual phase is taken at the sweep-start wavelength, not the
+    # carrier's: see the docstring.
     sweep_start_frequency_hz = (
         radar.transmitter.carrier_frequency_hz + radar.transmitter.bandwidth_hz / 2.0
     )
-    residual_phase_rad = -2.0 * np.pi * sweep_start_frequency_hz * delay_s
+    sweep_start_wavelength_m = SPEED_OF_LIGHT_MPS / sweep_start_frequency_hz
+    residual_phase_rad = propagation_phase_rad(range_sum_m, sweep_start_wavelength_m)
     beat_phase_rad = (
         2.0 * np.pi * radar.transmitter.sweep_rate_hzps * delay_s[..., None] * fast_time_s
     )
@@ -318,14 +327,14 @@ def pulsed_baseband(
         raise ValueError(msg)
 
     pulse_repetition_interval_s = radar.transmitter.pulse_repetition_interval_s
-    closing_velocity_mps = paths.doppler_hz * radar.wavelength_m / 2.0
+    range_sum_rate_mps = range_sum_rate_from_doppler_mps(paths.doppler_hz, radar.wavelength_m)
 
     chirp_index = np.arange(n_pulses, dtype=np.float64)[:, None]
-    range_m = (
-        paths.range_m[None, :]
-        - closing_velocity_mps[None, :] * chirp_index * pulse_repetition_interval_s
+    range_sum_m = (
+        paths.range_sum_m[None, :]
+        - range_sum_rate_mps[None, :] * chirp_index * pulse_repetition_interval_s
     )
-    true_delay_s = 2.0 * range_m / SPEED_OF_LIGHT_MPS
+    true_delay_s = propagation_delay_s(range_sum_m)
     folded_delay_s = np.mod(true_delay_s, pulse_repetition_interval_s)
 
     n_samples = radar.n_samples_per_pri
@@ -343,7 +352,7 @@ def pulsed_baseband(
     # artefact of when the receiver listens, and does not change the carrier
     # phase the target actually imposed. Using the folded delay here would
     # corrupt the Doppler.
-    residual_phase_rad = -2.0 * np.pi * radar.transmitter.carrier_frequency_hz * true_delay_s
+    residual_phase_rad = propagation_phase_rad(range_sum_m, radar.wavelength_m)
 
     per_path = (
         np.abs(paths.amplitude_linear)[None, :, None]
@@ -358,17 +367,19 @@ def pulsed_baseband(
 
 
 def _warn_if_stop_and_hop_is_strained(
-    closing_velocity_mps: NDArray[np.float64], radar: RadarLike
+    range_sum_rate_mps: NDArray[np.float64], radar: RadarLike
 ) -> None:
     """Warn when a target moves a noticeable fraction of a bin within one chirp.
 
-    For a :class:`~radar_forge.core.radar.BistaticRadar` the bin used is the
+    The motion is in range sum, so it is measured against the range-sum bin
+    :math:`c/B`, twice the half-sum ``range_resolution_m`` a map is labelled
+    in. For a :class:`~radar_forge.core.radar.BistaticRadar` the bin used is the
     best-case one at zero bistatic angle, so the warning is slightly
     conservative: a target at a wide bistatic angle has a coarser bin than this
     and is smeared a little less than the message claims.
     """
-    motion_m = np.abs(closing_velocity_mps) * radar.transmitter.chirp_duration_s
-    bin_fraction = motion_m / radar.range_resolution_m
+    range_sum_motion_m = np.abs(range_sum_rate_mps) * radar.transmitter.chirp_duration_s
+    bin_fraction = range_sum_motion_m / (2.0 * radar.range_resolution_m)
     worst = float(np.max(bin_fraction, initial=0.0))
     if worst > _STOP_AND_HOP_BIN_FRACTION:
         msg = (

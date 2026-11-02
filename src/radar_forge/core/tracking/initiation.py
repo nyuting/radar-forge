@@ -152,7 +152,7 @@ class DirectStateInitiator:
     -----
     There is no initiator for
     :class:`~radar_forge.core.tracking.measurement_models.BistaticRangeDopplerModel`.
-    One bistatic measurement gives a path length and a path rate. That pins
+    One bistatic measurement gives a range sum and its rate. That pins
     the target to a surface, not to a point, so it cannot be copied into a
     state. This initiator returns None for it. So a tracker whose only model
     is bistatic never starts a track by itself. Its tracks must be added with

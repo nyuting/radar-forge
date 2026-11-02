@@ -177,8 +177,8 @@ Scenario 001 §3.5 holds unchanged. What is added or reinterpreted:
 | Contract | Statement |
 | :--- | :--- |
 | `PropagationPaths.delay_s` | `(R_t + R_r)/c` — the whole transmitter → target → receiver route |
-| `PropagationPaths.range_m` | `delay_s·c/2` = the **bistatic mean range** `(R_t + R_r)/2` |
-| `PropagationPaths.doppler_hz` | `2·v_bisector/λ`, with `v_bisector = −½·d(R_t + R_r)/dt`, positive closing |
+| `PropagationPaths.range_sum_m` | `delay_s·c` = the **range sum** `R_t + R_r` |
+| `PropagationPaths.doppler_hz` | `L̇_c/λ`, with `L̇_c = −d(R_t + R_r)/dt` the range-sum rate, positive closing; equal to `2·v_bisector/λ` |
 | RD map range axis | Bistatic mean range, metres. **The array is identical to the monostatic case; only the label differs.** |
 | `BistaticTargetTrack` | `(n_frames,)` float64 per field: `range_tx_m`, `range_rx_m`, `bistatic_angle_rad`, `bisector_velocity_mps`, and tx/rx azimuth and elevation in degrees |
 | Coordinate frames | **Two** local ENU tangent planes, one per site. Transmit angles are angles of departure; receive angles are angles of arrival. They genuinely differ — that is what makes the geometry bistatic |

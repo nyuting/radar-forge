@@ -405,17 +405,21 @@ class TestBistaticGenerators:
         ).argmax()
         assert int(folded_peak) == int(unfolded_peak)
 
-    def test_doppler_bin_follows_the_bisector_rate(self) -> None:
-        """Closing-positive survives the bistatic path: the peak is at +v, not -v."""
+    def test_doppler_bin_follows_half_the_range_sum_rate(self) -> None:
+        """Closing-positive survives the bistatic path: the peak is at +v, not -v.
+
+        The velocity axis is labelled in half the range-sum rate, so a path
+        closing at twice a bin's label lands in that bin.
+        """
         velocity_axis_mps = doppler_bin_centers_mps(
             N_PULSES,
             S1_PAIR.transmitter.pulse_repetition_interval_s,
             S1_PAIR.wavelength_m,
         )
         target_bin = N_PULSES // 2 + 3
-        bisector_velocity_mps = float(velocity_axis_mps[target_bin])
+        range_sum_rate_mps = 2.0 * float(velocity_axis_mps[target_bin])
 
-        paths = bistatic_line_of_sight_paths(S1_PAIR, 12.0e3, 15.0e3, bisector_velocity_mps, 10.0)
+        paths = bistatic_line_of_sight_paths(S1_PAIR, 12.0e3, 15.0e3, range_sum_rate_mps, 10.0)
         cube = fmcw_deramp_baseband(paths, S1_PAIR, N_PULSES)
         rd_map = range_doppler_map(cube)
         peak = np.unravel_index(np.abs(rd_map).argmax(), rd_map.shape)

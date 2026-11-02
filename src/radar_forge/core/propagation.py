@@ -15,27 +15,32 @@ comes from the range equation alone, through
 :func:`radar_forge.core.radar_equation.received_power_w` and its bistatic
 counterpart; this module adds no link-budget mathematics of its own.
 
-Bistatic geometry
------------------
-:func:`bistatic_line_of_sight_paths` builds paths for a transmitter and receiver
-at different sites, and the generators in :mod:`radar_forge.core.signal` consume
-them **unchanged**. That works because of how a path reports its range and
-Doppler:
+One geometry for both sitings
+-----------------------------
+A path is the whole transmitter-target-receiver route, and everything a path
+carries follows from two numbers: its length, the **range sum**
+:math:`L = R_t + R_r`, and how fast that length is shrinking, the **range-sum
+rate** :math:`\dot{L}_c = -dL/dt`, positive closing [1]_, [2]_:
 
 .. math::
 
-    \mathrm{range\_m} = \frac{R_t + R_r}{2},
+    \tau = \frac{L}{c},
     \qquad
-    \mathrm{bisector\_velocity\_mps} = \frac{1}{2}\frac{d(R_t + R_r)}{dt}
+    \phi = -\frac{2\pi L}{\lambda},
+    \qquad
+    f_d = \frac{\dot{L}_c}{\lambda}
 
-Every use of range in a generator is through :math:`\tau = 2\,R/c`, and every use
-of Doppler is through :math:`v = f_d \lambda / 2`. Feeding them half the total
-path length and half its rate of change therefore produces exactly the bistatic
-delay :math:`(R_t + R_r)/c`, the bistatic propagation phase
-:math:`-2\pi (R_t + R_r)/\lambda`, and the correct slow-time evolution — the
-factor of two that the monostatic convention puts in cancels the one the
-definition takes out. A bistatic scenario costs no new generator code, only a
-different path builder.
+A monostatic radar is the case :math:`R_t = R_r = R`, where these become the
+familiar :math:`2R/c`, :math:`-4\pi R/\lambda` and :math:`2 v_r/\lambda`. There is
+no separate monostatic physics, so each relation is one public function here
+(:func:`propagation_delay_s`, :func:`propagation_phase_rad`,
+:func:`doppler_shift_hz`) and both path builders call the same ones. They differ
+only in where the two ranges come from and which range equation sets the power.
+
+Range-Doppler maps are still *labelled* in the monostatic convention, half the
+range sum and half the range-sum rate, so that a monostatic map reads in range
+and radial velocity. That halving is display, and it lives with the axes in
+:mod:`radar_forge.core.dsp`, not here.
 
 References
 ----------
@@ -59,9 +64,14 @@ from radar_forge.core.radar_equation import bistatic_received_power_w, received_
 
 __all__ = [
     "PropagationPaths",
-    "bistatic_doppler_hz",
     "bistatic_line_of_sight_paths",
+    "doppler_shift_hz",
     "line_of_sight_paths",
+    "path_amplitude_linear",
+    "propagation_delay_s",
+    "propagation_phase_rad",
+    "range_sum_rate_from_doppler_mps",
+    "range_sum_rate_mps",
 ]
 
 
@@ -79,14 +89,16 @@ class PropagationPaths:
     Parameters
     ----------
     delay_s : numpy.ndarray
-        Two-way propagation delay of each path, shape ``(n_paths,)``, seconds.
+        Total propagation delay of each path, transmitter to target to receiver,
+        shape ``(n_paths,)``, seconds.
     doppler_hz : numpy.ndarray
         Doppler shift of each path, shape ``(n_paths,)``, hertz. **Positive is
-        closing**, so ``doppler_hz = 2 * closing_velocity_mps / wavelength_m``.
+        closing**: it is :func:`doppler_shift_hz` of the range-sum rate.
     amplitude_linear : numpy.ndarray
-        Complex voltage amplitude of each path, shape ``(n_paths,)``. Its squared
-        magnitude is the received power in watts, so that a cube built from it
-        sits on the same scale as :attr:`Receiver.noise_power_per_sample_w`.
+        Complex voltage amplitude of each path, shape ``(n_paths,)``, from
+        :func:`path_amplitude_linear`. Its squared magnitude is the received
+        power in watts, so that a cube built from it sits on the same scale as
+        :attr:`Receiver.noise_power_per_sample_w`.
 
         **Only the magnitude reaches the generators.**
         :func:`~radar_forge.core.signal.fmcw_deramp_baseband` and
@@ -145,23 +157,270 @@ class PropagationPaths:
         return int(self.delay_s.shape[0])
 
     @property
-    def range_m(self) -> NDArray[np.float64]:
-        """One-way equivalent range of each path, metres, from the delay.
+    def range_sum_m(self) -> NDArray[np.float64]:
+        """Total length of each path, :math:`R_t + R_r`, metres, from the delay.
 
-        For a monostatic path this is the range to the target. In general it is
-        **half the total propagation path length**, :math:`(R_t + R_r)/2` — the
-        range a monostatic radar would have to be at to produce the same delay.
-        The two coincide only when the transmitter and receiver are collocated.
-
-        This is the convention the signal generators are built on, so changing
-        it would silently break every one of them; see the module docstring.
-        For a bistatic path it also means the surfaces of constant
-        ``range_m`` are ellipsoids with the two sites at the foci, not spheres,
-        and that :func:`radar_forge.core.dsp.range_bin_centers_m` labels a
-        bistatic map in this half-sum rather than in distance to anything.
+        The inverse of :func:`propagation_delay_s`. For a monostatic path it is
+        twice the range to the target; it is never a distance to anything on its
+        own, and the surfaces of constant range sum are ellipsoids with the two
+        sites at the foci.
         """
-        result: NDArray[np.float64] = self.delay_s * SPEED_OF_LIGHT_MPS / 2.0
+        result: NDArray[np.float64] = self.delay_s * SPEED_OF_LIGHT_MPS
         return result
+
+
+def propagation_delay_s(range_sum_m: ArrayLike) -> NDArray[np.float64]:
+    r"""Return the time for energy to travel a path, in seconds.
+
+    .. math:: \tau = \frac{R_t + R_r}{c}
+
+    The whole route at the speed of light [1]_. For a monostatic radar the range
+    sum is :math:`2R` and this is the familiar two-way delay :math:`2R/c`.
+
+    Parameters
+    ----------
+    range_sum_m : array_like
+        Total path length :math:`R_t + R_r`, metres.
+
+    Returns
+    -------
+    numpy.ndarray
+        Delay in seconds, of the shape of the input.
+
+    See Also
+    --------
+    PropagationPaths.range_sum_m : The inverse.
+
+    References
+    ----------
+    .. [1] Richards (2014), §2.6.1; see the module References.
+    """
+    result: NDArray[np.float64] = np.asarray(range_sum_m, dtype=np.float64) / SPEED_OF_LIGHT_MPS
+    return result
+
+
+def propagation_phase_rad(range_sum_m: ArrayLike, wavelength_m: ArrayLike) -> NDArray[np.float64]:
+    r"""Return the carrier phase a path imposes, in radians.
+
+    .. math:: \phi = -\frac{2\pi (R_t + R_r)}{\lambda}
+
+    One cycle of lag for every wavelength of route [1]_. For a monostatic radar
+    this is the two-way phase :math:`-4\pi R/\lambda`. Its change from one pulse
+    to the next is what a Doppler filter measures, which is why the signal
+    generators recompute it as the range sum advances rather than read it off a
+    path set.
+
+    Parameters
+    ----------
+    range_sum_m : array_like
+        Total path length :math:`R_t + R_r`, metres.
+    wavelength_m : array_like
+        Carrier wavelength, metres. Broadcast against ``range_sum_m``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Phase in radians, unwrapped, of the broadcast shape of the inputs.
+
+    References
+    ----------
+    .. [1] Richards (2014), §2.6.1; see the module References.
+    """
+    range_sum_arr = np.asarray(range_sum_m, dtype=np.float64)
+    result: NDArray[np.float64] = -2.0 * np.pi * range_sum_arr / np.asarray(wavelength_m)
+    return result
+
+
+def path_amplitude_linear(power_w: ArrayLike, phase_rad: ArrayLike) -> NDArray[np.complex128]:
+    r"""Return the complex voltage amplitude of a path.
+
+    .. math:: a = \sqrt{P_r}\, e^{j\phi}
+
+    The library's amplitude convention, stated once: ``abs(a) ** 2`` is the
+    received power in watts, so that a cube built from these amplitudes sits on
+    the same scale as
+    :attr:`~radar_forge.core.radar.Receiver.noise_power_per_sample_w` and
+    signal-to-noise ratios can be read straight off it [1]_.
+
+    Parameters
+    ----------
+    power_w : array_like
+        Received power, watts, normally from the range equation. Non-negative.
+    phase_rad : array_like
+        Carrier phase, radians, normally from :func:`propagation_phase_rad`.
+        Broadcast against ``power_w``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Complex amplitude, of the broadcast shape of the inputs.
+
+    References
+    ----------
+    .. [1] Richards (2014), §2.2; see the module References.
+    """
+    amplitude = np.sqrt(np.asarray(power_w, dtype=np.float64)) * np.exp(
+        1j * np.asarray(phase_rad, dtype=np.float64)
+    )
+    return np.asarray(amplitude, dtype=np.complex128)
+
+
+def doppler_shift_hz(range_sum_rate_mps: ArrayLike, wavelength_m: ArrayLike) -> NDArray[np.float64]:
+    r"""Return the Doppler shift of a path, in hertz.
+
+    .. math:: f_d = \frac{\dot{L}_c}{\lambda} = -\frac{1}{\lambda}\frac{d(R_t + R_r)}{dt}
+
+    The rate at which the path sheds wavelengths [1]_, [2]_. For a monostatic
+    radar the range-sum rate is twice the radial velocity and this is the
+    familiar :math:`2 v_r/\lambda`.
+
+    Parameters
+    ----------
+    range_sum_rate_mps : array_like
+        Range-sum rate, metres/second, **positive closing**: the rate at which the
+        total path is getting shorter. See :func:`range_sum_rate_mps`.
+    wavelength_m : array_like
+        Carrier wavelength, metres. Broadcast against the rate.
+
+    Returns
+    -------
+    numpy.ndarray
+        Doppler shift in hertz, positive closing, of the broadcast shape of the
+        inputs.
+
+    See Also
+    --------
+    range_sum_rate_from_doppler_mps : The inverse.
+
+    References
+    ----------
+    .. [1] Richards (2014), §2.6.1; see the module References.
+    .. [2] Willis (2005), §6.1; see the module References.
+    """
+    range_sum_rate_arr = np.asarray(range_sum_rate_mps, dtype=np.float64)
+    result: NDArray[np.float64] = range_sum_rate_arr / np.asarray(wavelength_m)
+    return result
+
+
+def range_sum_rate_from_doppler_mps(
+    doppler_hz: ArrayLike, wavelength_m: ArrayLike
+) -> NDArray[np.float64]:
+    r"""Return the range-sum rate that produces a Doppler shift, in metres/second.
+
+    .. math:: \dot{L}_c = f_d\,\lambda
+
+    The inverse of :func:`doppler_shift_hz`. Halve it for the monostatic radial
+    velocity, which is what a range-Doppler map's velocity axis shows.
+
+    Parameters
+    ----------
+    doppler_hz : array_like
+        Doppler shift, hertz, positive closing.
+    wavelength_m : array_like
+        Carrier wavelength, metres. Broadcast against the shift.
+
+    Returns
+    -------
+    numpy.ndarray
+        Range-sum rate in metres/second, positive closing, of the broadcast
+        shape of the inputs.
+
+    References
+    ----------
+    .. [1] Richards (2014), §2.6.1; see the module References.
+    """
+    result: NDArray[np.float64] = np.asarray(doppler_hz, dtype=np.float64) * np.asarray(
+        wavelength_m
+    )
+    return result
+
+
+def range_sum_rate_mps(
+    velocity_enu_mps: ArrayLike,
+    unit_vector_to_tx: ArrayLike,
+    unit_vector_to_rx: ArrayLike,
+) -> NDArray[np.float64]:
+    r"""Return how fast moving targets shorten their total path, in metres/second.
+
+    The rate at which the range sum shrinks [1]_,
+
+    .. math::
+
+        \dot{L}_c = -\frac{d(R_t + R_r)}{dt}
+            = \vec{v}\cdot\hat{u}_t + \vec{v}\cdot\hat{u}_r
+
+    which is equivalent to the textbook form
+    :math:`\dot{L}_c = 2v\cos\delta\,\cos(\beta/2)`, with :math:`\beta` the
+    bistatic angle and :math:`\delta` the angle between the velocity and the
+    bisector of the two directions. The vector form is used here because a
+    scenario has velocities and positions to hand, and extracting
+    :math:`\delta` and :math:`\beta` first would only add a step that can go
+    wrong. Collocate the sites and it is twice the radial velocity.
+
+    The sign follows the library's **closing-positive** convention: approaching
+    either site shortens that range and pushes the rate positive. Pass the
+    result to :func:`doppler_shift_hz` for the shift in hertz.
+
+    Parameters
+    ----------
+    velocity_enu_mps : array_like
+        Target velocity in local east, north, up metres/second, shape
+        ``(n_targets, 3)``.
+    unit_vector_to_tx : array_like
+        Unit vector from each target **towards the transmitter**, shape
+        ``(n_targets, 3)``, in the same frame as ``velocity_enu_mps``.
+    unit_vector_to_rx : array_like
+        Unit vector from each target **towards the receiver**, same shape and
+        frame.
+
+    Returns
+    -------
+    numpy.ndarray
+        Range-sum rate in metres/second, shape ``(n_targets,)``, positive closing.
+
+    Raises
+    ------
+    ValueError
+        If any of the three arrays does not have three components per target.
+
+    Notes
+    -----
+    Two geometries give exactly zero rate, and both are worth recognising in a
+    range-Doppler map. A target crossing the bisector at right angles is
+    momentarily neither closing nor opening on the pair. A target moving **along
+    the baseline** also nulls, because the transmit range shortens at exactly
+    the rate the receive range lengthens; a monostatic radar has no equivalent
+    of this second null, and it is why a bistatic pair is blind to some motion
+    that is plainly radial to one of its two sites.
+
+    See Also
+    --------
+    radar_forge.core.radar.BistaticRadar.bistatic_angle_rad : The angle in the
+        textbook form of this equation.
+
+    References
+    ----------
+    .. [1] Willis (2005), §6.1; see the module References.
+    """
+    velocity_arr = np.atleast_2d(np.asarray(velocity_enu_mps, dtype=np.float64))
+    to_tx_arr = np.atleast_2d(np.asarray(unit_vector_to_tx, dtype=np.float64))
+    to_rx_arr = np.atleast_2d(np.asarray(unit_vector_to_rx, dtype=np.float64))
+
+    for name, array in (
+        ("velocity_enu_mps", velocity_arr),
+        ("unit_vector_to_tx", to_tx_arr),
+        ("unit_vector_to_rx", to_rx_arr),
+    ):
+        if array.shape[-1] != 3:
+            msg = f"{name} must have three components per target; got shape {array.shape}."
+            raise ValueError(msg)
+
+    # Each unit vector points from the target towards a site, so a velocity with
+    # a positive component along one is closing on it and shortens that range.
+    result: NDArray[np.float64] = np.sum(velocity_arr * to_tx_arr, axis=-1) + np.sum(
+        velocity_arr * to_rx_arr, axis=-1
+    )
+    return result
 
 
 def line_of_sight_paths(
@@ -179,10 +438,10 @@ def line_of_sight_paths(
     the zeroth-order case of a ray-tracing backend, and
     ``raytracing/backends/analytic.py`` should build on it rather than repeat it.
 
-    Amplitude is the square root of the monostatic radar range equation, so that
-    ``abs(amplitude_linear) ** 2`` is the received power in watts and a cube built
-    from it is directly comparable with :attr:`Receiver.noise_power_per_sample_w`. The phase is
-    the two-way propagation phase :math:`-4\pi R/\lambda`.
+    The monostatic case of :func:`bistatic_line_of_sight_paths`: the range sum
+    is :math:`2R` and the range-sum rate :math:`2 v_r`, and from there the
+    delay, phase, Doppler and amplitude come from the same functions. Only the
+    power differs, coming from the monostatic range equation.
 
     Parameters
     ----------
@@ -223,6 +482,8 @@ def line_of_sight_paths(
     >>> paths = line_of_sight_paths(radar, 10_000.0, 80.0, 10.0)
     >>> paths.n_paths
     1
+    >>> float(paths.range_sum_m[0])  # out and back
+    20000.0
     >>> bool(paths.doppler_hz[0] > 0.0)  # closing is positive
     True
     """
@@ -254,132 +515,23 @@ def line_of_sight_paths(
         range_m=range_arr[illuminated],
     )
 
-    two_way_phase_rad = -4.0 * np.pi * range_arr / radar.wavelength_m
-    amplitude_linear = np.sqrt(power_w) * np.exp(1j * two_way_phase_rad)
-
+    # One site, so the departure and arrival angles are the same pair.
     angles_rad = _angle_pairs_rad(azimuth_deg, elevation_deg, n_paths)
-
-    return PropagationPaths(
-        delay_s=2.0 * range_arr / SPEED_OF_LIGHT_MPS,
-        doppler_hz=2.0 * velocity_arr / radar.wavelength_m,
-        amplitude_linear=np.asarray(amplitude_linear, dtype=np.complex128),
-        aoa_rad=angles_rad,
+    return _direct_paths(
+        range_sum_m=2.0 * range_arr,
+        range_sum_rate_mps=2.0 * velocity_arr,
+        power_w=power_w,
+        wavelength_m=radar.wavelength_m,
         aod_rad=angles_rad.copy(),
-        bounce_count=np.ones(n_paths, dtype=np.int_),
+        aoa_rad=angles_rad,
     )
-
-
-def _angle_pairs_rad(
-    azimuth_deg: ArrayLike, elevation_deg: ArrayLike, n_paths: int
-) -> NDArray[np.float64]:
-    """Return ``(n_paths, 2)`` radian (azimuth, elevation) pairs from degrees.
-
-    The zeros array is a broadcasting device, not data: it forces a scalar angle
-    up to one value per path without materialising a tiled copy.
-    """
-    pairs: NDArray[np.float64] = np.stack(
-        np.broadcast_arrays(
-            np.radians(np.asarray(azimuth_deg, dtype=np.float64)),
-            np.radians(np.asarray(elevation_deg, dtype=np.float64)),
-            np.zeros(n_paths),
-        )[:2],
-        axis=-1,
-    )
-    return pairs
-
-
-def bistatic_doppler_hz(
-    wavelength_m: ArrayLike,
-    velocity_enu_mps: ArrayLike,
-    unit_vector_to_tx: ArrayLike,
-    unit_vector_to_rx: ArrayLike,
-) -> NDArray[np.float64]:
-    r"""Return the bistatic Doppler shift of moving point targets, in hertz.
-
-    The shift is the rate at which the total path length changes [2]_,
-
-    .. math::
-
-        f_d = -\frac{1}{\lambda}\frac{d(R_t + R_r)}{dt}
-            = \frac{1}{\lambda}\left(
-                \vec{v}\cdot\hat{u}_t + \vec{v}\cdot\hat{u}_r\right)
-
-    which is equivalent to the textbook form
-    :math:`f_d = (2v/\lambda)\cos\delta\,\cos(\beta/2)`, with :math:`\beta` the
-    bistatic angle and :math:`\delta` the angle between the velocity and the
-    bisector of the two directions. The vector form is used here because a
-    scenario has velocities and positions to hand, and extracting
-    :math:`\delta` and :math:`\beta` first would only add a step that can go
-    wrong.
-
-    The sign follows the library's **closing-positive** convention: approaching
-    either site shortens that range and pushes the shift positive.
-
-    Parameters
-    ----------
-    wavelength_m : array_like
-        Carrier wavelength, metres.
-    velocity_enu_mps : array_like
-        Target velocity in local east, north, up metres/second, shape
-        ``(n_targets, 3)``.
-    unit_vector_to_tx : array_like
-        Unit vector from each target **towards the transmitter**, shape
-        ``(n_targets, 3)``, in the same frame as ``velocity_enu_mps``.
-    unit_vector_to_rx : array_like
-        Unit vector from each target **towards the receiver**, same shape and
-        frame.
-
-    Returns
-    -------
-    numpy.ndarray
-        Doppler shift in hertz, shape ``(n_targets,)``, positive closing.
-
-    Notes
-    -----
-    Two geometries give exactly zero shift, and both are worth recognising in a
-    range-Doppler map. A target crossing the bisector at right angles is
-    momentarily neither closing nor opening on the pair. A target moving **along
-    the baseline** also nulls, because the transmit range shortens at exactly
-    the rate the receive range lengthens; a monostatic radar has no equivalent
-    of this second null, and it is why a bistatic pair is blind to some motion
-    that is plainly radial to one of its two sites.
-
-    See Also
-    --------
-    bistatic_line_of_sight_paths : Consumes the bisector range rate this implies.
-    radar_forge.core.radar.BistaticRadar.bistatic_angle_rad : The angle in the
-        textbook form of this equation.
-    """
-    velocity_arr = np.atleast_2d(np.asarray(velocity_enu_mps, dtype=np.float64))
-    to_tx_arr = np.atleast_2d(np.asarray(unit_vector_to_tx, dtype=np.float64))
-    to_rx_arr = np.atleast_2d(np.asarray(unit_vector_to_rx, dtype=np.float64))
-
-    for name, array in (
-        ("velocity_enu_mps", velocity_arr),
-        ("unit_vector_to_tx", to_tx_arr),
-        ("unit_vector_to_rx", to_rx_arr),
-    ):
-        if array.shape[-1] != 3:
-            msg = f"{name} must have three components per target; got shape {array.shape}."
-            raise ValueError(msg)
-
-    # Each unit vector points from the target towards a site, so a velocity with
-    # a positive component along one is closing on it and shortens that range:
-    # d(R_t + R_r)/dt is the negative of this sum, and the Doppler shift is the
-    # negative of that again. Collocate the sites and it becomes the monostatic
-    # 2 v / lambda.
-    closing_rate_mps = np.sum(velocity_arr * to_tx_arr, axis=-1) + np.sum(
-        velocity_arr * to_rx_arr, axis=-1
-    )
-    result: NDArray[np.float64] = closing_rate_mps / np.asarray(wavelength_m, dtype=np.float64)
-    return result
 
 
 def bistatic_line_of_sight_paths(
     radar: BistaticRadar,
     range_tx_m: ArrayLike,
     range_rx_m: ArrayLike,
-    bisector_velocity_mps: ArrayLike,
+    range_sum_rate_mps: ArrayLike,
     bistatic_rcs_m2: ArrayLike,
     *,
     transmit_azimuth_deg: ArrayLike = 0.0,
@@ -389,16 +541,12 @@ def bistatic_line_of_sight_paths(
 ) -> PropagationPaths:
     r"""Build the direct-return paths for point targets seen by a bistatic pair.
 
-    The bistatic counterpart of :func:`line_of_sight_paths`: one path per target,
-    single bounce, no multipath and no obstruction. Amplitude is the square root
-    of the bistatic radar range equation, so ``abs(amplitude_linear) ** 2`` is
-    the received power in watts, and the phase is the propagation phase over the
-    whole transmitter-target-receiver route, :math:`-2\pi (R_t + R_r)/\lambda`.
-
-    The returned paths carry :math:`(R_t + R_r)/2` as their ``range_m`` and are
-    consumed by :func:`~radar_forge.core.signal.fmcw_deramp_baseband` and
-    :func:`~radar_forge.core.signal.pulsed_baseband` unchanged; the module
-    docstring explains why that works.
+    One path per target, single bounce, no multipath and no obstruction. The
+    delay, phase, Doppler and amplitude are those of the module's one geometry,
+    applied to the range sum :math:`R_t + R_r`; the power comes from the
+    bistatic radar range equation, so ``abs(amplitude_linear) ** 2`` is the
+    received power in watts. The generators in :mod:`radar_forge.core.signal`
+    consume these paths exactly as they consume monostatic ones.
 
     Parameters
     ----------
@@ -410,13 +558,9 @@ def bistatic_line_of_sight_paths(
     range_rx_m : array_like
         Receive range to each target — target to receiver, metres. Strictly
         positive.
-    bisector_velocity_mps : array_like
-        Half the rate of change of the total path length,
-        :math:`\tfrac{1}{2}\,d(R_t + R_r)/dt`, metres/second, **positive
-        closing**. This is the bistatic stand-in for a radial velocity; it is
-        ``bistatic_doppler_hz(...) * wavelength_m / 2`` and is defined with the
-        same factor of two so that a bistatic target lands in the Doppler bin a
-        monostatic one with this closing rate would.
+    range_sum_rate_mps : array_like
+        The rate at which the total path :math:`R_t + R_r` is getting shorter,
+        metres/second, **positive closing**. See :func:`range_sum_rate_mps`.
     bistatic_rcs_m2 : array_like
         Bistatic radar cross-section of each target, square metres, at this
         geometry. Zero is permitted and produces a null path. Not in general the
@@ -453,10 +597,9 @@ def bistatic_line_of_sight_paths(
 
     See Also
     --------
-    line_of_sight_paths : The monostatic equivalent, which this reduces to when
-        the two sites are collocated.
-    bistatic_doppler_hz : Computes the bisector rate this takes, from velocity
-        and geometry vectors.
+    line_of_sight_paths : The monostatic case.
+    range_sum_rate_mps : Computes the rate this takes, from velocity and
+        geometry vectors.
 
     Examples
     --------
@@ -465,15 +608,15 @@ def bistatic_line_of_sight_paths(
     >>> pair = BistaticRadar(
     ...     tx, Receiver(1.0e6, 30.0, 3.0), 36.0025, -78.941, 60.0, 36.0025, -78.741, 60.0
     ... )
-    >>> paths = bistatic_line_of_sight_paths(pair, 12_000.0, 15_000.0, 80.0, 10.0)
-    >>> float(paths.range_m[0])  # the half-sum, not either range
-    13500.0
+    >>> paths = bistatic_line_of_sight_paths(pair, 12_000.0, 15_000.0, 160.0, 10.0)
+    >>> float(paths.range_sum_m[0])
+    27000.0
     >>> bool(paths.doppler_hz[0] > 0.0)  # closing is positive
     True
     """
     range_tx_arr = np.atleast_1d(np.asarray(range_tx_m, dtype=np.float64))
     range_rx_arr = np.atleast_1d(np.asarray(range_rx_m, dtype=np.float64))
-    velocity_arr = np.atleast_1d(np.asarray(bisector_velocity_mps, dtype=np.float64))
+    rate_arr = np.atleast_1d(np.asarray(range_sum_rate_mps, dtype=np.float64))
     rcs_arr = np.atleast_1d(np.asarray(bistatic_rcs_m2, dtype=np.float64))
 
     if np.any(range_tx_arr <= 0.0) or np.any(range_rx_arr <= 0.0):
@@ -486,16 +629,15 @@ def bistatic_line_of_sight_paths(
         msg = "bistatic_rcs_m2 must be non-negative; use 0.0 for a target that returns nothing."
         raise ValueError(msg)
 
-    range_tx_arr, range_rx_arr, velocity_arr, rcs_arr = np.broadcast_arrays(
-        range_tx_arr, range_rx_arr, velocity_arr, rcs_arr
+    range_tx_arr, range_rx_arr, rate_arr, rcs_arr = np.broadcast_arrays(
+        range_tx_arr, range_rx_arr, rate_arr, rcs_arr
     )
     n_paths = range_tx_arr.shape[0]
-    sum_range_m = range_tx_arr + range_rx_arr
 
     # As in the monostatic case, a legitimate 0 m^2 target would divide by a
     # zero-power path, so substitute and zero the amplitude afterwards.
     illuminated = rcs_arr > 0.0
-    power_w = np.zeros_like(sum_range_m)
+    power_w = np.zeros_like(range_tx_arr)
     power_w[illuminated] = bistatic_received_power_w(
         transmit_power_w=radar.transmitter.transmit_power_w,
         gain_tx_linear=10.0 ** (radar.transmitter.gain_tx_dbi / 10.0),
@@ -506,16 +648,54 @@ def bistatic_line_of_sight_paths(
         range_rx_m=range_rx_arr[illuminated],
     )
 
-    # The whole route, not twice one range: this is the monostatic -4 pi R /
-    # lambda generalised, and it collapses to it when the two ranges are equal.
-    propagation_phase_rad = -2.0 * np.pi * sum_range_m / radar.wavelength_m
-    amplitude_linear = np.sqrt(power_w) * np.exp(1j * propagation_phase_rad)
-
-    return PropagationPaths(
-        delay_s=sum_range_m / SPEED_OF_LIGHT_MPS,
-        doppler_hz=2.0 * velocity_arr / radar.wavelength_m,
-        amplitude_linear=np.asarray(amplitude_linear, dtype=np.complex128),
+    return _direct_paths(
+        range_sum_m=range_tx_arr + range_rx_arr,
+        range_sum_rate_mps=rate_arr,
+        power_w=power_w,
+        wavelength_m=radar.wavelength_m,
         aod_rad=_angle_pairs_rad(transmit_azimuth_deg, transmit_elevation_deg, n_paths),
         aoa_rad=_angle_pairs_rad(receive_azimuth_deg, receive_elevation_deg, n_paths),
-        bounce_count=np.ones(n_paths, dtype=np.int_),
     )
+
+
+def _direct_paths(
+    *,
+    range_sum_m: NDArray[np.float64],
+    range_sum_rate_mps: NDArray[np.float64],
+    power_w: NDArray[np.float64],
+    wavelength_m: float,
+    aod_rad: NDArray[np.float64],
+    aoa_rad: NDArray[np.float64],
+) -> PropagationPaths:
+    """Assemble single-bounce paths from their range sum, rate and power.
+
+    The part both builders share: the module's one geometry, applied once.
+    """
+    phase_rad = propagation_phase_rad(range_sum_m, wavelength_m)
+    return PropagationPaths(
+        delay_s=propagation_delay_s(range_sum_m),
+        doppler_hz=doppler_shift_hz(range_sum_rate_mps, wavelength_m),
+        amplitude_linear=path_amplitude_linear(power_w, phase_rad),
+        aoa_rad=aoa_rad,
+        aod_rad=aod_rad,
+        bounce_count=np.ones(range_sum_m.shape[0], dtype=np.int_),
+    )
+
+
+def _angle_pairs_rad(
+    azimuth_deg: ArrayLike, elevation_deg: ArrayLike, n_paths: int
+) -> NDArray[np.float64]:
+    """Return ``(n_paths, 2)`` radian (azimuth, elevation) pairs from degrees.
+
+    The zeros array is a broadcasting device, not data: it forces a scalar angle
+    up to one value per path without materialising a tiled copy.
+    """
+    pairs: NDArray[np.float64] = np.stack(
+        np.broadcast_arrays(
+            np.radians(np.asarray(azimuth_deg, dtype=np.float64)),
+            np.radians(np.asarray(elevation_deg, dtype=np.float64)),
+            np.zeros(n_paths),
+        )[:2],
+        axis=-1,
+    )
+    return pairs

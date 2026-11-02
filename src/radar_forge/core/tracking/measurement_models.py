@@ -30,7 +30,7 @@ The classes:
 - :class:`MarginalModel`, built by :func:`marginal`, keeps some of another
   model's components, so that a track can use part of a measurement.
 - :class:`SensorPose` is where a sensor stands.
-- :class:`BistaticRangeDopplerModel` predicts the path length and path rate seen
+- :class:`BistaticRangeDopplerModel` predicts the range sum and range-sum rate seen
   by a transmitter and receiver at two places.
 - :class:`RangeAzimuthElevationRangeRate` predicts the range, azimuth, elevation
   and range rate a monostatic radar reports.
@@ -963,18 +963,20 @@ class _Geometry:
 
 
 class BistaticRangeDopplerModel:
-    """Predict the path length and path rate seen by a separated transmitter and receiver.
+    """Predict the range sum and range-sum rate seen by a separated transmitter and receiver.
 
     In a bistatic radar the transmitter and receiver stand at different places.
     The signal travels from the transmitter to the target, then on to the
     receiver. This model predicts two numbers from the target's state:
 
-    - ``path_range_m``, the length of that path, R_tx + R_rx, in metres. Here
+    - the **range sum**, the length of that path, R_tx + R_rx, in metres. Here
       R_tx is the distance from the transmitter to the target, and R_rx from the
       target to the receiver. With ``excess_range``, the baseline L (the direct
       distance from transmitter to receiver) is subtracted, so a target on the
-      baseline has a path range of zero [1]_.
-    - ``path_range_rate_mps``, how fast the path is getting shorter, in m/s.
+      baseline measures zero [1]_. The coordinate is named for what it holds:
+      ``excess_range_sum_m`` with the baseline subtracted, ``range_sum_m``
+      without.
+    - ``range_sum_rate_mps``, how fast the path is getting shorter, in m/s.
       It is positive when the path is shrinking (closing).
 
     Parameters
@@ -984,7 +986,7 @@ class BistaticRangeDopplerModel:
     transmitter, receiver : SensorPose
         The two sites. They must share the state's frame and origin.
     excess_range : bool, optional
-        If True (the default), subtract the baseline from the path length.
+        If True (the default), subtract the baseline from the range sum.
     fixed_coordinates : mapping of str to float or None, optional
         A value, in SI units, for each of ``x_m``, ``y_m``, ``z_m``,
         ``xdot_mps``, ``ydot_mps`` and ``zdot_mps`` that the state does not hold.
@@ -1001,12 +1003,12 @@ class BistaticRangeDopplerModel:
     Let p be the target position and v its velocity. The unit vector from the
     transmitter to the target is u_tx = (p - p_tx) / R_tx, and u_rx likewise from
     the receiver. Moving the target by v changes R_tx at the rate u_tx · v, and
-    R_rx at u_rx · v. So the path rate, positive closing, is
+    R_rx at u_rx · v. So the range-sum rate, positive closing, is
 
-        path_range_rate_mps = -(u_tx + u_rx) · v.
+        range_sum_rate_mps = -(u_tx + u_rx) · v.
 
     This is not the range rate of a monostatic radar, and it is not a Doppler
-    shift in Hz. The Doppler shift is path_range_rate_mps divided by the
+    shift in Hz. The Doppler shift is range_sum_rate_mps divided by the
     wavelength; converting to Hz is the job of the code that reads the radar.
     Both unit vectors are undefined when the target sits exactly on a site, so
     :meth:`predict` rejects that state.
@@ -1025,9 +1027,10 @@ class BistaticRangeDopplerModel:
         geodetic positions. Not used here: the tracking state is in local ENU
         metres, and converting every sigma point back to latitude, longitude and
         altitude would only add work and roundoff.
-    radar_forge.core.propagation.bistatic_doppler_hz : The same path rate, divided by
-        the wavelength, in Hz. Not used here: the measurement is the path rate in
-        m/s, which needs no wavelength.
+    radar_forge.core.propagation.range_sum_rate_mps : The same rate, from unit
+        vectors that point from the target to each site. Not used here: the
+        Jacobian below needs the site-to-target vectors and ranges anyway, and
+        :func:`radar_forge.core.propagation.doppler_shift_hz` turns either into Hz.
 
     References
     ----------
@@ -1036,7 +1039,7 @@ class BistaticRangeDopplerModel:
     Examples
     --------
     A target 12 m up, and 13 m from both sites. The sites share a place, so the
-    baseline is zero and the path range is 13 + 13 m:
+    baseline is zero and the range sum is 13 + 13 m:
 
     >>> import numpy as np
     >>> names = ("x_m", "xdot_mps", "y_m", "ydot_mps", "z_m", "zdot_mps")
@@ -1063,13 +1066,14 @@ class BistaticRangeDopplerModel:
         self._tx = _Geometry(state_layout, transmitter, fixed_coordinates, include_velocity=True)
         self._rx = _Geometry(state_layout, receiver, fixed_coordinates, include_velocity=True)
         self.excess_range = excess_range
+        range_sum_name = "excess_range_sum_m" if excess_range else "range_sum_m"
         self.measurement_layout = StateLayout(
-            (Coordinate("path_range_m", "m"), Coordinate("path_range_rate_mps", "m/s")),
+            (Coordinate(range_sum_name, "m"), Coordinate("range_sum_rate_mps", "m/s")),
             "bistatic",
         )
 
     def predict(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
-        """Return the path length and path rate for one state or a stack of states.
+        """Return the range sum and range-sum rate for one state or a stack of states.
 
         Parameters
         ----------
@@ -1079,7 +1083,7 @@ class BistaticRangeDopplerModel:
         Returns
         -------
         numpy.ndarray
-            ``(path_range_m, path_range_rate_mps)``, shape ``(2,)`` for one state
+            ``(range_sum_m, range_sum_rate_mps)``, shape ``(2,)`` for one state
             or ``(n_points, 2)`` for a stack.
 
         Raises
@@ -1101,10 +1105,10 @@ class BistaticRangeDopplerModel:
         range_rx_m = np.linalg.norm(to_target_rx_m, axis=-1)
         baseline_m = float(np.linalg.norm(self._tx.pose.position_m - self._rx.pose.position_m))
 
-        path_range_m = range_tx_m + range_rx_m - (baseline_m if self.excess_range else 0.0)
+        range_sum_m = range_tx_m + range_rx_m - (baseline_m if self.excess_range else 0.0)
         unit_sum = to_target_tx_m / range_tx_m[..., None] + to_target_rx_m / range_rx_m[..., None]
-        path_range_rate_mps = -np.sum(unit_sum * velocity_mps, axis=-1)
-        return np.stack([path_range_m, path_range_rate_mps], axis=-1)
+        range_sum_rate_mps = -np.sum(unit_sum * velocity_mps, axis=-1)
+        return np.stack([range_sum_m, range_sum_rate_mps], axis=-1)
 
     def _check_off_sites(self, position_m: NDArray[np.float64]) -> None:
         """Raise if any target position is exactly on the transmitter or the receiver."""
@@ -1121,7 +1125,7 @@ class BistaticRangeDopplerModel:
             raise ValueError(msg)
 
     def jacobian(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
-        r"""Return the derivatives of the path range and path rate at one state.
+        r"""Return the derivatives of the range sum and range-sum rate at one state.
 
         Parameters
         ----------
@@ -1131,8 +1135,8 @@ class BistaticRangeDopplerModel:
         Returns
         -------
         numpy.ndarray
-            Shape ``(2, n_state)``: row 0 for ``path_range_m``, row 1 for
-            ``path_range_rate_mps``. A coordinate the state lacks, held at a fixed value, has
+            Shape ``(2, n_state)``: row 0 for the range sum, row 1 for
+            ``range_sum_rate_mps``. A coordinate the state lacks, held at a fixed value, has
             no column.
 
         Raises
@@ -1152,7 +1156,7 @@ class BistaticRangeDopplerModel:
             \frac{\partial \dot{R}}{\partial v} = -(u_{tx} + u_{rx}), \qquad
             \frac{\partial \dot{R}}{\partial p} = -\sum_k \frac{(I - u_k u_k^T)\, v}{R_k},
 
-        where :math:`\dot{R}` is the path rate, positive closing, and the path range does
+        where :math:`\dot{R}` is the range-sum rate, positive closing, and the range sum does
         not depend on v. The last term holds because moving the target turns each unit
         vector: :math:`\partial u_k / \partial p = (I - u_k u_k^T) / R_k`, the projection
         onto the plane across the line of sight, scaled by one over the range. The baseline

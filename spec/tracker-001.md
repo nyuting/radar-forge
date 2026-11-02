@@ -428,7 +428,7 @@ Two radar facts the model does not hide:
 ### 6.3 Bistatic models
 
 `BistaticRangeDopplerModel` exists and is unchanged: the state is ENU, the measurement is
-`(path_range_m, path_range_rate_mps)` relative to a transmitter and receiver `SensorPose`,
+`(excess_range_sum_m, range_sum_rate_mps)` (or `range_sum_m` without `excess_range`) relative to a transmitter and receiver `SensorPose`,
 closing-positive. One bistatic measurement cannot fix a position, so its initiator is still
 open (§16).
 

@@ -536,8 +536,8 @@ def to_bistatic_radar_frame(trajectory: Trajectory, radar: BistaticRadar) -> Bis
     See Also
     --------
     to_radar_frame : The monostatic form.
-    radar_forge.core.propagation.bistatic_line_of_sight_paths : Consumes
-        ``bisector_velocity_mps`` directly.
+    radar_forge.core.propagation.bistatic_line_of_sight_paths : Consumes twice
+        ``bisector_velocity_mps``, as its range-sum rate.
 
     Examples
     --------
