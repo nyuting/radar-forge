@@ -243,3 +243,37 @@ def test_an_estimate_rejects_a_mean_of_the_wrong_length() -> None:
 def test_an_estimate_rejects_a_nonfinite_time() -> None:
     with pytest.raises(ValueError, match="timestamp_s must be finite"):
         StateEstimate(np.zeros(2), np.eye(2), np.nan, FOLDED)
+
+
+def test_the_mean_about_a_reference_is_the_weighted_sum_across_the_wrap() -> None:
+    """179° and -179° (that is, 181°) weighted 3:1 about 179° give 179.5°, as on a line."""
+    mean = AZIMUTH.weighted_mean_about([[179.0], [-179.0]], [0.75, 0.25], [179.0])
+    # A few float64 operations on exact values.
+    np.testing.assert_allclose(mean, [179.5], rtol=1e-15)
+
+
+def test_the_mean_about_a_reference_is_unbiased_where_the_circular_mean_is_not() -> None:
+    """0° and 90° weighted 3:1: the weighted sum is 22.5°, the circular mean atan(1/3).
+
+    An unscented transform's mean is the weighted sum, so the circular mean
+    would bias it by 4.07° here.
+    """
+    points, weights = [[0.0], [90.0]], [0.75, 0.25]
+    about = AZIMUTH.weighted_mean_about(points, weights, [0.0])
+    circular = AZIMUTH.weighted_mean(points, weights)
+    np.testing.assert_allclose(about, [22.5], rtol=1e-15)
+    # Exact: the same closed form, atan2(0.25, 0.75), in degrees.
+    np.testing.assert_allclose(circular, [np.degrees(np.arctan2(0.25, 0.75))], rtol=1e-15)
+
+
+def test_the_mean_about_a_reference_takes_negative_weights() -> None:
+    """A UKF centre weight can be negative; equal and opposite points still cancel cleanly."""
+    mean = FOLDED.weighted_mean_about(
+        [[0.0, 0.0], [10.0, 1.0], [-10.0, -1.0]], [-1.0, 1.0, 1.0], [0.0, 0.0]
+    )
+    np.testing.assert_allclose(mean, [0.0, 0.0], rtol=0, atol=0)
+
+
+def test_the_mean_about_a_reference_rejects_a_stack_as_the_reference() -> None:
+    with pytest.raises(ValueError, match="reference must have shape"):
+        AZIMUTH.weighted_mean_about([[0.0], [10.0]], [0.5, 0.5], [[0.0], [10.0]])

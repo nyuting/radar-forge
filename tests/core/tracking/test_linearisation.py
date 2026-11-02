@@ -286,3 +286,27 @@ def test_the_taylor_measurement_supplies_h_and_the_unscented_does_not() -> None:
         [[1.0, 0.0, 0.0, 0.0, 0.0, 0.0]],
     )
     assert UnscentedLinearisation().measure(model, prior).measurement_matrix is None
+
+
+def test_a_linear_measurement_straddling_the_wrap_has_the_kalman_mean() -> None:
+    """Sigma points either side of +period/2 give the KF's ẑ, not one pulled round the circle."""
+    motion = _guard_motion()
+    period_m = 10_000.0
+    model = CartesianPosition(motion.state_layout, ("x_m",), periods={"x_m": period_m})
+    prior = _guard_prior(motion)
+    # x 10 m below the wrap at +5 km, with sigma points about 2.4 km either side.
+    mean = prior.mean.copy()
+    mean[0] = period_m / 2 - 10.0
+    straddling = StateEstimate(mean, prior.covariance, 0.0, motion.state_layout)
+
+    moments_u = UnscentedLinearisation().measure(model, straddling)
+    moments_t = TaylorLinearisation().measure(model, straddling)
+    sigma = _sigma(straddling.covariance)
+    _assert_scaled_close(
+        moments_u.predicted_measurement, moments_t.predicted_measurement, sigma[:1]
+    )
+    _assert_scaled_close(
+        moments_u.predicted_measurement_covariance,
+        moments_t.predicted_measurement_covariance,
+        np.outer(sigma[:1], sigma[:1]),
+    )

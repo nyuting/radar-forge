@@ -208,9 +208,13 @@ the covariance form from that. A further linearisation, such as cubature or Gaus
 new `Linearisation`, never a new filter.
 
 **Periodic coordinates in the moments.** The unscented linearisation forms its means with the
-layout's `weighted_mean` and its deviations with the layout's `residual`, so sigma points that
-straddle a wrap (an azimuth near ±π) are averaged and differenced the short way round.
-`UKF._innovation` does this today, and it moves into `UnscentedLinearisation` unchanged.
+layout's `weighted_mean_about`, as weighted offsets from the centre sigma point, and its
+deviations with the layout's `residual`. Sigma points that straddle a wrap (an azimuth near ±π)
+are therefore averaged and differenced the short way round. Within half a period of the centre
+this is exactly the transform's weighted sum, so a linear model still gives the KF's mean. The
+layout's circular `weighted_mean` (Mardia and Jupp) is not used here: its mean is not the
+weighted sum, so an asymmetric set of points biases it (0° and 90° weighted 3:1 give 18.4°,
+not 22.5°). It also fails outright when the weighted unit vectors cancel.
 
 ### 4.3 One correction core
 
