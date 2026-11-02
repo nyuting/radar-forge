@@ -29,7 +29,7 @@ free, which matters once the package is on PyPI and users need to know what brok
 | `fix` | Bug fix — including a numerical correction |
 | `docs` | Documentation only |
 | `style` | Formatting only, no behaviour change |
-| `refactor` | Restructuring with no behaviour change |
+| `refactor` | Restructuring with no behaviour change ([refactoring.md](refactoring.md)) |
 | `perf` | Performance improvement (say the speedup in the body) |
 | `test` | Adding or fixing tests only |
 | `build` | Packaging, `pyproject.toml`, dependencies |

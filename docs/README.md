@@ -16,6 +16,8 @@ These are the rules the git hooks and CI enforce. Read them before your first co
 - [**review.md**](conventions/review.md) — doing and writing a PR review: where it lives, the order
   the work is done in, its layout, how a finding and a check are phrased, the voice, and what to
   review against.
+- [**refactoring.md**](conventions/refactoring.md) — what a refactor is for (one definition per
+  relation, visible steps, names that hold up) and how to show it changed nothing.
 - [**audit.md**](conventions/audit.md) — auditing existing code against the spec (Q1–Q8), the
   changes an audit may make (C1–C4), and auditing and pruning the test suite.
 

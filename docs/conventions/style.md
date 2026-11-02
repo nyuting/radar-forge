@@ -173,6 +173,11 @@ catches it in anything committed, which is the case that matters.
 - Verb-first function names for actions (`compute_`, `estimate_`, `export_`, `simulate_`);
   noun names for quantities returned (`received_power_w`, `beam_pattern_db`).
 - `_leading_underscore` for everything not in the public API (§6).
+- Name a thing by what it does or holds, not by who it is for **[review]**: `viz`, not
+  `teaching`. A name that is nearly right gets renamed ([refactoring.md](refactoring.md) F5).
+- Never reuse a term that already means something here or in the field **[review]**.
+  `noise_power_w` is thermal noise, so a CFAR estimate is `cfar_noise_estimate_w`.
+  "Observable" means observability in estimation, so a field-of-view test is `covers`.
 
 ### 3.1 Data layout and array names **[review]**
 
