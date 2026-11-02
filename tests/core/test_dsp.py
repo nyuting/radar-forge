@@ -175,7 +175,7 @@ class TestBinCenters:
         r"""Bin k sits at k c f_s / (2 alpha N), an exact closed form starting at zero.
 
         Catches a one-way (c f_s / alpha N) relation, an offset first bin, and
-        the Notes' unambiguous limit: bin N/2 is R_max = c f_s T / (4 B).
+        the Notes' span: the N bins cover one circle of c f_s T / (2 B).
         """
         bins_m = range_bin_centers_m(N_SAMPLES, **NOMINAL)
         sweep_rate = NOMINAL["bandwidth_hz"] / NOMINAL["chirp_duration_s"]
@@ -185,13 +185,13 @@ class TestBinCenters:
         spacing_m = SPEED_OF_LIGHT_MPS * NOMINAL["sample_rate_hz"] / (2.0 * sweep_rate * N_SAMPLES)
         # rtol 1e-12: a handful of float64 operations.
         np.testing.assert_allclose(bins_m, np.arange(N_SAMPLES) * spacing_m, rtol=1e-12)
-        max_unambiguous_range_m = (
+        span_m = (
             SPEED_OF_LIGHT_MPS
             * NOMINAL["sample_rate_hz"]
             * NOMINAL["chirp_duration_s"]
-            / (4.0 * NOMINAL["bandwidth_hz"])
+            / (2.0 * NOMINAL["bandwidth_hz"])
         )
-        np.testing.assert_allclose(bins_m[N_SAMPLES // 2], max_unambiguous_range_m, rtol=1e-12)
+        np.testing.assert_allclose(bins_m[-1] + spacing_m, span_m, rtol=1e-12)
 
     def test_doppler_span_is_the_unambiguous_velocity(self) -> None:
         r"""Bin k is (k - N/2) lambda / (2 N T_PRI): zero at N/2, -lambda/(4 T_PRI) at 0.
