@@ -77,6 +77,11 @@ Ranked best to worst:
 2. **Independent re-derivation.** Evaluate the textbook expression separately in the test
    from the inputs, and compare. Still catches algebra errors — but not a shared
    misunderstanding, so cite the reference in the test too.
+
+   Comparing two of our own implementations is not this. Where they share a core, a test
+   that checks one against the other cannot catch a bug in the core: the UKF-against-KF
+   guards both call `_correct`, so a 1 % error in the gain passed them. Keep at least one
+   test against an independent reference, such as the filter written out by hand (6600d00).
 3. **Invariants and properties.** Energy conservation (Parseval), linearity, superposition,
    symmetry, monotonicity, unit consistency. Good with `hypothesis` (§5).
 4. **Golden data.** Last resort (§6). It proves only that behaviour has not *changed*, never
@@ -287,6 +292,11 @@ already does the job, the row names it.
 | Window | Peak sidelobe and processing loss per Harris (1978): Hann −31.5 dB / 1.76 dB, Hamming −42.7 dB / 1.34 dB; see `tests/core/test_windows.py` | Wrong window, or a periodic window where a symmetric one is needed |
 | Compression gain | Noise-free SNR gain equals the time–bandwidth product B·T_p minus the window's processing loss | Matched filter not conjugated or not time-reversed, or the window applied twice |
 | MTI | Null at f_d = k·PRF below the peak by a stated depth (§2 near-zero rule); blind speeds at k·λ·PRF/2 | Canceller taps or PRF unit wrong |
+
+Code on a circular axis ([style.md §3.3](style.md#33-circular-axes-review)) is tested near
+the edge: a target a fraction of a bin inside it (0.2, 0.5 and 0.9 of a bin, as in 72e8a94),
+and a target that moves across it over several frames (ea860c5). A target on a bin centre does
+not exercise the wrap.
 
 The −3 dB mainlobe width of an unweighted response is about 0.886·c/(2B). c/(2B) is the
 peak-to-first-null spacing, and asserting it as the −3 dB width fails a correct

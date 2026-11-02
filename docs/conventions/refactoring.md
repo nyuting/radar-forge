@@ -130,6 +130,11 @@ only" (3652134). Never weaken a tolerance to absorb the change. Re-derive the nu
 [audit.md](audit.md#2-changes-an-audit-makes) C1 and C2. A refactor that needs a behaviour change
 is two commits: the `refactor` and a `fix` or `feat`.
 
+When moving code onto a new path would shift a number on its own, keep the old rule as an
+explicit option, named for what it is, so the move changes nothing. The spec records when the
+option goes. 9f0aa5f added `Tracker(cost="legacy_nis")` so that scenario 003's move onto
+`Tracker` changed no figure, and 374c319 removed it with the change that moved the figures.
+
 ### F8. Leave history alone
 
 `docs/reviews/` and `docs/audits/` record what the code was called when they were written. Don't
@@ -151,3 +156,8 @@ The body's first paragraph says why the code had to change, and names the failur
 allowed. Then list what moved, as bullets when there are several things. End with the evidence
 from F7 and the spec step or audit finding the commit carries out. The format is in
 [commits.md](commits.md#commit-body).
+
+When the code departs from the spec step it carries out, the same PR has a `docs(spec)` commit
+that records the departure and its evidence in the spec's migration section (a142aee, ac054f8).
+The spec is the intended end state, so a departure recorded only in a commit body is lost to the
+next reader of the spec.

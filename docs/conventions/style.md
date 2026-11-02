@@ -267,6 +267,14 @@ from treating such an axis as a line, so:
 - **Convert an index to a value with the axis's own formula**
   (`RangeDopplerProduct.range_at_index_m`, `velocity_at_index_mps`), so that a fractional
   index past the last bin wraps instead of clamping.
+- **Keep a fold half-open.** In floating point, `x % p` can round up to exactly `p`, so fold
+  that case back to 0, as `StateLayout.wrap` does (9cae072).
+- **Average about a reference point.** A weighted mean of angles is `wrap(r + Σ wᵢ·residual(xᵢ,
+  r))` about a nearby `r` (`StateLayout.weighted_mean_about`). The circular mean of unit vectors
+  is a different quantity: it is biased for unequal weights, and undefined when the vectors
+  cancel (5ff1fa9).
+- **Unwrap a history before fitting to it.** A slope fitted across a fold is wrong by a period
+  per sample. Unwrap the series as it grows, then fit (ea860c5).
 
 ---
 
@@ -302,6 +310,10 @@ References
 .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
        McGraw-Hill, 2014, §2.2.1 (the simple point-target radar range equation).
 ```
+
+**Write a docstring that holds LaTeX as a raw string** **[review]**: `r"""…"""`. In a plain
+string `\alpha`, `\beta` and `\frac` become the control bytes BEL, BS and FF, which ruff does
+not flag and the rendered formula silently loses (cd568eb, 23a0ccd).
 
 **Write out array shapes** **[review]**. Every array parameter and return states its shape using the
 `n_` names, and says what the axes *mean*:
@@ -494,6 +506,10 @@ change in any release.
 - **Raise your own error at a module boundary** **[review]**. If a library's exception would
   escape, catch it and raise one that names the `radar_forge` operation, chained with `from`.
   Callers should not depend on which library sits underneath.
+- **An error leaves the state as it was** **[review]**. A method that changes several objects
+  either finishes, or puts every one back before it re-raises. `Tracker.process` restores every
+  track if predicting or gating any of them fails (6b04059), so a caller that catches the error
+  still holds a consistent tracker.
 - Do not use `assert` for validation **[ruff: S101 in src]** — `python -O` removes it.
 - `warnings.warn` for a recoverable situation the user should know about (aliasing, an
   under-sampled pattern), with a `stacklevel` so it points at the caller.

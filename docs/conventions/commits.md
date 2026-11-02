@@ -117,17 +117,44 @@ Same type vocabulary as commits: `feat/taylor-tapering`, `fix/range-equation-exp
 - Branch from `main`; keep branches short-lived.
 - `main` is protected by the `pre-push` hook. Override for solo maintenance with
   `RADAR_FORGE_ALLOW_MAIN_PUSH=1 git push`.
-- Rebase on `main` rather than merging it in, so the history stays linear.
-- Tidy up before pushing for review: `git rebase -i main` to squash `fixup!` noise. Once
-  someone has reviewed, stop rewriting — push follow-up commits so the reviewer can see
-  what changed.
+- Before review, rebase on `main` rather than merging it in. Tidy up then too:
+  `git rebase -i main` to squash `fixup!` noise. Once someone has reviewed, stop rewriting.
+  Push follow-up commits so the reviewer can see what changed, and merge `main` in if the
+  branch needs it.
+- Work on a branch in its own worktree: `git worktree add ../radar-forge-<name> <branch>`,
+  then `uv sync` the extras there (CLAUDE.md lists them). Sessions that share one checkout
+  share its index and `HEAD`, and one session's commit sweeps up another's staged files.
+- A branch that replaces an abandoned one keeps its name with a `-v2` suffix, and its PR
+  says "Replaces #N".
+
+### Stacked PRs
+
+A PR whose base is another PR's branch merges into that branch, not into `main`. If the base
+merges first, the child's merge lands on a branch nothing reads, and its commits never reach
+`main` (#47 and #49 were lost this way). Before merging the base, retarget the child to
+`main`. After merging any PR, check that `git log origin/main` contains its commits.
+
+### After a merge
+
+```sh
+git switch main && git pull --ff-only     # in the main checkout
+git worktree remove ../radar-forge-<name>
+git branch -d <branch> && git push origin --delete <branch>
+```
+
+`--ff-only` fails rather than making a merge commit if local `main` has diverged. That
+happens only if something was committed to it by mistake, so find out what before going on.
 
 ## Pull requests
 
-- **The PR title must itself be a valid Conventional Commit** — we squash-merge, so it
-  becomes the commit subject on `main`.
+- **PRs land as merge commits**, so every commit on the branch reaches `main` as it is and
+  must be a valid Conventional Commit on its own. The `commit-msg` hook checks each one.
+- **The PR title must itself be a valid Conventional Commit.** It becomes the body of the
+  merge commit, and is what the PR list shows.
 - The PR description carries the commit body: what changed, why, what a reviewer should
   check, and the reference for any new physics.
+- If a rebase hit a conflict, the description names each one and says which side's
+  behaviour won and why.
 
 ## Changelog and releases
 
