@@ -205,9 +205,9 @@ Added by this scenario, in new TOML blocks:
 | | |
 | :--- | :--- |
 | CFAR variant | CA, along the **range** axis (`axis = -1`) |
-| `n_train`, `n_guard` | 16, 4 per side — 245,760 of 256,000 cells carry a complete window |
+| `n_train`, `n_guard` | 16, 4 per side. All 256,000 cells are tested. Where `wrap_range` is off, the 10,240 within 20 cells of a range end use a one-sided window of 16 cells; where it is on, a wrapped one |
 | `pfa` | **1e-5** — see §3 |
-| Threshold factor α | 11.417 dB, from `cfar_threshold_factor` |
+| Threshold factor α | 11.417 dB, or 12.268 dB in the one-sided edge cells, from `cfar_threshold_factors` |
 | Measurement | slant range **and unfolded** range rate — see §5 |
 | `sigma_range_m` | 21.64 m — see §5.4 |
 | `sigma_velocity_mps` | 0.01725 m/s — see §5.4 |
@@ -225,7 +225,7 @@ scenario adds:
 | Contract | Statement |
 | :--- | :--- |
 | Detection map | `(n_doppler_bins, n_range_bins)` bool — `(256, 1000)` for S1 |
-| `cfar_valid_mask` | Same shape; `245_760` of `256_000` cells True at `n_train = 16`, `n_guard = 4`, `axis = -1` |
+| `cfar_valid_mask` | Same shape; all `256_000` cells True at `n_train = 16`, `n_guard = 4`, `axis = -1` |
 | `Detection.centroid_index` | **Fractional** cell indices, power-weighted; interpolated into the bin-centre axes, never converted with a locally derived bin spacing |
 | Measurement `z` | `(dim,)` float64, with `dim` in `{1, 2, 3, 4}` per §5.2 and §5.3 — it **varies within a run** |
 | Measurement noise `R` | `(dim, dim)` float64, diagonal; `diag(sigma_range_m², sigma_velocity_mps²)` at `dim = 2` |
@@ -411,18 +411,35 @@ track's gate is far smaller (§7), and that asymmetry is the point.
 
 | | |
 | :--- | :--- |
-| Cells with a complete reference window | 256 × (1000 − 2·20) = **245,760** |
-| Expected false alarms per frame, at `pfa = 1e-5` | 245,760 × 1e-5 = **2.46** |
+| Cells tested | 256 × 1000 = **256,000**, wrapped or not; with `wrap_range` off, the 256 × 2·20 = 10,240 at the range ends use a one-sided window |
+| Expected false alarms per frame, at `pfa = 1e-5` | 256,000 × 1e-5 = **2.56** |
 | Initiation gate, at ±200 m/s over 1 s and all Doppler | 5.34 range bins × 256 = 1,366 cells |
-| Expected false alarms inside it | 2.46 × 1366/245,760 = 0.0137 per frame |
-| P(a false alarm is confirmed as a track), at 4-of-5 | 1 − F_Binom(2; 4, 0.0137) ≈ **1.2e-5** |
-| Expected false confirmed tracks over 120 frames | 120 × 2.46 × 1.2e-5 ≈ **0.003** |
+| Expected false alarms inside it | 2.56 × 1366/256,000 = 0.0137 per frame |
+| P(a false alarm is confirmed as a track), at 4-of-5 | 1 − F_Binom(2; 4, 0.0137) ≈ **1.0e-5** |
+| Expected false confirmed tracks over 120 frames | 120 × 2.56 × 1.0e-5 ≈ **0.003** |
 
 So `pfa = 1e-5` puts roughly two or three spurious measurements in front of the associator every
 single frame — enough that gating and assignment are exercised continuously — while making a
-spurious *confirmed track* a once-in-four-hundred-runs event. Raising `pfa` to 1e-4 multiplies
-the last row by roughly 7,000 and the scenario stops having one answer; that is a good exercise
-to set an intern, and a bad default.
+spurious *confirmed track* about a once-in-three-hundred-runs event. Raising `pfa` to 1e-4
+multiplies the last row by roughly 9,000 and the scenario stops having one answer; that is a good
+exercise to set an intern, and a bad default.
+
+> **Revised for one-sided CFAR edges.** The 1-D CFAR used to leave the 20 cells at each range end
+> untested, so this table counted 245,760 cells and 2.46 false alarms per frame. It now tests them
+> with a one-sided window calibrated to the same `pfa` (`core/detection.py` module Notes), which
+> adds 10,240 cells and 0.10 false alarms per frame. The per-cell rate, and with it the gate and
+> confirmation rows, is unchanged. With `wrap_range` off, the 40 end cells of each Doppler row use
+> a one-sided window; with `wrap_range` on, they use real wrapped cells from the far end, and the
+> cell count is the same. Both shipped paths have wrapped range since §14.12, so no shipped
+> figure moves: S1 still accepts 377 detections, with track 75 primary. Measured on the Kalman
+> path as it ran before §14.12, with `wrap_range` off, S1 gained 17 detections
+> (366 to 383), all in the edge cells: 0.14 per frame against 0.10 expected, a Poisson tail of
+> about 0.1. Every tracking metric was unchanged to full precision. Only the primary track's ID
+> moved, from 71 to 76, because the extra false alarms start tentative tracks first. The same pass
+> re-derived the rows from their formulas and
+> corrected three figures that were already off: the confirmation probability, 1.0e-5 rather than
+> 1.2e-5; one run in about 300 (322 now, 336 before) rather than four hundred; and the 1e-4
+> factor, about 9,000 rather than 7,000.
 
 > Every number in §3 is derived from the parameters in §2 and was confirmed numerically. The
 > implementation must nonetheless re-derive the valid-cell count from `cfar_valid_mask`, the
@@ -640,6 +657,13 @@ this one.
 > argument. `frame_detections` now uses `wrap` in place of padding the range axis by hand, and its
 > output is unchanged (`test_wrap_matches_padding_the_map_by_hand`).
 
+> **Edges.** The 1-D functions now test the cells within `n_guard + n_train` of a non-circular
+> end, with the complete half-window on the far side (N = `n_train` cells, calibrated as an
+> N-cell window). The 2-D ring still leaves those cells untested, with a `nan` threshold, for now:
+> a clipped ring needs a rank filter over a footprint that changes from cell to cell, which OS
+> does not have. When this scenario moves to the ring, it moves back to untested edges unless the
+> ring gains the same treatment.
+
 ### 13.3 Multiple targets — a note only
 
 Everything in §7 that makes GNN sufficient depends on there being one target: gates never overlap,
@@ -811,7 +835,7 @@ what was measured against it.
 | 8 | The pictures exist | `track_00000.png`, `rd_00000.png` with markers, `tracks.csv`, `detections.csv` | `tests/visualisation/test_track_plot.py`, `tests/pipelines/test_scenario_003.py` |
 | — | `gate_threshold` matches the tabulated chi^2 quantile at each `dim` | 6.635 / 9.210 / 11.345 / 13.277 | `tests/core/test_tracking.py` |
 | — | EKF Jacobians match a central-difference derivative of `h` | 1e-8 | same |
-| — | `cfar_valid_mask` cell count and `cfar_threshold_factor`, at the shipped TOML's operating point | 245 760 cells; alpha = 13.856 = 11.417 dB | `tests/core/test_detection.py::test_scenario_003_calibration_matches_its_specification` |
+| — | `cfar_valid_mask` cell count, `cfar_threshold_factor` and the edge factor from `cfar_threshold_factors`, at the shipped TOML's operating point | 256 000 cells; alpha = 13.856 = 11.417 dB, 16.856 = 12.268 dB at the 20 cells of each end | `tests/core/test_detection.py::test_scenario_003_calibration_matches_its_specification` |
 
 Run over **20 frames** rather than §12's 15: the bootstrap holds a track range-only for ten frames
 and S1's first fold change is at frame 17. Criterion 1 is measured from the first confirmation,

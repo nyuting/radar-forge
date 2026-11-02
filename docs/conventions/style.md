@@ -437,7 +437,7 @@ change in any release.
   suite at the operation that went wrong. Before silencing one, decide whether the NaN or
   inf is the right answer or a sign of bad input:
   - *It is the right answer and the docstring says so.* Mask it explicitly and say why in a
-    comment, as CFAR does for cells with an incomplete reference window
+    comment, as the 2-D CFAR does for cells with an incomplete reference ring
     (`np.greater(..., where=tested)` in `core/detection.py`). Or scope the narrowest
     `np.errstate` category to the one expression that produces it, as
     `BistaticRadar.range_resolution_m` does with `divide="ignore"` at forward scatter. Name
