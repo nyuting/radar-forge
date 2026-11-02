@@ -87,13 +87,14 @@ WaveformKind = Literal["fmcw", "pulsed"]
 
 @dataclass(frozen=True)
 class Transmitter:
-    """A radar transmitter.
+    r"""A radar transmitter.
 
     Parameters
     ----------
     carrier_frequency_hz : float
-        Carrier frequency, Hz: the instantaneous frequency at the start of each
-        chirp. 9.8e9 for scenario 001.
+        Carrier frequency :math:`f_c`, Hz: the centre of the occupied band.
+        The chirp sweeps :math:`f_c \pm B/2` about it, and the receiver's local
+        oscillator sits on it. 9.8e9 for scenario 001.
     bandwidth_hz : float
         Swept or modulated bandwidth, Hz. Sets range resolution as
         :math:`c/2B`, independently of the waveform family.
@@ -156,7 +157,7 @@ class Transmitter:
 
     @property
     def wavelength_m(self) -> float:
-        r"""Carrier wavelength :math:`\lambda = c/f_0`, m."""
+        r"""Carrier wavelength :math:`\lambda = c/f_c`, m."""
         return SPEED_OF_LIGHT_MPS / self.carrier_frequency_hz
 
     @property

@@ -141,12 +141,13 @@ def fmcw_deramp_baseband(
 ) -> NDArray[np.complex128]:
     r"""Synthesise a deramped FMCW baseband cube.
 
-    Models a **down** sweep mixed as :math:`s_{rx} \cdot s_{tx}^{*}`, giving
+    Models a **down** sweep from :math:`f_c + B/2` to :math:`f_c - B/2`, centred
+    on the carrier :math:`f_c`, mixed as :math:`s_{rx} \cdot s_{tx}^{*}`, giving
 
     .. math::
 
         s[m, n] = \sum_p A_p \,
-            \exp\!\left(-j 2\pi f_0 \tau_p[m]\right)\,
+            \exp\!\left(-j 2\pi \left(f_c + \tfrac{B}{2}\right) \tau_p[m]\right)\,
             \exp\!\left(+j 2\pi \alpha \tau_p[m]\, t_n\right)
 
     with :math:`\tau_p[m] = 2 R_p[m]/c` held constant across chirp :math:`m`
@@ -154,6 +155,14 @@ def fmcw_deramp_baseband(
     phase that becomes Doppler across slow time; the second is the beat frequency
     that becomes range across fast time. See the module docstring for why the
     sweep must descend for both to carry the library's sign convention.
+
+    The residual phase is referenced to :math:`f_c + B/2` because that is the
+    frequency transmitted at :math:`t_n = 0`. Read at a fixed range bin after the
+    fast-time DFT, though, the slow-time phase advances at the *mid-sweep*
+    frequency :math:`f_c`: as the delay grows the beat frequency rises with it,
+    and the DFT bin takes up that rise as a phase referred to the centre of the
+    window. So Doppler converts to velocity through the carrier wavelength
+    :math:`\lambda = c/f_c`, as it does for the pulsed generator.
 
     Parameters
     ----------
@@ -222,7 +231,10 @@ def fmcw_deramp_baseband(
 
     # (n_pulses, n_paths, 1) against (n_samples,) broadcasts to the full cube
     # without materialising an intermediate of that size per path.
-    residual_phase_rad = -2.0 * np.pi * radar.transmitter.carrier_frequency_hz * delay_s
+    sweep_start_frequency_hz = (
+        radar.transmitter.carrier_frequency_hz + radar.transmitter.bandwidth_hz / 2.0
+    )
+    residual_phase_rad = -2.0 * np.pi * sweep_start_frequency_hz * delay_s
     beat_phase_rad = (
         2.0 * np.pi * radar.transmitter.sweep_rate_hzps * delay_s[..., None] * fast_time_s
     )
@@ -250,16 +262,19 @@ def pulsed_baseband(
     .. math::
 
         s[m, n] = \sum_p A_p \, p\!\left(t_n - \tau_p[m]\right)\,
-                  \exp\!\left(-j 2\pi f_0 \tau_p[m]\right)
+                  \exp\!\left(-j 2\pi f_c \tau_p[m]\right)
 
-    where :math:`p` is the baseband chirp and the delay is taken **modulo the
+    where :math:`p` is the baseband chirp, swept from :math:`-B/2` to
+    :math:`+B/2` so that the pulse is centred on the carrier :math:`f_c`, which
+    is also the receiver's local oscillator. The delay is taken **modulo the
     repetition interval**. That modulo is not a convenience: it is exactly how a
     real pulsed radar folds targets beyond its unambiguous range, and it is what
     makes the scenario-001 S2 variant show its target at the wrong range.
 
     The output is *not* pulse-compressed. Pass it through
     :func:`radar_forge.core.dsp.matched_filter` with the reference returned by
-    :func:`radar_forge.core.waveforms.lfm_chirp`.
+    :func:`radar_forge.core.waveforms.lfm_chirp` with
+    ``start_frequency_hz=-bandwidth_hz / 2``.
 
     Parameters
     ----------
@@ -318,7 +333,12 @@ def pulsed_baseband(
 
     elapsed_s = fast_time_s - folded_delay_s[..., None]
     within_pulse = (elapsed_s >= 0.0) & (elapsed_s < radar.transmitter.chirp_duration_s)
-    envelope_phase_rad = np.pi * radar.transmitter.sweep_rate_hzps * elapsed_s**2
+    # The chirp of lfm_chirp(..., start_frequency_hz=-B/2), centred on the carrier.
+    envelope_phase_rad = (
+        np.pi
+        * elapsed_s
+        * (radar.transmitter.sweep_rate_hzps * elapsed_s - radar.transmitter.bandwidth_hz)
+    )
     # The residual phase uses the TRUE delay, not the folded one: folding is an
     # artefact of when the receiver listens, and does not change the carrier
     # phase the target actually imposed. Using the folded delay here would

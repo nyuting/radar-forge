@@ -127,7 +127,7 @@ class TestPulsedBaseband:
         true_range_m = 3_000.0
         paths = line_of_sight_paths(S2_RADAR, true_range_m, 0.0, 10.0)
         cube = pulsed_baseband(paths, S2_RADAR, 16)
-        reference = lfm_chirp(2.0e6, 10.0e-6, 2.5e6)
+        reference = lfm_chirp(2.0e6, 10.0e-6, 2.5e6, start_frequency_hz=-1.0e6)
         compressed = matched_filter(cube, reference, axis=-1)
         peak_sample = int(np.abs(compressed[0]).argmax())
         # Matched filtering adds the reference's group delay; compare the shift
@@ -151,7 +151,7 @@ class TestPulsedBaseband:
         folded_range_m = true_range_m % S2_RADAR.unambiguous_range_m
         paths = line_of_sight_paths(S2_RADAR, true_range_m, 0.0, 10.0)
         cube = pulsed_baseband(paths, S2_RADAR, 16)
-        reference = lfm_chirp(2.0e6, 10.0e-6, 2.5e6)
+        reference = lfm_chirp(2.0e6, 10.0e-6, 2.5e6, start_frequency_hz=-1.0e6)
         compressed = matched_filter(cube, reference, axis=-1)
 
         unfolded = line_of_sight_paths(S2_RADAR, folded_range_m, 0.0, 10.0)
@@ -195,6 +195,71 @@ class TestPulsedBaseband:
         paths = line_of_sight_paths(S2_RADAR, 10_000.0, 0.0, 10.0)
         with pytest.raises(ValueError, match="at least one"):
             pulsed_baseband(paths, S2_RADAR, 0)
+
+
+# A 40 MHz carrier with 8 MHz of sweep: 20 % fractional bandwidth, so a Doppler
+# referred to a band edge instead of the carrier is 10 % off and plainly visible.
+# At X band the same mistake is 1e-4 and hides inside a bin.
+_WIDEBAND_CARRIER_HZ = 40.0e6
+_WIDEBAND_BANDWIDTH_HZ = 8.0e6
+
+
+def _slow_time_doppler_hz(samples: np.ndarray, pulse_repetition_interval_s: float) -> float:
+    """Doppler from the mean pulse-to-pulse phase step of one cell, Hz."""
+    phase_step_rad = np.angle(samples[1:] * np.conj(samples[:-1]))
+    return float(np.mean(phase_step_rad) / (2.0 * np.pi * pulse_repetition_interval_s))
+
+
+class TestDopplerIsReferredToTheCarrier:
+    """The slow-time phase of a range cell advances at 2 v f_c / c, not at a band edge.
+
+    This is what lets the range-Doppler axes convert Doppler to velocity with the
+    carrier wavelength alone.
+    """
+
+    def test_fmcw_range_bin_advances_at_the_carrier(self) -> None:
+        radar = Radar(
+            Transmitter(_WIDEBAND_CARRIER_HZ, _WIDEBAND_BANDWIDTH_HZ, 1.0, 0.0, 1.0e-3, 1.0e3),
+            Receiver(1.0e6, 0.0, 3.0),
+            *DUKE_SITE,
+        )
+        paths = line_of_sight_paths(radar, 5_000.0, 1.0, 10.0)
+        spectra = np.fft.fft(fmcw_deramp_baseband(paths, radar, 64), axis=-1)
+        peak_bin = int(np.abs(spectra[0]).argmax())
+        measured_hz = _slow_time_doppler_hz(
+            spectra[:, peak_bin], radar.transmitter.pulse_repetition_interval_s
+        )
+        expected_hz = 2.0 * 1.0 / radar.wavelength_m
+        np.testing.assert_allclose(measured_hz, expected_hz, rtol=1e-3)
+
+    def test_pulsed_compressed_peak_advances_at_the_carrier(self) -> None:
+        radar = Radar(
+            Transmitter(
+                _WIDEBAND_CARRIER_HZ,
+                _WIDEBAND_BANDWIDTH_HZ,
+                1.0,
+                0.0,
+                10.0e-6,
+                10.0e3,
+                waveform="pulsed",
+            ),
+            Receiver(10.0e6, 0.0, 3.0),
+            *DUKE_SITE,
+        )
+        paths = line_of_sight_paths(radar, 3_000.0, 1.0, 10.0)
+        reference = lfm_chirp(
+            _WIDEBAND_BANDWIDTH_HZ,
+            10.0e-6,
+            10.0e6,
+            start_frequency_hz=-_WIDEBAND_BANDWIDTH_HZ / 2.0,
+        )
+        compressed = matched_filter(pulsed_baseband(paths, radar, 64), reference, axis=-1)
+        peak_lag = int(np.abs(compressed[0]).argmax())
+        measured_hz = _slow_time_doppler_hz(
+            compressed[:, peak_lag], radar.transmitter.pulse_repetition_interval_s
+        )
+        expected_hz = 2.0 * 1.0 / radar.wavelength_m
+        np.testing.assert_allclose(measured_hz, expected_hz, rtol=1e-3)
 
 
 class TestThermalNoise:
@@ -309,7 +374,7 @@ class TestBistaticGenerators:
         range_sum_m = unambiguous_sum_m * 1.5  # beyond one repetition interval
         folded_sum_m = range_sum_m % unambiguous_sum_m
 
-        reference = lfm_chirp(2.0e6, 10.0e-6, 2.5e6)
+        reference = lfm_chirp(2.0e6, 10.0e-6, 2.5e6, start_frequency_hz=-1.0e6)
         folded_peak = np.abs(
             matched_filter(
                 pulsed_baseband(

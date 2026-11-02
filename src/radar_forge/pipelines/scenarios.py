@@ -873,6 +873,7 @@ def form_range_doppler_map(
             burst.transmitter.bandwidth_hz,
             burst.transmitter.chirp_duration_s,
             burst.receiver.sample_rate_hz,
+            start_frequency_hz=-burst.transmitter.bandwidth_hz / 2.0,
         )
         group_delay_samples = reference.size - 1
         compressed = matched_filter(baseband, reference, axis=-1)
