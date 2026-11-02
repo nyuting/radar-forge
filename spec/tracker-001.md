@@ -442,8 +442,9 @@ today imports them from `kalman.py` (TD13).
 
 ### 7.2 GNN and NN
 
-`GlobalNearestNeighbour` builds an (n_tracks, n_measurements) cost matrix, NIS or negative
-log-likelihood (`Tracker(cost=...)`), forbids pairs outside the gate, and solves it with
+`GlobalNearestNeighbour` builds an (n_tracks, n_measurements) cost matrix, NIS, negative
+log-likelihood or likelihood ratio (`Tracker(cost=...)`), forbids pairs outside the gate, and
+solves it with
 `scipy.optimize.linear_sum_assignment`. It maximises the number of matches before minimising
 cost; the docstring says so, and names a finite non-assignment cost as the alternative.
 `NearestNeighbour` is the greedy version, for teaching.
@@ -452,13 +453,31 @@ cost; the docstring says so, and names a finite non-assignment cost as the alter
 can hold pairs scored at different measurement dimensions: range and rate (2) beside range
 alone (1). Raw NIS can't be compared across dimensions, because its expectation is the
 dimension. A 1-D pair costs about 1 and a 2-D pair about 2, so a pair that fell back to range
-alone undercuts its full-dimension rivals in the solve. So when the dimensions in one matrix
-differ, the cost is the negative log-likelihood, ½ νᵀ S⁻¹ ν + ½ ln |2π S|, the negative of the
-`log_likelihood` that `innovation_stats` already returns. NIS stays available as a cost only
-when every pair has the same dimension. If a scan would put NIS costs of different dimensions
-in one matrix, `Tracker` raises rather than solve it. Today's scenario 003 code mixes raw NIS
-across dimensions, so its numbers may move when it migrates (§13 step 6); the commit records
-the move, as §12 requires.
+alone undercuts its full-dimension rivals in the solve. The negative log-likelihood,
+½ νᵀ S⁻¹ ν + ½ ln |2π S|, is no fairer. A density's value depends on the units of what it
+measures, so each extra component adds ½ ln(2π S_kk) in its own unit: metres set against
+metres per second.
+
+So when the dimensions in one matrix differ, the cost is the likelihood ratio,
+`cost="likelihood_ratio"`: −ln(g / λ), where g = 𝒩(ν; 0, S) and λ is the clutter density over
+the same components, in false measurements per scan per unit of that model's measurement space.
+This is the per-update increment of Blackman's (2004) track score, with λ as his false-target
+density β_FT. The ratio has no units, and within one model it is the negative log-likelihood
+plus a constant. Across models it asks the right question: is this measurement likelier to be
+the track's than a false alarm, in the space it was scored in? `Tracker(clutter_density=...)`
+takes λ per measurement model ID: required for every registered model under this cost, refused
+under any other, and positive and finite. The values are the caller's (TD9), since they depend
+on the detector and the scene. For clutter spread evenly over a range-rate span V, a range-only
+marginal's density is V times its base's.
+
+GNN maximises the number of matches before it compares costs, so a factor common to every
+density adds the same amount to every solution. Only the ratios between the models' densities
+decide an assignment, which is why a scenario may set the level loosely (scenario 003 §14.12).
+
+NIS stays available as a cost only when every pair has the same dimension. If a scan would put
+NIS costs of different dimensions in one matrix, `Tracker` raises rather than solve it. The
+negative log-likelihood stays for trackers with one measurement model, where it is the
+likelihood ratio up to a constant and needs no density.
 
 ### 7.3 Assignment order
 
@@ -760,12 +779,10 @@ it would be later. The names and module moves are TD13's.
    map's span on both paths, and the fold monitor's range history is unwrapped as it grows, which
    fixes a target crossing the span (scenario 003 §14.12). `TrackSnapshot` gains
    `measurement_dim`, the dimension the update used. `state_model` other than `range_1d` now
-   raises on both paths. **Departure from §7.2:** pairs are scored by raw NIS across dimensions,
-   `cost="legacy_nis"`, `KalmanTracker`'s rule, so that the move changes no figure. Measured on
-   S1, the negative log-likelihood is worse, and for a reason that also makes §7.2 wrong: a
-   log-density depends on the units of what it measures, so an extra component adds
-   ½ ln(2π S_kk) in its own unit. A likelihood ratio against the clutter density over the same
-   components has no units; it replaces `"legacy_nis"`, and §7.2, in the next change.
+   raises on both paths. The step first kept `KalmanTracker`'s raw NIS across dimensions, so
+   that the move changed no figure. Measured on S1, the negative log-likelihood was worse, which
+   showed that a log-density cannot compare dimensions either. The next change scored pairs by
+   §7.2's likelihood ratio, and scenario 003 §14.12 records what that moved.
 7. **Delete the old stack:** `KalmanTracker`, `KalmanFilter`, `KalmanState`, `TrackModel` and
    `FrameResult` (`UKF` and `ukf.py` went in step 2), and the rest of TD13's renames. Two of
    those renames are scenario TOML keys (TD13), so this step also updates the scenario 003
@@ -1005,6 +1022,9 @@ These hold after migration; each is stated in a docstring, not discovered by a u
   2000, pp. 153-158 (the UKF, its sigma-point weights, and the usual α, β and κ).
 - S. J. Julier, "The scaled unscented transformation," *Proc. American Control Conference*,
   vol. 6, 2002, pp. 4555-4559.
+- S. S. Blackman, "Multiple hypothesis tracking for multiple target tracking," *IEEE Aerosp.
+  Electron. Syst. Mag.*, vol. 19, no. 1, pp. 5-18, 2004 (the track score as a log-likelihood
+  ratio against a false-target density; track-oriented MHT).
 - D. F. Crouse, "On implementing 2D rectangular assignment algorithms," *IEEE Trans. Aerosp.
   Electron. Syst.*, vol. 52, no. 4, pp. 1679-1696, 2016.
 - D. Lerro and Y. Bar-Shalom, "Tracking with debiased consistent converted measurements versus
