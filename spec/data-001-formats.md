@@ -26,10 +26,11 @@
 
 ## 1. Status, purpose and scope
 
-Status: **proposed**. Schema version **1.2.0**. `scripts/run_scenario.py` writes `metadata.json`
+Status: **proposed**. Schema version **1.3.0**. `scripts/run_scenario.py` writes `metadata.json`
 (§6.1, all but `files`), `detections.csv` (§6.5), `tracks.csv` (§6.6, for the `range_1d` state
-model) and `metrics.csv` (§6.9). Nothing else below is implemented yet except where §12 says
-today's writer already matches.
+model) and `metrics.csv` (§6.9), and stamps them 1.2.0. Version 1.3.0 adds only the
+instrumentation files of §6.11–§6.15 and their `metadata.json` keys, none of which is written yet.
+Nothing else below is implemented yet except where §12 says today's writer already matches.
 
 Today each scenario specification defines its own output files:
 `spec/scenario-001-xband.md` §3.6, `spec/scenario-002-bistatic.md` §3.6 and
@@ -54,7 +55,9 @@ column lists as history, and §12 records every change.
 
 **In scope:** scenario inputs, trajectories, raw IQ, processed arrays (range × slow time,
 range-Doppler, CFAR thresholds), detections, tracks, truth, metrics, run metadata and the COCO
-export's place in the layout.
+export's place in the layout. Also the *format* of the instrumentation files (logs, timing spans,
+health telemetry, events, flight-recorder snapshots, §6.11–§6.15). What they mean and when they
+are written is `spec/instrumentation-001.md`'s business.
 
 **Out of scope:**
 - **Real-time streaming** and network transport.
@@ -90,6 +93,7 @@ export's place in the layout.
 | **Arrays**: raw IQ, range × slow time, range-Doppler, CFAR thresholds, later range-Doppler-azimuth | **HDF5**, one file per product level per run, frames on the leading axis | Self-describing (attributes, dimension scales), with chunked partial reads. Native in MATLAB, C++ and Python. MATLAB's own `.mat` v7.3 is HDF5 underneath | ↔ SigMF (§7.5); → xarray (§7.1); legacy `.npz` → HDF5 (§12) |
 | **Recorded hardware IQ**, as interchange | **SigMF** v1.2: a `.sigmf-meta` JSON file plus raw `.sigmf-data` | The open standard SDR tools already write. Reading it needs only JSON and `numpy.fromfile` | SigMF ↔ `iq.h5` (§7.5) |
 | **Run metadata and provenance** | **JSON** (`metadata.json`) | It is machine output, not configuration. Readable by `json`, MATLAB `jsondecode` and nlohmann/json. The same format SigMF uses for its metadata | — |
+| **Logs** | **JSON Lines** (`log.jsonl`) | Records are heterogeneous, carry tracebacks and are appended while the run executes. The one place JSON Lines is canonical (`spec/instrumentation-001.md` DI4) | — |
 | **ML annotation export** | **COCO JSON** | `spec/structure.md` D5, unchanged | — |
 | **Figures** | PNG, MP4 (GIF fallback) | For people, never parsed back | — |
 
@@ -103,7 +107,7 @@ export's place in the layout.
 | Zarr | Excellent for cloud-chunked arrays, but MATLAB and C++ support is still immature. Revisit if runs outgrow a single machine |
 | Strict NetCDF-4 / CF compliance | CF has no complex data type, and every product before detection is complex. We stay *CF-aligned* (`units` and `long_name` attributes, dimension scales), which keeps the files legible to NetCDF-aware tools without pretending to comply |
 | CF-Radial 2 / ODIM_H5 | Built for weather radar: they are organised around sweeps and moments (reflectivity, velocity, spectrum width), not around raw IQ cubes, detections and tracks. Borrowed for their product-level idea (§4), not their layout |
-| JSON Lines for detections and tracks | Nested records are a better fit for variable-length fields, but MATLAB and spreadsheet users lose. Nothing in §6 is nested enough to need it |
+| JSON Lines for detections and tracks | Nested records are a better fit for variable-length fields, but MATLAB and spreadsheet users lose. No data product in §6 is nested enough to need it. Logs are, and are the exception (§6.11) |
 
 **Dependency note** (`CLAUDE.md` requires one). `h5py` goes in a new **`io` extra**, never in core.
 It buys attributes, labelled axes, chunked partial reads and a file MATLAB and C++ read natively.
@@ -129,6 +133,7 @@ its predecessor plus the metadata.
 | — | Performance metrics | `metrics.csv` | acceptance tests, later a metrics module |
 | — | Exports | `exports/coco.json` | `pipelines/exporters/` (design only) |
 | — | Figures | `figures/*.png`, `figures/*.mp4` | `visualisation/scopes/` |
+| — | Instrumentation: logs, timing spans, health telemetry, events, flight-recorder snapshots | `log.jsonl`, `spans.csv`, `telemetry.csv`, `events.csv`, `snapshots.h5` | the recorder of `spec/instrumentation-001.md` §3 (design only) |
 
 ```text
 out/<run_id>/
@@ -143,6 +148,11 @@ out/<run_id>/
 ├── truth.csv              # §6.4
 ├── metrics.csv            # §6.9
 ├── exports/coco.json      # §6.10
+├── log.jsonl              # §6.11 — instrumentation (spec/instrumentation-001.md)
+├── spans.csv              # §6.12
+├── telemetry.csv          # §6.13
+├── events.csv             # §6.14
+├── snapshots.h5           # §6.15 — only when a trigger fired
 └── figures/
     ├── rd_00000.png
     ├── track_00000.png
@@ -187,7 +197,7 @@ the ones marked *new*.
 
 | Key | Type | Content |
 | :--- | :--- | :--- |
-| `schema_version` *new* | string | Semver of this spec, `"1.2.0"` |
+| `schema_version` *new* | string | Semver of this spec, `"1.3.0"` |
 | `run_id` *new* | string | `<scenario-name>-<created_utc as YYYYMMDDTHHMMSSZ>` unless the caller overrides it. The run directory is named after it |
 | `created_utc` *new* | string | ISO 8601 UTC instant the run started |
 | `epoch_utc` *new* | string or null | §5 Time |
@@ -198,8 +208,10 @@ the ones marked *new*.
 | `bursts` | array | As today, one object per burst: waveform, `f0_hz`, `bandwidth_hz`, `prf_hz`, `n_pulses`, `n_samples`, resolutions, unambiguous range and velocity, `noise_power_w` |
 | `detection` | object or null | As today: the resolved `[detection]` table |
 | `tracking` | object or null | As today, including `simulated_angles` (`spec/scenario-003-tracking.md` §6.3). **Adds** `state_model` and `state_fields`: the ordered list of state-vector column names, e.g. `["east_m", "north_m", "east_rate_mps", "north_rate_mps"]`. §6.6's covariance columns are indexed by it. **Adds** `range_period_m`: when the tracker measures range modulo a period, that period, and every `range_m` in `detections.csv` and `tracks.csv` lies in `[0, range_period_m)`. `null` when range is absolute. **Adds** `unused`: the names of the settings, among those recorded, that the chosen `estimator` did not read, so that no recorded value is mistaken for one the run used |
-| `provenance` | object | As today, `radar_forge_version` and `git_commit`. **Adds** `python_version`, `numpy_version`, and `command` (the argv that produced the run) |
-| `files` *new* | array | One object per file written: `path` (relative), `level` (`L0`–`L4`, `truth`, `metrics`, `export`, `figure`), `format`, `sha256`, `size_bytes`. The inventory is what lets the validator tell a truncated run from a complete one |
+| `provenance` | object | As today, `radar_forge_version` and `git_commit`. **Adds** `python_version`, `numpy_version`, and `command` (the argv that produced the run). **Adds** (1.3.0) `physics_sha256`, the hash of the resolved physics settings excluding `[runtime]` (`spec/instrumentation-001.md` §4.1), and `machine`: `platform`, `processor`, `cpu_count`, `devices` (list of strings) |
+| `runtime` *new* (1.3.0) | object | The resolved `[runtime]` settings, defaults included, with `cli_overrides`: the keys the command line changed (`spec/instrumentation-001.md` §4) |
+| `telemetry_summary` *new* (1.3.0) | object or null | `rtf_processing_linear`, `rtf_total_linear`, `wall_duration_s`, `n_events`, `n_dropped_records`, `n_nonfinite_samples` (`spec/instrumentation-001.md` §6.3, §14). `null` when telemetry was off |
+| `files` *new* | array | One object per file written: `path` (relative), `level` (`L0`–`L4`, `truth`, `metrics`, `export`, `figure`, and from 1.3.0 `log`, `telemetry`, `snapshot`), `format`, `sha256`, `size_bytes`. The inventory is what lets the validator tell a truncated run from a complete one |
 
 A JSON Schema for this object is a follow-up (§12). Until it exists, this table is the contract.
 
@@ -290,6 +302,7 @@ polar position, a Doppler speed and an amplitude. The units are SI, not ASTERIX'
 | `status` | enum | — | R | *new*. What became of the detection on its way to the tracker: `accepted` (passed to it); or, for a dual-PRF pair, `missing_pair` (no detection in the other burst within the range tolerance), `ambiguous_pair` (one within it, but not mutually nearest) or `unresolved_velocity` (paired, but the two folded velocities agree on no unfolded one). Only the first burst's `accepted` detections reach the tracker |
 | `pair_id` | int | — | R | *new*. The same integer on the two detections of a dual-PRF pair, unique within the frame. Empty for a detection that was not paired |
 | `range_unfolded_m` | float64 | m | R | *new*. The true range the two detections of an `accepted` dual-PRF pair agree on, from `core.ambiguity.unfold_range_dual_prf`; the same on both. `range_m` stays each burst's own folded reading. Empty for any other detection |
+| `injected` | bool | — | O | *new* (1.3.0). `1` for the plot matched to a synthetic built-in test target (`spec/instrumentation-001.md` §12), which never reaches the tracker; `0` otherwise. Absent when the run injected nothing |
 
 ### 6.6 `tracks.csv`
 
@@ -415,6 +428,78 @@ could disagree with it.
 Specified by `spec/structure.md` D5 and unchanged. The two transformations D5 requires happen here
 and nowhere else. The exporter transposes `/rd` into D5's range × Doppler × azimuth order (DF1)
 and converts to boresight azimuth and dB (DF2, §2.4).
+
+### 6.11 `log.jsonl`
+
+*New in 1.3.0.* One JSON object per line, UTF-8, `\n` line endings, appended in the order records
+are made. The fields, their meaning and the logging levels are `spec/instrumentation-001.md`
+§5.3. The format rules are:
+- `logged_utc` is ISO 8601 UTC with microseconds and a `Z` suffix. It is machine time, not
+  scenario time; `time_s` is scenario time (§5 Time; instrumentation-001 §5.4).
+- Keys inside `data` carry unit suffixes, as column names do (§2.3).
+- Floats are written with the shortest round-trip representation (DF9). `NaN` and infinities,
+  which JSON cannot hold, are written as the strings `"nan"`, `"inf"` and `"-inf"`.
+- Readers ignore fields they do not know (§8).
+
+### 6.12 `spans.csv`
+
+*New in 1.3.0.* One row per finished timing span (`spec/instrumentation-001.md` §6).
+
+| Column | dtype | Unit | Req. | Meaning |
+| :--- | :--- | :--- | :--- | :--- |
+| `frame` | int | — | O | Empty for the run-level span |
+| `burst_index` | int | — | O | Empty for a span that covers every burst |
+| `stage` | string | — | R | `run`, `frame`, `synthesise`, `range_doppler`, `cfar`, `cluster`, `unfold`, `track`, `write`, or a finer name a pipeline adds |
+| `parent_stage` | string | — | O | Empty for `run` |
+| `elapsed_start_s` | float64 | s | R | Start, in seconds since the run's monotonic start. Machine time, not scenario time |
+| `duration_s` | float64 | s | R | |
+| `device` | string | — | R | `cpu`, or a device name such as `cuda:0` |
+
+### 6.13 `telemetry.csv`
+
+*New in 1.3.0.* Health metrics that need no ground truth (`spec/instrumentation-001.md` §7), in
+§6.9's tidy long shape so one reader handles both files. The columns are §6.9's, in its order,
+followed by:
+
+| Column | dtype | Unit | Req. | Meaning |
+| :--- | :--- | :--- | :--- | :--- |
+| `time_s` | float64 | s | R | Scenario time of `frame_end` |
+| `burst_index` | int | — | O | Empty for a frame- or run-level metric |
+
+`target_id` is always empty, because telemetry knows no truth. A per-frame value has
+`frame_start = frame_end`.
+
+### 6.14 `events.csv`
+
+*New in 1.3.0.* One row for everything unusual in a run (`spec/instrumentation-001.md` §8–§12).
+
+| Column | dtype | Unit | Req. | Meaning |
+| :--- | :--- | :--- | :--- | :--- |
+| `event_id` | int | — | R | Zero-based, in order of occurrence |
+| `frame` | int | — | R | |
+| `time_s` | float64 | s | R | |
+| `time_utc` | string | ISO 8601 | E | |
+| `burst_index` | int | — | O | |
+| `track_id` | string | — | O | For a per-track monitor |
+| `kind` | enum | — | R | `trigger`, `invariant`, `numeric_guard`, `injection_miss`, `queue_drop` |
+| `name` | string | — | R | The trigger's `name`, the invariant's number (`I2`), the stage, or the injection's `name` |
+| `metric` | string | — | O | The metric watched, with its unit suffix |
+| `value` | float64 | — | O | The value that fired, in the metric's unit |
+| `threshold` | float64 | — | O | What it was compared with, where that is one number |
+| `action` | enum | — | R | `log`, `snapshot`, `raise` |
+| `snapshot_group` | string | — | O | The `snapshots.h5` group written, e.g. `/event_3`. Empty when the action wrote no snapshot |
+
+### 6.15 `snapshots.h5`
+
+*New in 1.3.0.* Flight-recorder frames written when a trigger fires
+(`spec/instrumentation-001.md` §11.3). It is present only if one did.
+- One group per event, `/event_<event_id>/`, with attributes `trigger_name`, `trigger_frame` and
+  `metric`. It matches the `events.csv` row of the same `event_id`.
+- Inside each event group are the trees of §6.7 and §6.8, unchanged, for the levels the run kept:
+  `iq/burst{k}/…`, `rd/burst{k}/…`, `cfar/burst{k}/…`. Their frame axis holds only the snapshot's
+  frames, and the `frame` dimension scale says which, so a reader of `iq.h5` or `products.h5`
+  reads a snapshot by prefixing the group path.
+- The root attributes are §6.7's. It sits behind the `io` extra like every HDF5 file (DF8).
 
 ## 7. Reading and converting
 
@@ -675,6 +760,7 @@ item 5. Only rule R7, which AC8 cites, is in place.
 | 1.0.0 | 2026-09-29 | First proposal |
 | 1.1.0 | 2026-10-07 | `detections.csv` adds `burst_index`, `status` and `pair_id`; `metadata.json` `tracking` adds `range_period_m` and `unused`, and records the resolved settings, defaults included, beside the `[tracking]` table's own keys |
 | 1.2.0 | 2026-10-29 | `detections.csv` adds `range_unfolded_m` |
+| 1.3.0 | 2026-11-02 | Instrumentation files `log.jsonl`, `spans.csv`, `telemetry.csv`, `events.csv` and `snapshots.h5` (§6.11–§6.15), specified by `spec/instrumentation-001.md`; JSON Lines becomes canonical for logs only (§3); `metadata.json` adds `runtime`, `telemetry_summary`, `provenance.physics_sha256` and `provenance.machine`; `detections.csv` adds the optional `injected` column |
 
 ## References
 

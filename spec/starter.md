@@ -53,8 +53,10 @@ list. The vertical slices through it are specified one document each:
 | Scenario 10 | [`scenario-010-self-calibration.md`](scenario-010-self-calibration.md) | Array perturbations: self-calibration, self-localisation and robust beamforming *(specified)* |
 | Scenario 11 | [`scenario-011-terminal-area-tracking.md`](scenario-011-terminal-area-tracking.md) | Dense terminal-area traffic: crossings, clutter, manoeuvres and closely spaced aircraft (IMM, JPDA, MHT, PMBM) *(specified)* |
 
-Two documents cut across the slices: [`data-001-formats.md`](data-001-formats.md) (file formats)
-and [`tracker-001.md`](tracker-001.md) (the tracking architecture).
+Three documents cut across the slices: [`data-001-formats.md`](data-001-formats.md) (file
+formats), [`tracker-001.md`](tracker-001.md) (the tracking architecture) and
+[`instrumentation-001.md`](instrumentation-001.md) (runtime configuration, logging, timing and
+health telemetry).
 
 ---
 

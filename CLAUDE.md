@@ -74,3 +74,4 @@ to understand and to test; if a step is hard to test on its own, split it. The f
 | `spec/` | Design specification; the intended end state |
 | `spec/data-001-formats.md` | File formats, columns, units and conventions for every input, output and product |
 | `spec/tracker-001.md` | Tracking architecture: one tracker, interchangeable KF/EKF/UKF, how they must not drift |
+| `spec/instrumentation-001.md` | Runtime config, logging, timing, health telemetry, triggers; hot path (`core/`) emits none of it |
