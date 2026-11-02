@@ -156,10 +156,10 @@ docstring explains this, gives the CA case (`sigma_jerk_mps3`), and compares the
 
 **Not yet supported here:**
 
-- a fair cost across measurement dimensions. When the model selector lets range-only and
-  range-and-rate pairs compete, neither NIS nor the negative log-likelihood compares them
-  fairly; `cost="legacy_nis"` keeps the old tracker's rule until a likelihood ratio against
-  the clutter density replaces it (`spec/tracker-001.md` §13 step 6);
+- keeping a wrong Doppler fold out of the gate while a target manoeuvres. The likelihood
+  ratio (`cost="likelihood_ratio"`) compares range-only and range-and-rate pairs fairly, but
+  in scenario 003's S1 a wrong-fold detection still passes the gate during the manoeuvre and
+  pulls the track 15 m/s out (`spec/scenario-003-tracking.md` §14.12);
 - the interacting multiple model (IMM) filter and the coordinated-turn motion model;
 - Singer's motion model, which carries the acceleration in the state and is exact at every
   time step. Its white-noise limit sets the process noise now;

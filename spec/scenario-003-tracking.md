@@ -1127,13 +1127,58 @@ rather than 366, and the extra false alarms start four more tentative tracks fir
 dual-PRF variant 187 detections lack a pair rather than 174, for the same reason, and the range
 RMSE is 1.0253 m rather than 1.0262 m.
 
-Pairs are still scored by raw NIS across one and two components, as `KalmanTracker` did
-(`Tracker(cost="legacy_nis")`). `spec/tracker-001.md` §7.2 asks for the negative
-log-likelihood, and measured here it is worse: at the first two-component frame the extra rate
-component adds ½ ln(2π S_vv) ≈ 3 to the confirmed track's cost, and a tentative track wins its
-detection. A log-density depends on the units of what it measures, so it cannot compare one
-component with two. The fair score is a likelihood ratio against the clutter density over the
-same components, and it comes in its own change, with its own measurement.
+The move first kept `KalmanTracker`'s rule of scoring pairs by raw NIS across one and two
+components. The negative log-likelihood was measured worse here: at the first two-component
+frame, the extra rate component adds ½ ln(2π S_vv) ≈ 3 to the confirmed track's cost, and a
+tentative track wins its detection. A log-density depends on the units of what it measures, so
+it cannot compare one component with two.
+
+**The likelihood ratio.** Pairs are now scored by `Tracker(cost="likelihood_ratio")`
+(`spec/tracker-001.md` §7.2), against a clutter density spread evenly over the map:
+λ_r = 1 / range span for range alone, and λ_r / V for range and rate, where V is one fold span
+for one burst and 2 `v_max_mps` for dual PRF (`ScenarioTracker._clutter_density`). The level is
+one false alarm per scan over the range span, not the detector's rate. GNN maximises the number
+of matches before it compares costs, so only the ratio V decides an assignment.
+
+This moves S1 only. The other four scenario-003 runs, the dual-PRF Kalman run and all three on
+the UKF path, are unchanged to every printed digit. On S1 the track-ID swap is gone: one track
+holds the target for all 117 tracked frames. The headline figures are worse, because they now
+score frames the old replacement track never had to:
+
+| S1, primary track | Raw NIS (track 75) | Likelihood ratio (track 1) |
+| :--- | :--- | :--- |
+| Confirmed tracks | 2 | 1 |
+| Frames scored | 81 (frames 37–117) | 117 (the whole run) |
+| Range RMSE | 3.93 m | 11.7 m |
+| Range-rate RMSE | 0.505 m/s | 4.40 m/s |
+
+| Frames | Track 1, LR: range, rate RMSE | Old track 1: range, rate RMSE | Old track 75 |
+| :--- | :--- | :--- | :--- |
+| 3–23 | 5.26 m, 2.62 m/s | 5.26 m, 2.62 m/s | — |
+| 24–39, the manoeuvre | 23.3 m, 11.5 m/s | 61.3 m, 16.5 m/s (lost at frame 35) | — |
+| 40–119 | 9.26 m, 0.007 m/s | — | 3.88 m, 0.501 m/s |
+| 80–119 | 6.65 m, 0.007 m/s | — | 3.51 m, 0.007 m/s |
+
+Traced frame by frame, the cost is not what makes the figures worse. There are two causes:
+
+- **Wrong-fold updates in the manoeuvre.** In frames 24–39 the gate lets the track update on
+  detections unfolded into the wrong Doppler fold, 15.3 m/s out. Raw NIS did the same, with a
+  61 m range error. Under raw NIS, a tentative track's one-component NIS undercut the confirmed
+  track at frame 30, so it coasted, and it was deleted at frame 35. The replacement, track 75,
+  started cleanly after the manoeuvre and is scored only from frame 37. The likelihood ratio
+  keeps the track through the manoeuvre, so its errors there now count.
+- **Slow range recovery.** After the manoeuvre the track carries a +18 m range offset. That
+  offset falls only to +6.6 m by frames 80–119, where track 75's was +3.5 m. The range-rate
+  reading (σ 0.017 m/s) is trusted far more than the range reading (σ 21.6 m), so each update
+  corrects the range by only about 3 %. This is the filter's tuning, not the cost.
+  The range-rate error after the manoeuvre is 0.007 m/s, against track 75's 0.501 m/s.
+
+One alternative was tried and dropped. It let each pair take whichever of range alone and
+range-and-rate scored better, rather than the first model that passed the gate. That gave one
+track at 4.82 m and 2.81 m/s, but the tracker then never used the range rate. With
+`sigma_accel_mps2 = 5`, the predicted rate spread is about 5 m/s, a third of the 15.3 m/s fold
+span, so the rate component never beat the uniform clutter 1/V. Keeping the wrong fold out of
+the gate during a manoeuvre is a separate change.
 
 ---
 

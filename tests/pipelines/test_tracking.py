@@ -952,6 +952,23 @@ class TestScenarioTrackerSettings:
             burst.unambiguous_range_m, rel=1e-12
         )
 
+    @pytest.mark.parametrize("variant", ["fmcw_low_prf", "fmcw_dual_prf"])
+    def test_the_clutter_density_ratio_is_the_rate_span(self, variant):
+        """Clutter even over range and rate: one fold for one burst, +-v_max_mps for two."""
+        tracker = ScenarioTracker(bursts(variant))
+        density = tracker.tracker.clutter_density
+        assert density is not None
+        range_span_m = tracker.folding_layout.coordinates[0].period
+        rate_span_mps = (
+            2.0 * tracker.tracking.v_max_mps
+            if variant == "fmcw_dual_prf"
+            else tracker.fold_span_mps
+        )
+        np.testing.assert_allclose(density["range"], 1.0 / range_span_m, rtol=1e-12)
+        np.testing.assert_allclose(
+            density["range"] / density["range_doppler"], rate_span_mps, rtol=1e-12
+        )
+
     def test_the_ukf_range_period_is_the_maps_range_span(self):
         """S2's pulsed axis is one PRI of delay, c / 2 PRF: exactly its unambiguous range."""
         burst = bursts("pulsed_medium_prf")[0]
