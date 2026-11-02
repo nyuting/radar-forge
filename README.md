@@ -71,7 +71,7 @@ APIs shown below are targets, not shipping behaviour.
 | **`array`** | Phased array geometries (linear, planar, circular, conformal), Taylor/Chebyshev tapering, beam and null steering, phase quantization, DoA estimation |
 | **`raytracing`** | A single scene abstraction over pluggable ray-tracing backends (RadarSimPy, Mitsuba/Dr.Jit, NVIDIA Omniverse RTX), all optional extras |
 | **`pipelines`** | Scenario generation and ML dataset synthesis, with COCO-annotation and range-Doppler-cube exporters plus PyTorch dataset wrappers |
-| **`viz`** | Plots and scopes for reading results: range-Doppler maps and track histories today; A-Scope, B-Scope and PPI planned |
+| **`visualisation`** | Plots and scopes for reading results: range-Doppler maps and track histories today; A-Scope, B-Scope and PPI planned |
 
 ---
 
@@ -83,7 +83,7 @@ APIs shown below are targets, not shipping behaviour.
 pip install radar-forge                  # core library (NumPy/SciPy only)
 pip install "radar-forge[raytracing]"    # + ray-tracing backends
 pip install "radar-forge[ml]"            # + PyTorch dataset pipelines
-pip install "radar-forge[viz]"           # + matplotlib plots and scopes
+pip install "radar-forge[visualisation]"           # + matplotlib plots and scopes
 pip install "radar-forge[notebooks]"     # + JupyterLab, for the tutorial notebooks
 ```
 
@@ -172,7 +172,7 @@ radar-forge/
         ├── array/              # Phased array pattern generation, tapering, null steering, DoA
         ├── raytracing/         # Wrappers for Mitsuba / RadarSimPy / ovrtx backends
         ├── pipelines/          # ML dataset generation & COCO / range-Doppler exporters
-        └── viz/                # Plots and scopes (range-Doppler map, track history)
+        └── visualisation/                # Plots and scopes (range-Doppler map, track history)
 ```
 
 See [`spec/structure.md`](spec/structure.md) for the file-level breakdown and the upstream module
@@ -200,7 +200,7 @@ much can be borrowed — GPL-licensed code is treated as a **reference to reimpl
 | [torchcvnn](https://github.com/torchcvnn/torchcvnn) | MIT | Complex-valued PyTorch layers, transforms and SAR dataset loaders — MSTAR, SAMPLE, PolSF, ALOS2, UAVSAR SLC, S1SLC (CentraleSupélec, IJCNN '25) | Reference layout for complex radar data in `pipelines/datasets.py`; usable directly as an optional `cvnn` extra |
 | [complexPyTorch](https://github.com/wavefrontshaping/complexPyTorch) | MIT | Complex-valued layers, activations and batch normalisation after Trabelsi et al. (ICLR '18) | Complex batch-norm formulation and minimal layer set; the library Steinmetz builds on |
 | [Steinmetz Neural Networks](https://github.com/shyamven/SteinmetzNeuralNetworks) | *(no licence declared)* | Complex-valued networks keeping I/Q as an analytic pair (AISTATS '25) by the RASPNet author; ships a RASPNet regression notebook | Reference for the complex-valued I/Q feature convention in `pipelines/datasets.py`; paired with RASPNet as a dataset-plus-model benchmark |
-| [RadarSim (GUI)](https://github.com/SpaceEngineerSS/RadarSim) | MIT | Educational pulse-Doppler visualizer with real-time PySide6 scopes | Blueprint for the interactive `viz` scopes (A-Scope, B-Scope, PPI, RHI) |
+| [RadarSim (GUI)](https://github.com/SpaceEngineerSS/RadarSim) | MIT | Educational pulse-Doppler visualizer with real-time PySide6 scopes | Blueprint for the interactive `visualisation` scopes (A-Scope, B-Scope, PPI, RHI) |
 | [Stone Soup](https://github.com/dstl/Stone-Soup) | MIT | Dstl's target-tracking and state-estimation framework: filters, gaters, data associators, initiators, OSPA/GOSPA metrics | The architectural reference for `core/tracking/` — its predictor/updater/associator seams and its `Detection`/`Track`/`Hypothesis` vocabulary, at a fraction of the surface area; the reference for JPDA and IMM when those arrive |
 | [FilterPy](https://github.com/rlabbe/filterpy) | MIT | Kalman, extended, unscented and particle filters, with the *Kalman and Bayesian Filters in Python* companion text | Reference formulation for the constant-velocity KF and the `Q_discrete_white_noise` process-noise construction, reimplemented in `core/tracking/` from the cited papers rather than depended on |
 | [motpy](https://github.com/wmuron/motpy) | MIT | Minimal tracking-by-detection multi-object tracker: predict, Hungarian match, update, prune | Shape reference for the scan loop: one scan in, the current tracks out, as `core.tracking.Tracker.process(batch)` |

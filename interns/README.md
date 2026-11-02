@@ -28,7 +28,7 @@ it would replace. They share [one background page](ai-for-radar.md). It also lis
 directions you may propose instead, if you agree one with us first.
 
 Tasks 4, 5, 6 and 9 need PyTorch, and so do the optional parts of 7 and 8. For those, run
-`uv sync --extra dev --extra viz --extra ml` instead of the setup command below.
+`uv sync --extra dev --extra visualisation --extra ml` instead of the setup command below.
 
 **Choose the task you find most technically interesting.** We learn more from you chasing a
 question you care about than from you finishing one you don't. Tell us briefly why you chose it.
@@ -42,7 +42,7 @@ If we have assigned you a specific task, do that one.
   public fork, or a private fork or repository with us added as collaborators. Check the link
   works from a logged-out browser, or ask us to confirm we can open it, *before* you submit. If we
   can't open your branch, we can't grade it.
-- **Set up.** Install [uv](https://docs.astral.sh/uv/), then run `uv sync --extra dev --extra viz`
+- **Set up.** Install [uv](https://docs.astral.sh/uv/), then run `uv sync --extra dev --extra visualisation`
   from the repository root. Run everything through `uv run …`. Never use `pip install`.
 - **Read before you write.** [`CLAUDE.md`](../CLAUDE.md) is a one-page summary of the project's
   rules:

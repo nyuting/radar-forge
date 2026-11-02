@@ -220,6 +220,26 @@ detector or an estimator; take it from the `data_*` array it came from.
 every file a run reads or writes are in
 [`spec/data-001-formats.md`](../../spec/data-001-formats.md).
 
+### 3.2 Spelling **[review]**
+
+**British spelling is preferred, unless there is a good reason not to.** That covers names,
+docstrings, comments, Markdown and commit messages: `normalise`, `vectorise`, `behaviour`,
+`visualisation`, `licence` as a noun.
+
+Good reasons to use another spelling:
+
+- **The name mirrors an outside API.** A keyword passed through to matplotlib stays `color=`,
+  and a helper named after NumPy's `normalize_axis_index` may stay `_normalize_axis`. A reader
+  who knows the library should recognise the name.
+- **It is quoted.** The title of a cited book or paper, an error message from another library,
+  or a proper noun keeps its own spelling.
+- **Changing it would break something.** A public name, a file column or a CLI flag that is
+  already released keeps its spelling until there is a reason to rename it anyway. Don't churn
+  working code just to respell it.
+
+If you keep an American spelling for one of these reasons and the reason isn't obvious, say why
+in a comment.
+
 ---
 
 ## 4. Docstrings

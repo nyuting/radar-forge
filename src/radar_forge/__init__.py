@@ -14,7 +14,7 @@ raytracing
     A single scene abstraction over pluggable ray-tracing backends.
 pipelines
     Scenario generation and machine-learning dataset synthesis.
-viz
+visualisation
     Plots and scopes (range-Doppler maps, track histories) for reading results.
 """
 

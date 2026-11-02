@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -2829,7 +2829,7 @@ notebooks = [
 raytracing = [
     { name = "mitsuba" },
 ]
-viz = [
+visualisation = [
     { name = "matplotlib" },
 ]
 
@@ -2837,7 +2837,7 @@ viz = [
 requires-dist = [
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.100" },
     { name = "jupyterlab", marker = "extra == 'notebooks'", specifier = ">=4.0" },
-    { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.8" },
+    { name = "matplotlib", marker = "extra == 'visualisation'", specifier = ">=3.8" },
     { name = "mitsuba", marker = "extra == 'raytracing'", specifier = ">=3.5" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
     { name = "numpy", specifier = ">=1.26" },
@@ -2850,7 +2850,7 @@ requires-dist = [
     { name = "torch", marker = "extra == 'ml'", specifier = ">=2.2" },
     { name = "types-pygments", marker = "extra == 'dev'" },
 ]
-provides-extras = ["raytracing", "ml", "viz", "notebooks", "dev"]
+provides-extras = ["raytracing", "ml", "visualisation", "notebooks", "dev"]
 
 [[package]]
 name = "referencing"

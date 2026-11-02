@@ -448,7 +448,7 @@ belongs to scenario 008, and `array/` to 006 onward.
   7. pipelines/scenarios.py            new tables; "noise" dispatch; stream frames
   8. scenarios/scenario_005_*.toml     three files
   9. tests/pipelines/test_scenario_005.py   A6-A14
- 10. notebooks/: the dynamic-range ladder, the notch plot, the distortion floor (viz extra)
+ 10. notebooks/: the dynamic-range ladder, the notch plot, the distortion floor (visualisation extra)
 ```
 
 | Step | Module | Reuse |

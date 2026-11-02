@@ -128,7 +128,7 @@ its predecessor plus the metadata.
 | — | Ground truth | `truth.csv` | `pipelines/trajectories.py` (`TargetTrack`, `BistaticTargetTrack`) |
 | — | Performance metrics | `metrics.csv` | acceptance tests, later a metrics module |
 | — | Exports | `exports/coco.json` | `pipelines/exporters/` (design only) |
-| — | Figures | `figures/*.png`, `figures/*.mp4` | `viz/scopes/` |
+| — | Figures | `figures/*.png`, `figures/*.mp4` | `visualisation/scopes/` |
 
 ```text
 out/<run_id>/

@@ -30,7 +30,7 @@ This task needs PyTorch, which is in the `ml` extra. `uv sync` removes every ext
 name, so name them all:
 
 ```bash
-uv sync --extra dev --extra viz --extra ml
+uv sync --extra dev --extra visualisation --extra ml
 ```
 
 Keep the network small. It should train in minutes on a laptop CPU. A large model that wins is a

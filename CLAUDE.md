@@ -22,7 +22,8 @@ to understand and to test; if a step is hard to test on its own, split it. The f
   and git metadata, not tool config, and are allowed.
 - **Run everything through `uv`**: `uv run pytest`, `uv run ruff …`. Never `pip install`.
   `uv sync` uninstalls every extra not named, so name them all: `uv sync --extra dev --extra
-  viz` (add `--extra notebooks` for Jupyter). Never sync one extra alone, and never `--all-extras` (it pulls in torch).
+  visualisation` (add `--extra notebooks` for Jupyter). Never sync one extra alone, and never
+  `--all-extras` (it pulls in torch).
 - **`make check` must pass before you say you are done.** It runs lint, types,
   conventions and the full test suite — the same gate as `pre-push` and CI.
 - **SI units, with the unit in the name**: `range_m`, `f0_hz`, `chirp_duration_s`, `rcs_dbsm`,
@@ -42,6 +43,9 @@ to understand and to test; if a step is hard to test on its own, split it. The f
 
 ## Working agreements
 
+- British spelling (`normalise`, `behaviour`, `visualisation`) in names, docs and comments,
+  unless there is a good reason not to, such as mirroring an outside API (matplotlib's `color=`).
+  See [style.md §3.2](docs/conventions/style.md#32-spelling-review).
 - Vectorise with NumPy; if a Python loop is unavoidable, write a comment saying why.
 - Broadcast rather than `np.tile`/`np.repeat`/`np.broadcast_to`. A hook rejects those unless the
   call carries `# broadcast-exempt: <reason>` on its line or the one above.
