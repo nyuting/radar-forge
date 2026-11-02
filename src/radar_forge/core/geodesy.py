@@ -51,7 +51,7 @@ from radar_forge.core.constants import WGS84_FLATTENING, WGS84_SEMI_MAJOR_AXIS_M
 
 __all__ = [
     "ecef_to_enu_m",
-    "enu_to_range_azimuth_elevation",
+    "enu_to_range_azimuth_elevation_deg",
     "enu_to_range_azimuth_elevation_rad",
     "geodetic_to_ecef_m",
     "geodetic_to_enu_m",
@@ -263,7 +263,7 @@ def geodetic_to_enu_m(
 
     See Also
     --------
-    enu_to_range_azimuth_elevation : Turn the result into radar observables.
+    enu_to_range_azimuth_elevation_deg : Turn the result into radar observables.
 
     Examples
     --------
@@ -296,7 +296,7 @@ def enu_to_range_azimuth_elevation_rad(
     ``spec/data-001-formats.md`` DF2.
 
     This is the one implementation of the spherical geometry. The degree form,
-    :func:`enu_to_range_azimuth_elevation`, and the tracker's spherical
+    :func:`enu_to_range_azimuth_elevation_deg`, and the tracker's spherical
     measurement model
     (:class:`~radar_forge.core.tracking.measurement_models.RangeAzimuthElevationRangeRate`)
     both call it.
@@ -363,7 +363,7 @@ def enu_to_range_azimuth_elevation_rad(
     return range_m, azimuth_rad, elevation_rad
 
 
-def enu_to_range_azimuth_elevation(
+def enu_to_range_azimuth_elevation_deg(
     enu_m: ArrayLike,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     """Convert local ENU metres to the spherical coordinates a radar measures, in degrees.

@@ -795,17 +795,17 @@ class TestEnuMeasurementModel:
         """The conventions must be the repository's, not a fresh invention.
 
         Azimuth zero at true north increasing clockwise, and elevation above the
-        local horizontal, exactly as enu_to_range_azimuth_elevation defines
+        local horizontal, exactly as enu_to_range_azimuth_elevation_deg defines
         them. A tracker that reinvents these produces a track that mirrors the
         truth and still looks like a track.
         """
-        from radar_forge.core.geodesy import enu_to_range_azimuth_elevation
+        from radar_forge.core.geodesy import enu_to_range_azimuth_elevation_deg
 
         position_m = np.array([3_000.0, 4_000.0, 1_500.0])
         state = np.concatenate([position_m, [10.0, -20.0, 0.0]])
         predicted = enu_model("enu_3d").measurement_function(state)
 
-        range_m, azimuth_deg, elevation_deg = enu_to_range_azimuth_elevation(position_m)
+        range_m, azimuth_deg, elevation_deg = enu_to_range_azimuth_elevation_deg(position_m)
         # rtol 1e-12: the same trigonometry evaluated twice in float64.
         np.testing.assert_allclose(predicted[0], float(range_m), rtol=1e-12)
         np.testing.assert_allclose(np.rad2deg(predicted[1]) % 360.0, float(azimuth_deg), rtol=1e-12)

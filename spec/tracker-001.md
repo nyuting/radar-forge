@@ -391,7 +391,7 @@ A new monostatic model, `RangeAzimuthElevationRangeRate`, maps an ENU state to
 - a 2-D variant drops elevation, and any variant may drop range rate; the measured components
   are chosen by name, as `CartesianPosition` does today.
 
-It **reuses** the geometry of `core.geodesy.enu_to_range_azimuth_elevation`, factored so that
+It **reuses** the geometry of `core.geodesy.enu_to_range_azimuth_elevation_deg`, factored so that
 both call one function in radians. `kalman._enu_model` re-derives it today, with elevation as
 atan2(u, ground) where geodesy uses asin(u/R): the two agree, but there are two of them.
 

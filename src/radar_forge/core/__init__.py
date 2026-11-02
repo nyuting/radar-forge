@@ -66,7 +66,7 @@ from radar_forge.core.dsp import (
 )
 from radar_forge.core.geodesy import (
     ecef_to_enu_m,
-    enu_to_range_azimuth_elevation,
+    enu_to_range_azimuth_elevation_deg,
     enu_to_range_azimuth_elevation_rad,
     geodetic_to_ecef_m,
     geodetic_to_enu_m,
@@ -191,7 +191,7 @@ __all__ = [
     "doppler_fft",
     "dsp",
     "ecef_to_enu_m",
-    "enu_to_range_azimuth_elevation",
+    "enu_to_range_azimuth_elevation_deg",
     "enu_to_range_azimuth_elevation_rad",
     "fmcw_deramp_baseband",
     "fold_into_period",

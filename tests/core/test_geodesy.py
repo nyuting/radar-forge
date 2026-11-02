@@ -117,7 +117,7 @@ class TestEnuToRangeAzimuthElevation:
         cardinal_enu_m = np.array(
             [[0.0, 1000.0, 0.0], [1000.0, 0.0, 0.0], [0.0, -1000.0, 0.0], [-1000.0, 0.0, 0.0]]
         )
-        _, azimuth_deg, _ = geodesy.enu_to_range_azimuth_elevation(cardinal_enu_m)
+        _, azimuth_deg, _ = geodesy.enu_to_range_azimuth_elevation_deg(cardinal_enu_m)
         np.testing.assert_allclose(azimuth_deg, [0.0, 90.0, 180.0, 270.0], atol=1e-12)
 
     def test_a_pythagorean_point_gives_exact_range_and_angles(self) -> None:
@@ -127,7 +127,7 @@ class TestEnuToRangeAzimuthElevation:
         exactly, elevation asin(12/13) = 67.38 deg (a zenith angle would read
         22.62), azimuth atan2(3, 4) = 36.87 deg.
         """
-        range_m, azimuth_deg, elevation_deg = geodesy.enu_to_range_azimuth_elevation(
+        range_m, azimuth_deg, elevation_deg = geodesy.enu_to_range_azimuth_elevation_deg(
             (300.0, 400.0, 1200.0)
         )
         # rtol 1e-12: a square root and one inverse trig function each.
@@ -137,7 +137,7 @@ class TestEnuToRangeAzimuthElevation:
 
     def test_rejects_a_last_axis_that_is_not_three(self) -> None:
         with pytest.raises(ValueError, match=r"shape \(\.\.\., 3\)"):
-            geodesy.enu_to_range_azimuth_elevation(np.zeros((4, 2)))
+            geodesy.enu_to_range_azimuth_elevation_deg(np.zeros((4, 2)))
 
 
 class TestRadiansAndInverse:
@@ -150,7 +150,7 @@ class TestRadiansAndInverse:
         enu_m = np.array(
             [[300.0, 400.0, 1200.0], [-250.0, 80.0, -40.0], [-10.0, -900.0, 5.0], [7.0, -3.0, 2.0]]
         )
-        range_m, azimuth_deg, elevation_deg = geodesy.enu_to_range_azimuth_elevation(enu_m)
+        range_m, azimuth_deg, elevation_deg = geodesy.enu_to_range_azimuth_elevation_deg(enu_m)
         range_rad_m, azimuth_rad, elevation_rad = geodesy.enu_to_range_azimuth_elevation_rad(enu_m)
         # rtol 1e-15: the degree form is the radian form times one constant.
         np.testing.assert_allclose(range_m, range_rad_m, rtol=1e-15)
