@@ -224,6 +224,20 @@ def test_radial_noise_is_the_cv_block_with_negative_cross_terms() -> None:
     )
 
 
+def test_radial_dwna_noise_is_the_old_trackers_with_the_closing_sign() -> None:
+    """TD5: the DWNA option reproduces kalman.process_noise_dwna, rate sign flipped."""
+    radial = RadialMotion(5.0, process_noise_model="dwna")
+    closing = np.diag([1.0, -1.0])
+    expected = closing @ process_noise_dwna(1.3, 5.0) @ closing
+    # rtol 1e-12: the same powers of T times sigma squared, in a different order.
+    np.testing.assert_allclose(radial.process_noise(np.zeros(2), 1.3), expected, rtol=1e-12)
+
+
+def test_radial_motion_rejects_an_unknown_noise_model() -> None:
+    with pytest.raises(ValueError, match="process_noise_model"):
+        RadialMotion(process_noise_model="singer")  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize("kind", ["CV", "CA"])
 def test_a_batched_cartesian_transition_equals_one_state_at_a_time(
     kind: str, rng: np.random.Generator
