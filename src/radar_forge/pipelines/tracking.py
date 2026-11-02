@@ -2,17 +2,16 @@ r"""Turn range-Doppler maps into tracks: detect, unfold, associate, filter.
 
 This module is the pipeline half of
 ``spec/scenario-003-tracking.md``. It owns everything between a
-:class:`~radar_forge.pipelines.scenarios.RangeDopplerProduct` and a call to one
-of the two trackers in :mod:`radar_forge.core.tracking`, chosen by
-``TrackingConfig.estimator``:
+:class:`~radar_forge.pipelines.scenarios.RangeDopplerProduct` and a call to
+:class:`~radar_forge.core.tracking.Tracker`, which measures range modulo the
+span of the burst's range axis
+(:func:`~radar_forge.pipelines.scenarios.range_axis_m`) with one of two
+filters, chosen by ``TrackingConfig.estimator``:
 
-* ``"kalman"``: :class:`~radar_forge.core.tracking.KalmanTracker`, a linear
-  Kalman filter with track-aided Doppler unfolding. Scenario 003's own runs use
-  it.
-* ``"ukf"``: :class:`~radar_forge.core.tracking.Tracker`, an unscented Kalman
-  filter that measures range modulo the span of the burst's range axis
-  (:func:`~radar_forge.pipelines.scenarios.range_axis_m`). The runs of scenario
-  001's three waveforms (S1, S2, S3) use it.
+* ``"kalman"``: a Kalman filter with track-aided Doppler unfolding. Scenario
+  003's own runs use it.
+* ``"ukf"``: an unscented Kalman filter, which unfolds by dual PRF or not at
+  all. The runs of scenario 001's three waveforms (S1, S2, S3) use it.
 
 Between the map and the tracker this module does:
 
@@ -67,7 +66,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field, fields, replace
-from typing import TYPE_CHECKING, Any, Literal, cast, get_args, get_type_hints
+from typing import TYPE_CHECKING, Any, Literal, get_args, get_type_hints
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -81,19 +80,28 @@ from radar_forge.core.detection import (
 )
 from radar_forge.core.tracking import (
     CartesianPosition,
+    ChiSquareGate,
     Coordinate,
-    KalmanFilter,
-    KalmanTracker,
+    DirectStateInitiator,
+    Estimator,
+    GaussianFilter,
+    GlobalNearestNeighbour,
     LifecyclePolicy,
+    MeasurementModel,
     RadialMotion,
+    SensorRegistration,
     StateEstimate,
     StateLayout,
+    TaylorLinearisation,
     Track,
     Tracker,
+    TrackInitiator,
+    TrackSnapshot,
     TrackStatus,
     build_tracker,
-    state_model_matrices,
+    marginal,
 )
+from radar_forge.core.tracking import Measurement as TrackerMeasurement
 from radar_forge.pipelines.scenarios import range_axis_m
 
 if TYPE_CHECKING:
@@ -164,7 +172,10 @@ SENSOR_ID = "rx0"
 """
 
 _MEASUREMENT_MODEL_ID = "range_doppler"
-"""The ID under which the UKF tracker registers its one measurement model."""
+"""The ID under which both trackers register their range and range-rate model."""
+
+_RANGE_MODEL_ID = "range"
+"""The ID of the ``"kalman"`` path's range-only marginal of that model (§5.3)."""
 
 STATE_FIELDS: tuple[str, ...] = ("range_m", "range_rate_mps")
 """The state vector of the ``range_1d`` state model, in order.
@@ -298,7 +309,8 @@ class TrackingConfig:
       acceleration for both, but the two process-noise models differ. The
       ``"kalman"`` path uses discrete white-noise acceleration, a constant
       acceleration of that size within each frame
-      (:func:`~radar_forge.core.tracking.process_noise_dwna`). The ``"ukf"``
+      (:class:`~radar_forge.core.tracking.RadialMotion` with
+      ``process_noise_model="dwna"``). The ``"ukf"``
       path uses :class:`~radar_forge.core.tracking.RadialMotion`, which adds
       ``acceleration_correlation_time_s``: continuous white noise of density
       :math:`q = 2\sigma_a^2\tau`, the white-noise limit of Singer's model
@@ -1195,6 +1207,34 @@ class FrameTracks:
     unfold_reference_id: int | None = None
 
 
+class _RangeOnlyBirth:
+    """Start a track from a measurement's range alone; its rate comes from the prior.
+
+    A brand-new single-burst track is still in its §5.3 bootstrap, so the rate
+    of the detection it is born from is a *folded* value, and a track seeded
+    with it starts out confidently wrong about which way the target is going
+    (scenario 003 §14.5). Seeding nothing is better: the rate starts at the
+    prior's zero, with the prior's ``v_max_mps`` spread.
+    """
+
+    def __init__(
+        self, initiator: DirectStateInitiator, periods: Mapping[str, float] | None
+    ) -> None:
+        self._initiator = initiator
+        self.prior = initiator.prior
+        layout = initiator.prior.state_layout
+        self._range = CartesianPosition(layout, ("range_m",), periods)
+        self._cut = marginal(CartesianPosition(layout, STATE_FIELDS, periods), ("range_m",))
+
+    def initiate(
+        self, measurement: TrackerMeasurement, model: MeasurementModel
+    ) -> Estimator | None:
+        """Start a filter from the range of ``measurement``, a range and range-rate one."""
+        return self._initiator.initiate(
+            self._cut.marginalise(measurement, _RANGE_MODEL_ID), self._range
+        )
+
+
 def range_layout(burst: RadarLike) -> StateLayout:
     """Return a one-coordinate layout, ``range_m``, with the period of a burst's map.
 
@@ -1254,19 +1294,18 @@ class ScenarioTracker:
         The CFAR settings in use.
     tracking : TrackingConfig
         The tracking settings in use.
-    tracker : KalmanTracker or Tracker
-        The tracker that holds the tracks: a
-        :class:`~radar_forge.core.tracking.KalmanTracker` when
-        ``tracking.estimator`` is ``"kalman"``, a
-        :class:`~radar_forge.core.tracking.Tracker` running a UKF when it is
-        ``"ukf"``.
+    tracker : Tracker
+        The :class:`~radar_forge.core.tracking.Tracker` that holds the tracks.
+        Each track's filter is a Kalman filter (the Taylor linearisation, with
+        discrete white-noise acceleration) when ``tracking.estimator`` is
+        ``"kalman"``, and a UKF when it is ``"ukf"``.
     folding_layout : StateLayout
         One coordinate, ``range_m``, with the period the measured range has:
         the span of the first burst's range axis
-        (:func:`~radar_forge.pipelines.scenarios.range_axis_m`) on the
-        ``"ukf"`` path, and none on the ``"kalman"`` path. The measurement
-        model, the exported range (:meth:`StateLayout.wrap`) and the range
-        error of a scored track (:meth:`StateLayout.residual`) all use it.
+        (:func:`~radar_forge.pipelines.scenarios.range_axis_m`). The
+        measurement model, the exported range (:meth:`StateLayout.wrap`), the
+        ``"kalman"`` path's range history and the range error of a scored
+        track (:meth:`StateLayout.residual`) all use it.
     min_unfold_frames : int or None
         ``"kalman"`` path only, ``None`` otherwise. Frames of associated range
         history a track needs before it may unfold its Doppler, from
@@ -1285,9 +1324,9 @@ class ScenarioTracker:
         velocity, so their folds cannot be told apart, or ``tracking.v_max_mps``
         does not exceed the smaller of the two; if ``tracking.estimator``,
         ``tracking.unfolding_mode`` or ``detection.variant`` is not a known
-        name; or if the ``"ukf"``
-        estimator is asked for track-aided or oracle unfolding, or for a state
-        model other than ``"range_1d"``.
+        name; if the ``"ukf"`` estimator is asked for track-aided or oracle
+        unfolding; or if either estimator is asked for a state model other than
+        ``"range_1d"``.
 
     Notes
     -----
@@ -1295,9 +1334,9 @@ class ScenarioTracker:
     Doppler at its unambiguous velocity, and the tracker should measure only
     what does not fold, or what has been unfolded.
 
-    - Range: on the ``"ukf"`` path the radar only ever sees range modulo the
-      span of the first burst's range axis, and the measurement model says
-      exactly that. The span is ``Radar.unambiguous_range_m`` for a pulsed
+    - Range: the radar only ever sees range modulo the span of the first
+      burst's range axis, and on both paths the measurement model says exactly
+      that. The span is ``Radar.unambiguous_range_m`` for a pulsed
       burst and twice it for an FMCW burst, whose deramped baseband is complex
       (:func:`~radar_forge.pipelines.scenarios.range_axis_m`, and
       ``spec/scenario-003-tracking.md`` §14.11). The filter's range state is
@@ -1306,7 +1345,9 @@ class ScenarioTracker:
       exported range is wrapped. Whether a target crosses the wrap depends on
       the scenario's window, so each run's figures are in
       ``spec/scenario-003-tracking.md`` §14.11, beside the window they hold
-      for. The ``"kalman"`` path treats range as unambiguous.
+      for. The ``"kalman"`` path's range history, which the fold monitor fits a
+      slope to, is unwrapped as it grows, so a target crossing the wrap does
+      not jump a whole span within it.
     - Two bursts: their maps may span different ranges, and
       :func:`dual_prf_detections` pairs their detections on the assumption
       that the target is inside both spans, so that both measure the same
@@ -1340,12 +1381,12 @@ class ScenarioTracker:
     frame_time_s: float = 1.0
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
-    tracker: KalmanTracker | Tracker = field(init=False)
+    tracker: Tracker = field(init=False)
     folding_layout: StateLayout = field(init=False)
     frames: list[FrameTracks] = field(default_factory=list, init=False)
     # The "ukf" path only: how many components each measurement has.
     _n_measured: int = field(default=2, init=False)
-    # The "kalman" path only; they go with KalmanTracker (tracker-001 §13 step 6).
+    # The "kalman" path only: the §5.3 bootstrap's state.
     min_unfold_frames: int | None = field(init=False)
     _range_history: dict[int, list[float]] = field(default_factory=dict, init=False)
     _unfold_frame: dict[int, int] = field(default_factory=dict, init=False)
@@ -1354,8 +1395,8 @@ class ScenarioTracker:
         """Check the settings, then build the tracker they ask for."""
         self._check_settings()
         burst = self.bursts[0]
+        self.folding_layout = range_layout(burst)
         if self.tracking.estimator == "ukf":
-            self.folding_layout = range_layout(burst)
             # A single burst may fold the Doppler unless its unambiguous
             # velocity exceeds any speed the target can have.
             folds_doppler = (
@@ -1366,14 +1407,13 @@ class ScenarioTracker:
             self.tracker = self._build_ukf()
             return
 
-        self.folding_layout = StateLayout((Coordinate("range_m", "m"),), frame="radial")
-        self.tracker = self._build_kalman()
         self.min_unfold_frames = minimum_unfold_history_frames(
             self.tracking.sigma_range_m,
             self.fold_span_mps,
             self.frame_time_s,
             self.tracking.unfold_sigma_gate,
         )
+        self.tracker = self._build_kalman()
 
     def _check_settings(self) -> None:
         """Raise ``ValueError`` for bursts or settings this class cannot run."""
@@ -1418,10 +1458,10 @@ class ScenarioTracker:
                 f"{self.tracking.unfolding_mode!r}."
             )
             raise ValueError(msg)
-        if self.tracking.estimator == "ukf" and self.tracking.state_model != "range_1d":
+        if self.tracking.state_model != "range_1d":
             msg = (
-                "the 'ukf' estimator runs the range_1d state model only; got "
-                f"{self.tracking.state_model!r}."
+                f"the {self.tracking.estimator!r} estimator runs the range_1d state model only; "
+                f"got {self.tracking.state_model!r}."
             )
             raise ValueError(msg)
 
@@ -1543,13 +1583,9 @@ class ScenarioTracker:
             )
             raise ValueError(msg)
 
-        # __post_init__ built the tracker tracking.estimator names, so that
-        # field, not the tracker's class, says which path this is. The UKF path
-        # measures range modulo the map's range axis, so it detects on that
-        # axis as the circle it is. The Kalman path treats range as
-        # unambiguous, as scenario 003 always has.
-        is_ukf = self.tracking.estimator == "ukf"
-        wrap_range = is_ukf
+        # Both paths measure range modulo the map's range axis, so detection
+        # treats that axis as the circle it is.
+        wrap_range = True
         if len(self.bursts) == 2:
             spans_mps = [2.0 * burst.unambiguous_velocity_mps for burst in self.bursts]
             detections = dual_prf_detections(
@@ -1563,13 +1599,15 @@ class ScenarioTracker:
             detections = frame_detections(products[0], self.detection, wrap_range=wrap_range)
 
         reference_id: int | None = None
-        if is_ukf:
+        # tracking.estimator, which __post_init__ built the tracker from, says
+        # which path this is.
+        if self.tracking.estimator == "ukf":
             detections, associations, records = self._track_ukf(
-                cast(Tracker, self.tracker), products[0], detections, time_s
+                self.tracker, products[0], detections, time_s
             )
         else:
             detections, associations, records, reference_id = self._track_kalman(
-                cast(KalmanTracker, self.tracker),
+                self.tracker,
                 detections,
                 frame_index,
                 time_s,
@@ -1664,46 +1702,120 @@ class ScenarioTracker:
         return detections, associations, records
 
     # ------------------------------------------------------------------ #
-    # The "kalman" path only. Everything below goes with KalmanTracker
-    # when scenario 003 moves onto Tracker (spec/tracker-001.md §13 step 6),
-    # together with the else-branches of __post_init__ and step.
+    # The "kalman" path: a Kalman filter on Tracker, with the §5.3
+    # bootstrap and the fold-consistency monitor as its scenario policy
+    # (spec/tracker-001.md §8.3, TD9).
     # ------------------------------------------------------------------ #
 
-    def _build_kalman(self) -> KalmanTracker:
-        """Build the Kalman tracker: range_1d, with the §5.3 bootstrap's settings."""
-        model = state_model_matrices(
-            "range_1d",
-            self.frame_time_s,
-            sigma_accel_mps2=self.tracking.sigma_accel_mps2,
-            sigma_range_m=self.tracking.sigma_range_m,
-            sigma_velocity_mps=self.tracking.sigma_velocity_mps,
+    def _build_kalman(self) -> Tracker:
+        """Build the Kalman tracker: range_1d on ``Tracker``, with §5.3's policy.
+
+        The filter is ``GaussianFilter`` with the Taylor linearisation, which on
+        this linear model is the Kalman filter, and discrete white-noise
+        acceleration, which scenario 003 specifies (``spec/tracker-001.md``
+        TD5). Range is measured modulo :attr:`folding_layout`'s period, as on
+        the ``"ukf"`` path.
+        """
+        motion = RadialMotion(self.tracking.sigma_accel_mps2, process_noise_model="dwna")
+        range_period_m = self.folding_layout.coordinates[0].period
+        periods = None if range_period_m is None else {"range_m": range_period_m}
+        range_and_rate = CartesianPosition(motion.state_layout, STATE_FIELDS, periods)
+        # A new track knows its range from its first detection, and of its rate
+        # only that the target is no faster than v_max_mps. The range mean 0
+        # and the time 0 are placeholders the initiator overwrites.
+        prior = StateEstimate(
+            np.zeros(2, dtype=np.float64),
+            np.diag(
+                np.asarray(
+                    [self.tracking.sigma_range_m**2, self.tracking.v_max_mps**2], dtype=np.float64
+                )
+            ),
+            0.0,
+            motion.state_layout,
         )
-        initial_covariance = np.diag(
-            np.asarray(
-                [self.tracking.sigma_range_m**2, self.tracking.v_max_mps**2],
-                dtype=np.float64,
-            )
+
+        def kalman_filter(state: StateEstimate) -> GaussianFilter:
+            return GaussianFilter(state, motion, TaylorLinearisation())
+
+        direct = DirectStateInitiator(kalman_filter, prior)
+        # With two bursts the waveform has resolved the Doppler, so a track may
+        # start from both components. With one, the rate is still folded.
+        initiator: TrackInitiator = (
+            direct if len(self.bursts) == 2 else _RangeOnlyBirth(direct, periods)
         )
-        return KalmanTracker(
-            model=model,
-            initial_covariance=initial_covariance,
-            gate_probability=self.tracking.gate_probability,
+        n_lives = self.tracking.n_delete_misses + self.tracking.n_reacquire_frames
+        policy = LifecyclePolicy(
             n_confirm_hits=self.tracking.n_confirm_hits,
             n_confirm_frames=self.tracking.n_confirm_frames,
             n_delete_misses=self.tracking.n_delete_misses,
             n_reacquire_frames=self.tracking.n_reacquire_frames,
+            # Frames are evenly spaced, so the miss count already measures
+            # time; the coast-time limit is set past it so that it never fires.
+            max_coast_time_s=(n_lives + 1) * self.frame_time_s,
+            # The frame records here keep the history.
+            n_history=0,
+            # A confirmed track that stops associating has, on this scenario,
+            # almost always taken a wrong Doppler fold: the target is detected
+            # in every frame at the link budget of §4. So on the miss that
+            # starts re-acquisition its rate is forgotten, its range gate
+            # widens by T² v_max² a frame, and the redetection falls inside it
+            # before a parallel track can confirm on it.
+            reacquire_reset=("range_rate_mps",),
         )
+        return Tracker(
+            {
+                _MEASUREMENT_MODEL_ID: range_and_rate,
+                _RANGE_MODEL_ID: marginal(range_and_rate, ("range_m",)),
+            },
+            {SENSOR_ID: SensorRegistration(SENSOR_ID, (_MEASUREMENT_MODEL_ID,))},
+            ChiSquareGate(self.tracking.gate_probability),
+            GlobalNearestNeighbour(),
+            initiator,
+            policy,
+            # Pairs gate at one or two components (the retry below), and
+            # neither NIS nor the negative log-likelihood compares the two
+            # fairly (Tracker's cost). This is KalmanTracker's rule, kept so
+            # that moving onto Tracker moves no figure; measured, the
+            # negative log-likelihood hands a confirmed track's detection to a
+            # tentative one at its first two-component frame. A likelihood
+            # ratio against the clutter density replaces it next.
+            cost="legacy_nis",
+            # Confirmed-first was measured worse here on every count: a
+            # confirmed track whose gate has widened to re-acquire outbids
+            # tentative ones for false alarms too (spec/tracker-001.md §7.3).
+            assignment="joint",
+            model_selector=self._select_models,
+        )
+
+    def _select_models(
+        self, snapshot: TrackSnapshot, measurement: TrackerMeasurement
+    ) -> tuple[str, ...]:
+        """§5.3's bootstrap, and the range-only retry, as ``Tracker``'s model selector.
+
+        A track that cannot yet select a Doppler fold measures range alone. One
+        that can measures range and range rate, and falls back to range alone
+        when the pair fails its rate gate. On this scenario that failure is
+        almost never a missed detection; it is a detection unfolded to the
+        wrong fold, which misses by a whole fold span in velocity while its
+        range is as good as any other frame's. Coasting on it would throw that
+        range away, let the track drift, and leave the detection free to seed a
+        parallel track that confirms and competes, which is how one target
+        ends up with several track IDs.
+        """
+        if len(self.bursts) == 2 or self.is_unfoldable(snapshot.track_id):
+            return (_MEASUREMENT_MODEL_ID, _RANGE_MODEL_ID)
+        return (_RANGE_MODEL_ID,)
 
     @property
     def fold_span_mps(self) -> float:
         """Width of one Doppler fold of the first burst, ``2 * unambiguous_velocity_mps``."""
         return 2.0 * self.bursts[0].unambiguous_velocity_mps
 
-    def is_unfoldable(self, track: Track[KalmanFilter]) -> bool:
-        """Whether this track has enough range history to select a Doppler fold."""
+    def is_unfoldable(self, track_id: int) -> bool:
+        """Whether a track has enough range history to select a Doppler fold."""
         if self.min_unfold_frames is None:
             return False
-        return len(self._range_history.get(track.track_id, ())) >= self.min_unfold_frames
+        return len(self._range_history.get(track_id, ())) >= self.min_unfold_frames
 
     def unfold_frame_of(self, track_id: int) -> int | None:
         """Return the frame at which a track stepped from range-only to both components.
@@ -1715,139 +1827,136 @@ class ScenarioTracker:
 
     def _track_kalman(
         self,
-        tracker: KalmanTracker,
+        tracker: Tracker,
         detections: list[Measurement],
         frame_index: int,
         time_s: float,
         truth_velocity_mps: float | None,
     ) -> tuple[list[Measurement], dict[int, int], tuple[TrackRecord, ...], int | None]:
         """Run the Kalman tracker over one frame's detections."""
-        if len(self.bursts) == 2:
-            # The dual-PRF path: the waveform has resolved the ambiguity, so
-            # there is no bootstrap to serve out and no fold to select. Every
-            # track measures range and range rate from its first frame.
-            accepted = [
-                index
-                for index, measurement in enumerate(detections)
-                if measurement.burst_index == 0 and measurement.status == "accepted"
-            ]
-            associations, records = self._advance(
-                tracker,
-                [detections[index] for index in accepted],
-                frame_index,
-                time_s,
-                unfolded=True,
+        dual_prf = len(self.bursts) == 2
+        reference_id: int | None = None
+        if not dual_prf:
+            # With two bursts the waveform has resolved the ambiguity, so there
+            # is no bootstrap to serve out and no fold to select.
+            reference = self._reference_track(tracker)
+            reference_id = None if reference is None else reference.track_id
+            detections = self._unfold_all(detections, reference, truth_velocity_mps)
+        accepted = [
+            index
+            for index, measurement in enumerate(detections)
+            if measurement.burst_index == 0 and measurement.status == "accepted"
+        ]
+        for track in tracker.tracks:
+            if dual_prf or self.is_unfoldable(track.track_id):
+                self._unfold_frame.setdefault(track.track_id, frame_index)
+
+        covariance = np.diag(
+            np.asarray(
+                [self.tracking.sigma_range_m**2, self.tracking.sigma_velocity_mps**2],
+                dtype=np.float64,
             )
-            # _advance indexes the accepted detections; map back to all of them.
-            return (
-                detections,
-                {track_id: accepted[index] for track_id, index in associations.items()},
-                tuple(
-                    record
-                    if record.detection_index is None
-                    else replace(record, detection_index=accepted[record.detection_index])
-                    for record in records
+        )
+        # A range-only track takes the range alone (_select_models), so the
+        # folded rate of a measurement not yet unfolded is never used.
+        values = [
+            np.asarray(
+                [
+                    detections[index].range_m,
+                    detections[index].velocity_folded_mps
+                    if detections[index].velocity_unfolded_mps is None
+                    else detections[index].velocity_unfolded_mps,
+                ],
+                dtype=np.float64,
+            )
+            for index in accepted
+        ]
+        batch = tracker.sensors[SENSOR_ID].batch(
+            time_s, [(_MEASUREMENT_MODEL_ID, value, covariance) for value in values]
+        )
+        snapshots = [
+            snapshot for snapshot in tracker.process(batch) if snapshot.status != "deleted"
+        ]
+
+        # Range history drives the bootstrap, so it counts associations, not
+        # frames: a coasting track learns nothing new about its range slope. A
+        # track held for re-acquisition keeps its history: its ranges were
+        # never the reason it was lost, and the fold monitor needs them the
+        # moment it comes back.
+        alive = {snapshot.track_id for snapshot in snapshots}
+        self._range_history = {
+            track_id: history
+            for track_id, history in self._range_history.items()
+            if track_id in alive
+        }
+        for snapshot in snapshots:
+            history = self._range_history.setdefault(snapshot.track_id, [])
+            if snapshot.nis is not None and snapshot.measurement_index is not None:
+                self._extend_history(history, float(values[snapshot.measurement_index][0]))
+
+        records = tuple(
+            TrackRecord(
+                track_id=snapshot.track_id,
+                status=snapshot.status,
+                state=np.concatenate(
+                    [
+                        self.folding_layout.wrap(snapshot.state[:1], interval="nonnegative"),
+                        snapshot.state[1:],
+                    ]
                 ),
-                None,
+                covariance=np.array(snapshot.covariance, dtype=np.float64),
+                # The dimension the update used; for a track that took none,
+                # the one it would have measured at.
+                measurement_dim=snapshot.measurement_dim
+                if snapshot.measurement_dim is not None
+                else 2
+                if dual_prf or self.is_unfoldable(snapshot.track_id)
+                else 1,
+                n_hits=snapshot.n_hits,
+                n_misses=snapshot.n_misses,
+                nis=snapshot.nis,
+                detection_index=None
+                if snapshot.measurement_index is None
+                else accepted[snapshot.measurement_index],
             )
+            for snapshot in snapshots
+        )
+        # An update has a NIS; a birth, which also took a detection, has none.
+        associations = {
+            record.track_id: record.detection_index
+            for record in records
+            if record.detection_index is not None and record.nis is not None
+        }
+        return detections, associations, records, reference_id
 
-        reference = self._reference_track(tracker)
-        detections = self._unfold_all(detections, reference, truth_velocity_mps)
-        associations, records = self._advance(tracker, detections, frame_index, time_s)
-        return detections, associations, records, reference.track_id if reference else None
+    def _extend_history(self, history: list[float], range_m: float) -> None:
+        """Append a measured range to a track's history, unwrapped.
 
-    def _reference_track(self, tracker: KalmanTracker) -> Track[KalmanFilter] | None:
+        The map shows range modulo its span, so a target crossing the span
+        reads a whole span away from where it was. The history is kept
+        continuous instead: each range is the last one plus the short way
+        round to the new reading (:meth:`StateLayout.residual`), as
+        :func:`numpy.unwrap` does. So :func:`slope_velocity_mps` fits the
+        target's real motion, across the wrap too. It needs the target to
+        move less than half a span between associations, which at 1 s frames
+        is 3 km/s on S2's 6 km map.
+        """
+        if history:
+            step_m = self.folding_layout.residual(np.array([range_m]), np.array([history[-1]]))
+            range_m = history[-1] + float(step_m[0])
+        history.append(range_m)
+
+    def _reference_track(self, tracker: Tracker) -> Track[Estimator] | None:
         """Return the track whose prediction selects the fold for this frame."""
-        candidates = [track for track in tracker.tracks if self.is_unfoldable(track)]
+        candidates = [track for track in tracker.tracks if self.is_unfoldable(track.track_id)]
         if not candidates:
             return None
         return max(candidates, key=lambda track: len(self._range_history[track.track_id]))
 
-    def _advance(
-        self,
-        tracker: KalmanTracker,
-        measurements: list[Measurement],
-        frame_index: int,
-        time_s: float,
-        *,
-        unfolded: bool = False,
-    ) -> tuple[dict[int, int], tuple[TrackRecord, ...]]:
-        """Run the Kalman tracker over one frame's measurements.
-
-        Returns the associations, as indices into ``measurements``, and a
-        record of every track alive at the end of the frame.
-        """
-        live = [track for track in tracker.tracks if track.is_alive]
-        if unfolded:
-            # Nothing is ambiguous, so a new track may be seeded from both
-            # measurement components and every track measures both from birth.
-            tracker.n_initiation_rows = 2
-            dims = [2] * len(live)
-        else:
-            dims = [2 if self.is_unfoldable(track) else 1 for track in live]
-        for track, dim in zip(live, dims, strict=True):
-            if dim == 2 and track.track_id not in self._unfold_frame:
-                self._unfold_frame[track.track_id] = frame_index
-
-        vectors = [
-            np.asarray(
-                [
-                    measurement.range_m,
-                    measurement.velocity_unfolded_mps
-                    if measurement.velocity_unfolded_mps is not None
-                    else measurement.velocity_folded_mps,
-                ],
-                dtype=np.float64,
-            )
-            for measurement in measurements
-        ]
-        known_ids = {track.track_id for track in tracker.tracks}
-        result = tracker.step(vectors, time_s=time_s, measurement_dims=dims)
-        # KalmanTracker seeds one track per unassociated measurement, in order,
-        # and appends it, so the new IDs pair with result.unassociated in turn.
-        new_ids = [track.track_id for track in result.tracks if track.track_id not in known_ids]
-        detection_index = dict(result.associations)
-        detection_index.update(zip(new_ids, result.unassociated, strict=True))
-
-        # Range history drives the bootstrap, so it counts associations, not
-        # frames: a coasting track learns nothing new about its range slope.
-        for track_id, measurement_index in result.associations.items():
-            self._range_history.setdefault(track_id, []).append(
-                measurements[measurement_index].range_m
-            )
-        for track in result.tracks:
-            self._range_history.setdefault(track.track_id, [])
-        # A track held for re-acquisition keeps its range history: the ranges
-        # are unambiguous and were never the reason it was lost, and the fold
-        # monitor needs them the moment it comes back.
-        alive_ids = {track.track_id for track in result.tracks}
-        alive_ids.update(tracker.lost_track_ids)
-        self._range_history = {
-            track_id: history
-            for track_id, history in self._range_history.items()
-            if track_id in alive_ids
-        }
-
-        records = tuple(
-            TrackRecord(
-                track_id=track.track_id,
-                status=track.status,
-                state=np.array(track.estimator.estimate.state, dtype=np.float64),
-                covariance=np.array(track.estimator.estimate.covariance, dtype=np.float64),
-                measurement_dim=track.estimator.measurement_dim,
-                n_hits=track.n_hits,
-                n_misses=track.n_misses,
-                nis=track.estimator.last_nis,
-                detection_index=detection_index.get(track.track_id),
-            )
-            for track in result.tracks
-        )
-        return result.associations, records
-
     def _unfold_all(
         self,
         measurements: Sequence[Measurement],
-        reference: Track[KalmanFilter] | None,
+        reference: Track[Estimator] | None,
         truth_velocity_mps: float | None,
     ) -> list[Measurement]:
         """Attach an unfolded velocity to each measurement, where one is available."""
@@ -1873,7 +1982,7 @@ class ScenarioTracker:
             predicted_mps: float | None = truth_velocity_mps
         else:
             predicted_mps = (
-                float(reference.estimator.estimate.state[1]) if reference is not None else None
+                float(reference.estimator.state.mean[1]) if reference is not None else None
             )
 
         if predicted_mps is None:
