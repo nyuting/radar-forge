@@ -1,4 +1,4 @@
-"""Tests for scripts/check_conventions.py: R7 heading slugs and R8 comment style."""
+"""Tests for scripts/check_conventions.py: R7 slugs, R8 comment style, R9 control characters."""
 
 from __future__ import annotations
 
@@ -78,6 +78,30 @@ def test_every_tracked_python_file_passes_r8() -> None:
         if problem.rule == "R8 comments"
     ]
     assert problems == []
+
+
+def _r9_lines(text: str) -> list[int]:
+    problems = checker.check_control_characters(Path("src/radar_forge/x.py"), text)
+    assert all(problem.rule == "R9 control" for problem in problems)
+    return [problem.line for problem in problems]
+
+
+def test_a_bel_written_in_place_of_backslash_alpha_is_flagged() -> None:
+    """Catches the BEL that lands in a file when a tool writes ``\\alpha`` through an escape."""
+    # The source as cd568eb found it: "\a" here is the BEL byte itself.
+    source = 'def f() -> None:\n    r"""Weight W0 = \alpha^2."""\n'
+    assert _r9_lines(source) == [2]
+
+
+@pytest.mark.parametrize("character", ["\b", "\f", "\x00", "\x1b", "\x7f"])
+def test_other_control_characters_are_flagged(character: str) -> None:
+    """Catches a pattern that stops at BEL and lets backspace, form feed or ESC through."""
+    assert _r9_lines(f"x = 1\ny = '{character}'\n") == [2]
+
+
+def test_tab_and_crlf_are_not_flagged() -> None:
+    """Catches R9 rejecting a CRLF working copy, or a tab in a Markdown code block."""
+    assert _r9_lines("x = 1\r\n\ty = 2\r\n") == []
 
 
 @pytest.mark.parametrize(

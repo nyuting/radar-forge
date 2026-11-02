@@ -32,6 +32,7 @@ tagged **[review]** — which are the ones a tool genuinely cannot judge.
 | R6 `broadcast` | `np.tile`/`np.repeat`/`np.broadcast_to` without a justification comment |
 | R7 `anchor` | An in-file Markdown link `](#section)` with no matching heading (§12) |
 | R8 `comments` | A `##########` banner comment, or an `# Inputs:`/`# Outputs:` comment block |
+| R9 `control` | A control character other than tab, LF or CR in a `.py` or `.md` file, usually a BEL that a script wrote for `\alpha` |
 
 Each failure prints the rule, the offending line, the fix, and a pointer back here.
 

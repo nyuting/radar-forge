@@ -70,7 +70,7 @@ to understand and to test; if a step is hard to test on its own, split it. The f
 | `docs/conventions/audit.md` | Auditing code against the spec and pruning tests: Q1–Q8, rules C1–C4, the reports |
 | `src/radar_forge/core/constants.py` | Every physical constant, defined once |
 | `.githooks/` | pre-commit, commit-msg, pre-push |
-| `scripts/check_conventions.py` | Rules R1–R8: TOML config, layout, docstrings, constants, units, broadcasting, Markdown anchors, comment banners |
+| `scripts/check_conventions.py` | Rules R1–R9: TOML config, layout, docstrings, constants, units, broadcasting, Markdown anchors, comment banners, control characters |
 | `Makefile` | The single definition of every gate |
 | `spec/` | Design specification; the intended end state |
 | `spec/data-001-formats.md` | File formats, columns, units and conventions for every input, output and product |

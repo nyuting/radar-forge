@@ -19,6 +19,8 @@ R7  Every in-file Markdown anchor (``](#section)``) resolves to a real heading
     in that same file, so a summary table's jump links cannot rot.
 R8  Python comments carry no hash banners and no ``Inputs:``/``Outputs:``
     blocks; parameters and returns belong in the NumPy docstring.
+R9  Python and Markdown files hold no control characters other than tab, line
+    feed and carriage return, such as the BEL a tool writes for ``\\alpha``.
 
 Each failure prints the rule, the fix, and where the rule is documented.
 
@@ -528,9 +530,46 @@ def check_comment_style(rel: Path, lines: list[str]) -> list[Problem]:
     return problems
 
 
+# --------------------------------------------------------------------------- #
+# R9 — no control characters
+# --------------------------------------------------------------------------- #
+
+# C0 controls and DEL, except tab, line feed and carriage return: a CRLF working
+# copy is the editor's business, and git normalises it on commit.
+CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def check_control_characters(rel: Path, text: str) -> list[Problem]:
+    """R9: no control characters in a Python or Markdown file.
+
+    They are invisible in an editor and in a diff, and no linter reports them. The
+    usual source is a script that writes LaTeX through a string that reads escapes,
+    such as Python in a shell heredoc, so ``\\alpha``, ``\\beta`` and ``\\frac``
+    land in the file as BEL, BS and FF.
+    """
+    problems: list[Problem] = []
+    for number, line in enumerate(text.split("\n"), start=1):
+        match = CONTROL_RE.search(line)
+        if match:
+            problems.append(
+                Problem(
+                    rel,
+                    number,
+                    "R9 control",
+                    f"control character U+{ord(match.group()):04X} at column {match.start() + 1}.",
+                    "type the backslash the character replaced (\\a for BEL, \\b for BS, "
+                    "\\f for FF), or delete it.",
+                )
+            )
+    return problems
+
+
 def check_file(rel: Path, canonical: set[str]) -> list[Problem]:
     """Run every rule against one repository-relative path."""
     problems = check_path_rules(rel)
+
+    if rel.suffix in {".md", ".py"} and (REPO / rel).is_file():
+        problems += check_control_characters(rel, (REPO / rel).read_text(encoding="utf-8"))
 
     if rel.suffix == ".md":
         problems += check_markdown_anchors(rel)
