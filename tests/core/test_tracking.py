@@ -32,6 +32,7 @@ from radar_forge.core.tracking import (
     state_model_matrices,
     update,
 )
+from radar_forge.core.tracking.kalman import _wrap_to_pi
 
 # Scenario 003's numbers, so the unit tests exercise the conditioning the
 # scenario actually runs at -- in particular the five orders of magnitude
@@ -872,6 +873,13 @@ class TestEnuMeasurementModel:
         measurement = model.measurement_function(np.array([10.0, 10_000.0, 0.0, 0.0]))
         innovation, _, _ = innovation_of(KalmanState(state, np.eye(4)), measurement, model)
         assert abs(innovation[1]) < 0.01
+
+    def test_the_angle_wrap_stays_inside_its_half_open_interval(self):
+        """The float just below -pi wraps to -pi, not pi: the modulo rounds up to 2 pi."""
+        below_minus_pi = np.nextafter(-np.pi, -4.0)
+        wrapped = _wrap_to_pi(np.array([below_minus_pi, -np.pi, 0.0, np.pi]))
+        assert np.all(wrapped >= -np.pi)
+        assert np.all(wrapped < np.pi)
 
     @pytest.mark.parametrize(
         ("state_model", "position_m", "match"),

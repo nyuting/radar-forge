@@ -629,7 +629,12 @@ def predict(state: KalmanState, model: TrackModel) -> KalmanState:
 
 def _wrap_to_pi(angle_rad: NDArray[np.float64]) -> NDArray[np.float64]:
     """Wrap an angle in radians to [-pi, pi)."""
-    wrapped: NDArray[np.float64] = (angle_rad + np.pi) % (2.0 * np.pi) - np.pi
+    shifted = (angle_rad + np.pi) % (2.0 * np.pi)
+    # The modulo of a tiny negative number can round up to exactly 2 pi, which
+    # lies outside the half-open interval; fold it back to zero, as
+    # StateLayout.wrap does.
+    shifted = np.where(shifted >= 2.0 * np.pi, shifted - 2.0 * np.pi, shifted)
+    wrapped: NDArray[np.float64] = shifted - np.pi
     return wrapped
 
 
