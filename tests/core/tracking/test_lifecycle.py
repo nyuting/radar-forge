@@ -167,6 +167,10 @@ def test_a_gap_longer_than_max_coast_time_deletes_the_track() -> None:
         ({"max_coast_time_s": float("inf")}, "max_coast_time_s"),
         ({"n_confirm_hits": True}, "int"),
         ({"n_confirm_frames": 5.0}, "int"),
+        ({"reacquire_reset": ["range_rate_mps"]}, "reacquire_reset"),
+        ({"reacquire_reset": ("range_rate_mps", "range_rate_mps")}, "reacquire_reset"),
+        ({"reacquire_reset": ("",)}, "reacquire_reset"),
+        ({"reacquire_reset": "range_rate_mps"}, "reacquire_reset"),
     ],
     ids=[
         "M above N",
@@ -178,10 +182,12 @@ def test_a_gap_longer_than_max_coast_time_deletes_the_track() -> None:
         "infinite coast time",
         "bool count",
         "float count",
+        "reset names in a list",
+        "reset name repeated",
+        "empty reset name",
+        "reset given as one string",
     ],
 )
-def test_the_policy_rejects_an_impossible_setting(
-    policy: dict[str, int | float], match: str
-) -> None:
+def test_the_policy_rejects_an_impossible_setting(policy: dict[str, object], match: str) -> None:
     with pytest.raises(ValueError, match=match):
         LifecyclePolicy(**policy)  # type: ignore[arg-type]

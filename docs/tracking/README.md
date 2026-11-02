@@ -21,14 +21,14 @@ The package runs two tracker loops for now. Both keep their tracks as the same `
   that each target has one track whichever sensor sees it. The scenario-003 runs over
   scenario 001's S1, S2 and S3 use it: `estimator = "ukf"`.
 
-A later change moves scenario 003's own runs onto `Tracker` too, and deletes `KalmanTracker`,
-once `Tracker` has what the Limitations below list.
+A later change moves scenario 003's own runs onto `Tracker` too (`spec/tracker-001.md` §13
+step 6), and the one after deletes `KalmanTracker` (step 7).
 
 | Module | What it holds |
 | :-- | :-- |
 | `coordinates.py` | Named coordinates (`x_m`, `xdot_mps`, …), the state layout they form, and `StateEstimate`: a mean, a covariance and a time. x is east, y is north and z is up, so an azimuth is measured clockwise from north. |
 | `motion.py` | Motion models, which predict a state forward in time: `CartesianMotion` (constant velocity, CV, or constant acceleration, CA, per axis) and `RadialMotion` (range and range rate). |
-| `measurement_models.py` | `Measurement` (a value, its covariance, a time, a sensor and a model), `MeasurementBatch` (one scan from one sensor), `SensorRegistration` (a sensor, and the models its measurements may use), and the models that predict a measurement from a state: `CartesianPosition` (coordinates reported directly), `RangeAzimuthElevationRangeRate` (a monostatic radar's range, azimuth, elevation and range rate) and `BistaticRangeDopplerModel`. |
+| `measurement_models.py` | `Measurement` (a value, its covariance, a time, a sensor and a model), `MeasurementBatch` (one scan from one sensor), `SensorRegistration` (a sensor, and the models its measurements may use), and the models that predict a measurement from a state: `CartesianPosition` (coordinates reported directly), `RangeAzimuthElevationRangeRate` (a monostatic radar's range, azimuth, elevation and range rate) and `BistaticRangeDopplerModel`. `marginal` keeps some of a model's components, so that a track can use part of a measurement, such as its range alone. |
 | `estimation.py` | The `Estimator` interface, the innovation statistics used for gating, and `GaussianFilter`: the Kalman filter (KF), the extended Kalman filter (EKF) and the unscented Kalman filter (UKF) in one predict and one update. |
 | `linearisation.py` | How `GaussianFilter` carries a mean and a covariance through a model, the one thing that differs between its filters: `TaylorLinearisation` (the KF on a linear model, the EKF otherwise) and `UnscentedLinearisation` (the UKF). |
 | `association.py` | The chi-square gate, and nearest-neighbour (NN) and global nearest-neighbour (GNN) assignment. |
@@ -57,8 +57,13 @@ It does these five steps in order:
    which measures how surprising the measurement is; its square root is the *Mahalanobis
    distance*. A pair fails the *chi-square gate* (`ChiSquareGate.accepts`) when its NIS is
    larger than a true measurement's would be, at the gate probability, and is dropped.
-3. **Assign.** Pair measurements with tracks, in two stages. Confirmed tracks pick first, from
-   all the measurements. Tentative tracks then pick from what is left (`GlobalNearestNeighbour`).
+   A `model_selector` may offer a pair more than one model, best first, such as range and
+   range rate and then range alone (a `marginal` of the first). The pair keeps the first
+   model it passes. When pairs of different dimensions pass, the cost must be the negative
+   log-likelihood: NIS grows with the dimension, so it cannot compare them.
+3. **Assign.** Pair measurements with tracks (`GlobalNearestNeighbour`). By default this is
+   done in two stages. Confirmed tracks pick first, from all the measurements. Tentative tracks
+   then pick from what is left. With `assignment="joint"`, every track picks in one solve.
 4. **Update, and confirm or delete.** Correct each track that got a measurement
    (`GaussianFilter.update`), reusing the innovation from step 2. Then count a hit or a miss for every
    track the sensor can see (`TrackManager.record_hit`, `TrackManager.record_miss`), and apply
@@ -67,9 +72,14 @@ It does these five steps in order:
    - It is deleted as soon as M hits can no longer be reached.
    - A confirmed track that misses *coasts*: it is predicted forward with nothing to update
      it, and its status is `"coasting"` until its next hit. It is deleted after
-     `n_delete_misses` misses in a row.
-5. **Start.** Begin a tentative track from each measurement that no track took, unless it falls
-   inside a confirmed track's gate (`DirectStateInitiator`).
+     `n_delete_misses` misses in a row, or `n_reacquire_frames` more if it is confirmed.
+   - On the miss that starts those extra frames, the coordinates named in
+     `LifecyclePolicy.reacquire_reset` are forgotten: their variances go back to the
+     initiator's prior. The gate then widens as the track coasts, so it can find its target
+     again under the same track ID.
+5. **Start.** Begin a tentative track from each measurement that no track took
+   (`DirectStateInitiator`). In two-stage assignment, a measurement inside a confirmed track's
+   gate starts none.
 
 `lifecycle.py`'s module docstring works an M-of-N example through scan by scan. Steps 3 and 5
 stop a new, unproven track from taking a confirmed track's measurement; `tracker.py`'s module
@@ -145,15 +155,13 @@ docstring explains this, gives the CA case (`sigma_jerk_mps3`), and compares the
 
 ## Limitations
 
-**Not yet supported here.** Scenario 003's own runs still use `kalman.py` because the UKF
-tracker doesn't yet have these, and the change that switches them over adds them:
+**Not yet supported here.** Scenario 003's Kalman runs still use `kalman.py`. `Tracker` now
+has the mechanisms they need (the model selector, joint assignment and the re-acquisition
+reset), and `spec/tracker-001.md` §13 step 6 moves them over. Not yet here:
 
-- choosing per track whether a measurement uses range alone or range and range rate (the
-  range-only start that scenario 003's S1 needs);
-- a range-only retry when a measurement fails the gate on velocity;
-- re-finding a lost target with a widened gate while keeping its track ID;
 - a per-track `measurement_dim`, as `KalmanFilter` records. Which measurement each track
-  took in the scan, and its NIS, are on the scan's `TrackSnapshot`s;
+  took in the scan, and its NIS, are on the scan's `TrackSnapshot`s; the NIS's dimension is
+  the one the pair passed the gate at;
 - the interacting multiple model (IMM) filter and the coordinated-turn motion model;
 - Singer's motion model, which carries the acceleration in the state and is exact at every
   time step. Its white-noise limit sets the process noise now;

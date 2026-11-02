@@ -88,9 +88,17 @@ class LifecyclePolicy:
         meets the M-of-N deadline first unless this is smaller than N - M + 1.
     n_reacquire_frames : int, default 0
         Extra misses in a row that a confirmed track survives beyond
-        ``n_delete_misses``. :class:`~radar_forge.core.tracking.kalman.KalmanTracker`
-        uses them to re-acquire a target whose track has lost it. 0 deletes
+        ``n_delete_misses``, to re-acquire a target it has lost. 0 deletes
         every track at ``n_delete_misses``.
+    reacquire_reset : tuple of str, default ()
+        State coordinates that :class:`~radar_forge.core.tracking.tracker.Tracker`
+        forgets on the miss that starts the re-acquisition window, the
+        ``n_delete_misses``-th in a row: their variances go back to the
+        initiator's prior and their cross-covariances to zero, so the gate
+        widens as the track coasts on (``spec/tracker-001.md`` §8.3). Scenario
+        003 names ``("range_rate_mps",)``: a track that has lost its target has
+        usually taken a wrong Doppler fold, so its range rate is the thing to
+        stop believing. Empty, the default, forgets nothing.
     max_coast_time_s : float, default 30.0
         Seconds since a track's last measurement after which it is deleted,
         whatever its status. A gap of exactly this long is still allowed.
@@ -104,8 +112,9 @@ class LifecyclePolicy:
         If a count is not an ``int``. If ``n_confirm_hits`` is less than 1 or
         more than ``n_confirm_frames``, so that no track could ever be
         confirmed. If ``n_delete_misses`` is less than 1,
-        ``n_reacquire_frames`` or ``n_history`` is negative, or
-        ``max_coast_time_s`` is not finite and positive.
+        ``n_reacquire_frames`` or ``n_history`` is negative,
+        ``max_coast_time_s`` is not finite and positive, or
+        ``reacquire_reset`` is not a tuple of unique, nonempty names.
     """
 
     n_confirm_hits: int = 3
@@ -114,6 +123,7 @@ class LifecyclePolicy:
     n_reacquire_frames: int = 0
     max_coast_time_s: float = 30.0
     n_history: int = 100
+    reacquire_reset: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Reject a policy that could not work, naming the field at fault."""
@@ -146,6 +156,14 @@ class LifecyclePolicy:
             raise ValueError(msg)
         if not (math.isfinite(self.max_coast_time_s) and self.max_coast_time_s > 0):
             msg = f"max_coast_time_s must be finite and positive; got {self.max_coast_time_s}."
+            raise ValueError(msg)
+        names = self.reacquire_reset
+        if (
+            not isinstance(names, tuple)
+            or not all(isinstance(name, str) and name for name in names)
+            or len(set(names)) != len(names)
+        ):
+            msg = f"reacquire_reset must be a tuple of unique, nonempty names; got {names!r}."
             raise ValueError(msg)
 
 

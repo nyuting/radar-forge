@@ -78,7 +78,19 @@ def _check_independent_blocks(covariance: NDArray[np.float64], indices: tuple[in
 
 
 class TrackInitiator(Protocol):
-    """The interface of an initiator: one measurement in, a new filter (or None) out."""
+    """The interface of an initiator: one measurement in, a new filter (or None) out.
+
+    Attributes
+    ----------
+    prior : StateEstimate
+        What a new track believes before its first measurement: mean
+        ``(n_state,)`` and covariance ``(n_state, n_state)``. The measurement
+        replaces what it observes. :class:`~radar_forge.core.tracking.tracker.Tracker`
+        also reads it, to forget coordinates on re-acquisition
+        (``LifecyclePolicy.reacquire_reset``).
+    """
+
+    prior: StateEstimate
 
     def initiate(self, measurement: Measurement, model: MeasurementModel) -> Estimator | None:
         """Return a new filter started from ``measurement``, or None.
