@@ -53,6 +53,8 @@ References
 .. [3] N. J. Willis, *Bistatic Radar*, 2nd ed., SciTech Publishing, 2005, §1.2
        (definitions and the bistatic angle), ch. 3 (geometry), §7.1 (range
        resolution).
+.. [4] M. I. Skolnik, *Introduction to Radar Systems*, 3rd ed., McGraw-Hill,
+       2001, §2.3 (receiver noise and the signal-to-noise ratio).
 """
 
 from __future__ import annotations
@@ -217,6 +219,30 @@ class Receiver:
         r"""Noise figure as a linear factor :math:`F \ge 1`."""
         return float(10.0 ** (self.noise_figure_db / 10.0))
 
+    @property
+    def noise_density_w_per_hz(self) -> float:
+        r"""Thermal noise power spectral density :math:`N_0 = k T_0 F`, W/Hz.
+
+        The noise the receive chain adds per hertz of bandwidth, referred to its
+        input [4]_. Every noise power in this module is :math:`N_0` times some
+        bandwidth; what differs between them is which bandwidth.
+        """
+        return BOLTZMANN_JPK * STANDARD_NOISE_TEMPERATURE_K * self.noise_figure_linear
+
+    @property
+    def noise_power_per_sample_w(self) -> float:
+        r"""Thermal noise power in one complex baseband sample, :math:`N_0 f_s`, W.
+
+        A complex sampler at rate :math:`f_s` represents a band :math:`f_s`
+        wide, so white noise of density :math:`N_0` fills it with
+        :math:`N_0 f_s` per sample [4]_. This is the variance
+        :mod:`radar_forge.core.signal` adds to every sample of a cube, whatever
+        the waveform: an FMCW receiver that samples the deramped beat signal
+        below the swept bandwidth sees less noise per sample than the swept
+        bandwidth would suggest, and an oversampled pulsed receiver sees more.
+        """
+        return self.noise_density_w_per_hz * self.sample_rate_hz
+
 
 @dataclass(frozen=True)
 class _RadarChain:
@@ -304,18 +330,16 @@ class _RadarChain:
         return self.wavelength_m * self.transmitter.prf_hz / 4.0
 
     @property
-    def noise_power_w(self) -> float:
-        r"""Receiver thermal noise power :math:`k T_0 B F`, W.
+    def noise_power_matched_w(self) -> float:
+        r"""Thermal noise power in the transmitted bandwidth, :math:`k T_0 B F`, W.
 
-        The bandwidth used is the transmitted bandwidth, which is the noise
-        bandwidth of a matched receiver.
+        The noise a receiver matched to the waveform admits, since its noise
+        bandwidth is the signal bandwidth :math:`B` [4]_. This is the noise term
+        of the radar-equation SNR. It is *not* the noise in a simulated sample,
+        which fills the sampled band instead; that is
+        :attr:`Receiver.noise_power_per_sample_w`.
         """
-        return (
-            BOLTZMANN_JPK
-            * STANDARD_NOISE_TEMPERATURE_K
-            * self.transmitter.bandwidth_hz
-            * self.receiver.noise_figure_linear
-        )
+        return self.receiver.noise_density_w_per_hz * self.transmitter.bandwidth_hz
 
     @property
     def n_samples_per_chirp(self) -> int:

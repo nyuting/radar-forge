@@ -145,12 +145,28 @@ class TestRadarValidation:
         with pytest.raises(ValueError, match="would alias"):
             Radar(S2_TRANSMITTER, Receiver(1.0e6, 30.0, 3.0), *DUKE_SITE)
 
-    def test_noise_power_matches_ktbf(self) -> None:
+    def test_noise_density_is_kt0_times_the_noise_figure(self) -> None:
+        """-174 dBm/Hz + F, the first line of every link budget."""
+        density_dbm_per_hz = 10.0 * np.log10(S1_RECEIVER.noise_density_w_per_hz * 1e3)
+        assert abs(density_dbm_per_hz - (-173.98 + 3.0)) < 0.01
+
+    def test_matched_noise_power_matches_ktbf(self) -> None:
         """-174 dBm/Hz + 10log10(B) + F, the standard link-budget line."""
         radar = _radar(S1_TRANSMITTER, S1_RECEIVER)
-        noise_dbm = 10.0 * np.log10(radar.noise_power_w * 1e3)
+        noise_dbm = 10.0 * np.log10(radar.noise_power_matched_w * 1e3)
         expected_dbm = -173.98 + 10.0 * np.log10(2.0e6) + 3.0
         assert abs(noise_dbm - expected_dbm) < 0.01
+
+    def test_noise_per_sample_fills_the_sampled_band_not_the_swept_one(self) -> None:
+        """S1 deramps 2 MHz of sweep but samples 1 MHz: 3.01 dB below kT0BF."""
+        radar = _radar(S1_TRANSMITTER, S1_RECEIVER)
+        noise_dbm = 10.0 * np.log10(S1_RECEIVER.noise_power_per_sample_w * 1e3)
+        expected_dbm = -173.98 + 10.0 * np.log10(1.0e6) + 3.0
+        assert abs(noise_dbm - expected_dbm) < 0.01
+        ratio_db = 10.0 * np.log10(
+            S1_RECEIVER.noise_power_per_sample_w / radar.noise_power_matched_w
+        )
+        np.testing.assert_allclose(ratio_db, 10.0 * np.log10(0.5), rtol=1e-12)
 
     def test_samples_per_chirp(self) -> None:
         """1 ms at 1 MHz is 1000 samples; a 10 us pulse at 2.5 MHz is 25."""
@@ -288,7 +304,7 @@ class TestBistaticAmbiguity:
         pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
         monostatic = _radar(S1_TRANSMITTER, S1_RECEIVER)
         assert pair.wavelength_m == monostatic.wavelength_m
-        assert pair.noise_power_w == monostatic.noise_power_w
+        assert pair.noise_power_matched_w == monostatic.noise_power_matched_w
         assert pair.n_samples_per_pri == monostatic.n_samples_per_pri
         assert pair.n_samples_per_chirp == monostatic.n_samples_per_chirp
         assert pair.unambiguous_velocity_mps == monostatic.unambiguous_velocity_mps

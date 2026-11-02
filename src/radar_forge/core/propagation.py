@@ -86,7 +86,7 @@ class PropagationPaths:
     amplitude_linear : numpy.ndarray
         Complex voltage amplitude of each path, shape ``(n_paths,)``. Its squared
         magnitude is the received power in watts, so that a cube built from it
-        sits on the same scale as :attr:`Radar.noise_power_w`.
+        sits on the same scale as :attr:`Receiver.noise_power_per_sample_w`.
 
         **Only the magnitude reaches the generators.**
         :func:`~radar_forge.core.signal.fmcw_deramp_baseband` and
@@ -181,7 +181,7 @@ def line_of_sight_paths(
 
     Amplitude is the square root of the monostatic radar range equation, so that
     ``abs(amplitude_linear) ** 2`` is the received power in watts and a cube built
-    from it is directly comparable with :attr:`Radar.noise_power_w`. The phase is
+    from it is directly comparable with :attr:`Receiver.noise_power_per_sample_w`. The phase is
     the two-way propagation phase :math:`-4\pi R/\lambda`.
 
     Parameters

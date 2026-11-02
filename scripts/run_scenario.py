@@ -207,7 +207,7 @@ def burst_metadata(scenario: Scenario) -> list[dict[str, Any]]:
                 "range_resolution_m": burst.range_resolution_m,
                 "unambiguous_range_m": burst.unambiguous_range_m,
                 "unambiguous_velocity_mps": burst.unambiguous_velocity_mps,
-                "noise_power_w": burst.noise_power_w,
+                "noise_power_w": burst.receiver.noise_power_per_sample_w,
             }
         )
     return bursts
@@ -389,9 +389,11 @@ def detection_rows(
     for record in frames:
         claimed = {index: track_id for track_id, index in record.associations.items()}
         for detection_id, measurement in enumerate(record.measurements):
-            # snr_db is against the burst's thermal noise power, not the CFAR
+            # snr_db is against the thermal noise power per sample, not the CFAR
             # estimate of the local floor (data-001 §6.5).
-            noise_power_w = scenario.bursts[measurement.burst_index].noise_power_w
+            noise_power_w = scenario.bursts[
+                measurement.burst_index
+            ].receiver.noise_power_per_sample_w
             yield {
                 "frame": record.frame_index,
                 "time_s": record.time_s,

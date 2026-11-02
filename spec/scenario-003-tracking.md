@@ -148,10 +148,10 @@ Stated up front, in the same spirit as scenario 001 §2.2. These are properties 
 defects in the tracker, and §13 turns the first three into the work that follows this slice.
 
 - **The target is far too easy to detect.** Post-integration peak-to-floor over this scenario's
-  window measures **45–49 dB**, rising to about 69 dB at the track's 5.33 km closest approach,
+  window measures **48–52 dB**, rising to about 72 dB at the track's 5.33 km closest approach,
   against an 11.417 dB threshold factor: Pd is 1 to many decimal places. *(The figures 51.7 dB at
   17.87 km and 64.8 dB at 8.39 km, written before the geographic re-anchoring onto
-  Raleigh-Durham (`scripts/translate_flight_coordinates.py`), were recomputed against the current siting and window; the conclusion is unchanged.)* **Track maintenance under missed detections is therefore not exercised at the default
+  Raleigh-Durham (`scripts/translate_flight_coordinates.py`), were recomputed against the current siting and window; the conclusion is unchanged. The range then was 45–69 dB, measured while `core/signal.py` added `k·T₀·B·F` to each sample; it now adds `N0·fs`, 3.01 dB less at this burst's `fs/B = 0.5`, and every figure rises by that.)* **Track maintenance under missed detections is therefore not exercised at the default
   settings**, and neither is the coast-and-delete logic of §7, which exists here largely untested
   by the scenario. §13.1 is the fix.
 - **CFAR is one-dimensional.** This scenario's pipeline slides its window along range. That is
@@ -879,7 +879,7 @@ now replaced by the `wrap_axes` option on `cluster_detections` itself — see
 
 ### 14.3 The target's own sidelobes become extra detections
 
-Scenario 001 applies no Doppler taper. At the 45–69 dB post-integration SNR §4
+Scenario 001 applies no Doppler taper. At the 48–72 dB post-integration SNR §4
 describes, the target's Doppler sidelobes sit tens of decibels above an 11.4 dB
 threshold and are detected at its range, each seeding a competing track. Over
 twelve frames the target gives one cluster of 30–95 cells at its true bin plus

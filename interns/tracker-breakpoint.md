@@ -36,7 +36,8 @@ to find out what happens when the radar starts missing.
   commit `out/`. Read that script to see how the pieces fit together.
 - Useful entry points:
   - `radar_forge.core.radar_equation.received_power_w`
-  - `radar_forge.core.radar.Radar.noise_power_w`
+  - `radar_forge.core.radar.Radar.noise_power_matched_w` and
+    `radar_forge.core.radar.Receiver.noise_power_per_sample_w`
   - `radar_forge.core.detection`
   - `radar_forge.pipelines.scenarios`: `load_scenario`, `iterate_frames`, `form_range_doppler_map`
   - `radar_forge.pipelines.tracking`: `frame_detections`, `ScenarioTracker.from_scenario`,

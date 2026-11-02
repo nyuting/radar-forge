@@ -5,8 +5,8 @@
 **Status: specified, not implemented.**
 
 Scenarios 001–003 synthesise complex baseband directly: `core/signal.py` writes the samples a
-perfect quadrature receiver would deliver, at the output rate, with the noise power `k·T0·B·F`
-assumed rather than produced. That is the right idealisation for teaching range and Doppler. It
+perfect quadrature receiver would deliver, at the output rate, with the noise power `k·T0·F·fs`
+of an ideal brick-wall filter assumed rather than produced. That is the right idealisation for teaching range and Doppler. It
 hides everything that happens between the antenna port and the cube, though, and a multi-channel
 array (scenario-006 D13) is only as good as the agreement between its channels.
 
@@ -149,7 +149,7 @@ Noise and SNR, with `N0 = k·T0·F` = **7.9888e-21 W/Hz**:
 | :--- | ---: |
 | Real noise at the ADC, `N0·fs_adc/2` | 7.9888e-14 W |
 | Complex noise per output sample, `N0·fs_adc·Σh²` | **1.8420e-14 W** |
-| Ideal receiver's assumed noise, `k·T0·B·F` | 1.5978e-14 W (0.618 dB lower) |
+| Ideal receiver's assumed noise, `N0·fs_out` | 1.9972e-14 W (0.351 dB higher) |
 | SNR gain, real ADC to output, `10·log10(fs_adc / (2·ENBW))` | **6.372 dB** |
 | The same, decomposed | `10·log10 8` (9.031) − 3.010 (real ADC: noise occupies `fs/2`) + 0.351 (ENBW is 0.9223 `fs_out`) |
 | Simulated (40 000 output samples) | 6.356 dB |
@@ -159,8 +159,9 @@ The real CW tone has two spectral lines after the NCO: +3 MHz, and −13 MHz, wh
 +7 MHz at the 20 MHz rate. Both fall in the stopband, so the suppression bound is
 `A_s − 10·log10 2` = **81.82 dB**, not `A_s`.
 
-The output noise is 0.618 dB above the ideal receiver's `k·T0·B·F`. The ideal receiver assumes a
-noise bandwidth equal to the signal bandwidth; a real filter's ENBW is 2.3057 MHz. Neither is wrong.
+The output noise is 0.351 dB below the ideal receiver's `N0·fs_out`. The ideal receiver assumes a
+brick-wall filter whose noise bandwidth is the whole output band, 2.5 MHz; a real filter's ENBW is
+2.3057 MHz, 0.9223 of it. Neither is wrong.
 The front-end path reports its own `noise_power_w`, and the gap is a teaching quantity (§3.6).
 
 ### 3.3 Impairments (`[impairments]`) and pilot (`[calibration]`)
@@ -277,7 +278,7 @@ As scenario-001 §3.6, with a 16-channel cube, plus:
 | Where | What |
 | :--- | :--- |
 | `metadata.json` `front_end` | `null` when bypassed; otherwise the resolved `[front_end]` table plus `n_taps`, `enbw_hz`, `passband_ripple_db` and `stopband_attenuation_db` as achieved, and `group_delay_samples` |
-| `metadata.json` `bursts[].noise_power_w` | In the front-end path, `N0·fs_adc·Σh²`, not `k·T0·B·F` |
+| `metadata.json` `bursts[].noise_power_w` | In the front-end path, `N0·fs_adc·Σh²`, not the ideal `N0·fs_out` |
 | `metadata.json` `impairments` | The resolved `[impairments]` table and its seed. The **drawn** values go to `products.h5`, not here |
 | `products.h5` `/impairments/` | `channel_gain_linear` (n_rx,) complex128, `channel_delay_s` (n_rx,), `iq_k1_linear`, `iq_k2_linear` (n_rx,) complex128: the truth |
 | `products.h5` `/calibration/` | `channel_gain_linear`, `channel_delay_s`, `iq_compensation_linear` (n_rx,), `pilot_snr_db`, and `method` as an attribute: the estimates |
@@ -477,7 +478,7 @@ marked `slow`, on a 2-frame window.
 | A15 | Range correlation suppresses close-in noise | τ = 10 µs, bin 2: ≥ 30 dB below independent oscillators (37.6 dB) | `4 sin²(πfτ)` = −38.2 dB at 195 Hz | C3 |
 | A16 | Common LO phase noise leaves the beam pattern unchanged | pattern equals ideal, `rtol = 1e-12` | Common factor across channels | C3 |
 | A17 | Per-channel LO phase, CPE-corrected | residual rms within the 99 % χ² interval of 0.405°; floor −54.13 dB (from −32.30 dB) | Pilot-gate CRB | C3 |
-| A18 | Not asserted: absolute SNR against scenario 001 in the front-end path | — | Noise bandwidths differ by design (0.618 dB, §3.2) | — |
+| A18 | Not asserted: absolute SNR against scenario 001 in the front-end path | — | Noise bandwidths differ by design (0.351 dB, §3.2) | — |
 
 ---
 

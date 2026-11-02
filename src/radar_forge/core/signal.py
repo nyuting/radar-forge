@@ -107,7 +107,7 @@ def thermal_noise(
         Output shape.
     noise_power_w : float
         Total noise power per sample, watts — normally
-        :attr:`Radar.noise_power_w`. Must be non-negative; zero gives an exactly
+        :attr:`Receiver.noise_power_per_sample_w`. Must be non-negative; zero gives an exactly
         noiseless cube, which is useful for isolating a geometry bug.
     rng : numpy.random.Generator
         Seeded generator. Required, not optional: every random draw in the
@@ -168,7 +168,7 @@ def fmcw_deramp_baseband(
     rng : numpy.random.Generator, optional
         Seeded generator for receiver noise. Default None, which produces a
         **noiseless** cube; pass a generator to add
-        :attr:`Radar.noise_power_w` per sample.
+        :attr:`Receiver.noise_power_per_sample_w` per sample.
 
     Returns
     -------
@@ -232,7 +232,7 @@ def fmcw_deramp_baseband(
     cube: NDArray[np.complex128] = np.asarray(per_path.sum(axis=1), dtype=np.complex128)
 
     if rng is not None:
-        cube = cube + thermal_noise(cube.shape, radar.noise_power_w, rng=rng)
+        cube = cube + thermal_noise(cube.shape, radar.receiver.noise_power_per_sample_w, rng=rng)
     return cube
 
 
@@ -333,7 +333,7 @@ def pulsed_baseband(
     cube: NDArray[np.complex128] = np.asarray(per_path.sum(axis=1), dtype=np.complex128)
 
     if rng is not None:
-        cube = cube + thermal_noise(cube.shape, radar.noise_power_w, rng=rng)
+        cube = cube + thermal_noise(cube.shape, radar.receiver.noise_power_per_sample_w, rng=rng)
     return cube
 
 

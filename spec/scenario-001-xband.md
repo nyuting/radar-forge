@@ -93,6 +93,7 @@ frame cadence. They differ only in `[[burst]]`. This is the comparison the scena
 | `sample_rate_hz` | 1.0 MHz | 2.5 MHz | 4.0 MHz |
 | `fs / B` | **0.50** | 1.25 | 2.00 |
 | Samples per PRI | 1000 | 100 | 800 / 667 |
+| Thermal noise per IQ sample, `N0·fs` | 7.9888e-15 W | 1.9972e-14 W | 3.1955e-14 W |
 | `n_pulses` | 256 | 256 | 128 + 128 |
 | CPI | 256.0 ms | 10.24 ms | 25.60 + 21.33 ≈ 47 ms |
 | Unambiguous range | 37.474 km | **5.996 km** | 29.979 / 24.983 km |
@@ -176,15 +177,18 @@ These are properties of the input, not defects in the simulation.
 | :--- | :--- |
 | Carrier `f0_hz` | 9.8 GHz → λ = **30.5911 mm** |
 | Bandwidth `bandwidth_hz` | 2.0 MHz → range resolution c/2B = **74.9481 m** |
-| Thermal noise power | 1.598e-14 W (kT₀·B·F at B = **2 MHz**, F = 3 dB) |
+| Noise density `N0 = k·T₀·F` | 7.9888e-21 W/Hz (−170.98 dBm/Hz at F = 3 dB) |
+| Matched-receiver noise `k·T₀·B·F` | 1.598e-14 W at B = **2 MHz** (`Radar.noise_power_matched_w`) |
 
-> The bandwidth in that product is the **transmitted** bandwidth, 2.0 MHz, which is what
-> `core/radar.py`'s `Radar.noise_power_w` uses as the noise bandwidth of a matched receiver.
-> An earlier draft of this row said `B = 1 MHz`, which is S1's *sample rate*; the stated
-> 1.598e-14 W was always the 2 MHz figure (1 MHz would give 7.989e-15 W), and only the
-> parenthetical was wrong. It has to be the transmitted bandwidth for this quantity to sit
-> in §3.2 at all: the three variants sample at 1.0, 2.5 and 4.0 MHz, so a sample-rate-based
-> noise power would not be waveform-independent. Corrected by the `core/` audit (PR #24).
+> Two noise powers, because there are two bandwidths. The matched-receiver figure uses the
+> **transmitted** bandwidth, the noise bandwidth of a receiver matched to the waveform; it is the
+> noise term of the radar-equation SNR and is waveform-independent, so it sits here. The noise
+> actually in the IQ cube fills the **sampled** band instead, `N0·fs` per complex sample
+> (`Receiver.noise_power_per_sample_w`), and so differs by variant (§2.1, the row under samples per
+> PRI): 3.01 dB below the matched figure in S1, 0.97 dB above in S2, 3.01 dB above in S3. The
+> pipeline gains are consistent with it: a matched filter over `fs·T` samples or an FMCW range FFT
+> over `fs·T` samples gives `E/N0` either way. An earlier version of `core/signal.py` added the
+> matched figure to every sample, which put each variant's noise floor off by `B/fs`.
 
 ### 3.3 Derived geometry, computed from the CSV against the radar site
 

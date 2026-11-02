@@ -306,7 +306,7 @@ Fixed here and referenced by 007–010 as "scenario-006 D13".
    response to each path. `array/beamforming.py::steering_vectors` builds it from the paths'
    arrival angles. With it the cube is 3-D. Without it the 2-D cube is bit-identical to today's,
    which is how 001–003 stay untouched. Noise is drawn independently per channel at
-   `Radar.noise_power_w` each.
+   `Receiver.noise_power_per_sample_w` each.
 8. **Narrowband.** The steering vector is phase-only. Valid while the aperture transit time is
    small against `1/B`: 1.53 × 10⁻³ here, stated in `signal.py`'s Notes with the bound. 009 owns
    the wideband case.

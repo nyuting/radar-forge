@@ -239,7 +239,24 @@ class TestThermalNoise:
         noisy = fmcw_deramp_baseband(paths, S1_RADAR, 8, rng=np.random.default_rng(3))
         assert not np.array_equal(clean, noisy)
         residual_power_w = float(np.mean(np.abs(noisy - clean) ** 2))
-        np.testing.assert_allclose(residual_power_w, S1_RADAR.noise_power_w, rtol=0.05)
+        np.testing.assert_allclose(
+            residual_power_w, S1_RADAR.receiver.noise_power_per_sample_w, rtol=0.05
+        )
+
+    def test_pulsed_noise_fills_the_sampled_band(self) -> None:
+        """S2 samples 2.5 MHz of a 2 MHz pulse, so each sample holds N0 * fs, not N0 * B.
+
+        The two differ by 0.97 dB (25 %), far outside the 3.5 % sampling error of
+        8 x 100 samples, so the test tells them apart.
+        """
+        paths = line_of_sight_paths(S2_RADAR, 3_000.0, 0.0, 10.0)
+        clean = pulsed_baseband(paths, S2_RADAR, 8)
+        noisy = pulsed_baseband(paths, S2_RADAR, 8, rng=np.random.default_rng(3))
+        residual_power_w = float(np.mean(np.abs(noisy - clean) ** 2))
+        np.testing.assert_allclose(
+            residual_power_w, S2_RADAR.receiver.noise_power_per_sample_w, rtol=0.1
+        )
+        assert abs(residual_power_w / S2_RADAR.noise_power_matched_w - 1.0) > 0.15
 
 
 # A synthetic receiver site 0.2 deg due east of DUKE_SITE; baseline about
