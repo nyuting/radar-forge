@@ -428,13 +428,14 @@ exercise to set an intern, and a bad default.
 > untested, so this table counted 245,760 cells and 2.46 false alarms per frame. It now tests them
 > with a one-sided window calibrated to the same `pfa` (`core/detection.py` module Notes), which
 > adds 10,240 cells and 0.10 false alarms per frame. The per-cell rate, and with it the gate and
-> confirmation rows, is unchanged. With `wrap_range` off, as the Kalman path ran when this landed,
-> the 40 end cells of each Doppler row use a one-sided window; with `wrap_range` on, they use real
-> wrapped cells from the far end, and the cell count is the same. Measured over S1's 120 frames
-> with `wrap_range` off, the run gains 17 detections
+> confirmation rows, is unchanged. With `wrap_range` off, the 40 end cells of each Doppler row use
+> a one-sided window; with `wrap_range` on, they use real wrapped cells from the far end, and the
+> cell count is the same. Both shipped paths have wrapped range since §14.12, so no shipped
+> figure moves: S1 still accepts 377 detections, with track 75 primary. Measured on the Kalman
+> path as it ran before §14.12, with `wrap_range` off, S1 gained 17 detections
 > (366 to 383), all in the edge cells: 0.14 per frame against 0.10 expected, a Poisson tail of
-> about 0.1. Every tracking metric is unchanged to full precision. Only the primary track's ID
-> moves, from 71 to 76, because the extra false alarms start tentative tracks first. The same pass
+> about 0.1. Every tracking metric was unchanged to full precision. Only the primary track's ID
+> moved, from 71 to 76, because the extra false alarms start tentative tracks first. The same pass
 > re-derived the rows from their formulas and
 > corrected three figures that were already off: the confirmation probability, 1.0e-5 rather than
 > 1.2e-5; one run in about 300 (322 now, 336 before) rather than four hundred; and the 1e-4
