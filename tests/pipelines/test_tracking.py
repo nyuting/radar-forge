@@ -445,7 +445,7 @@ class TestScenarioTrackerUnfolding:
             product = synthetic_product(range_m - closing_mps * index, 2.0, seed=100 + index)
             tracker.step([product], frame_index=index, time_s=float(index))
 
-        confirmed = tracker.tracker.confirmed_tracks
+        confirmed = [track for track in tracker.tracker.tracks if track.is_confirmed]
         assert confirmed
         unfold_frame = tracker.unfold_frame_of(confirmed[0].track_id)
         assert unfold_frame is not None
@@ -744,6 +744,45 @@ class TestCircularRange:
         # The centroid may lie past the last bin centre, still inside one period.
         assert 0.0 <= near[0].range_m < period_m
 
+    def test_the_kalman_path_keeps_one_track_across_the_wrap(self):
+        """Review item 3: a target receding through S2's 6 km fold keeps its track.
+
+        The target opens at 60 m/s from 600 m short of the span, so it crosses
+        the wrap at frame 10 and reads near zero range from then on. The track
+        must keep its ID; its range history must stay continuous, so that the
+        fold monitor's slope is the true rate; and its rate must stay on it.
+        """
+        burst = bursts("pulsed_medium_prf")[0]
+        period_m = self.N_RANGE_BINS * self.RANGE_BIN_M
+        # S2's own quantisation floors, one bin over sqrt(12), not S1's defaults.
+        settings = TrackingConfig(
+            sigma_range_m=self.RANGE_BIN_M / np.sqrt(12.0),
+            sigma_velocity_mps=S2_FOLD_SPAN_MPS / 256 / np.sqrt(12.0),
+        )
+        tracker = ScenarioTracker((burst,), tracking=settings)
+        start_m, opening_mps = period_m - 600.0, 60.0
+        for index in range(20):
+            product = targets_product(
+                [(start_m + opening_mps * index, -opening_mps)],
+                fold_span_mps=S2_FOLD_SPAN_MPS,
+                n_doppler_bins=256,
+                n_range_bins=self.N_RANGE_BINS,
+                range_bin_m=self.RANGE_BIN_M,
+                seed=200 + index,
+            )
+            frame = tracker.step([product], frame_index=index, time_s=float(index))
+
+        confirmed = [record for record in frame.tracks if record.is_confirmed]
+        assert [record.track_id for record in confirmed] == [1]
+        (track,) = confirmed
+        # Within half a bin of truth, the short way round the circle.
+        truth_m = (start_m + opening_mps * 19) % period_m
+        gap_m = abs(track.state[0] - truth_m)
+        assert min(gap_m, period_m - gap_m) < self.RANGE_BIN_M / 2
+        assert track.state[1] == pytest.approx(-opening_mps, abs=1.0)
+        slope_mps = slope_velocity_mps(tracker._range_history[1][-5:], 1.0)
+        assert slope_mps == pytest.approx(-opening_mps, abs=5.0)
+
 
 class TestBinQuantisationSigmas:
     @pytest.mark.parametrize(("n_range_bins", "n_doppler_bins"), [(1, 4), (4, 1)])
@@ -880,9 +919,16 @@ class TestScenarioTrackerSettings:
         with pytest.raises(ValueError, match="time order"):
             tracker.step([synthetic_product(15_000.0, 2.0)], frame_index=1, time_s=0.5)
 
-    def test_the_kalman_path_treats_range_as_unambiguous(self):
-        tracker = ScenarioTracker(bursts("fmcw_low_prf"))
-        assert tracker.folding_layout.coordinates[0].period is None
+    def test_both_paths_measure_range_modulo_the_same_span(self):
+        """Review item 3: the Kalman path no longer assumes range never folds."""
+        burst = bursts("pulsed_medium_prf")[0]
+        kalman = ScenarioTracker((burst,))
+        ukf = ScenarioTracker((burst,), tracking=UKF_SETTINGS)
+        assert kalman.folding_layout == ukf.folding_layout
+        model = kalman.tracker.measurement_models["range_doppler"]
+        assert model.measurement_layout.coordinates[0].period == pytest.approx(
+            burst.unambiguous_range_m, rel=1e-12
+        )
 
     def test_the_ukf_range_period_is_the_maps_range_span(self):
         """S2's pulsed axis is one PRI of delay, c / 2 PRF: exactly its unambiguous range."""
