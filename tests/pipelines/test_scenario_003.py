@@ -213,10 +213,10 @@ class TestS1:
         assert values.mean() < dims.mean() + 5.0 * standard_error
 
     def test_criterion_6_false_alarms_are_about_as_many_as_designed(self, s1_run):
-        """§3 predicts 2.46 per frame, plus the target's own detection."""
+        """§3 predicts 2.56 per frame, plus the target's own detection."""
         _, _, records = s1_run
         per_frame = [len(result.measurements) for _, _, result in records]
-        # A Poisson mean of 2.46 plus one target; a loose band, because twenty
+        # A Poisson mean of 2.56 plus one target; a loose band, because twenty
         # frames is twenty draws, not a rate measurement.
         assert 1.0 <= float(np.mean(per_frame)) <= 8.0
 

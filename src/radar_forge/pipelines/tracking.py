@@ -246,11 +246,11 @@ class DetectionConfig:
     Attributes
     ----------
     pfa : float
-        Design probability of false alarm per cell. At 1e-5 over the 245,760
-        cells of S1's map that carry a complete reference window, roughly 2.46
-        false alarms reach the associator every frame -- enough that gating and
-        assignment are exercised continuously, while a spurious *confirmed*
-        track stays a once-in-four-hundred-runs event.
+        Design probability of false alarm per cell. At 1e-5 over the 256,000
+        cells of S1's map, all of them tested, roughly 2.56 false alarms reach
+        the associator every frame -- enough that gating and assignment are
+        exercised continuously, while a spurious *confirmed* track stays about
+        a once-in-three-hundred-runs event.
     n_train, n_guard : int
         Training and guard cells per side.
     variant : str

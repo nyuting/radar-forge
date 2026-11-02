@@ -32,6 +32,7 @@ from radar_forge.core.detection import (
     cfar_threshold_2d_w,
     cfar_threshold_factor,
     cfar_threshold_factor_2d,
+    cfar_threshold_factors,
     cfar_threshold_w,
     cfar_valid_mask,
     cfar_valid_mask_2d,
@@ -112,19 +113,28 @@ def measure_false_alarm_rate(
     n_guard: int = NOMINAL_N_GUARD,
     noise_power_w: float = 1.0,
     n_cells: int = 4096,
+    cells: str = "interior",
 ):
     """Run CFAR over seeded complex Gaussian noise and count threshold crossings.
+
+    ``cells`` picks which cells of each row are counted: ``"interior"``, those
+    with a full two-sided window, or ``"edge"``, the ``n_guard + n_train`` at
+    each end, which have a one-sided window. The two are calibrated separately,
+    so each is measured on its own; a pooled rate could hide an edge error
+    behind the interior.
 
     Returns
     -------
     tuple of (int, int)
-        False alarms, and the number of cells actually tested. Only cells with a
-        complete reference window are counted: including the untested edge cells
-        would dilute the rate towards zero and make too high a threshold look
-        correct.
+        False alarms, and the number of cells counted.
     """
     margin = n_guard + n_train
-    tested_per_row = n_cells - 2 * margin
+    counted = np.zeros(n_cells, dtype=np.bool_)
+    if cells == "interior":
+        counted[margin : n_cells - margin] = True
+    else:
+        counted[:margin] = counted[n_cells - margin :] = True
+    tested_per_row = int(counted.sum())
     n_rows = max(1, math.ceil(EXPECTED_FALSE_ALARMS / pfa / tested_per_row))
 
     n_hit = 0
@@ -144,7 +154,7 @@ def measure_false_alarm_rate(
         mask = cfar_detect(
             power_w, pfa=pfa, n_train=n_train, n_guard=n_guard, variant=variant, axis=-1
         )
-        n_hit += int(np.count_nonzero(mask))
+        n_hit += int(np.count_nonzero(mask[:, counted]))
         n_tested += rows * tested_per_row
         remaining -= rows
 
@@ -312,18 +322,21 @@ def test_default_order_statistic_rank_is_three_quarters_of_the_window():
 def test_scenario_003_calibration_matches_its_specification():
     """Catches the shipped scenario-003 detector drifting from the figures its spec quotes.
 
-    ``spec/scenario-003-tracking.md`` §12 quotes 245 760 tested cells and
-    alpha = 11.417 dB, and §3 requires both to be re-derived in a test. The
+    ``spec/scenario-003-tracking.md`` §12 quotes 256 000 tested cells, alpha =
+    11.417 dB in the interior and 12.268 dB at the one-sided edges, and §3
+    requires them to be re-derived in a test. The
     operating point is read from ``scenarios/scenario_003_tracking.toml``: CA
     along range, n_train = 16 and n_guard = 4 per side, pfa = 1e-5, on a
     (256, 1000) map (256 pulses; 1 ms x 1 MHz = 1000 range samples).
 
-    Valid cells: 256 x (1000 - 2 x (16 + 4)) = 245 760.
+    Tested cells: all of them, 256 x 1000 = 256 000. Of those, 256 x 2 x
+    (16 + 4) = 10 240 are edge cells with a one-sided window.
 
     Threshold factor, CA with M = 2N = 32 cells:
     alpha = M (pfa^(-1/M) - 1) = 32 (exp(ln(1e5)/32) - 1) = 32 (1.433013 - 1)
     = 13.8564, and 10 log10(13.8564) = 11.4165 dB, which the spec rounds to
-    11.417 dB.
+    11.417 dB. At the edges, M = N = 16: 16 (exp(ln(1e5)/16) - 1) = 16.8564,
+    or 12.2676 dB.
     """
     scenario = tomllib.loads(
         (Path(__file__).parents[2] / "scenarios" / "scenario_003_tracking.toml").read_text()
@@ -339,7 +352,7 @@ def test_scenario_003_calibration_matches_its_specification():
         n_guard=detection["n_guard"],
         axis=-1,
     )
-    assert int(valid.sum()) == 245_760
+    assert int(valid.sum()) == 256_000
 
     alpha_linear = cfar_threshold_factor(
         pfa=detection["pfa"], n_train=detection["n_train"], variant="ca"
@@ -351,6 +364,17 @@ def test_scenario_003_calibration_matches_its_specification():
     )
     # atol 1e-4 dB: the spec's 11.417 is this value to three decimals.
     np.testing.assert_allclose(10.0 * math.log10(alpha_linear), 11.4165, atol=1e-4)
+
+    factors = cfar_threshold_factors(
+        (burst["n_pulses"], n_samples),
+        pfa=detection["pfa"],
+        n_train=detection["n_train"],
+        n_guard=detection["n_guard"],
+    ).ravel()
+    margin = detection["n_train"] + detection["n_guard"]
+    assert np.count_nonzero(factors != alpha_linear) == 2 * margin
+    # atol 1e-4 dB, as above: the spec's 12.268 to three decimals.
+    np.testing.assert_allclose(10.0 * math.log10(factors[0]), 12.2676, atol=1e-4)
 
 
 # --------------------------------------------------------------------------- #
@@ -378,6 +402,23 @@ def test_order_statistic_false_alarm_rate_matches_design_pfa(rng):
     """
     pfa = 1e-2
     n_hit, n_tested = measure_false_alarm_rate(rng, pfa=pfa, variant="os")
+    assert_rate_consistent_with_design(n_hit, n_tested, pfa)
+
+
+@pytest.mark.parametrize(
+    ("variant", "pfa"), [("ca", 1e-3), ("go", 1e-3), ("so", 1e-3), ("os", 1e-2)]
+)
+def test_edge_false_alarm_rate_matches_design_pfa(rng, variant, pfa):
+    """The one-sided edge cells, counted on their own, hold the design pfa too.
+
+    The rows are one window plus one cell long, so nearly every cell is an edge
+    cell and the measurement is as cheap as the interior one. OS is measured at
+    1e-2, as above.
+    """
+    margin = NOMINAL_N_TRAIN + NOMINAL_N_GUARD
+    n_hit, n_tested = measure_false_alarm_rate(
+        rng, pfa=pfa, variant=variant, n_cells=2 * margin + 1, cells="edge"
+    )
     assert_rate_consistent_with_design(n_hit, n_tested, pfa)
 
 
@@ -418,12 +459,11 @@ def test_threshold_tracks_a_noise_floor_that_varies_with_range(rng):
 # --------------------------------------------------------------------------- #
 
 
-def test_valid_mask_excludes_exactly_the_incomplete_windows():
-    """Cells within n_guard + n_train of an end have no full window."""
-    mask = cfar_valid_mask((20,), n_train=4, n_guard=2)
-    assert not mask[:6].any()
-    assert mask[6:14].all()
-    assert not mask[14:].any()
+def test_valid_mask_tests_every_cell_once_the_axis_holds_one_window():
+    """With one-sided edges every cell is tested, from 2 (n_guard + n_train) + 1 cells up."""
+    assert cfar_valid_mask((20,), n_train=4, n_guard=2).all()
+    assert cfar_valid_mask((13,), n_train=4, n_guard=2).all()
+    assert not cfar_valid_mask((12,), n_train=4, n_guard=2).any()
 
 
 def test_valid_mask_is_empty_when_the_map_is_shorter_than_the_window():
@@ -431,16 +471,90 @@ def test_valid_mask_is_empty_when_the_map_is_shorter_than_the_window():
     assert not cfar_valid_mask((8,), n_train=8, n_guard=2).any()
 
 
-def test_noise_estimate_is_nan_outside_the_valid_mask(rng):
-    """Edge cells get nan rather than an estimate from a truncated window.
+@pytest.mark.parametrize("variant", CFAR_VARIANTS)
+@pytest.mark.parametrize("rank", [None, 7, 5])
+def test_edge_cells_take_the_far_band_alone(rng, variant, rank):
+    """Each end cell's estimate is its far band, reduced as an N-cell window would.
 
-    Truncating would change Pfa in exactly the way CFAR exists to prevent.
+    n_train = 5 is odd, so the edge window holds an odd number of cells. The
+    default OS rank for 10 cells is 8, and 7 and 5 test the rounding: rank
+    ceil(k/2) of 5 cells, so 4, 4 and 3.
     """
-    power_w = rng.exponential(1.0, size=(4, 64))
-    estimate_w = cfar_noise_estimate_w(power_w, n_train=8, n_guard=2)
-    valid = cfar_valid_mask(power_w.shape, n_train=8, n_guard=2)
-    assert np.all(np.isnan(estimate_w[~valid]))
-    assert np.all(np.isfinite(estimate_w[valid]))
+    n_train, n_guard = 5, 2
+    margin = n_train + n_guard
+    power_w = rng.exponential(1.0, size=(3, 40))
+    estimate_w = cfar_noise_estimate_w(
+        power_w, n_train=n_train, n_guard=n_guard, variant=variant, rank=rank
+    )
+
+    k = default_os_rank(n_train) if rank is None else rank
+    edge_rank = math.ceil(k / 2)
+    for i in range(margin):
+        for cell, band in (
+            (i, power_w[:, i + n_guard + 1 : i + margin + 1]),
+            (39 - i, power_w[:, 39 - i - margin : 39 - i - n_guard]),
+        ):
+            assert band.shape[1] == n_train
+            if variant == "os":
+                expected_w = np.sort(band, axis=-1)[:, edge_rank - 1]
+            else:
+                expected_w = band.mean(axis=-1)
+            # rtol 1e-15: the same mean over the same cells in the same order,
+            # or the same selected cell.
+            np.testing.assert_allclose(estimate_w[:, cell], expected_w, rtol=1e-15)
+
+
+@pytest.mark.parametrize("variant", CFAR_VARIANTS)
+def test_a_flat_floor_gives_exactly_the_floor_at_every_edge_cell(variant):
+    """No edge cell is biased: the mean or any rank of equal cells is that value."""
+    estimate_w = cfar_noise_estimate_w(np.full((2, 30), 4.0), n_train=4, n_guard=2, variant=variant)
+    np.testing.assert_array_equal(estimate_w, 4.0)
+
+
+@pytest.mark.parametrize("variant", CFAR_VARIANTS)
+def test_a_target_in_the_first_and_last_cells_is_detected(rng, variant):
+    """30 dB above the floor in cell 0 and in the last cell: both detected, nothing else."""
+    power_w = rng.exponential(1.0, size=256)
+    power_w[0] += 1e3
+    power_w[-1] += 1e3
+    mask = cfar_detect(power_w, pfa=1e-6, n_train=8, n_guard=2, variant=variant)
+    assert mask[0]
+    assert mask[-1]
+    assert int(mask.sum()) == 2
+
+
+@pytest.mark.parametrize(("variant", "rank"), [("ca", None), ("os", 24), ("os", 23)])
+def test_edge_threshold_factor_is_that_of_an_n_cell_window(variant, rank):
+    """The edge factor gives the design pfa through the N-cell closed form.
+
+    N = 16 is even, so the public Pfa with n_train = 8 (2 x 8 = 16 cells) is the
+    N-cell expression, an independent route to the same number. OS ranks 24 and
+    23 both become ceil(k/2) = 12 at the edge.
+    """
+    n_train, n_guard, pfa = 16, 2, 1e-4
+    factors = cfar_threshold_factors(
+        (64,), pfa=pfa, n_train=n_train, n_guard=n_guard, variant=variant, rank=rank
+    )
+    margin = n_train + n_guard
+    interior = cfar_threshold_factor(pfa=pfa, n_train=n_train, variant=variant, rank=rank)
+    np.testing.assert_array_equal(factors[margin : 64 - margin], interior)
+    np.testing.assert_array_equal(factors[:margin], factors[0])
+    np.testing.assert_array_equal(factors[64 - margin :], factors[0])
+    edge_rank = None if rank is None else math.ceil(rank / 2)
+    recovered = cfar_probability_of_false_alarm(
+        float(factors[0]), n_train=n_train // 2, variant=variant, rank=edge_rank
+    )
+    # rtol 1e-8, as in the round-trip test: bisection stops at float64
+    # resolution in alpha.
+    np.testing.assert_allclose(recovered, pfa, rtol=1e-8)
+    assert factors[0] > interior
+
+
+def test_threshold_factors_broadcast_along_the_requested_axis():
+    factors = cfar_threshold_factors((40, 3), pfa=1e-3, n_train=4, n_guard=1, axis=0)
+    assert factors.shape == (40, 1)
+    wrapped = cfar_threshold_factors((40, 3), pfa=1e-3, n_train=4, n_guard=1, axis=0, wrap=True)
+    np.testing.assert_array_equal(wrapped, cfar_threshold_factor(pfa=1e-3, n_train=4))
 
 
 def test_cell_averaging_estimate_equals_the_explicit_window_mean():

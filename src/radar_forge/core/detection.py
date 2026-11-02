@@ -79,12 +79,25 @@ labelling, and :func:`cluster_detections` reduces each group to one
 Notes
 -----
 Cells closer than ``n_guard + n_train`` to either end of a non-circular axis
-have no complete reference window. Rather than silently estimating the floor
-from a truncated window — which changes :math:`P_{fa}` in exactly the way CFAR
-exists to prevent — those cells are given a ``nan`` threshold and never declared
-detections. :func:`cfar_valid_mask` and :func:`cfar_valid_mask_2d` report which
-cells were actually tested, and any measured false-alarm rate must be taken over
-those cells alone.
+have no complete two-sided window. The 1-D functions give each of them a
+*one-sided* window [6]_: the complete half-window on the far side, the leading
+band at the start of the axis and the lagging band at its end, so
+:math:`N` = ``n_train`` reference cells. Every variant then reduces those cells
+as an :math:`N`-cell detector would. ``"ca"``, ``"go"`` and ``"so"`` all become
+the band's mean, since there is no second half to compare it with. ``"os"``
+takes rank :math:`\lceil k/2 \rceil` of the :math:`N` cells, the same quantile
+as rank :math:`k` of :math:`2N`. The threshold factor at those cells is
+calibrated for that :math:`N`-cell window (:func:`cfar_threshold_factors`), so
+they hold the design :math:`P_{fa}`, at the larger CFAR loss of a window half
+the size. The edges are not dropped, because a target in the first or last
+cells of a range profile is still a target.
+
+The 2-D ring keeps the older policy for now: a cell without a complete ring is
+given a ``nan`` threshold and is never declared a detection. A clipped ring
+would need a rank filter over a footprint that changes from cell to cell, which
+``"os"`` does not have. :func:`cfar_valid_mask` and :func:`cfar_valid_mask_2d`
+report which cells were tested, and any measured false-alarm rate must be taken
+over those cells alone.
 
 The closed forms also assume the reference cells are *independent*, which holds
 for an untapered, unpadded FFT of white noise and fails for a tapered one. A
@@ -145,6 +158,7 @@ from __future__ import annotations
 
 import math
 import operator
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, get_args
 
@@ -168,6 +182,7 @@ __all__ = [
     "cfar_threshold_2d_w",
     "cfar_threshold_factor",
     "cfar_threshold_factor_2d",
+    "cfar_threshold_factors",
     "cfar_threshold_w",
     "cfar_valid_mask",
     "cfar_valid_mask_2d",
@@ -380,17 +395,12 @@ def cfar_probability_of_false_alarm(
     n_ref = 2 * n_train
 
     if variant == "ca":
-        # Sum of n_ref exponentials is Gamma(n_ref); Pfa is its MGF at alpha/n_ref.
-        return float((1.0 + alpha_linear / n_ref) ** -n_ref)
+        return _pfa_ca(alpha_linear, n_ref)
 
     if variant == "os":
         k = default_os_rank(n_train) if rank is None else rank
         _validate_rank(k, n_ref)
-        # Product form of Rohling eq. 14; equals k * C(M, k) * B(M - k + 1 + alpha, k).
-        pfa = 1.0
-        for i in range(k):
-            pfa *= (n_ref - i) / (n_ref - i + alpha_linear)
-        return float(pfa)
+        return _pfa_os(alpha_linear, n_ref, k)
 
     # GO and SO share the same series; GO is its complement within 2 (1 + beta)^-N.
     beta = alpha_linear / n_train
@@ -474,47 +484,105 @@ def cfar_threshold_factor(
 
     n_ref = 2 * n_train
     if variant == "ca":
-        # P^(-1/M) - 1 as expm1(-ln P / M): P^(-1/M) is close to 1 when M is
-        # large, as it is for a 2-D ring, and subtracting 1 from it loses digits.
-        return float(n_ref * math.expm1(-math.log(pfa) / n_ref))
+        return _threshold_factor(pfa, n_ref, "ca", rank=0)
+    if variant == "os":
+        k = default_os_rank(n_train) if rank is None else rank
+        _validate_rank(k, n_ref)
+        return _threshold_factor(pfa, n_ref, "os", rank=k)
+    return _solve_threshold_factor(
+        lambda alpha_linear: cfar_probability_of_false_alarm(
+            alpha_linear, n_train=n_train, variant=variant
+        ),
+        pfa,
+        window=f"variant={variant!r} with n_train={n_train}",
+    )
 
-    if variant == "os" and rank is not None:
-        _validate_rank(rank, n_ref)
 
-    def excess(alpha_linear: float) -> float:
-        return (
-            cfar_probability_of_false_alarm(
-                alpha_linear, n_train=n_train, variant=variant, rank=rank
-            )
-            - pfa
-        )
+def cfar_threshold_factors(
+    shape: tuple[int, ...],
+    *,
+    pfa: float,
+    n_train: int,
+    n_guard: int = 1,
+    variant: CfarVariant = "ca",
+    rank: int | None = None,
+    axis: int = -1,
+    wrap: bool = False,
+) -> NDArray[np.float64]:
+    r"""Return the threshold factor :math:`\alpha` of each cell along ``axis``.
 
-    # Pfa(alpha) decreases from 1 towards 0, so doubling finds a bracket in a
-    # few dozen steps; a Python loop is unavoidable because each step depends on
-    # the previous one.
-    low, high = 1e-9, 1.0
-    while excess(high) > 0.0:
-        high *= 2.0
-        if high > _MAX_ALPHA_LINEAR:
-            msg = (
-                f"no threshold factor below {_MAX_ALPHA_LINEAR:g} achieves pfa={pfa!r} "
-                f"for variant={variant!r} with n_train={n_train}. The reference window is "
-                f"too small for a false-alarm rate this low; increase n_train."
-            )
-            raise ValueError(msg)
+    The interior of the axis uses the full two-sided window, so its factor is
+    :func:`cfar_threshold_factor`. The ``n_guard + n_train`` cells at each end
+    of a non-circular axis use a one-sided window of :math:`N` = ``n_train``
+    cells (see the module Notes). Their factor is that of an :math:`N`-cell
+    CA window, or for ``'os'`` of rank :math:`\lceil k/2 \rceil` in :math:`N`
+    cells. Multiply :func:`cfar_noise_estimate_w` by this to get the threshold.
 
-    # Bisection rather than a faster root finder: Pfa spans many decades, so a
-    # derivative-based method needs careful scaling, while bisection cannot fail
-    # on a bracketed monotone function. Sixty halvings reach float64 resolution.
-    for _ in range(200):
-        middle = 0.5 * (low + high)
-        if middle <= low or middle >= high:
-            break
-        if excess(middle) > 0.0:
-            low = middle
+    Parameters
+    ----------
+    shape : tuple of int
+        Shape of the detected map.
+    pfa : float
+        Design probability of false alarm per cell, in ``(0, 1)``.
+    n_train, n_guard : int
+        Training and guard cells per side; ``n_guard`` defaults to 1.
+    variant : {'ca', 'go', 'so', 'os'}, optional
+        Reduction rule. Default ``'ca'``.
+    rank : int, optional
+        Order-statistic rank :math:`k` for ``variant='os'``, of the full
+        window. Defaults to :func:`default_os_rank`.
+    axis : int, optional
+        Axis the window lies along. Default ``-1``.
+    wrap : bool, optional
+        Whether ``axis`` is circular. Default False. If so, every cell has a
+        full window and takes the interior factor.
+
+    Returns
+    -------
+    numpy.ndarray
+        Linear factors, shape ``(n,)`` along ``axis`` and one along every other
+        axis, so that it broadcasts against a map of ``shape``.
+
+    Raises
+    ------
+    ValueError
+        As :func:`cfar_threshold_factor`, or if ``axis`` is out of bounds.
+
+    Notes
+    -----
+    The edge factor is larger than the interior one: half as many cells give
+    a noisier estimate, so the threshold must rise to hold the same rate.
+
+    Examples
+    --------
+    >>> alpha_linear = cfar_threshold_factors((12,), pfa=1e-3, n_train=2, n_guard=1)
+    >>> bool(np.isclose(alpha_linear[5], cfar_threshold_factor(pfa=1e-3, n_train=2)))
+    True
+    >>> bool(np.isclose(alpha_linear[0], 2 * (1e-3 ** (-1 / 2) - 1)))
+    True
+    """
+    _validate_variant(variant)
+    _validate_window(n_train=n_train, n_guard=n_guard)
+    axis = _normalize_axis(axis, len(shape))
+    n_cells = shape[axis]
+    margin = n_guard + n_train
+    k = default_os_rank(n_train) if rank is None else rank
+
+    interior = cfar_threshold_factor(pfa=pfa, n_train=n_train, variant=variant, rank=k)
+    factors = np.full(n_cells, interior, dtype=np.float64)
+    if not wrap and n_cells >= 2 * margin + 1:
+        if variant == "os":
+            edge = _threshold_factor(pfa, n_train, "os", rank=math.ceil(k / 2))
         else:
-            high = middle
-    return float(0.5 * (low + high))
+            # One band has no partner to compare with, so GO and SO reduce to
+            # its mean, which is CA over N cells.
+            edge = _threshold_factor(pfa, n_train, "ca", rank=0)
+        factors[:margin] = edge
+        factors[n_cells - margin :] = edge
+
+    broadcast_shape = [1] * len(shape)
+    broadcast_shape[axis] = n_cells
+    return factors.reshape(broadcast_shape)
 
 
 def cfar_valid_mask(
@@ -525,7 +593,11 @@ def cfar_valid_mask(
     axis: int = -1,
     wrap: bool = False,
 ) -> NDArray[np.bool_]:
-    """Return which cells have a complete reference window, and so were tested.
+    """Return which cells the 1-D CFAR tests.
+
+    Every cell is tested, unless ``axis`` is shorter than one window. The cells
+    within ``n_guard + n_train`` of an end of a non-circular axis are tested too,
+    with a one-sided window (see the module Notes).
 
     Parameters
     ----------
@@ -536,40 +608,33 @@ def cfar_valid_mask(
     axis : int, optional
         Axis the reference window lies along. Default ``-1``.
     wrap : bool, optional
-        Whether ``axis`` is circular. Default False.
+        Whether ``axis`` is circular. Default False. Accepted for symmetry with
+        the other 1-D functions; it does not change the result.
 
     Returns
     -------
     numpy.ndarray
-        Boolean array of ``shape``, True where the cell was tested. False in the
-        ``n_guard + n_train`` cells at each end of ``axis`` unless it wraps, and
-        everywhere if ``axis`` is shorter than the window, which would then
-        overlap itself.
+        Boolean array of ``shape``: all True, or all False if ``axis`` has fewer
+        than ``2 * (n_guard + n_train) + 1`` cells. Then even the one-sided
+        window at one end would reach past the other end.
 
     Notes
     -----
     Any measured false-alarm rate must be taken over these cells alone. Counting
-    the untested edge cells as non-detections dilutes the rate towards zero and
-    would make a detector with far too high a threshold look correct.
+    untested cells as non-detections dilutes the rate towards zero and would make
+    a detector with far too high a threshold look correct.
 
     Examples
     --------
-    >>> cfar_valid_mask((7,), n_train=2, n_guard=0)
-    array([False, False,  True,  True,  True, False, False])
-    >>> bool(cfar_valid_mask((7,), n_train=2, n_guard=0, wrap=True).all())
+    >>> bool(cfar_valid_mask((7,), n_train=2, n_guard=1).all())
     True
+    >>> bool(cfar_valid_mask((6,), n_train=2, n_guard=1).any())
+    False
     """
     _validate_window(n_train=n_train, n_guard=n_guard)
-    margin = n_guard + n_train
-    valid = np.zeros(shape, dtype=np.bool_)
     axis = _normalize_axis(axis, len(shape))
-    if shape[axis] < 2 * margin + 1:
-        return valid
-    index: list[slice] = [slice(None)] * len(shape)
-    if not wrap:
-        index[axis] = slice(margin, shape[axis] - margin)
-    valid[tuple(index)] = True
-    return valid
+    tested = shape[axis] >= 2 * (n_guard + n_train) + 1
+    return np.full(shape, tested, dtype=np.bool_)
 
 
 def cfar_noise_estimate_w(
@@ -585,9 +650,10 @@ def cfar_noise_estimate_w(
     r"""Estimate the local noise floor around each cell, in watts.
 
     Reduces the :math:`2N` reference cells around each cell under test to one
-    number, by the rule that ``variant`` selects. Multiply the result by
-    :func:`cfar_threshold_factor` to get a threshold; :func:`cfar_threshold_w`
-    does both.
+    number, by the rule that ``variant`` selects. Near an end of a non-circular
+    axis the window is one-sided, :math:`N` cells (see the module Notes).
+    Multiply the result by :func:`cfar_threshold_factors` to get a threshold;
+    :func:`cfar_threshold_w` does both.
 
     Parameters
     ----------
@@ -620,8 +686,8 @@ def cfar_noise_estimate_w(
     Returns
     -------
     numpy.ndarray
-        Noise-floor estimate in watts, the same shape as ``power_w``, and
-        ``nan`` wherever the reference window is incomplete
+        Noise-floor estimate in watts, the same shape as ``power_w``. All
+        ``nan`` if ``axis`` is shorter than one window
         (see :func:`cfar_valid_mask`).
 
     Raises
@@ -643,16 +709,20 @@ def cfar_noise_estimate_w(
     at each end, as the ring does in :func:`cfar_noise_estimate_2d_w`, so every
     cell along it has a complete window.
 
+    On a non-circular axis the ``n_guard + n_train`` cells at each end take the
+    far band alone: cell ``i`` near the start uses cells ``i + n_guard + 1``
+    to ``i + n_guard + n_train``, and near the end the mirror image. Those
+    bands are gathered by index, which costs ``2 (n_guard + n_train) n_train``
+    cells per line.
+
     Examples
     --------
-    In a flat floor every variant recovers the floor itself:
+    In a flat floor every variant recovers the floor itself, at the ends too:
 
     >>> flat_w = np.full(11, 4.0)
     >>> estimate_w = cfar_noise_estimate_w(flat_w, n_train=2, n_guard=1)
-    >>> float(estimate_w[5])
-    4.0
-    >>> bool(np.all(np.isnan(estimate_w[:3])))
-    True
+    >>> float(estimate_w[5]), float(estimate_w[0]), float(estimate_w[10])
+    (4.0, 4.0, 4.0)
     """
     _validate_variant(variant)
     _validate_window(n_train=n_train, n_guard=n_guard)
@@ -670,8 +740,9 @@ def cfar_noise_estimate_w(
 
     estimate_w = np.full(values_w.shape, np.nan, dtype=np.float64)
     if values_w.shape[axis] < 2 * margin + 1:
-        # No cell has a complete window; every entry stays nan.
+        # Even a one-sided window would run past the far end; every entry stays nan.
         return estimate_w
+    unpadded_w = values_w
 
     if wrap:
         padding = [(0, 0)] * values_w.ndim
@@ -705,6 +776,11 @@ def cfar_noise_estimate_w(
     if not wrap:
         index[axis] = slice(margin, n_cells - margin)
     estimate_w[tuple(index)] = interior_w
+    if not wrap:
+        index[axis] = np.r_[0:margin, n_cells - margin : n_cells]
+        estimate_w[tuple(index)] = _one_sided_estimate(
+            unpadded_w, n_train, n_guard, variant, math.ceil(k / 2), axis
+        )
     return estimate_w
 
 
@@ -722,7 +798,9 @@ def cfar_threshold_w(
     """Return the adaptive detection threshold for each cell, in watts.
 
     The local noise estimate from :func:`cfar_noise_estimate_w` scaled by the
-    threshold factor from :func:`cfar_threshold_factor`.
+    threshold factor of each cell from :func:`cfar_threshold_factors`: the
+    two-sided factor in the interior, and the :math:`N`-cell factor at the
+    ends of a non-circular axis.
 
     Parameters
     ----------
@@ -744,8 +822,8 @@ def cfar_threshold_w(
     Returns
     -------
     numpy.ndarray
-        Threshold in watts, the same shape as ``power_w``, ``nan`` where the
-        reference window is incomplete.
+        Threshold in watts, the same shape as ``power_w``. All ``nan`` if
+        ``axis`` is shorter than one window.
 
     Examples
     --------
@@ -754,12 +832,21 @@ def cfar_threshold_w(
     >>> floor_w = np.full(64, 2.0)
     >>> low_w = cfar_threshold_w(floor_w, pfa=1e-3, n_train=8, n_guard=2)
     >>> high_w = cfar_threshold_w(100.0 * floor_w, pfa=1e-3, n_train=8, n_guard=2)
-    >>> bool(np.isclose(np.nanmax(high_w), 100.0 * np.nanmax(low_w)))
+    >>> bool(np.allclose(high_w, 100.0 * low_w))
     True
     """
-    alpha_linear = cfar_threshold_factor(pfa=pfa, n_train=n_train, variant=variant, rank=rank)
     estimate_w = cfar_noise_estimate_w(
         power_w, n_train=n_train, n_guard=n_guard, variant=variant, rank=rank, axis=axis, wrap=wrap
+    )
+    alpha_linear = cfar_threshold_factors(
+        estimate_w.shape,
+        pfa=pfa,
+        n_train=n_train,
+        n_guard=n_guard,
+        variant=variant,
+        rank=rank,
+        axis=axis,
+        wrap=wrap,
     )
     return alpha_linear * estimate_w
 
@@ -797,8 +884,8 @@ def cfar_detect(
     Returns
     -------
     numpy.ndarray
-        Boolean mask, the same shape as ``power_w``. Always False in the
-        untested edge cells reported by :func:`cfar_valid_mask`.
+        Boolean mask, the same shape as ``power_w``. All False if ``axis`` is
+        shorter than one window (see :func:`cfar_valid_mask`).
 
     Notes
     -----
@@ -813,8 +900,12 @@ def cfar_detect(
     .. code-block:: python
 
         estimate_w = cfar_noise_estimate_w(power_w, n_train=16, n_guard=2)
-        threshold_w = cfar_threshold_factor(pfa=1e-4, n_train=16) * estimate_w
-        mask = power_w > threshold_w  # a nan threshold compares False
+        alpha_linear = cfar_threshold_factors(power_w.shape, pfa=1e-4, n_train=16, n_guard=2)
+        mask = power_w > alpha_linear * estimate_w  # a nan threshold compares False
+
+    Use :func:`cfar_threshold_factors`, not the single
+    :func:`cfar_threshold_factor`: the one-sided cells at the ends need a
+    larger factor.
 
     Examples
     --------
@@ -1513,6 +1604,70 @@ def cluster_detections(
 # --------------------------------------------------------------------------- #
 
 
+def _pfa_ca(alpha_linear: float, n_ref: int) -> float:
+    """CA-CFAR false-alarm probability over ``n_ref`` reference cells (module ref. [5])."""
+    # Sum of n_ref exponentials is Gamma(n_ref); Pfa is its MGF at alpha/n_ref.
+    return float((1.0 + alpha_linear / n_ref) ** -n_ref)
+
+
+def _pfa_os(alpha_linear: float, n_ref: int, rank: int) -> float:
+    """OS-CFAR false-alarm probability, rank ``rank`` of ``n_ref`` cells (module ref. [4])."""
+    # Product form of Rohling eq. 14; equals k * C(M, k) * B(M - k + 1 + alpha, k).
+    pfa = 1.0
+    for i in range(rank):
+        pfa *= (n_ref - i) / (n_ref - i + alpha_linear)
+    return float(pfa)
+
+
+def _threshold_factor(pfa: float, n_ref: int, variant: Literal["ca", "os"], rank: int) -> float:
+    """Return alpha for ``n_ref`` reference cells, which may be odd; ``rank`` is for OS only."""
+    if variant == "ca":
+        # P^(-1/M) - 1 as expm1(-ln P / M): P^(-1/M) is close to 1 when M is
+        # large, as it is for a 2-D ring, and subtracting 1 from it loses digits.
+        return float(n_ref * math.expm1(-math.log(pfa) / n_ref))
+    return _solve_threshold_factor(
+        lambda alpha_linear: _pfa_os(alpha_linear, n_ref, rank),
+        pfa,
+        window=f"variant='os' with {n_ref} reference cells and rank {rank}",
+    )
+
+
+def _solve_threshold_factor(
+    pfa_of_alpha: Callable[[float], float], pfa: float, *, window: str
+) -> float:
+    """Invert a strictly decreasing ``pfa_of_alpha`` at ``pfa`` by bracketing and bisection."""
+
+    def excess(alpha_linear: float) -> float:
+        return pfa_of_alpha(alpha_linear) - pfa
+
+    # Pfa(alpha) decreases from 1 towards 0, so doubling finds a bracket in a
+    # few dozen steps; a Python loop is unavoidable because each step depends on
+    # the previous one.
+    low, high = 1e-9, 1.0
+    while excess(high) > 0.0:
+        high *= 2.0
+        if high > _MAX_ALPHA_LINEAR:
+            msg = (
+                f"no threshold factor below {_MAX_ALPHA_LINEAR:g} achieves pfa={pfa!r} "
+                f"for {window}. The reference window is too small for a false-alarm "
+                f"rate this low; increase n_train."
+            )
+            raise ValueError(msg)
+
+    # Bisection rather than a faster root finder: Pfa spans many decades, so a
+    # derivative-based method needs careful scaling, while bisection cannot fail
+    # on a bracketed monotone function. Sixty halvings reach float64 resolution.
+    for _ in range(200):
+        middle = 0.5 * (low + high)
+        if middle <= low or middle >= high:
+            break
+        if excess(middle) > 0.0:
+            low = middle
+        else:
+            high = middle
+    return float(0.5 * (low + high))
+
+
 def _validate_variant(variant: str) -> None:
     """Reject a variant name that is not one of the four implemented rules."""
     if variant not in CFAR_VARIANTS:
@@ -1578,6 +1733,36 @@ def _slice_along(
     index: list[slice] = [slice(None)] * values.ndim
     index[axis] = slice(start, stop)
     return values[tuple(index)]
+
+
+def _one_sided_estimate(
+    values_w: NDArray[np.float64],
+    n_train: int,
+    n_guard: int,
+    variant: str,
+    edge_rank: int,
+    axis: int,
+) -> NDArray[np.float64]:
+    """Return the one-sided estimate of the ``n_guard + n_train`` cells at each end of ``axis``.
+
+    The result runs along ``axis`` as the first ``margin`` cells, then the last
+    ``margin``. A start cell ``i`` takes its leading band, cells
+    ``i + n_guard + 1 .. i + margin``; an end cell its lagging band, cells
+    ``i - margin .. i - n_guard - 1``. CA, GO and SO all reduce the band to its
+    mean, and OS to its ``edge_rank``-th smallest cell.
+    """
+    margin = n_guard + n_train
+    n_cells = values_w.shape[axis]
+    cell = np.r_[0:margin, n_cells - margin : n_cells]
+    first_offset = np.where(cell < margin, n_guard + 1, -margin)
+    # band[c, j]: the j-th reference cell of edge cell c, shape (2 margin, n_train).
+    band = (cell + first_offset)[:, None] + np.arange(n_train)
+    reference_w = np.moveaxis(values_w, axis, -1)[..., band]
+    if variant == "os":
+        estimate_w = np.partition(reference_w, edge_rank - 1, axis=-1)[..., edge_rank - 1]
+    else:
+        estimate_w = reference_w.mean(axis=-1)
+    return np.moveaxis(estimate_w, -1, axis)
 
 
 def _order_statistic(

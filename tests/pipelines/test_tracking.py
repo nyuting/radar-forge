@@ -395,7 +395,7 @@ class TestFrameDetections:
     def test_a_noise_only_map_yields_about_the_designed_false_alarm_count(self):
         """§3's arithmetic, measured rather than trusted.
 
-        2.46 expected over 245,760 valid cells at pfa = 1e-5. Asserted loosely
+        2.56 expected over 256,000 tested cells at pfa = 1e-5. Asserted loosely
         because a single frame is one Poisson draw, not a rate measurement.
         """
         rng = np.random.default_rng(11)
@@ -743,13 +743,22 @@ class TestCircularRange:
             range_bin_m=self.RANGE_BIN_M,
         )
 
-    def test_a_target_near_the_end_is_detected_only_on_a_circle(self):
-        """Without wrapping, the 20 cells at each end have no reference window."""
+    def test_a_target_near_the_end_is_detected_with_or_without_the_circle(self):
+        """Bin 5 is within the 20 edge cells. Unwrapped, it is tested with a one-sided window.
+
+        What wrap_range still changes is that the window is two-sided, from
+        the far end of the circle, and that a target straddling the ends is one
+        detection (the next test).
+        """
         range_m = 5 * self.RANGE_BIN_M
         product = self._product(range_m)
-        assert not [m for m in frame_detections(product) if abs(m.range_m - range_m) < 150.0]
-        wrapped = frame_detections(product, wrap_range=True)
-        assert [m for m in wrapped if abs(m.range_m - range_m) < 150.0]
+        for wrap_range in (False, True):
+            near = [
+                m
+                for m in frame_detections(product, wrap_range=wrap_range)
+                if abs(m.range_m - range_m) < 150.0
+            ]
+            assert len(near) == 1, f"wrap_range={wrap_range}"
 
     def test_a_target_straddling_the_ends_is_one_detection_at_its_range(self):
         period_m = self.N_RANGE_BINS * self.RANGE_BIN_M
