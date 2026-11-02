@@ -103,6 +103,8 @@ def test_matches_the_textbook_worked_example() -> None:
   `ids=` when the values alone are not self-describing.
 - **Every random draw is seeded**: `np.random.default_rng(20260911)`. An unseeded test that
   fails once a fortnight is worse than no test. Seed from a fixture so it is stated once.
+- Tests write only under `tmp_path`, never into the repo. A helper that only tests use lives
+  in `tests/`, not in `src/`.
 
 ---
 
