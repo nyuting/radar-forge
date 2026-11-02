@@ -42,6 +42,9 @@ to understand and to test; if a step is hard to test on its own, split it. The f
 
 ## Working agreements
 
+- British spelling (`normalise`, `behaviour`, `visualisation`) in names, docs and comments,
+  unless there is a good reason not to, such as mirroring an outside API (matplotlib's `color=`).
+  See [style.md §3.2](docs/conventions/style.md#32-spelling-review).
 - Vectorise with NumPy; if a Python loop is unavoidable, write a comment saying why.
 - Broadcast rather than `np.tile`/`np.repeat`/`np.broadcast_to`. A hook rejects those unless the
   call carries `# broadcast-exempt: <reason>` on its line or the one above.
