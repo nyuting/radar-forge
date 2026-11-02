@@ -66,7 +66,7 @@ to understand and to test; if a step is hard to test on its own, split it. The f
 | `docs/conventions/commits.md` | Commit and branch conventions |
 | `docs/conventions/testing.md` | Test layout, tolerances, golden data, markers |
 | `docs/conventions/review.md` | Doing and writing a PR review: procedure, layout, findings, checks, voice, what to check against |
-| `docs/conventions/refactoring.md` | Refactoring: rules F1–F8, and how to show nothing moved |
+| `docs/conventions/refactoring.md` | Refactoring: rules F1–F9, and how to show nothing moved |
 | `docs/conventions/audit.md` | Auditing code against the spec and pruning tests: Q1–Q8, rules C1–C4, the reports |
 | `src/radar_forge/core/constants.py` | Every physical constant, defined once |
 | `.githooks/` | pre-commit, commit-msg, pre-push |

@@ -3,7 +3,7 @@
 A refactor changes how the code is put together and leaves what it computes alone. This page lists
 what a refactor in this repo is for and how to show it changed nothing. The commit type is
 `refactor` ([commits.md](commits.md#types)). The rules that every piece of code follows (naming,
-units, the public API) are in [style.md](style.md) and are not repeated here. Each rule cites one or
+units, the public API) are in [style.md](style.md) and are not repeated here. Most rules cite one or
 two commits from the history as worked examples. `git show <hash>` shows the change and its
 reasoning.
 
@@ -17,6 +17,7 @@ reasoning.
 | [F6](#f6-break-deliberately) | Break deliberately, with no compatibility shims |
 | [F7](#f7-prove-nothing-moved) | Show that nothing moved, or say exactly what did |
 | [F8](#f8-leave-history-alone) | Records keep the names they were written with |
+| [F9](#f9-pass-what-travels-together-as-one-object) | Arguments that always travel together become one object |
 
 ## The rules
 
@@ -34,6 +35,11 @@ such as a dict that dispatches on a kind, is defined once. If two modules open t
 make one of them call the other. Two readers of one format drift apart the same way two copies of
 a formula do, and the drift goes unnoticed until a column is renamed.
 
+Prose has one owner too. A docstring or doc that repeats what the spec or another doc already
+says links to it instead, and keeps only what is its own. The equation a function implements and
+its References stay in its docstring ([style.md §4](style.md#4-docstrings)): that is the function's
+own content, not a copy.
+
 ### F2. Delete what a library already does, or what nothing calls
 
 Hand-written code that SciPy or a helper in this repo already does is code to read, test and
@@ -44,7 +50,8 @@ idea. 3652134 replaced a hand-written summed-area table with `scipy.ndimage.unif
 Code with no caller left goes too: a wrapper that only forwards its arguments, a flag that only a
 test sets, a helper used once that names no step of its own. A helper that F3 made public to show
 a step stays, even with one caller. Don't convert data out of a shape and back again either. If a
-function takes cells only to rebuild the array they came from, pass it the array.
+function takes cells only to rebuild the array they came from, pass it the array. When a deletion
+gives something up, such as a case nothing covers any more, the commit body says so.
 
 ### F3. Show the steps
 
@@ -54,6 +61,10 @@ calibrated by calling the 1-D function with `n_train=M // 2`. That commit made t
 `cfar_ring_reference_count` and `cfar_threshold_factor_2d`. Clustering also became public as
 `label_connected_cells`. This is the [§1.1 bar](../../spec/starter.md#11-the-bar) applied to old
 code: the intermediate quantities are visible.
+
+A function that both decides whether to act and acts is two steps. Split it into the check and
+the action, so each can be read and tested alone. "Writers that only write" in
+[review.md](review.md#design-and-api) is the same rule for output files.
 
 ### F4. Split along the spec
 
@@ -66,6 +77,10 @@ moved names back and keeps them in its `__all__`.
 
 Code lives in the stage it serves, not beside the helper it happens to use. "It sat there only to
 borrow a helper" is a reason to move it, and the helper moves to where both can import it.
+
+The rule cuts both ways. A function whose body is the spec's sequence of steps, such as a
+scenario runner, stays one function even when it is long. Splitting it would hide the order the
+spec sets.
 
 ### F5. Rename until the name holds up
 
@@ -121,6 +136,14 @@ is two commits: the `refactor` and a `fix` or `feat`.
 rename inside them (4a0f1f4). Add a dated Status note instead
 ([audit.md](audit.md#4-writing-the-report)). Code comments go the other way: they describe the
 code as it is now, so they don't cite the PR or commit that changed it (3652134).
+
+### F9. Pass what travels together as one object
+
+When the same several arguments pass together through one call after another, make them one
+frozen dataclass and pass that. The signatures shrink, and the arguments can't be passed in the
+wrong order. An argument that changes between calls stays separate, so the call still shows what
+varies. This is the cure for the "constructor call that restates nine fields to change two" in
+[review.md](review.md#design-and-api).
 
 ## The commit
 

@@ -184,6 +184,9 @@ catches it in anything committed, which is the case that matters.
 - Never reuse a term that already means something here or in the field **[review]**.
   `noise_power_w` is thermal noise, so a CFAR estimate is `cfar_noise_estimate_w`.
   "Observable" means observability in estimation, so a field-of-view test is `covers`.
+- Never shadow a parameter, a builtin or an imported module with a local or a loop variable
+  **[review]**. Pick another word: a loop over `track` inside a function that takes `track` reads
+  as the same object.
 
 ### 3.1 Data layout and array names **[review]**
 
@@ -516,6 +519,8 @@ reader must be able to tell an approximation from a bug.
   go in the docstring (§4), where they cannot drift from it.
 - **TODOs name an owner and an issue** **[ruff: TD]**: `# TODO(author): what — <issue link>`.
   An unowned TODO is never done.
+- **A `# noqa` is a last resort** **[review]**. Fix what ruff flags. One that must stay names
+  its rule and says why on the same line, as a `# type: ignore` does (§5).
 
 ---
 
