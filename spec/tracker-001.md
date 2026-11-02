@@ -689,6 +689,11 @@ statistics, each a small dense solve. That is the hot path, and it is batched.
 | Batched ≡ per pair | the batched gate's NIS and log-likelihood against `innovation_stats` called pair by pair | `rtol=1e-12` |
 | Performance | time per scan: scenario 003, and the synthetic 100 × 1000 scan (§11) | budget against the committed baseline, `benchmark` |
 
+These are offline tests. Their live, truth-free counterparts (windowed NIS, innovation whiteness,
+mean innovation as a bias check) are monitors, specified in `spec/instrumentation-001.md` §10;
+they need each update's whitened innovation on `TrackSnapshot`, a return value added by that
+spec's migration step 6. NEES needs truth and stays here.
+
 Two rules carry over from `docs/conventions/testing.md`: never loosen a tolerance to pass, and
 prefer analytic truth to recorded output. Migration adds one: **each step of §13 leaves
 scenario 003's end-to-end numbers where they were**, or explains the move in the commit.

@@ -23,6 +23,9 @@ input, output and product the tree below reads or writes.
 **Tracking architecture:** [`tracker-001.md`](tracker-001.md) owns the internal design of
 `core/tracking/` — its pieces, their protocols, and how the filters are kept from drifting. This
 document only places the package in the tree.
+**Instrumentation:** [`instrumentation-001.md`](instrumentation-001.md) owns runtime configuration,
+logging, timing, health telemetry and anomaly triggers, and the rule that `core/` emits none of
+them (`pipelines/runtime/`, `core/invariants.py`, `core/monitoring.py` below).
 
 This document does two things, in the order a reader needs them. **Part B** is the file-level design
 of the `radar_forge` package: the tree as intended, the module-to-upstream mapping, the design rules
@@ -72,6 +75,8 @@ src/radar_forge/
 │   ├── windows.py               # Taylor, Chebyshev, Hamming, Hann tapers; coherent gain, loss
 │   ├── ambiguity.py             # velocity folding; dual-PRF Doppler unfolding
 │   ├── detection.py             # CA/GO/SO/OS-CFAR (1-D), CA/OS 2-D ring, Pfa calibration, wrap-aware clustering
+│   ├── invariants.py            # algorithmic invariants as pure functions: Parseval, noise floor, bookkeeping (instrumentation-001 §9)
+│   ├── monitoring.py            # truth-free monitors: windowed NIS, whiteness, bias, Pfa; EWMA and CUSUM (instrumentation-001 §10–§11)
 │   ├── clutter.py               # land/sea clutter; least-squares leakage and clutter cancellation (005); Ward clutter patch, ICM taper (008);
 │   │                            #   Poisson clutter plots per (m·rad), fixed discretes (011)
 │   ├── plots.py                 # plot-level sensor model: Pd with MTI notch, finite-resolution merging, plot noise (D25)
@@ -135,6 +140,7 @@ src/radar_forge/
 ├── pipelines/
 │   ├── __init__.py
 │   ├── scenarios.py             # TOML scenario schema + loader (stdlib tomllib); frame loop
+│   ├── runtime/                 # [runtime] config, logging setup, spans, recorder, triggers, injection (instrumentation-001)
 │   ├── trajectories.py          # trajectory load/resample; monostatic and bistatic radar frames
 │   ├── tracking.py              # RD map → measurements → core.tracking.Tracker, frame by frame (scenario 3)
 │   ├── terminal_area.py         # closed-form traffic (D24), clutter layout, rotating-scan sector batches (D25) (011)
@@ -1020,4 +1026,6 @@ and metrics and owns its own density; it is the reference score, not a fourth as
 1. **GPU story — deferred.** Three backends (Mitsuba, RadarSimPy, ovrtx) need CUDA or an RTX GPU. Whether
    CI exercises any of them, or backend tests stay mock-only with hardware validation left manual, is a
    question for when the first real backend lands. Until then `raytracing/backends/analytic.py` is the only
-   backend under test, and it runs anywhere. Revisit before merging the first GPU backend.
+   backend under test, and it runs anywhere. Revisit before merging the first GPU backend. For the
+   signal-processing path (as distinct from ray tracing), `instrumentation-001.md` §15 fixes what a
+   CPU/GPU array backend must respect; the backend itself is a later `backend-001`.
