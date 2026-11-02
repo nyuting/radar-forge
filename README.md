@@ -107,7 +107,7 @@ import radar_forge as rf
 # 1. Describe the sensor: an X-band FMCW radar at a fixed geodetic site.
 radar = rf.core.Radar(
     transmitter=rf.core.Transmitter(
-        f0_hz=9.8e9,
+        carrier_frequency_hz=9.8e9,
         bandwidth_hz=2.0e6,
         transmit_power_w=100.0,
         gain_tx_dbi=30.0,

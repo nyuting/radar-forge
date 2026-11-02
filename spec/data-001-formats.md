@@ -205,7 +205,7 @@ the ones marked *new*.
 | `conventions` *new* | object | Fixed strings restating §5, so a reader can check rather than assume: `frame: "enu"`, `azimuth_reference: "true_north_clockwise"`, `velocity_sign: "closing_positive"`, `cube_layout: "frame,pulse,sample[,rx]"`, `rd_layout: "frame,doppler,range"` |
 | `scenario` | object | As today: name, description, seed, `start_time_s`, `duration_s`, `frame_rate_hz`, `n_frames`, `trajectory_path`, `target_altitude_m` |
 | `sites`, `target` | object | As today |
-| `bursts` | array | As today, one object per burst: waveform, `f0_hz`, `bandwidth_hz`, `prf_hz`, `n_pulses`, `n_samples`, resolutions, unambiguous range and velocity, `noise_power_w` (thermal noise per complex IQ sample, `N0·fs` = `Receiver.noise_power_per_sample_w`) |
+| `bursts` | array | As today, one object per burst: waveform, `carrier_frequency_hz`, `bandwidth_hz`, `prf_hz`, `n_pulses`, `n_samples`, resolutions, unambiguous range and velocity, `noise_power_w` (thermal noise per complex IQ sample, `N0·fs` = `Receiver.noise_power_per_sample_w`) |
 | `detection` | object or null | As today: the resolved `[detection]` table |
 | `tracking` | object or null | As today, including `simulated_angles` (`spec/scenario-003-tracking.md` §6.3). **Adds** `state_model` and `state_fields`: the ordered list of state-vector column names, e.g. `["east_m", "north_m", "east_rate_mps", "north_rate_mps"]`. §6.6's covariance columns are indexed by it. **Adds** `range_period_m`: when the tracker measures range modulo a period, that period, and every `range_m` in `detections.csv` and `tracks.csv` lies in `[0, range_period_m)`. `null` when range is absolute. **Adds** `unused`: the names of the settings, among those recorded, that the chosen `estimator` did not read, so that no recorded value is mistaken for one the run used |
 | `provenance` | object | As today, `radar_forge_version` and `git_commit`. **Adds** `python_version`, `numpy_version`, and `command` (the argv that produced the run). **Adds** (1.3.0) `physics_sha256`, the hash of the resolved physics settings excluding `[runtime]` (`spec/instrumentation-001.md` §4.1), and `machine`: `platform`, `processor`, `cpu_count`, `devices` (list of strings) |
@@ -343,7 +343,7 @@ is written in the same closing-positive sign as the state it describes.
 │                                          epoch_utc, created_utc, radar_forge_version, git_commit,
 │                                          source ("simulated" | "recorded")
 └── iq/
-    ├── burst0/                     attrs: waveform, f0_hz, bandwidth_hz, prf_hz, sample_rate_hz,
+    ├── burst0/                     attrs: waveform, carrier_frequency_hz, bandwidth_hz, prf_hz, sample_rate_hz,
     │   │                                  chirp_duration_s, n_pulses, n_samples
     │   ├── data                    (n_frames, n_pulses, n_samples[, n_rx])  complex128
     │   ├── frame                   (n_frames,)   int64    — dimension scale, axis 0
@@ -585,7 +585,7 @@ stream reshaped, so the conversion is a mapping, not a transformation.
 | :--- | :--- |
 | `global.core:datatype` `cf64_le` / `cf32_le` / `ci16_le` | `data` dtype `complex128` / `complex64` / `{int16, int16}` (§6.7) |
 | `global.core:sample_rate` | `burst{k}` attr `sample_rate_hz` |
-| `captures[n].core:frequency` | `burst{k}` attr `f0_hz` |
+| `captures[n].core:frequency` | `burst{k}` attr `carrier_frequency_hz` |
 | `captures[n].core:datetime` | `epoch_utc + frame_time_s[n]` |
 | One capture per frame, `core:sample_start = n · n_pulses · n_samples` | Frame `n` of `data` |
 | Extension namespace `radar_forge:` in `global`, declared in `core:extensions`: `n_pulses`, `n_samples`, `prf_hz`, `bandwidth_hz`, `chirp_duration_s`, `waveform` | `burst{k}` attrs of the same names |

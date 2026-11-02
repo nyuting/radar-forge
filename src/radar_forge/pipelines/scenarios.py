@@ -120,7 +120,7 @@ _TARGET_KEYS = frozenset({"rcs_dbsm", "altitude_m", "name"})
 _TRAJECTORY_KEYS = frozenset({"path", "start_time_s", "duration_s", "frame_rate_hz"})
 _BURST_KEYS = frozenset(
     {
-        "f0_hz",
+        "carrier_frequency_hz",
         "bandwidth_hz",
         "transmit_power_w",
         "gain_tx_dbi",
@@ -383,7 +383,7 @@ def _burst_radar(
     """
     waveform: WaveformKind = burst.get("waveform", "fmcw")
     transmitter = Transmitter(
-        f0_hz=float(burst["f0_hz"]),
+        carrier_frequency_hz=float(burst["carrier_frequency_hz"]),
         bandwidth_hz=float(burst["bandwidth_hz"]),
         transmit_power_w=float(burst["transmit_power_w"]),
         gain_tx_dbi=float(burst["gain_tx_dbi"]),

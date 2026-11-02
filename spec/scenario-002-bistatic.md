@@ -130,7 +130,7 @@ The processing chain is scenario 001's unchanged. Only the geometry block differ
 
 | | **B1** `bistatic-xband` | **B2** `bistatic-sband` |
 | :--- | :--- | :--- |
-| `f0_hz` | 9.8 GHz | 2.8 GHz |
+| `carrier_frequency_hz` | 9.8 GHz | 2.8 GHz |
 | λ | 30.591 mm | 107.069 mm |
 | Unambiguous velocity | ±7.6478 m/s | **±26.7672 m/s** |
 | Folds over the default window | ≈8.6× | ≈2.5× |
@@ -355,7 +355,7 @@ geometry alongside the first.
 | 3 | `core/signal.py` *(widen)* | `bistatic_line_of_sight_paths` producing the same `PropagationPaths`; `fmcw_deramp_baseband` and `pulsed_baseband` widen to `RadarLike`. |
 | 4 | `pipelines/trajectories.py` *(edit)* | `BistaticTargetTrack` and `to_bistatic_radar_frame`. No `radial_velocity_mps` field: a bistatic target has two radial velocities and the Doppler shift measures neither. |
 | 5 | `pipelines/scenarios.py` *(edit)* | Siting selected by the presence of `[transmitter_site]`. The receiving site's coordinates are `[receiver_site]` and its chain `[receiver]`; the TOML layout row of §3 gives the order. |
-| 6 | `scenarios/*.toml` *(new)* | Two files differing in `[[burst]].f0_hz` alone. |
+| 6 | `scenarios/*.toml` *(new)* | Two files differing in `[[burst]].carrier_frequency_hz` alone. |
 | 7 | `visualisation/scopes/rd_map.py` *(edit)* | Axis label only. The array is the same array. |
 | 8 | `tests/pipelines/test_scenario_002.py` *(new)* | Build the degeneracy test first; everything else is meaningless until it passes. |
 

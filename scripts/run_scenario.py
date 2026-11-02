@@ -197,7 +197,7 @@ def burst_metadata(scenario: Scenario) -> list[dict[str, Any]]:
             {
                 "index": index,
                 "waveform": burst.transmitter.waveform,
-                "f0_hz": burst.transmitter.f0_hz,
+                "carrier_frequency_hz": burst.transmitter.carrier_frequency_hz,
                 "bandwidth_hz": burst.transmitter.bandwidth_hz,
                 "chirp_duration_s": burst.transmitter.chirp_duration_s,
                 "prf_hz": burst.transmitter.prf_hz,

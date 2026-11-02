@@ -222,7 +222,7 @@ def fmcw_deramp_baseband(
 
     # (n_pulses, n_paths, 1) against (n_samples,) broadcasts to the full cube
     # without materialising an intermediate of that size per path.
-    residual_phase_rad = -2.0 * np.pi * radar.transmitter.f0_hz * delay_s
+    residual_phase_rad = -2.0 * np.pi * radar.transmitter.carrier_frequency_hz * delay_s
     beat_phase_rad = (
         2.0 * np.pi * radar.transmitter.sweep_rate_hzps * delay_s[..., None] * fast_time_s
     )
@@ -323,7 +323,7 @@ def pulsed_baseband(
     # artefact of when the receiver listens, and does not change the carrier
     # phase the target actually imposed. Using the folded delay here would
     # corrupt the Doppler.
-    residual_phase_rad = -2.0 * np.pi * radar.transmitter.f0_hz * true_delay_s
+    residual_phase_rad = -2.0 * np.pi * radar.transmitter.carrier_frequency_hz * true_delay_s
 
     per_path = (
         np.abs(paths.amplitude_linear)[None, :, None]

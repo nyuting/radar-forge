@@ -175,7 +175,7 @@ does each tracker keep two tracks on two aircraft". The sweep is `d ∈ {0.25, 0
 | Parameter | Value | Source |
 | :--- | :--- | :--- |
 | Site | Duke Receiver, 36.00250 °N, 78.94100 °W, 60 m | Scenario-001 §3.1, unchanged |
-| `f0_hz` | 2.8e9 (λ = 0.10707 m) | S-band airport-surveillance class [24] |
+| `carrier_frequency_hz` | 2.8e9 (λ = 0.10707 m) | S-band airport-surveillance class [24] |
 | `scan_period_s` | **4.8** (12.5 rpm); V1 also 1.2 and 2.4 | [24]; the revisit sweep of V1 |
 | `beamwidth_azimuth_deg` | 1.4 | [24] |
 | `range_cell_m` | 115.75 (1/16 nautical mile) | [24] |

@@ -115,7 +115,7 @@ IQ-imbalance model. Which path a variant uses is a TOML choice (§3.4).
 | Array | 16-element ULA, `n_rx = 16`, spacing λ/2 = **15.296 mm** | Shared ground array, scenario-006 D13 |
 | Steering vector | `a_n = exp(+j·2π·(p_n·u)/λ)`, unnormalised, `y = wᴴx` | Scenario-006 D13 |
 | Beam taper | Taylor [11], 35 dB, n̄ = 6 (`core/windows.py` `taper("taylor", 16, sidelobe_db=35.0)`) | Ideal PSL **−34.73 dB**, HPBW **8.52°**, first null **11.99°** |
-| `f0_hz` | 9.8 GHz, λ = **30.591 mm** | Scenario-001 |
+| `carrier_frequency_hz` | 9.8 GHz, λ = **30.591 mm** | Scenario-001 |
 | Waveform | Scenario-001 **S2**: LFM pulse, `bandwidth_hz` 2.0 MHz, `chirp_duration_s` 10 µs, `prf_hz` 25 kHz | Scenario-001 §2.1 |
 | Output `sample_rate_hz` | 2.5 MHz, 100 samples/PRI, `n_pulses` 256 | Scenario-001 S2 |
 | `noise_figure_db` | 3.0 | Scenario-001 |

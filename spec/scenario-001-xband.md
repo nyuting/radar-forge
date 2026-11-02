@@ -103,7 +103,7 @@ frame cadence. They differ only in `[[burst]]`. This is the comparison the scena
 | Extra algorithm needed | — | — | `unfold_doppler_dual_prf` |
 | IQ cube per frame | `(256, 1000)`, 4.1 MB | `(256, 100)`, 0.4 MB | 2 × `(128, 800/667)` |
 
-Range resolution is **74.9481 m** in all three, since all three carry `f0_hz = 9.8e9` and
+Range resolution is **74.9481 m** in all three, since all three carry `carrier_frequency_hz = 9.8e9` and
 `bandwidth_hz = 2.0e6`.
 
 > **Why the three sampling rates differ** (an audit; no rate was changed).
@@ -175,7 +175,7 @@ These are properties of the input, not defects in the simulation.
 
 | Parameter | Value |
 | :--- | :--- |
-| Carrier `f0_hz` | 9.8 GHz → λ = **30.5911 mm** |
+| Carrier `carrier_frequency_hz` | 9.8 GHz → λ = **30.5911 mm** |
 | Bandwidth `bandwidth_hz` | 2.0 MHz → range resolution c/2B = **74.9481 m** |
 | Noise density `N0 = k·T₀·F` | 7.9888e-21 W/Hz (−170.98 dBm/Hz at F = 3 dB) |
 | Matched-receiver noise `k·T₀·B·F` | 1.598e-14 W at B = **2 MHz** (`Radar.noise_power_matched_w`) |
@@ -214,7 +214,7 @@ predictably.
 
 ### 3.4 Per-variant waveform matrix
 
-All three share `f0_hz = 9.8e9`, `bandwidth_hz = 2.0e6`, 74.9481 m range resolution, a 1 Hz frame
+All three share `carrier_frequency_hz = 9.8e9`, `bandwidth_hz = 2.0e6`, 74.9481 m range resolution, a 1 Hz frame
 cadence, and a short CPI within each 1 s frame (not a contiguous 1 s CPI — see §4.2).
 
 **S1 — `fmcw-low-prf`: Doppler folds.** Build this one first. The target is unambiguous in range

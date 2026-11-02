@@ -160,7 +160,7 @@ gives an 18.7370 m range bin at 001's carrier.
 | Parameter | Value | Note |
 | :--- | :--- | :--- |
 | `waveform` | `"noise"` | New `WaveformKind`; §4.4 |
-| `f0_hz` | 9.8e9 → λ = 30.5911 mm | 001's carrier |
+| `carrier_frequency_hz` | 9.8e9 → λ = 30.5911 mm | 001's carrier |
 | `bandwidth_hz` = `sample_rate_hz` | 8.0e6 | White over the sampled band |
 | `transmit_power_w`, `gain_tx_dbi` | 1.0, 30.0 | |
 | `gain_rx_dbi`, `noise_figure_db` | 30.0, 3.0 | 001's receiver. Noise power kT₀·f_s·F = 6.3910e-14 W (−131.94 dBW): the code fills the sampled band, so the noise bandwidth is `f_s` |

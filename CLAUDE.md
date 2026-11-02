@@ -26,7 +26,7 @@ to understand and to test; if a step is hard to test on its own, split it. The f
   `--all-extras` (it pulls in torch).
 - **`make check` must pass before you say you are done.** It runs lint, types,
   conventions and the full test suite — the same gate as `pre-push` and CI.
-- **SI units, with the unit in the name**: `range_m`, `f0_hz`, `chirp_duration_s`, `rcs_dbsm`,
+- **SI units, with the unit in the name**: `range_m`, `carrier_frequency_hz`, `chirp_duration_s`, `rcs_dbsm`,
   `power_w`. Linear internally; decibels only at API boundaries, and named `_db*`. Dimensionless
   ratios say which: `gain_tx_linear` or `gain_tx_dbi`, never `gain_tx`. A commit hook rejects bare
   names, matching on the leading token.

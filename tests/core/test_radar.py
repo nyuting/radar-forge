@@ -17,7 +17,7 @@ from radar_forge.core.radar import BistaticRadar, Radar, Receiver, Transmitter
 
 # Scenario 001 S1: FMCW, low PRF, Doppler folds.
 S1_TRANSMITTER = Transmitter(
-    f0_hz=9.8e9,
+    carrier_frequency_hz=9.8e9,
     bandwidth_hz=2.0e6,
     transmit_power_w=100.0,
     gain_tx_dbi=30.0,
@@ -29,7 +29,7 @@ S1_RECEIVER = Receiver(sample_rate_hz=1.0e6, gain_rx_dbi=30.0, noise_figure_db=3
 
 # Scenario 001 S2: pulsed, medium PRF, range folds.
 S2_TRANSMITTER = Transmitter(
-    f0_hz=9.8e9,
+    carrier_frequency_hz=9.8e9,
     bandwidth_hz=2.0e6,
     transmit_power_w=1.0e3,
     gain_tx_dbi=30.0,
@@ -61,11 +61,11 @@ class TestTransmitter:
 
     @pytest.mark.parametrize(
         "field",
-        ["f0_hz", "bandwidth_hz", "transmit_power_w", "chirp_duration_s", "prf_hz"],
+        ["carrier_frequency_hz", "bandwidth_hz", "transmit_power_w", "chirp_duration_s", "prf_hz"],
     )
     def test_rejects_non_positive_quantities(self, field: str) -> None:
         kwargs = {
-            "f0_hz": 9.8e9,
+            "carrier_frequency_hz": 9.8e9,
             "bandwidth_hz": 2.0e6,
             "transmit_power_w": 100.0,
             "gain_tx_dbi": 30.0,

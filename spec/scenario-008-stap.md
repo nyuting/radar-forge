@@ -146,7 +146,7 @@ checked identical in arXiv v1 (as Table 5), v2 and v3. CNR is from the paper's s
 
 | Parameter | Value | Name in the TOML |
 | :--- | :--- | :--- |
-| Carrier | 10 GHz → λ = **0.029979 m** | `f0_hz` |
+| Carrier | 10 GHz → λ = **0.029979 m** | `carrier_frequency_hz` |
 | Bandwidth | 5 MHz → c/2B = **29.9792 m** (the paper rounds to 30 m) | `bandwidth_hz` |
 | PRF | 1100 Hz → CPI **58.182 ms** at 64 pulses | `prf_hz` |
 | Platform altitude | 1000 m | `platform_altitude_m` |

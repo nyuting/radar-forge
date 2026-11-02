@@ -24,7 +24,7 @@ frame_rate_hz = 1.0
 # PRI 40 us at 2.5 MHz -> 100 samples/PRI. 256 pulses = 10.24 ms of CPI.
 [[burst]]
 waveform = "pulsed"
-f0_hz = 9.8e9
+carrier_frequency_hz = 9.8e9
 bandwidth_hz = 2.0e6
 transmit_power_w = 1.0e3
 gain_tx_dbi = 30.0

@@ -91,8 +91,9 @@ class Transmitter:
 
     Parameters
     ----------
-    f0_hz : float
-        Carrier frequency, Hz. 9.8e9 for scenario 001.
+    carrier_frequency_hz : float
+        Carrier frequency, Hz: the instantaneous frequency at the start of each
+        chirp. 9.8e9 for scenario 001.
     bandwidth_hz : float
         Swept or modulated bandwidth, Hz. Sets range resolution as
         :math:`c/2B`, independently of the waveform family.
@@ -122,7 +123,7 @@ class Transmitter:
     normal case for FMCW; anything above it is not a waveform.
     """
 
-    f0_hz: float
+    carrier_frequency_hz: float
     bandwidth_hz: float
     transmit_power_w: float
     gain_tx_dbi: float
@@ -133,7 +134,7 @@ class Transmitter:
     def __post_init__(self) -> None:
         """Validate the transmitter parameters; see the class ``Raises`` section."""
         positive = {
-            "f0_hz": self.f0_hz,
+            "carrier_frequency_hz": self.carrier_frequency_hz,
             "bandwidth_hz": self.bandwidth_hz,
             "transmit_power_w": self.transmit_power_w,
             "chirp_duration_s": self.chirp_duration_s,
@@ -156,7 +157,7 @@ class Transmitter:
     @property
     def wavelength_m(self) -> float:
         r"""Carrier wavelength :math:`\lambda = c/f_0`, m."""
-        return SPEED_OF_LIGHT_MPS / self.f0_hz
+        return SPEED_OF_LIGHT_MPS / self.carrier_frequency_hz
 
     @property
     def pulse_repetition_interval_s(self) -> float:
