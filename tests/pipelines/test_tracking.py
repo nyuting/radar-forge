@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from radar_forge.core.ambiguity import fold_velocity_mps
+from radar_forge.core.ambiguity_resolution import fold_velocity_mps
 from radar_forge.core.radar import RadarLike
 from radar_forge.pipelines.scenarios import load_scenario
 from radar_forge.pipelines.tracking import (

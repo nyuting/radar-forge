@@ -497,7 +497,7 @@ In this order:
    loop, analytic ground truth, a justified tolerance, and a domain test that names the bug it
    catches ([testing.md §10.1](testing.md#101-what-earns-a-place-review)).
 3. **The `core/` modules as written.** `radar_equation.py` is the exemplar; `detection.py`,
-   `dsp.py` and `ambiguity.py` show the same idioms at more length. Where the PR does something
+   `dsp.py` and `ambiguity_resolution.py` show the same idioms at more length. Where the PR does something
    differently, compare the two side by side.
 4. **[data-001](../../spec/data-001-formats.md)** for any file read or written, and the
    scenario specs for behaviour.

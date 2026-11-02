@@ -83,7 +83,7 @@ def render_range_doppler(
         it does not -- which is the usual case for a folding waveform.
     folded_range_m, folded_velocity_mps : float, optional
         Where that truth is obliged to appear on *this* map, from
-        :func:`radar_forge.core.ambiguity.fold_velocity_mps` and the range
+        :func:`radar_forge.core.ambiguity_resolution.fold_velocity_mps` and the range
         modulo. Drawn as a cross, and it should sit on the peak. Defaults to
         the unfolded values, which is right when nothing folds.
     title : str, optional

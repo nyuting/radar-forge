@@ -72,7 +72,7 @@ The DSP path this scenario builds, end to end:
                v
         RangeDopplerProduct (rd_map, range_axis_m, velocity_axis_mps)
                |
-               +---> core/ambiguity.py  unfold_doppler_dual_prf   (S3 only)
+               +---> core/ambiguity_resolution.py  unfold_doppler_dual_prf   (S3 only)
                |
                v
   visualisation/scopes/rd_map.py -> rd_{frame}.png,  truth.csv,  metadata.json
@@ -430,7 +430,7 @@ begins.
              |     [ 5. core/dsp.py, core/windows.py -- already built elsewhere ]
              |          consumed, never edited; see §4.3 for the seam
              v
-  5a. core/ambiguity.py         unfold_doppler_dual_prf          (S3 only)
+  5a. core/ambiguity_resolution.py         unfold_doppler_dual_prf          (S3 only)
              |
              v
   6. pipelines/trajectories.py  CSV -> frame grid -> radar frame
@@ -456,7 +456,7 @@ begins.
 | 3 | `core/targets.py` | `PointTarget`, constant RCS, **Swerling 0 only**. Swerling 1–4 stay unimplemented and are named as such. |
 | 4 | `core/signal.py` | `PropagationPaths` exactly as specified in D1, plus `line_of_sight_paths`, `fmcw_deramp_baseband`, `pulsed_baseband`, `thermal_noise`. Reuses `radar_equation.received_power_w` and `waveforms.lfm_chirp` / `beat_frequency_hz` — **adds no new waveform or link-budget mathematics**. |
 | 5 | `core/dsp.py`, `core/windows.py` | **Already built by the parallel workstream** (commit 64f1b62) and consumed, not written, by this scenario: `range_fft`, `doppler_fft`, `range_doppler_map`, `matched_filter`, `mti_filter`, `range_bin_centers_m`, `doppler_bin_centers_mps`, `taper`. See §4.3. |
-| 5a | `core/ambiguity.py` *(new)* | `unfold_doppler_dual_prf`, needed only by S3. Kept out of `core/dsp.py` because that module belongs to the other workstream and is already near the 400-line guidance of `docs/conventions/style.md` §9. |
+| 5a | `core/ambiguity_resolution.py` *(new)* | `unfold_doppler_dual_prf`, needed only by S3. Kept out of `core/dsp.py` because that module belongs to the other workstream and is already near the 400-line guidance of `docs/conventions/style.md` §9. |
 | 6 | `pipelines/trajectories.py` | CSV load, resample to the frame grid, transform to the radar frame. |
 | 7 | `pipelines/scenarios.py` | Scenario TOML (`tomllib`, stdlib) → `Scenario`; `iterate_frames` is a **generator**, not a list. |
 | 8 | `visualisation/plotting.py`, `visualisation/scopes/rd_map.py` | `matplotlib` lazily imported; `ImportError` names the `visualisation` extra. |

@@ -28,7 +28,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from radar_forge.core.ambiguity import fold_velocity_mps, unfold_doppler_dual_prf
+from radar_forge.core.ambiguity_resolution import fold_velocity_mps, unfold_doppler_dual_prf
 from radar_forge.pipelines.scenarios import (
     Scenario,
     form_range_doppler_map,

@@ -301,7 +301,7 @@ polar position, a Doppler speed and an amplitude. The units are SI, not ASTERIX'
 | `burst_index` | int | — | R | *new*. The burst whose map the detection was found in, `0` for a single-burst run. `range_index` and `velocity_index` index that burst's map |
 | `status` | enum | — | R | *new*. What became of the detection on its way to the tracker: `accepted` (passed to it); or, for a dual-PRF pair, `missing_pair` (no detection in the other burst within the range tolerance), `ambiguous_pair` (one within it, but not mutually nearest) or `unresolved_velocity` (paired, but the two folded velocities agree on no unfolded one). Only the first burst's `accepted` detections reach the tracker |
 | `pair_id` | int | — | R | *new*. The same integer on the two detections of a dual-PRF pair, unique within the frame. Empty for a detection that was not paired |
-| `range_unfolded_m` | float64 | m | R | *new*. The true range the two detections of an `accepted` dual-PRF pair agree on, from `core.ambiguity.unfold_range_dual_prf`; the same on both. `range_m` stays each burst's own folded reading. Empty for any other detection |
+| `range_unfolded_m` | float64 | m | R | *new*. The true range the two detections of an `accepted` dual-PRF pair agree on, from `core.ambiguity_resolution.unfold_range_dual_prf`; the same on both. `range_m` stays each burst's own folded reading. Empty for any other detection |
 | `injected` | bool | — | O | *new* (1.3.0). `1` for the plot matched to a synthetic built-in test target (`spec/instrumentation-001.md` §12), which never reaches the tracker; `0` otherwise. Absent when the run injected nothing |
 
 ### 6.6 `tracks.csv`

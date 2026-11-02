@@ -73,7 +73,7 @@ src/radar_forge/
 │   ├── migration.py             # keystone (1st/2nd order, fold factor), Doppler-rate matched filter, RFT/GRFT; data_rfst in and out (D10)
 │   ├── datachip.py              # DataChip, crop, fine range/velocity/acceleration estimators with CRB (D9)
 │   ├── windows.py               # Taylor, Chebyshev, Hamming, Hann tapers; coherent gain, loss
-│   ├── ambiguity.py             # velocity folding; dual-PRF Doppler unfolding
+│   ├── ambiguity_resolution.py  # velocity folding; dual-PRF range and Doppler unfolding (not the ambiguity function: see waveforms.py)
 │   ├── detection.py             # CA/GO/SO/OS-CFAR (1-D), CA/OS 2-D ring, Pfa calibration, wrap-aware clustering
 │   ├── invariants.py            # algorithmic invariants as pure functions: Parseval, noise floor, bookkeeping (instrumentation-001 §9)
 │   ├── monitoring.py            # truth-free monitors: windowed NIS, whiteness, bias, Pfa; EWMA and CUSUM (instrumentation-001 §10–§11)

@@ -492,7 +492,7 @@ change to both specs.
 | 7–8 | TOMLs, tests | New. Three TOMLs differing only in `[target]` kinematics |
 
 `core/radar.py`, `core/waveforms.py` (`lfm_chirp`), `core/windows.py`, `core/detection.py`,
-`core/constants.py` and `core/ambiguity.py` are consumed unchanged.
+`core/constants.py` and `core/ambiguity_resolution.py` are consumed unchanged.
 
 ---
 

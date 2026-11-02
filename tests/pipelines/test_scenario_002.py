@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from radar_forge.core.ambiguity import fold_velocity_mps
+from radar_forge.core.ambiguity_resolution import fold_velocity_mps
 from radar_forge.core.constants import WGS84_SEMI_MAJOR_AXIS_M
 from radar_forge.core.geodesy import geodetic_to_enu_m
 from radar_forge.core.radar import BistaticRadar, Radar

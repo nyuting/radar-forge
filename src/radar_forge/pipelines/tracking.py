@@ -70,7 +70,7 @@ from typing import TYPE_CHECKING, Any, Literal, get_args, get_type_hints
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from radar_forge.core.ambiguity import unfold_doppler_dual_prf, unfold_range_dual_prf
+from radar_forge.core.ambiguity_resolution import unfold_doppler_dual_prf, unfold_range_dual_prf
 from radar_forge.core.detection import (
     CFAR_VARIANTS,
     CfarVariant,
@@ -219,7 +219,7 @@ class Measurement:
         unique within the frame. ``None`` for a detection that was not paired.
     range_unfolded_m : float or None, default None
         Dual-PRF only: the true range both detections of an accepted pair agree
-        on, from :func:`~radar_forge.core.ambiguity.unfold_range_dual_prf`.
+        on, from :func:`~radar_forge.core.ambiguity_resolution.unfold_range_dual_prf`.
         ``range_m`` stays what this burst's map shows. ``None`` for a detection
         that was not accepted.
     """
@@ -618,7 +618,7 @@ def dual_prf_detections(
     The dual-PRF alternative to §5.3. Two bursts at coprime pulse repetition
     frequencies fold the same true velocity differently, and the pair of folded
     values identifies it uniquely over a span far wider than either burst's
-    own (:func:`~radar_forge.core.ambiguity.unfold_doppler_dual_prf`'s Notes
+    own (:func:`~radar_forge.core.ambiguity_resolution.unfold_doppler_dual_prf`'s Notes
     give the span). The ambiguity is resolved in
     the **waveform**, so the tracker is handed a true range rate from the very
     first frame and needs no bootstrap, no fold selector and no consistency
@@ -626,7 +626,7 @@ def dual_prf_detections(
 
     Range folds too, at each map's span, and the two spans may differ (60 and
     50 km for scenario 001 S3). So range is unfolded the same way as velocity,
-    by :func:`radar_forge.core.ambiguity.unfold_range_dual_prf`: for every
+    by :func:`radar_forge.core.ambiguity_resolution.unfold_range_dual_prf`: for every
     detection of the first burst, the true ranges up to ``max_range_m`` that
     its reading allows are folded into the second burst's map, and the gap to
     each of the second burst's detections is the shortest of those, measured
@@ -636,7 +636,7 @@ def dual_prf_detections(
     detection is used twice. A strong target's two detections pair even with a
     one-cell false alarm or sidelobe close by in one burst, and the false alarm
     is left out. Each pair is then resolved with
-    :func:`radar_forge.core.ambiguity.unfold_doppler_dual_prf`. Every detection
+    :func:`radar_forge.core.ambiguity_resolution.unfold_doppler_dual_prf`. Every detection
     gets a status (:data:`DetectionStatus`):
 
     - a detection with no compatible detection in the other burst is

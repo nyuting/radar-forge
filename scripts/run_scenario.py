@@ -28,7 +28,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from radar_forge import __version__
-from radar_forge.core.ambiguity import fold_velocity_mps
+from radar_forge.core.ambiguity_resolution import fold_velocity_mps
 from radar_forge.core.radar import BistaticRadar
 from radar_forge.pipelines.scenarios import (
     Frame,

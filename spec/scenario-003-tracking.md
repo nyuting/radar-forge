@@ -344,7 +344,7 @@ gate of 9.21. A mis-unfolded measurement is therefore rejected by the gate and c
 **miss**, never as a corrupted update. That is the desired behaviour and §12 asserts it.
 
 Scenario 001's S3 variant resolves the ambiguity in the waveform, via the existing
-`core/ambiguity.py`. Tracking over S3 needs none of this subsection, which is the argument for
+`core/ambiguity_resolution.py`. Tracking over S3 needs none of this subsection, which is the argument for
 doing it next (§13.4).
 
 ### 5.4 Measurement noise
@@ -734,7 +734,7 @@ begins.
 ### 10.1 What this scenario consumes but never edits
 
 `core/detection.py`, `core/dsp.py`, `core/windows.py`, `core/signal.py`, `core/geodesy.py`,
-`core/ambiguity.py`, `pipelines/trajectories.py`, and `data/flight_coordinates.csv`. If the
+`core/ambiguity_resolution.py`, `pipelines/trajectories.py`, and `data/flight_coordinates.csv`. If the
 tracker appears to need a change in any of them, that is a finding to raise, not a change to make
 inside this workstream. §13.1 and §13.2 in particular are changes to `scenarios/*.toml` and to
 `core/detection.py` respectively, and belong to their own slices.
@@ -1113,7 +1113,7 @@ change. Correcting `Radar.unambiguous_range_m` is a follow-up in `core/radar.py`
 **Dual-PRF pairing, both trackers.** Two detections, one per burst, are paired when they are within
 the range tolerance and each is the other's nearest in range. The two bursts' maps span different
 ranges, 60.0 and 50.0 km, so a target past 50 km reads differently on each. Range is therefore
-unfolded as velocity is, by the one period-agnostic solver in `core/ambiguity.py`
+unfolded as velocity is, by the one period-agnostic solver in `core/ambiguity_resolution.py`
 (`unfold_range_dual_prf`): the gap between two detections is the residual of the best true range
 for the pair, measured round the second map's circle, so a target at either map's wrap edge still
 pairs. The search bound defaults to the larger span, 60.0 km; a caller may raise it as far as the
