@@ -169,9 +169,9 @@ def range_fft(
     the range profile.
 
     The output is **not** ``fftshift``-ed: bin 0 is zero beat frequency, hence
-    zero range, and bins count upward in range from there. Only the first half
-    of the output is physically meaningful for a real deramped signal; see
-    :func:`range_bin_centers_m`.
+    zero range, and bins count upward in range from there. For complex
+    deramped samples the whole output is one circle of range, and a beat past
+    the last bin wraps back to bin 0; see :func:`range_bin_centers_m`.
 
     Parameters
     ----------
@@ -388,10 +388,14 @@ def range_bin_centers_m(
 
     Notes
     -----
-    Only the first ``n_bins // 2`` entries are unambiguous: beyond that a
-    complex-baseband FFT is reporting negative frequencies, which correspond to
-    no physical range. The maximum unambiguous range is
-    :math:`R_{max} = c f_s T / (4 B)`.
+    The axis is circular. Complex samples at :math:`f_s` tell apart every beat
+    frequency in a band :math:`f_s` wide, so all ``n_bins`` entries are distinct
+    ranges, and the axis spans :math:`c f_s / (2\alpha) = c f_s T / (2 B)`,
+    with :math:`\alpha = B/T` the sweep rate. A return beyond that span
+    aliases back to near zero. A *real*-sampled receiver tells apart only
+    :math:`f_s / 2`, and would see half the span, :math:`c f_s T / (4 B)`.
+    :func:`radar_forge.pipelines.scenarios.range_axis_m` derives the same span
+    for a burst.
 
     Examples
     --------

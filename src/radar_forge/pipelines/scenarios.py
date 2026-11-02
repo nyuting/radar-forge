@@ -72,6 +72,7 @@ from typing import Any, cast
 import numpy as np
 from numpy.typing import NDArray
 
+from radar_forge.core.ambiguity import fold_velocity_mps
 from radar_forge.core.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.core.dsp import (
     doppler_bin_centers_mps,
@@ -674,11 +675,78 @@ class RangeDopplerProduct:
     velocity_axis_mps : numpy.ndarray
         Velocity bin centres, metres/second, shape ``(n_doppler_bins,)``.
         ``fftshift``-ed, zero in the middle, positive closing.
+
+    Notes
+    -----
+    Both axes are DFT outputs, so each is a circle: one period past any bin is
+    that bin again, and the array's two ends are neighbours. The ``fftshift``
+    moves where the Doppler axis is *cut*, not where it ends. So a fractional
+    index between the last bin and the first is a real position, and
+    :meth:`range_at_index_m` and :meth:`velocity_at_index_mps` convert it with
+    the uniform axis's own formula. ``np.interp`` would clamp it to the last
+    bin centre, up to a whole bin away.
+
+    References
+    ----------
+    .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
+           McGraw-Hill, 2014, §5.5.4 (range ambiguity) and §3.1.3 (Doppler
+           ambiguity).
     """
 
     rd_map: NDArray[np.complex128]
     range_axis_m: NDArray[np.float64]
     velocity_axis_mps: NDArray[np.float64]
+
+    @property
+    def range_period_m(self) -> float:
+        """Span of the range axis, metres: its number of bins times its bin width."""
+        return self.range_axis_m.size * float(self.range_axis_m[1] - self.range_axis_m[0])
+
+    @property
+    def velocity_period_mps(self) -> float:
+        """Span of the velocity axis, m/s: twice the burst's unambiguous velocity."""
+        return self.velocity_axis_mps.size * float(
+            self.velocity_axis_mps[1] - self.velocity_axis_mps[0]
+        )
+
+    def range_at_index_m(self, index: float) -> float:
+        """Return the range at a fractional range-bin index, in metres.
+
+        Parameters
+        ----------
+        index : float
+            Fractional bin index, in ``[0, n_range_bins)``. A value past the
+            last bin centre lies between it and bin 0 across the wrap.
+
+        Returns
+        -------
+        float
+            ``range_axis_m[0] + index * bin``, in ``[range_axis_m[0],
+            range_axis_m[0] + range_period_m)``.
+        """
+        bin_m = float(self.range_axis_m[1] - self.range_axis_m[0])
+        return float(self.range_axis_m[0]) + index * bin_m
+
+    def velocity_at_index_mps(self, index: float) -> float:
+        r"""Return the folded velocity at a fractional Doppler-bin index, in m/s.
+
+        Parameters
+        ----------
+        index : float
+            Fractional bin index, in ``[0, n_doppler_bins)``. A value past the
+            last bin centre lies between it and bin 0, across the
+            :math:`\pm v_{ua}` wrap.
+
+        Returns
+        -------
+        float
+            Positive closing, folded into ``[-velocity_period_mps / 2,
+            velocity_period_mps / 2)`` as
+            :func:`~radar_forge.core.ambiguity.fold_velocity_mps` folds it.
+        """
+        bin_mps = float(self.velocity_axis_mps[1] - self.velocity_axis_mps[0])
+        velocity_mps = float(self.velocity_axis_mps[0]) + index * bin_mps
+        return float(fold_velocity_mps(velocity_mps, self.velocity_period_mps / 2.0))
 
 
 def range_axis_m(burst: RadarLike) -> NDArray[np.float64]:
