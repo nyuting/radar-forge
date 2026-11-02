@@ -103,14 +103,19 @@ class TrackSnapshot:
         The normalised innovation squared of that update, computed before it
         [1]_. ``None`` if the track took no measurement, or was born, since a
         birth has no prediction to compare against.
+    measurement_dim : int or None, default None
+        How many measured components that update used. It is fewer than the
+        measurement has when the pair passed the gate through a marginal of
+        its model, such as range alone (``spec/tracker-001.md`` §8.3).
+        ``None`` whenever ``nis`` is.
 
     Notes
     -----
     Stone Soup carries the same thing on the track's state instead: each
     ``GaussianStateUpdate`` holds the ``hypothesis`` that made it, with its
     ``measurement`` and ``measurement_prediction``. A snapshot holds the
-    index and the NIS only, which is what ``tracks.csv`` needs (data-001
-    §6.6).
+    index, the NIS and the dimension only, which is what ``tracks.csv``
+    needs (data-001 §6.6).
 
     References
     ----------
@@ -128,6 +133,7 @@ class TrackSnapshot:
     n_misses: int
     measurement_index: int | None
     nis: float | None
+    measurement_dim: int | None = None
 
     @property
     def timestamp_s(self) -> float:
@@ -223,6 +229,7 @@ class Track(Generic[FilterT]):
         *,
         measurement_index: int | None = None,
         nis: float | None = None,
+        measurement_dim: int | None = None,
     ) -> TrackSnapshot:
         """Return a frozen copy of the track as it is now.
 
@@ -238,12 +245,14 @@ class Track(Generic[FilterT]):
             The track does not know it, so the tracker passes it in.
         nis : float or None, optional
             The NIS of that update, if it was one.
+        measurement_dim : int or None, optional
+            How many measured components that update used.
 
         Returns
         -------
         TrackSnapshot
             The track's identifier, status, counters, last measurement time and
-            source sensors, the two arguments, and a copy of its current
+            source sensors, the three arguments, and a copy of its current
             estimate. The copy's arrays are read-only and do not share memory
             with the filter.
         """
@@ -261,4 +270,5 @@ class Track(Generic[FilterT]):
             self.n_misses,
             measurement_index,
             nis,
+            measurement_dim,
         )

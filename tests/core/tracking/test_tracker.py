@@ -624,7 +624,7 @@ def test_a_track_born_in_a_scan_names_its_measurement_and_has_no_nis() -> None:
     snapshots = tracker.process(batch(tracker, 5.0, [5000.0]))
 
     (born,) = [snapshot for snapshot in snapshots if snapshot.track_id != track.track_id]
-    assert (born.measurement_index, born.nis) == (0, None)
+    assert (born.measurement_index, born.nis, born.measurement_dim) == (0, None, None)
     assert (born.n_hits, born.n_misses) == (1, 0)
 
 
@@ -742,6 +742,7 @@ def test_a_range_only_update_reports_its_one_dimensional_nis() -> None:
 
     (snapshot,) = tracker.process(radial_scan(tracker, 6, [(5003.0, 40.0)]))
     assert snapshot.nis == pytest.approx(expected, rel=1e-12)
+    assert snapshot.measurement_dim == 1
 
 
 def test_nis_costs_of_two_dimensions_in_one_scan_are_refused() -> None:
@@ -760,6 +761,19 @@ def test_nis_costs_of_two_dimensions_in_one_scan_are_refused() -> None:
     assert tracker.tracks == [track]
     assert track.estimator.state is before
     assert (track.status, track.n_frames, tracker.last_timestamp_s) == (CONFIRMED, n_frames, 5.0)
+
+
+def test_legacy_nis_lets_dimensions_mix() -> None:
+    """KalmanTracker's rule, kept for scenario 003's move: the scan "nis" refuses is solved.
+
+    The track takes one of the two detections, at the dimension that one
+    gated at: two components for the detection that agrees in rate, one for
+    the one 40 m/s out.
+    """
+    tracker = settled_radial_tracker(cost="legacy_nis", model_selector=full_then_range)
+    snapshot = tracker.process(radial_scan(tracker, 6, [(5000.0, 0.0), (5004.0, 40.0)]))[0]
+    assert snapshot.status == CONFIRMED
+    assert (snapshot.measurement_index, snapshot.measurement_dim) in ((0, 2), (1, 1))
 
 
 def test_the_selector_may_offer_only_the_measurements_model_or_a_marginal_of_it() -> None:
