@@ -1767,20 +1767,42 @@ class ScenarioTracker:
             GlobalNearestNeighbour(),
             initiator,
             policy,
-            # Pairs gate at one or two components (the retry below), and
-            # neither NIS nor the negative log-likelihood compares the two
-            # fairly (Tracker's cost). This is KalmanTracker's rule, kept so
-            # that moving onto Tracker moves no figure; measured, the
-            # negative log-likelihood hands a confirmed track's detection to a
-            # tentative one at its first two-component frame. A likelihood
-            # ratio against the clutter density replaces it next.
-            cost="legacy_nis",
+            # Pairs gate at one or two components (the retry below), and only
+            # the likelihood ratio compares the two fairly (Tracker's cost).
+            cost="likelihood_ratio",
+            clutter_density=self._clutter_density(),
             # Confirmed-first was measured worse here on every count: a
             # confirmed track whose gate has widened to re-acquire outbids
             # tentative ones for false alarms too (spec/tracker-001.md §7.3).
             assignment="joint",
             model_selector=self._select_models,
         )
+
+    def _clutter_density(self) -> dict[str, float]:
+        """Return the clutter density of the Kalman path's two models, by model ID.
+
+        False alarms fall evenly over the range span and over the range-rate
+        span a detection can be given: one Doppler fold, where the track
+        unfolds it, or the dual-PRF velocity search, ``±v_max_mps``. So the
+        two-component density is the range-only one divided by that rate span
+        (``Tracker``'s ``clutter_density``).
+
+        Only that ratio decides an assignment. ``GlobalNearestNeighbour``
+        makes as many pairs as it can before it compares costs, so a density
+        common to every pair adds the same amount to every solution. The level
+        is therefore set to one false alarm per scan over the range span,
+        rather than estimated from the detector's false-alarm rate, which
+        would need the map's size before the first frame.
+        """
+        range_span_m = self.folding_layout.coordinates[0].period
+        if range_span_m is None:
+            msg = "the range layout has no period, so the clutter density has no span."
+            raise ValueError(msg)
+        rate_span_mps = (
+            2.0 * self.tracking.v_max_mps if len(self.bursts) == 2 else self.fold_span_mps
+        )
+        range_only = 1.0 / range_span_m
+        return {_RANGE_MODEL_ID: range_only, _MEASUREMENT_MODEL_ID: range_only / rate_span_mps}
 
     def _select_models(
         self, snapshot: TrackSnapshot, measurement: TrackerMeasurement

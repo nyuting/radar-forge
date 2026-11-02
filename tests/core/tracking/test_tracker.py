@@ -755,7 +755,7 @@ def test_nis_costs_of_two_dimensions_in_one_scan_are_refused() -> None:
     (track,) = tracker.tracks
     before = track.estimator.state
     n_frames = track.n_frames
-    with pytest.raises(ValueError, match="negative_log_likelihood"):
+    with pytest.raises(ValueError, match="likelihood_ratio"):
         tracker.process(radial_scan(tracker, 6, [(5000.0, 0.0), (5004.0, 40.0)]))
 
     assert tracker.tracks == [track]
@@ -763,17 +763,85 @@ def test_nis_costs_of_two_dimensions_in_one_scan_are_refused() -> None:
     assert (track.status, track.n_frames, tracker.last_timestamp_s) == (CONFIRMED, n_frames, 5.0)
 
 
-def test_legacy_nis_lets_dimensions_mix() -> None:
-    """KalmanTracker's rule, kept for scenario 003's move: the scan "nis" refuses is solved.
+RANGE_DENSITY_PER_M = 1e-3
 
-    The track takes one of the two detections, at the dimension that one
-    gated at: two components for the detection that agrees in rate, one for
-    the one 40 m/s out.
+
+def mixed_scan_log_likelihoods(tracker: Tracker) -> tuple[float, float]:
+    """The settled track's log-likelihoods at 6 s: (5000, 0) on both components, 5004 m on range."""
+    estimator = copy.deepcopy(tracker.tracks[0].estimator)
+    estimator.predict_to(6.0)
+    full = Measurement(
+        np.array([5000.0, 0.0]), np.diag([25.0, 0.25]), 6.0, "radar", "range_and_rate"
+    )
+    range_only = Measurement(np.array([5004.0]), np.array([[25.0]]), 6.0, "radar", "range")
+    return (
+        estimator.innovation_statistics(
+            full, tracker.measurement_models["range_and_rate"]
+        ).log_likelihood,
+        estimator.innovation_statistics(
+            range_only, tracker.measurement_models["range"]
+        ).log_likelihood,
+    )
+
+
+@pytest.mark.parametrize(("scale", "expected"), [(0.99, (0, 2)), (1.01, (1, 1))])
+def test_the_likelihood_ratio_flips_between_dimensions_at_the_density_ratio(
+    scale: float, expected: tuple[int, int]
+) -> None:
+    """§7.2: the scan "nis" refuses is solved by -ln g + ln λ, each pair in its own model.
+
+    Detection A agrees in rate and gates on both components; detection B is
+    40 m/s out and gates on range alone. The costs tie where
+    ``-ll_A + ln λ_2 = -ll_B + ln λ_r``, so at
+    ``λ_2* = λ_r exp(ll_A - ll_B)``. Just below it the track takes A, just
+    above it B.
     """
-    tracker = settled_radial_tracker(cost="legacy_nis", model_selector=full_then_range)
+    # The settling scans have one detection each, so the track they leave does
+    # not depend on the densities: the flip can be found on one tracker and
+    # tested on another.
+    ll_a, ll_b = mixed_scan_log_likelihoods(settled_radial_tracker())
+    flip = RANGE_DENSITY_PER_M * np.exp(ll_a - ll_b)
+    density = {"range_and_rate": scale * flip, "range": RANGE_DENSITY_PER_M}
+    tracker = settled_radial_tracker(
+        cost="likelihood_ratio", clutter_density=density, model_selector=full_then_range
+    )
+
     snapshot = tracker.process(radial_scan(tracker, 6, [(5000.0, 0.0), (5004.0, 40.0)]))[0]
     assert snapshot.status == CONFIRMED
-    assert (snapshot.measurement_index, snapshot.measurement_dim) in ((0, 2), (1, 1))
+    assert (snapshot.measurement_index, snapshot.measurement_dim) == expected
+
+
+def test_the_clutter_density_is_read_only_and_only_under_the_likelihood_ratio() -> None:
+    density = {"range_and_rate": 1e-4, "range": RANGE_DENSITY_PER_M}
+    assert radial_tracker().clutter_density is None
+    held = radial_tracker(cost="likelihood_ratio", clutter_density=density).clutter_density
+    assert held == density
+    with pytest.raises(TypeError):
+        held["range"] = 1.0  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    ("cost", "density", "match"),
+    [
+        ("nis", {"range_and_rate": 1e-4, "range": 1e-3}, "only by cost='likelihood_ratio'"),
+        ("likelihood_ratio", None, "for each measurement model"),
+        ("likelihood_ratio", {"range_and_rate": 1e-4}, "for each measurement model"),
+        (
+            "likelihood_ratio",
+            {"range_and_rate": 1e-4, "range": 1e-3, "doppler": 1e-2},
+            "for each measurement model",
+        ),
+        ("likelihood_ratio", {"range_and_rate": 1e-4, "range": 0.0}, "positive and finite"),
+        ("likelihood_ratio", {"range_and_rate": -1e-4, "range": 1e-3}, "positive and finite"),
+        ("likelihood_ratio", {"range_and_rate": np.nan, "range": 1e-3}, "positive and finite"),
+        ("likelihood_ratio", {"range_and_rate": np.inf, "range": 1e-3}, "positive and finite"),
+    ],
+)
+def test_the_constructor_rejects_a_clutter_density_that_does_not_suit_the_cost(
+    cost: str, density: dict[str, float] | None, match: str
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        radial_tracker(cost=cost, clutter_density=density)
 
 
 def test_the_selector_may_offer_only_the_measurements_model_or_a_marginal_of_it() -> None:

@@ -160,7 +160,7 @@ class Tracker:
         Builds the filter for a new track from a measurement no track took.
     policy : LifecyclePolicy or None, optional
         When tracks are confirmed and deleted. None uses the defaults.
-    cost : {"nis", "negative_log_likelihood", "legacy_nis"}, default "nis"
+    cost : {"nis", "negative_log_likelihood", "likelihood_ratio"}, default "nis"
         How a pair that passes the gate is scored; smaller is better.
 
         - ``"nis"`` scores :math:`d^2 = \nu^\top S^{-1} \nu`, the squared
@@ -170,27 +170,40 @@ class Tracker:
           :math:`\tfrac12 (d^2 + \ln|S| + n_z \ln 2\pi)`. Up to a constant
           and a factor of one half, this is :math:`d^2 + \ln|S|`, the
           negative log of the Gaussian density of the innovation,
-          :math:`\mathcal{N}(\nu; 0, S)` [2]_.
+          :math:`g = \mathcal{N}(\nu; 0, S)` [2]_.
+        - ``"likelihood_ratio"`` scores :math:`-\ln(g / \lambda)`, where
+          :math:`\lambda` is the clutter density: the expected number of
+          false measurements per scan per unit of measurement space, in the
+          units of the model the pair was scored through [3]_. It is the
+          negative log of how much likelier the measurement is to be this
+          track's than a false alarm.
 
         Dividing by :math:`S` makes a very uncertain track, such as one that
         has coasted for several scans, look like a good match for anything
         nearby. The :math:`\ln|S|` term charges a track for being uncertain,
         so the negative log-likelihood favours the better-placed track.
 
-        NIS cannot compare pairs of different measurement dimensions, since
-        its expected value is the dimension: a pair that fell back to range
-        alone would undercut every two-component pair. So a ``"nis"`` scan
-        that would mix them raises (``spec/tracker-001.md`` §7.2). The
-        negative log-likelihood is no fairer across dimensions: a density's
-        value depends on its units, so each extra component adds
-        :math:`\tfrac12 \ln(2\pi S_{kk})` in whatever unit it has. The fair
-        score is a likelihood ratio against the clutter density, which is
-        still to come (tracker-001 §13 step 6).
-
-        - ``"legacy_nis"`` scores NIS as ``"nis"`` does, and lets dimensions
-          mix. It is :class:`~radar_forge.core.tracking.kalman.KalmanTracker`'s
-          rule, kept so that scenario 003 could move onto this class without
-          its figures moving. It goes when the likelihood ratio arrives.
+        Only the likelihood ratio compares pairs of different measurement
+        dimensions, as a model selector's range-only retry makes them. NIS
+        cannot, since its expected value is the dimension: a pair that fell
+        back to range alone would undercut every two-component pair. So a
+        ``"nis"`` scan that would mix them raises (``spec/tracker-001.md``
+        §7.2). The negative log-likelihood cannot either, since a density's
+        value depends on its units: each extra component adds
+        :math:`\tfrac12 \ln(2\pi S_{kk})` in whatever unit it has. Dividing
+        by :math:`\lambda`, a density over the same components in the same
+        units, cancels the units. Within one model the likelihood ratio is
+        the negative log-likelihood plus a constant.
+    clutter_density : mapping of str to float or None, optional
+        :math:`\lambda` for each measurement model, by ID: false measurements
+        per scan per unit of that model's measurement space, such as per metre
+        for range alone, or per metre per metre-per-second for range and range
+        rate. Required, for every registered model, when ``cost`` is
+        ``"likelihood_ratio"``, and refused with any other cost. A marginal
+        model's density is its base's integrated over the components it
+        drops: for clutter spread evenly over a range-rate span :math:`V`,
+        :math:`\lambda_r = V \lambda_{r \dot r}`. The values are the caller's,
+        since they depend on the detector and the scene (TD9).
     assignment : {"confirmed_first", "joint"}, default "confirmed_first"
         Who picks measurements first. ``"confirmed_first"`` assigns in two
         stages, confirmed tracks then tentative ones, and starts no track
@@ -205,6 +218,8 @@ class Tracker:
     ----------
     gate, associator, initiator, cost, assignment, model_selector
         As given.
+    clutter_density : mapping of str to float or None
+        As given. Read-only.
     manager : TrackManager
         Hands out track identifiers and confirms and deletes tracks, by
         ``policy``.
@@ -217,7 +232,9 @@ class Tracker:
     ------
     ValueError
         If ``cost`` or ``assignment`` is not one of its names, a key of
-        ``sensors`` is not its sensor's ``sensor_id``, a sensor is invalid
+        ``sensors`` is not its sensor's ``sensor_id``, ``clutter_density``
+        does not suit ``cost`` (see above) or holds a density that is not
+        positive and finite, a sensor is invalid
         (see :meth:`add_sensor`), or the policy's ``reacquire_reset`` names a
         coordinate the initiator's prior does not have.
 
@@ -244,6 +261,11 @@ class Tracker:
     .. [2] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with
            Applications to Tracking and Navigation*, Wiley, 2001, §5.2.6 (the
            innovations and the likelihood function).
+    .. [3] S. S. Blackman, "Multiple hypothesis tracking for multiple target
+           tracking," *IEEE Aerosp. Electron. Syst. Mag.*, vol. 19, no. 1,
+           pp. 5-18, 2004 (the track score: each update adds the log of the
+           likelihood ratio of the measurement against a false target of
+           density :math:`\beta_{FT}`, which is :math:`\lambda` here).
 
     Examples
     --------
@@ -282,17 +304,22 @@ class Tracker:
         associator: Associator,
         initiator: TrackInitiator,
         policy: LifecyclePolicy | None = None,
-        cost: Literal["nis", "negative_log_likelihood", "legacy_nis"] = "nis",
+        cost: Literal["nis", "negative_log_likelihood", "likelihood_ratio"] = "nis",
+        clutter_density: Mapping[str, float] | None = None,
         assignment: Literal["confirmed_first", "joint"] = "confirmed_first",
         model_selector: ModelSelector | None = None,
     ) -> None:
-        if cost not in ("nis", "negative_log_likelihood", "legacy_nis"):
-            msg = f"cost must be 'nis', 'negative_log_likelihood' or 'legacy_nis'; got {cost!r}."
+        if cost not in ("nis", "negative_log_likelihood", "likelihood_ratio"):
+            msg = (
+                "cost must be 'nis', 'negative_log_likelihood' or 'likelihood_ratio'; "
+                f"got {cost!r}."
+            )
             raise ValueError(msg)
         if assignment not in ("confirmed_first", "joint"):
             msg = f"assignment must be 'confirmed_first' or 'joint'; got {assignment!r}."
             raise ValueError(msg)
         _check_sensor_keys(sensors)
+        _check_clutter_density(cost, clutter_density, measurement_models)
         self._measurement_models = dict(measurement_models)
         self._sensors: dict[str, SensorRegistration] = {}
         # Each sensor goes through add_sensor so it gets the same checks as one added later.
@@ -306,6 +333,7 @@ class Tracker:
         # and not on the first track that loses its target.
         initiator.prior.state_layout.indices(self.manager.policy.reacquire_reset)
         self.cost = cost
+        self._clutter_density = dict(clutter_density or {})
         self.assignment = assignment
         self.model_selector = model_selector
         self.tracks: list[Track[Estimator]] = []
@@ -315,6 +343,13 @@ class Tracker:
     def measurement_models(self) -> Mapping[str, MeasurementModel]:
         """The registered measurement models, by ID. Read-only."""
         return MappingProxyType(self._measurement_models)
+
+    @property
+    def clutter_density(self) -> Mapping[str, float] | None:
+        """The clutter density of each measurement model, by ID, or None. Read-only."""
+        if self.cost != "likelihood_ratio":
+            return None
+        return MappingProxyType(self._clutter_density)
 
     @property
     def sensors(self) -> Mapping[str, SensorRegistration]:
@@ -650,11 +685,7 @@ class Tracker:
                         continue
                     stats = track.estimator.innovation_statistics(view, view_model)
                     if self.gate.accepts(stats):
-                        costs[i, j] = (
-                            -stats.log_likelihood
-                            if self.cost == "negative_log_likelihood"
-                            else stats.nis
-                        )
+                        costs[i, j] = self._pair_cost(stats, model_id)
                         dims[i, j] = len(view.value)
                         gated[i, j] = (stats, view, view_model)
                         break
@@ -663,10 +694,19 @@ class Tracker:
             msg = (
                 f"cost 'nis' cannot compare pairs of measurement dimensions {mixed.tolist()} "
                 "in one scan, since its expected value is the dimension; use "
-                "cost='negative_log_likelihood' (spec/tracker-001.md §7.2)."
+                "cost='likelihood_ratio' (spec/tracker-001.md §7.2)."
             )
             raise ValueError(msg)
         return costs, gated
+
+    def _pair_cost(self, stats: InnovationStats, model_id: str) -> float:
+        """Score one gated pair by ``cost``, through the model ``model_id``."""
+        if self.cost == "nis":
+            return stats.nis
+        if self.cost == "negative_log_likelihood":
+            return -stats.log_likelihood
+        # __init__ made sure that every registered model has a density.
+        return -stats.log_likelihood + float(np.log(self._clutter_density[model_id]))
 
     def _view(
         self, measurement: Measurement, model: MeasurementModel, model_id: str
@@ -741,6 +781,34 @@ class Tracker:
     def _same_time(a_s: float, b_s: float) -> bool:
         """Return whether two timestamps are equal within the tolerance."""
         return abs(a_s - b_s) <= TIMESTAMP_TOLERANCE_S
+
+
+def _check_clutter_density(
+    cost: str,
+    clutter_density: Mapping[str, float] | None,
+    measurement_models: Mapping[str, MeasurementModel],
+) -> None:
+    """Raise unless ``clutter_density`` suits ``cost``: one positive value per model, for LR."""
+    if cost != "likelihood_ratio":
+        if clutter_density is not None:
+            msg = f"clutter_density is used only by cost='likelihood_ratio'; got cost={cost!r}."
+            raise ValueError(msg)
+        return
+    if clutter_density is None or set(clutter_density) != set(measurement_models):
+        given = None if clutter_density is None else sorted(clutter_density)
+        msg = (
+            "cost='likelihood_ratio' needs a clutter density for each measurement model, "
+            f"{sorted(measurement_models)}; got {given}."
+        )
+        raise ValueError(msg)
+    bad = {
+        model_id: density
+        for model_id, density in clutter_density.items()
+        if not (np.isfinite(density) and density > 0.0)
+    }
+    if bad:
+        msg = f"clutter densities must be positive and finite; got {bad}."
+        raise ValueError(msg)
 
 
 def _check_sensor_keys(sensors: Mapping[str, SensorRegistration]) -> None:
