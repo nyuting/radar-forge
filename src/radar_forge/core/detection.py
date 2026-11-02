@@ -61,7 +61,9 @@ design choice this module has not made, not something a ring rules out.
 An axis can be circular, as the Doppler axis of a range-Doppler map is: pass
 ``wrap=True`` to the 1-D functions, or name the axis in ``wrap_axes`` for the
 ring. A circular axis is extended by one window's reach of wrapped cells at
-each end, so every cell along it is tested.
+each end, so every cell along it is tested, provided the axis is at least one
+window (``2 * (n_guard + n_train) + 1`` cells) long. An axis shorter than
+that, circular or not, is not tested at all.
 
 Each variant has a closed-form :math:`P_{fa}(\alpha)` for square-law-detected
 complex Gaussian noise, in which the cell powers are i.i.d. exponential.
@@ -85,8 +87,9 @@ band at the start of the axis and the lagging band at its end, so
 :math:`N` = ``n_train`` reference cells. Every variant then reduces those cells
 as an :math:`N`-cell detector would. ``"ca"``, ``"go"`` and ``"so"`` all become
 the band's mean, since there is no second half to compare it with. ``"os"``
-takes rank :math:`\lceil k/2 \rceil` of the :math:`N` cells, the same quantile
-as rank :math:`k` of :math:`2N`. The threshold factor at those cells is
+takes rank :math:`\lceil k/2 \rceil` of the :math:`N` cells: the same quantile
+as rank :math:`k` of :math:`2N` when :math:`k` is even, and that of rank
+:math:`k + 1` when it is odd. The threshold factor at those cells is
 calibrated for that :math:`N`-cell window (:func:`cfar_threshold_factors`), so
 they hold the design :math:`P_{fa}`, at the larger CFAR loss of a window half
 the size. The edges are not dropped, because a target in the first or last
