@@ -11,18 +11,17 @@ The package runs two tracker loops for now. Both keep their tracks as the same `
 (`tracks.py`), with the same `TrackStatus`, and both confirm and delete them with the same
 `TrackManager` (`lifecycle.py`). Only the filter inside each track differs.
 
-- **`KalmanTracker`** (`kalman.py`) is the linear Kalman tracker. Each of its tracks carries a
-  `KalmanFilter`. Scenario 003's own runs use it: `estimator = "kalman"` in the scenario's
-  `[tracking]` table, read by `pipelines/tracking.py`.
+- **`KalmanTracker`** (`kalman.py`) is the older linear Kalman tracker. Each of its tracks
+  carries a `KalmanFilter`. Nothing in the pipeline uses it any more, and step 7 of
+  `spec/tracker-001.md` §13 deletes it.
 - **`Tracker`** (`tracker.py`) is the scan-loop tracker. Each of its tracks carries an
   `Estimator`: by default a `GaussianFilter` with the unscented linearisation, which is the UKF.
   It is built from small, swappable pieces, and it is multi-sensor: one `Tracker`
   should handle every sensor in a scenario, each registered with `Tracker.add_sensor`, so
-  that each target has one track whichever sensor sees it. The scenario-003 runs over
-  scenario 001's S1, S2 and S3 use it: `estimator = "ukf"`.
-
-A later change moves scenario 003's own runs onto `Tracker` too (`spec/tracker-001.md` §13
-step 6), and the one after deletes `KalmanTracker` (step 7).
+  that each target has one track whichever sensor sees it. Every scenario-003 run uses it:
+  `estimator = "ukf"` runs a UKF, and `estimator = "kalman"` runs a Kalman filter
+  (`GaussianFilter` with `TaylorLinearisation`) with scenario 003's bootstrap as its model
+  selector.
 
 | Module | What it holds |
 | :-- | :-- |
@@ -155,13 +154,12 @@ docstring explains this, gives the CA case (`sigma_jerk_mps3`), and compares the
 
 ## Limitations
 
-**Not yet supported here.** Scenario 003's Kalman runs still use `kalman.py`. `Tracker` now
-has the mechanisms they need (the model selector, joint assignment and the re-acquisition
-reset), and `spec/tracker-001.md` §13 step 6 moves them over. Not yet here:
+**Not yet supported here:**
 
-- a per-track `measurement_dim`, as `KalmanFilter` records. Which measurement each track
-  took in the scan, and its NIS, are on the scan's `TrackSnapshot`s; the NIS's dimension is
-  the one the pair passed the gate at;
+- a fair cost across measurement dimensions. When the model selector lets range-only and
+  range-and-rate pairs compete, neither NIS nor the negative log-likelihood compares them
+  fairly; `cost="legacy_nis"` keeps the old tracker's rule until a likelihood ratio against
+  the clutter density replaces it (`spec/tracker-001.md` §13 step 6);
 - the interacting multiple model (IMM) filter and the coordinated-turn motion model;
 - Singer's motion model, which carries the acceleration in the state and is exact at every
   time step. Its white-noise limit sets the process noise now;

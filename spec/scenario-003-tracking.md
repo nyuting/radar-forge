@@ -1009,7 +1009,8 @@ even though §14.7's argument means it would survive any window.
 ### 14.11 The UKF tracker over S1, S2 and S3
 
 `core/tracking/`'s UKF `Tracker` runs over all three of scenario 001's waveforms from
-`pipelines/tracking.py`, beside `KalmanTracker`. A scenario's `[tracking]` table picks the tracker
+`pipelines/tracking.py`, beside `KalmanTracker` (until §14.12 moved the Kalman path onto
+`Tracker` too). A scenario's `[tracking]` table picks the tracker
 with `estimator = "kalman"` (the default, and both scenario 003 TOMLs above) or `"ukf"`. Three
 TOMLs run the UKF: `scenario_003_ukf_fmcw_low_prf.toml`, `scenario_003_ukf_pulsed_medium_prf.toml`
 and `scenario_003_ukf_fmcw_dual_prf.toml`. Above `[detection]` each is its scenario 001 TOML
@@ -1094,6 +1095,37 @@ scenario-003 run that refused the target's pair in two of the first five frames,
 one-cell false alarm lay 80–140 m away, and delayed confirmation from frame 3 to frame 8. Mutual
 nearest neighbours pairs the target and leaves the false alarm out. Both scenario-003 runs give
 the same tracks as before the UKF path was added, frame for frame.
+
+### 14.12 The Kalman path moves onto `Tracker`
+
+`spec/tracker-001.md` §13 step 6 runs `estimator = "kalman"` on `core/tracking`'s `Tracker`, so
+the two paths share one tracker. The Kalman filter is `GaussianFilter` with the Taylor
+linearisation, and `RadialMotion` with discrete white-noise acceleration (§6), so its predict
+and update are the old filter's. §5.3's bootstrap and the range-only retry are the pipeline's
+model selector, the re-acquisition of §14.7 is `LifecyclePolicy.reacquire_reset`, and the one
+joint assignment of §14.8 is `Tracker(assignment="joint")`.
+
+Range is now measured modulo the map's span on this path too, as §14.11 does for the UKF, and
+the range history the fold monitor fits is unwrapped as it grows. Before, a target crossing the
+span (S2's is 5,996 m) would have jumped a whole span in that history and broken both the slope
+and the fold choice. Neither shipped Kalman scenario crosses it; a synthetic S2 target does, in
+`tests/pipelines/test_tracking.py`.
+
+The figures over the default window do not move. On S1 the primary track is confirmed in the
+same 81 frames, with range RMSE 3.93 m, range-rate RMSE 0.505 m/s and mean NIS 0.150 at one
+component and 0.150 at two, equal to the old run to 1e-12. It is track 75 rather than 71:
+detecting on the circle reaches the range axis's end cells, so 377 detections are accepted
+rather than 366, and the extra false alarms start four more tentative tracks first. On the
+dual-PRF variant 187 detections lack a pair rather than 174, for the same reason, and the range
+RMSE is 1.0253 m rather than 1.0262 m.
+
+Pairs are still scored by raw NIS across one and two components, as `KalmanTracker` did
+(`Tracker(cost="legacy_nis")`). `spec/tracker-001.md` §7.2 asks for the negative
+log-likelihood, and measured here it is worse: at the first two-component frame the extra rate
+component adds ½ ln(2π S_vv) ≈ 3 to the confirmed track's cost, and a tentative track wins its
+detection. A log-density depends on the units of what it measures, so it cannot compare one
+component with two. The fair score is a likelihood ratio against the clutter density over the
+same components, and it comes in its own change, with its own measurement.
 
 ---
 
