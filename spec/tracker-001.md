@@ -750,6 +750,17 @@ it would be later. The names and module moves are TD13's.
    predictions already made.
 6. **Scenario 003 on `Tracker`.** `pipelines/tracking.py` becomes an adapter: plots in,
    batches out, snapshots back. `TrackingConfig.state_model` is honoured (it is ignored today).
+   Done as follows. The Kalman filter is `GaussianFilter(motion, TaylorLinearisation())` over
+   `RadialMotion(process_noise_model="dwna")`, TD5's discrete model. Range is measured modulo the
+   map's span on both paths, and the fold monitor's range history is unwrapped as it grows, which
+   fixes a target crossing the span (scenario 003 §14.12). `TrackSnapshot` gains
+   `measurement_dim`, the dimension the update used. `state_model` other than `range_1d` now
+   raises on both paths. **Departure from §7.2:** pairs are scored by raw NIS across dimensions,
+   `cost="legacy_nis"`, `KalmanTracker`'s rule, so that the move changes no figure. Measured on
+   S1, the negative log-likelihood is worse, and for a reason that also makes §7.2 wrong: a
+   log-density depends on the units of what it measures, so an extra component adds
+   ½ ln(2π S_kk) in its own unit. A likelihood ratio against the clutter density over the same
+   components has no units; it replaces `"legacy_nis"`, and §7.2, in the next change.
 7. **Delete the old stack:** `KalmanTracker`, `KalmanFilter`, `KalmanState`, `TrackModel` and
    `FrameResult` (`UKF` and `ukf.py` went in step 2), and the rest of TD13's renames. Two of
    those renames are scenario TOML keys (TD13), so this step also updates the scenario 003
