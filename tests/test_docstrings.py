@@ -24,12 +24,12 @@ import radar_forge
 
 
 def _module_names() -> list[str]:
-    """Every importable module in the package, viz extra excluded."""
+    """Every importable module in the package, visualisation extra excluded."""
     names = []
     for info in pkgutil.walk_packages(radar_forge.__path__, prefix="radar_forge."):
-        # viz/ needs matplotlib, which is an optional extra; importing it
+        # visualisation/ needs matplotlib, which is an optional extra; importing it
         # here would turn a missing extra into a failure of the core suite.
-        if info.name.startswith("radar_forge.viz"):
+        if info.name.startswith("radar_forge.visualisation"):
             continue
         names.append(info.name)
     return sorted(names)

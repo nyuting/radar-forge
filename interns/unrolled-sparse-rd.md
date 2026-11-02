@@ -37,7 +37,7 @@ script. Leave `src/` alone.
 ## Setup
 
 - Use this repository at the latest `main`, and record the commit hash you used in your report.
-- Run `uv sync --extra dev --extra viz --extra ml`.
+- Run `uv sync --extra dev --extra visualisation --extra ml`.
 - Useful entry points:
   - `radar_forge.pipelines.scenarios`: `load_scenario` (for scenario 003's waveform in
     `scenario.bursts[0]`), `form_range_doppler_map`.

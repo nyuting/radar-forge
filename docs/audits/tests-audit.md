@@ -5,6 +5,9 @@ modules that test the signal chain. **[Part 2](#part-2--pipelines-viz-tools-scri
 covers `tests/pipelines/` (less tracking), `tests/viz/`, `tests/tools/`, `tests/scripts/` and the
 top-level tests. Part 1 numbers its findings W1–W20, Part 2 F1–F10.
 
+`tests/viz/` has since become `tests/visualisation/`, and the `viz` extra `visualisation`. This
+audit keeps the paths and names it was written against.
+
 | Part | Before | After | Deleted | Weak | Wrong |
 | :--- | --: | --: | --: | --: | --: |
 | [1, `tests/core/`](#result--testscore) | 478 | 304 | 163 | 36 | 0 |

@@ -454,7 +454,8 @@ conversation behind it.
 - **Use the code's own names, and define terms once.** Spell out an abbreviation or radar term
   the first time it appears in the review (NLL: negative log-likelihood). Don't use nicknames the
   code doesn't ("births", "the reading view") unless you define them.
-- **Plain, short sentences, in British spelling** (normalise, behaviour, licence as a noun).
+- **Plain, short sentences, in British spelling** (normalise, behaviour, licence as a noun;
+  [style.md §3.2](style.md#32-spelling-review)).
 - **Polite, and asking.** "Please …", "Suggest: …", "If you keep X for Y, say so in the Notes."
   The author may know something you don't; a question gets the answer, an order gets compliance.
 - **Hedge once, honestly.** Say "I think" when you are unsure, and only then.

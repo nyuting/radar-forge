@@ -1,10 +1,10 @@
 """Smoke test: the package imports, reports a version, and needs no extras.
 
 The zero-extras guarantee is spec/structure.md B.2 rule 2 and is easy to break
-by accident: one convenience import of radar_forge.viz at the top of a
+by accident: one convenience import of radar_forge.visualisation at the top of a
 package __init__ makes `import radar_forge` fail for anyone who installed the
 library without matplotlib. It is checked in a subprocess because by the time
-this module runs, the test session has usually imported viz already.
+this module runs, the test session has usually imported visualisation already.
 """
 
 import subprocess
@@ -23,8 +23,8 @@ def test_the_public_api_is_what_it_re_exports():
         assert hasattr(radar_forge, name)
 
 
-def test_importing_the_package_does_not_pull_in_the_viz_extra():
-    """viz needs matplotlib, so importing it at top level costs everyone.
+def test_importing_the_package_does_not_pull_in_the_visualisation_extra():
+    """visualisation needs matplotlib, so importing it at top level costs everyone.
 
     The same fresh interpreter also checks that ``import radar_forge`` binds
     ``pipelines``: scenario-001 A8 and spec/structure.md B.2 rule 2 both ask
@@ -35,10 +35,10 @@ def test_importing_the_package_does_not_pull_in_the_viz_extra():
         [
             sys.executable,
             "-c",
-            # pipelines is reached first, so it too is held to the no-viz rule.
+            # pipelines is reached first, so it too is held to the no-visualisation rule.
             "import sys, radar_forge; "
             "radar_forge.pipelines.load_scenario; "
-            "assert 'radar_forge.viz' not in sys.modules, 'viz imported'; "
+            "assert 'radar_forge.visualisation' not in sys.modules, 'visualisation imported'; "
             "assert 'matplotlib' not in sys.modules, 'matplotlib imported'",
         ],
         capture_output=True,

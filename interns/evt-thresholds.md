@@ -45,7 +45,7 @@ your own script. Leave `src/` alone. SciPy, a core dependency, has the distribut
 ## Setup
 
 - Use this repository at the latest `main`, and record the commit hash you used in your report.
-- Run `uv sync --extra dev --extra viz`. Add `--extra ml` only for the optional flow.
+- Run `uv sync --extra dev --extra visualisation`. Add `--extra ml` only for the optional flow.
 - Useful entry points:
   - `radar_forge.core.detection`: `cfar_threshold_factor`, `cfar_probability_of_false_alarm`,
     `cfar_noise_estimate_w`, `cfar_detect`, `cfar_detect_2d`. Read the module docstring; it

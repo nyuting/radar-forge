@@ -1,4 +1,4 @@
-"""Tests for the viz plotting helpers.
+"""Tests for the visualisation plotting helpers.
 
 matplotlib is an optional extra, so the drawing tests skip without it while
 the decibel maths and the missing-extra error are checked unconditionally --
@@ -15,7 +15,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from radar_forge.viz.plotting import magnitude_db, require_pyplot
+from radar_forge.visualisation.plotting import magnitude_db, require_pyplot
 
 
 class TestMagnitudeDb:
@@ -72,7 +72,7 @@ class TestRequirePyplot:
             return real_import(name, *args, **kwargs)
 
         monkeypatch.setattr(builtins, "__import__", fake_import)
-        with pytest.raises(ImportError, match="uv sync --extra viz"):
+        with pytest.raises(ImportError, match="uv sync --extra visualisation"):
             require_pyplot()
 
 
@@ -89,7 +89,7 @@ class TestSaveFigure:
         import matplotlib
 
         matplotlib.use("Agg")
-        from radar_forge.viz.plotting import save_figure
+        from radar_forge.visualisation.plotting import save_figure
 
         figure = plt.figure()
         destination = tmp_path / "frame.png"

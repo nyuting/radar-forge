@@ -26,7 +26,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from radar_forge.viz.plotting import require_pyplot
+from radar_forge.visualisation.plotting import require_pyplot
 
 __all__ = ["render_range_time_history"]
 
@@ -96,7 +96,7 @@ def render_range_time_history(
     -------
     matplotlib.figure.Figure
         The rendered figure. The caller owns it and must close it;
-        :func:`radar_forge.viz.plotting.save_figure` does both.
+        :func:`radar_forge.visualisation.plotting.save_figure` does both.
 
     Raises
     ------

@@ -16,6 +16,11 @@ sign conventions, units; and `spec/structure.md`'s decisions D1–D8.
 Each public function is judged on both halves: does it compute what the spec says, and is it
 the better implementation available. An honest "no change, here is why" is a result.
 
+## Status at 2026-11-02
+
+- **`viz/` is now `visualisation/`**, and the extra is `visualisation`. This audit keeps the
+  `viz/` paths it was written against.
+
 ## Status at 2026-10-09
 
 - **`teaching/` is now `viz/`** (PR #16). Paths in this audit say which name they were audited

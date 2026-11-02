@@ -58,7 +58,7 @@ a different false-alarm rate. Your job is to find out on a problem we control.
   name, so name them all:
 
   ```bash
-  uv sync --extra dev --extra viz --extra ml
+  uv sync --extra dev --extra visualisation --extra ml
   ```
 
 - Keep models small. They should train in minutes on a laptop CPU. A large model that wins is a

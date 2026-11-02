@@ -30,7 +30,7 @@ to find out what happens when the radar starts missing.
 ## Setup
 
 - Use this repository at the latest `main`, and record the commit hash you used in your report.
-- Run `uv sync --extra dev --extra viz`.
+- Run `uv sync --extra dev --extra visualisation`.
 - `uv run python scripts/run_scenario.py scenarios/scenario_003_tracking.toml --out out/s1 --no-iq`
   runs the scenario end to end and writes detections, tracks and `metrics.csv` to `out/s1`. Don't
   commit `out/`. Read that script to see how the pieces fit together.

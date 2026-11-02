@@ -15,7 +15,7 @@
 **Status:** design document, partially implemented. `core/` and `pipelines/` are built as far as
 scenarios 001, 002 and 003 required, and `core/tracking/` is a package built out further, to
 [`tracker-001.md`](tracker-001.md); `array/`, `raytracing/`, `pipelines/exporters/` and most of
-`viz/` are still design only. Part B marks the tree as intended, not as built — read it
+`visualisation/` are still design only. Part B marks the tree as intended, not as built — read it
 alongside the source.
 **Companion to:** [`starter.md`](starter.md) (project charter and ecosystem survey).
 **File formats:** [`data-001-formats.md`](data-001-formats.md) fixes the on-disk form of every
@@ -148,7 +148,7 @@ src/radar_forge/
 │       ├── coco.py              # range-Doppler(-azimuth) cube -> COCO annotations
 │       ├── range_doppler.py     # cube serialization per spec/data-001-formats.md (HDF5); dB scaling
 │       └── labels.py            # shared label schema: range, velocity, azimuth, x, y, w, h, heading, obstruction
-└── viz/
+└── visualisation/
     ├── __init__.py
     ├── app.py                   # PySide6 application shell (extra: gui)
     ├── scopes/
@@ -181,7 +181,7 @@ Notebooks are not part of the installed package. Chapter-style guided notebooks 
 | `core/interference.py` | Friis (1946); Farina (1992) interference models |
 | `core/frontend.py` | Harris (2004); Harris–Dick–Rice (2003); GNU Radio `pfb_channelizer_ccf` and liquid-dsp `firpfbch` (structure only); `scipy.signal.remez` / `upfirdn` |
 | `pipelines/tracking.py` | motpy's `step(detections)` loop shape; Stone Soup's detection → gate → associate → update decomposition |
-| `viz/scopes/track_plot.py` | Tracktable's plan-view track rendering (prior art only; not a dependency) |
+| `visualisation/scopes/track_plot.py` | Tracktable's plan-view track rendering (prior art only; not a dependency) |
 | `core/tracking/` (all) | `unified-extensible-tracker`, contributed under MIT (`tracker-001.md` §1.2); Stone Soup's data model and seams |
 | `core/tracking/estimation.py`, `kalman.py`, `ukf.py` | FilterPy filter formulation and `UnscentedKalmanFilter` shape; Wan & van der Merwe (2000) for the UKF; Bar-Shalom, Li & Kirubarajan (2001); RadarBook tracking-filter chapters |
 | `core/tracking/motion.py` | FilterPy `Q_discrete_white_noise`; Bar-Shalom, Li & Kirubarajan (2001) DWNA model |
@@ -209,7 +209,7 @@ Notebooks are not part of the installed package. Chapter-style guided notebooks 
 | `pipelines/exporters/*` | FMCW Radar Target Simulator `JSONCoco.py` and its label schema |
 | `pipelines/scenarios.py` | RadarSim YAML scenario files (radar-forge uses TOML: `CLAUDE.md` requires it) |
 | `pipelines/datasets.py` | AIRadarLib PyTorch dataset/training wrappers; torchcvnn `datasets`/`transforms` (complex SAR loader layout); Steinmetz Neural Networks (complex-valued I/Q feature convention) |
-| `viz/scopes/*`, `viz/app.py` | RadarSim PySide6 GUI (PPI, RHI, A-Scope) |
+| `visualisation/scopes/*`, `visualisation/app.py` | RadarSim PySide6 GUI (PPI, RHI, A-Scope) |
 | `notebooks/` (top level) | RadarBook `jupyter/`; RadarSimNb |
 
 ### B.2 Design rules
@@ -241,10 +241,10 @@ Notebooks are not part of the installed package. Chapter-style guided notebooks 
 | `ovrtx` | ovrtx, ovstage | Omniverse RTX backend (NVIDIA licence, RTX GPU) |
 | `ml` | torch | `pipelines.datasets`, training loops |
 | `cvnn` | torch, torchcvnn, complexPyTorch | complex-valued layers and SAR dataset loaders for `pipelines.datasets` |
-| `viz` | matplotlib | `viz` plots and scopes |
+| `visualisation` | matplotlib | `visualisation` plots and scopes |
 | `notebooks` | jupyterlab | the top-level `notebooks/` |
 | `io` | h5py | HDF5 products ([`data-001-formats.md`](data-001-formats.md) DF8); the `.mat` v7.3 fallback of `pipelines.raspnet` |
-| `gui` | PySide6 | `viz/app.py` live scopes (added when `app.py` lands) |
+| `gui` | PySide6 | `visualisation/app.py` live scopes (added when `app.py` lands) |
 | `dev` | pytest, ruff, mypy, build tooling | development |
 
 ---
@@ -265,7 +265,7 @@ why.
 | [A.5](#a5-radarbook-software) | RadarBook Software | none declared | Canonical DSP blocks, written from the published equations (D4) |
 | [A.6](#a6-padasip) | padasip; pyAPRiL | MIT; GPL-3.0 | Adaptive-filter structure (LMS, NLMS, RLS); least-squares and Wiener-SMI cancellation structure, reimplemented. Both as reference for `core/clutter.py` |
 | [A.7](#a7-raspnet-dataset) | RASPNet | none declared | ML dataset conventions; an evaluation benchmark |
-| [A.8](#a8-radarsim-gui) | RadarSim (GUI) | MIT | Blueprint for `viz/scopes/`; the scenario-file idea |
+| [A.8](#a8-radarsim-gui) | RadarSim (GUI) | MIT | Blueprint for `visualisation/scopes/`; the scenario-file idea |
 | [A.9](#a9-airadarlib-pypi-optional) | AIRadarLib | unstated | Chirp generation and PyTorch dataset wrappers, as reference |
 | [A.10](#a10-ovrtx-pypi-optional) | ovrtx | NVIDIA proprietary | An opt-in, hardware-gated backend (D3) |
 | [A.11](#a11-pyroomacoustics) | pyroomacoustics | MIT | The DoA estimator base-class pattern and DoA benchmarks |
@@ -443,7 +443,7 @@ Networks, by the same author — is surveyed in §A.12.
 | `scenarios/` | YAML scenario configuration files |
 
 **What radar-forge borrows:** the scope layout and the PySide6 real-time-display architecture for
-`viz/`, and the YAML-scenario idea for `pipelines/scenarios.py`. Its CFAR-variant and tracking
+`visualisation/`, and the YAML-scenario idea for `pipelines/scenarios.py`. Its CFAR-variant and tracking
 coverage is a useful checklist for `core/`.
 
 ### A.9 AIRadarLib *(PyPI, optional)*
@@ -651,7 +651,7 @@ the loop structure is the whole borrowing.
 | `applications/` | Trajectory assembly, filtering and rendering as command-line tools |
 
 **What radar-forge borrows:** the *trajectory data model*, as prior art for
-`pipelines/trajectories.py` and for `viz/scopes/track_plot.py` — in particular the separation
+`pipelines/trajectories.py` and for `visualisation/scopes/track_plot.py` — in particular the separation
 of a coordinate domain from the trajectory container, which is what lets the same analysis run in
 geodetic and Cartesian frames. It is explicitly **not** a dependency: radar-forge needs one
 plan-view plot, matplotlib already draws it, and a C++/Boost build to draw it would fail
