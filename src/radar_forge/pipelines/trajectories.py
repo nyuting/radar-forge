@@ -48,7 +48,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from radar_forge.core.geodesy import enu_to_range_azimuth_elevation, geodetic_to_enu_m
+from radar_forge.core.geodesy import enu_to_range_azimuth_elevation_deg, geodetic_to_enu_m
 from radar_forge.core.radar import BistaticRadar, Radar
 
 __all__ = [
@@ -348,7 +348,7 @@ def _reject_targets_on_site(
 ) -> None:
     """Raise if any sample sits exactly on a site, where the look angles are undefined.
 
-    :func:`~radar_forge.core.geodesy.enu_to_range_azimuth_elevation` leaves this
+    :func:`~radar_forge.core.geodesy.enu_to_range_azimuth_elevation_deg` leaves this
     case unguarded on purpose and asks for it to be caught where the geometry is
     built, which is here. Unguarded it is 0/0 in the elevation and comes back NaN
     with a floating-point warning, far from the trajectory that caused it.
@@ -415,7 +415,7 @@ def to_radar_frame(trajectory: Trajectory, radar: Radar) -> TargetTrack:
         radar.altitude_m,
     )
     _reject_targets_on_site(enu_m, trajectory.time_s, "radar site")
-    range_m, azimuth_deg, elevation_deg = enu_to_range_azimuth_elevation(enu_m)
+    range_m, azimuth_deg, elevation_deg = enu_to_range_azimuth_elevation_deg(enu_m)
     radial_velocity_mps = -np.gradient(range_m, trajectory.time_s)
 
     return TargetTrack(
@@ -577,10 +577,10 @@ def to_bistatic_radar_frame(trajectory: Trajectory, radar: BistaticRadar) -> Bis
     )
     _reject_targets_on_site(transmit_enu_m, trajectory.time_s, "transmitter site")
     _reject_targets_on_site(receive_enu_m, trajectory.time_s, "receiver site")
-    range_tx_m, transmit_azimuth_deg, transmit_elevation_deg = enu_to_range_azimuth_elevation(
+    range_tx_m, transmit_azimuth_deg, transmit_elevation_deg = enu_to_range_azimuth_elevation_deg(
         transmit_enu_m
     )
-    range_rx_m, receive_azimuth_deg, receive_elevation_deg = enu_to_range_azimuth_elevation(
+    range_rx_m, receive_azimuth_deg, receive_elevation_deg = enu_to_range_azimuth_elevation_deg(
         receive_enu_m
     )
     bisector_velocity_mps = -np.gradient(range_tx_m + range_rx_m, trajectory.time_s) / 2.0

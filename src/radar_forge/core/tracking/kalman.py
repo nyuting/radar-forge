@@ -359,7 +359,7 @@ def state_model_matrices(
     plus an elevation row for ``enu_3d``. Azimuth is zero at true north and
     increases clockwise -- :math:`\operatorname{atan2}(e, n)`, not the
     mathematical convention -- matching
-    :func:`radar_forge.core.geodesy.enu_to_range_azimuth_elevation`, and the
+    :func:`radar_forge.core.geodesy.enu_to_range_azimuth_elevation_deg`, and the
     range-rate row carries a minus sign because the measurement is positive
     closing while :math:`p \cdot v / \lVert p \rVert` is positive opening.
     These models are what a real tracker uses, but they are **not observable**

@@ -717,7 +717,7 @@ class BistaticRadar:
             site in turn.
         """
         # Only the magnitudes are wanted, so take the norms rather than going
-        # through enu_to_range_azimuth_elevation: its arcsin(up / range) is 0/0
+        # through enu_to_range_azimuth_elevation_deg: its arcsin(up / range) is 0/0
         # for a target standing on a site, which is a legitimate thing to ask
         # about here and would come back NaN with a warning.
         range_tx_m = np.linalg.norm(

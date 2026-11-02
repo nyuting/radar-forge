@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from radar_forge.core.geodesy import enu_to_range_azimuth_elevation
+from radar_forge.core.geodesy import enu_to_range_azimuth_elevation_deg
 from radar_forge.core.radar import BistaticRadar, Radar, Receiver, Transmitter
 from radar_forge.core.tracking.coordinates import Coordinate, StateEstimate, StateLayout
 from radar_forge.core.tracking.measurement_models import (
@@ -537,7 +537,7 @@ def test_spherical_model_agrees_with_geodesy_about_an_offset_site() -> None:
     model = RangeAzimuthElevationRangeRate(
         layout, _pose(list(site)), ("range_m", "azimuth_rad", "elevation_rad")
     )
-    range_m, azimuth_deg, elevation_deg = enu_to_range_azimuth_elevation(position - site)
+    range_m, azimuth_deg, elevation_deg = enu_to_range_azimuth_elevation_deg(position - site)
     z = model.predict(_spherical_state(layout, list(position), [0.0, 0.0, 0.0]))
     expected = np.array([range_m, np.radians(azimuth_deg), np.radians(elevation_deg)])
     np.testing.assert_allclose(z, expected, rtol=1e-12)
