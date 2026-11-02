@@ -160,7 +160,7 @@ class Tracker:
         Builds the filter for a new track from a measurement no track took.
     policy : LifecyclePolicy or None, optional
         When tracks are confirmed and deleted. None uses the defaults.
-    cost : {"nis", "negative_log_likelihood"}, default "nis"
+    cost : {"nis", "negative_log_likelihood", "legacy_nis"}, default "nis"
         How a pair that passes the gate is scored; smaller is better.
 
         - ``"nis"`` scores :math:`d^2 = \nu^\top S^{-1} \nu`, the squared
@@ -179,9 +179,18 @@ class Tracker:
 
         NIS cannot compare pairs of different measurement dimensions, since
         its expected value is the dimension: a pair that fell back to range
-        alone would undercut every two-component pair. A scan that would mix
-        them raises, and needs ``"negative_log_likelihood"``
-        (``spec/tracker-001.md`` §7.2).
+        alone would undercut every two-component pair. So a ``"nis"`` scan
+        that would mix them raises (``spec/tracker-001.md`` §7.2). The
+        negative log-likelihood is no fairer across dimensions: a density's
+        value depends on its units, so each extra component adds
+        :math:`\tfrac12 \ln(2\pi S_{kk})` in whatever unit it has. The fair
+        score is a likelihood ratio against the clutter density, which is
+        still to come (tracker-001 §13 step 6).
+
+        - ``"legacy_nis"`` scores NIS as ``"nis"`` does, and lets dimensions
+          mix. It is :class:`~radar_forge.core.tracking.kalman.KalmanTracker`'s
+          rule, kept so that scenario 003 could move onto this class without
+          its figures moving. It goes when the likelihood ratio arrives.
     assignment : {"confirmed_first", "joint"}, default "confirmed_first"
         Who picks measurements first. ``"confirmed_first"`` assigns in two
         stages, confirmed tracks then tentative ones, and starts no track
@@ -273,12 +282,12 @@ class Tracker:
         associator: Associator,
         initiator: TrackInitiator,
         policy: LifecyclePolicy | None = None,
-        cost: Literal["nis", "negative_log_likelihood"] = "nis",
+        cost: Literal["nis", "negative_log_likelihood", "legacy_nis"] = "nis",
         assignment: Literal["confirmed_first", "joint"] = "confirmed_first",
         model_selector: ModelSelector | None = None,
     ) -> None:
-        if cost not in ("nis", "negative_log_likelihood"):
-            msg = f"cost must be 'nis' or 'negative_log_likelihood'; got {cost!r}."
+        if cost not in ("nis", "negative_log_likelihood", "legacy_nis"):
+            msg = f"cost must be 'nis', 'negative_log_likelihood' or 'legacy_nis'; got {cost!r}."
             raise ValueError(msg)
         if assignment not in ("confirmed_first", "joint"):
             msg = f"assignment must be 'confirmed_first' or 'joint'; got {assignment!r}."
@@ -489,9 +498,9 @@ class Tracker:
             inside_confirmed = np.asarray(np.isfinite(costs[confirmed]).any(axis=0), dtype=np.bool_)
 
         hit = dict(matches)
-        # took[track_id]: (measurement index, NIS) for each track that took a
-        # measurement this scan, updated or born. A birth has no NIS.
-        took: dict[int, tuple[int, float | None]] = {}
+        # took[track_id]: (measurement index, NIS, dimension) for each track that
+        # took a measurement this scan, updated or born. A birth has no NIS.
+        took: dict[int, tuple[int, float | None, int | None]] = {}
         # Each update changes one track's own filter, so tracks are updated one
         # at a time.
         for i, track in enumerate(visible):
@@ -510,7 +519,7 @@ class Tracker:
             # with, and reuses that innovation.
             stats, measurement, model = gated[i, j]
             track.estimator.update(measurement, model, innovation=stats)
-            took[track.track_id] = (j, stats.nis)
+            took[track.track_id] = (j, stats.nis, len(stats.innovation))
             self.manager.record_hit(track, measurement.timestamp_s, measurement.sensor_id)
 
         claimed = set(hit.values())
@@ -522,12 +531,12 @@ class Tracker:
             new_track = self._start(measurement, model)
             if new_track is not None:
                 self.tracks.append(new_track)
-                took[new_track.track_id] = (j, None)
+                took[new_track.track_id] = (j, None, None)
 
         # A snapshot copies one track's filter state, so it is taken per track.
         for track in self.tracks:
-            j, nis = took.get(track.track_id, (None, None))
-            snapshot = track.snapshot(measurement_index=j, nis=nis)
+            j, nis, dim = took.get(track.track_id, (None, None, None))
+            snapshot = track.snapshot(measurement_index=j, nis=nis, measurement_dim=dim)
             track.history.append(snapshot)
             reported.append(snapshot)
         self.tracks = [track for track in self.tracks if track.is_alive]
@@ -641,7 +650,11 @@ class Tracker:
                         continue
                     stats = track.estimator.innovation_statistics(view, view_model)
                     if self.gate.accepts(stats):
-                        costs[i, j] = stats.nis if self.cost == "nis" else -stats.log_likelihood
+                        costs[i, j] = (
+                            -stats.log_likelihood
+                            if self.cost == "negative_log_likelihood"
+                            else stats.nis
+                        )
                         dims[i, j] = len(view.value)
                         gated[i, j] = (stats, view, view_model)
                         break

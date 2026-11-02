@@ -518,21 +518,32 @@ class RadialMotion:
         "Process noise" section derives the default. Must be finite and not negative.
     acceleration_correlation_time_s : float, default 1.0
         :math:`\tau`, roughly how long one acceleration lasts, in seconds. Must be finite and
-        positive.
+        positive. Not used by ``"dwna"``.
+    process_noise_model : {"continuous", "dwna"}, default "continuous"
+        Keyword-only. ``"continuous"`` is continuous white-noise acceleration of density
+        :math:`q`, as everywhere else in this module. ``"dwna"`` is discrete white-noise
+        acceleration: one random acceleration of standard deviation :math:`\sigma_a`, held
+        through each step [1]_. Its Q depends on how time is cut up, so it suits one sensor
+        at a fixed frame rate only. Scenario 003's Kalman runs specify it
+        (``spec/tracker-001.md`` TD5).
 
     Attributes
     ----------
+    sigma_acceleration_mps2 : float
+        As given.
+    process_noise_model : str
+        As given.
     noise_density_m2ps3 : float
         The noise density :math:`q = 2 \sigma_a^2 \tau`, in m²/s³ (module docstring,
-        "Process noise").
+        "Process noise"). Used by ``"continuous"`` only.
     state_layout : StateLayout
         ``range_m`` (m) then ``range_rate_mps`` (m/s), in the frame ``"radial"``.
 
     Raises
     ------
     ValueError
-        If ``sigma_acceleration_mps2`` is negative or not finite, or the correlation time is
-        not finite and positive.
+        If ``sigma_acceleration_mps2`` is negative or not finite, the correlation time is
+        not finite and positive, or ``process_noise_model`` is not one of its names.
 
     Notes
     -----
@@ -544,13 +555,21 @@ class RadialMotion:
         Q = q \begin{bmatrix} T^3/3 & -T^2/2 \\ -T^2/2 & T \end{bmatrix}.
 
     The cross terms of Q are negative because a closing acceleration makes the range fall.
+    With ``"dwna"`` it is instead
+
+    .. math::
+
+        Q = \sigma_a^2 \begin{bmatrix} T^4/4 & -T^3/2 \\ -T^3/2 & T^2 \end{bmatrix},
+
+    :func:`~radar_forge.core.tracking.kalman.process_noise_dwna` with the same sign flip.
 
     Range is kept as one continuous value, even when the radar measures it folded (modulo its
     unambiguous range).
 
     References
     ----------
-    .. [1] Bar-Shalom, Li and Kirubarajan (2001), §6.2.
+    .. [1] Bar-Shalom, Li and Kirubarajan (2001), §6.2 (continuous white noise) and §6.3.2
+           (discrete white noise).
 
     Examples
     --------
@@ -562,7 +581,14 @@ class RadialMotion:
         self,
         sigma_acceleration_mps2: float = 4.0,
         acceleration_correlation_time_s: float = 1.0,
+        *,
+        process_noise_model: Literal["continuous", "dwna"] = "continuous",
     ) -> None:
+        if process_noise_model not in ("continuous", "dwna"):
+            msg = (
+                f"process_noise_model must be 'continuous' or 'dwna'; got {process_noise_model!r}."
+            )
+            raise ValueError(msg)
         if not np.isfinite(sigma_acceleration_mps2) or sigma_acceleration_mps2 < 0:
             msg = (
                 "sigma_acceleration_mps2 must be finite and nonnegative; "
@@ -570,6 +596,8 @@ class RadialMotion:
             )
             raise ValueError(msg)
         _check_correlation_time(acceleration_correlation_time_s)
+        self.sigma_acceleration_mps2 = float(sigma_acceleration_mps2)
+        self.process_noise_model = process_noise_model
         self.noise_density_m2ps3 = _white_noise_density(
             float(sigma_acceleration_mps2), float(acceleration_correlation_time_s)
         )
@@ -652,7 +680,8 @@ class RadialMotion:
         Returns
         -------
         numpy.ndarray
-            Q, shape ``(2, 2)``: m² for range, m²/s² for range rate, m²/s between them.
+            Q, shape ``(2, 2)``: m² for range, m²/s² for range rate, m²/s between them, of
+            the ``process_noise_model`` chosen (class Notes).
 
         Raises
         ------
@@ -660,6 +689,10 @@ class RadialMotion:
             If ``dt_s`` is negative or not finite.
         """
         _check_dt(dt_s)
+        if self.process_noise_model == "dwna":
+            return self.sigma_acceleration_mps2**2 * np.array(
+                [[dt_s**4 / 4, -(dt_s**3) / 2], [-(dt_s**3) / 2, dt_s**2]], dtype=np.float64
+            )
         return self.noise_density_m2ps3 * np.array(
             [[dt_s**3 / 3, -(dt_s**2) / 2], [-(dt_s**2) / 2, dt_s]], dtype=np.float64
         )
