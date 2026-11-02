@@ -235,6 +235,25 @@ Good reasons to use another spelling:
 If you keep an American spelling for one of these reasons and the reason isn't obvious, say why
 in a comment.
 
+### 3.3 Circular axes **[review]**
+
+Some axes are circles: Doppler always, range when a return can come from
+beyond one repetition interval, and an angle such as azimuth. On a circle, the last
+bin's neighbour is bin 0, and a difference is the shorter way round. Most wrap bugs come
+from treating such an axis as a line, so:
+
+- **Declare the period once, where the axis is made.** That is `Coordinate.period` for a
+  state or measurement coordinate, and `RangeDopplerProduct.range_period_m` /
+  `velocity_period_mps` for a map. Do not recompute it elsewhere from bin counts.
+- **Apply it in the layer that consumes the values.** Use `wrap`/`wrap_axes` in detection
+  and clustering, and `StateLayout.wrap` and `StateLayout.residual` in tracking. The
+  producer only labels the axis.
+- **Never pad, roll or `np.interp` across an edge.** Padding invents cells, a roll moves the
+  edge somewhere else rather than removing it, and `np.interp` clamps at the end bins.
+- **Convert an index to a value with the axis's own formula**
+  (`RangeDopplerProduct.range_at_index_m`, `velocity_at_index_mps`), so that a fractional
+  index past the last bin wraps instead of clamping.
+
 ---
 
 ## 4. Docstrings
