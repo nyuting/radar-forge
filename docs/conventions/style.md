@@ -35,6 +35,9 @@ tagged **[review]** — which are the ones a tool genuinely cannot judge.
 
 Each failure prints the rule, the offending line, the fix, and a pointer back here.
 
+When a **[review]** rule turns out to be checkable mechanically, add it to
+`scripts/check_conventions.py` or a test rather than writing more prose about it.
+
 ---
 
 ## 0. The audience rule **[review]**
@@ -172,7 +175,18 @@ catches it in anything committed, which is the case that matters.
   (trailing underscore — `lambda` is a keyword). Never as a parameter of a public function.
 - Verb-first function names for actions (`compute_`, `estimate_`, `export_`, `simulate_`);
   noun names for quantities returned (`received_power_w`, `beam_pattern_db`).
+- A verb keeps one meaning across the package **[review]**. Once `estimate_` or `export_` means
+  something, don't use another verb for the same action, or that verb for a different one. Name
+  a function for what it returns or produces, not for how it works.
 - `_leading_underscore` for everything not in the public API (§6).
+- Name a thing by what it does or holds, not by who it is for **[review]**: `visualisation`, not
+  `teaching`. A name that is nearly right gets renamed ([refactoring.md](refactoring.md) F5).
+- Never reuse a term that already means something here or in the field **[review]**.
+  `noise_power_w` is thermal noise, so a CFAR estimate is `cfar_noise_estimate_w`.
+  "Observable" means observability in estimation, so a field-of-view test is `covers`.
+- Never shadow a parameter, a builtin or an imported module with a local or a loop variable
+  **[review]**. Pick another word: a loop over `track` inside a function that takes `track` reads
+  as the same object.
 
 ### 3.1 Data layout and array names **[review]**
 
@@ -454,6 +468,13 @@ change in any release.
   shape bugs hide.
 - `ValueError` for bad values, `TypeError` for bad types, `ImportError` for a missing
   optional backend. Never a bare `Exception`, never a silent clamp.
+- **Never drop data silently** **[review]**. Input that cannot be read raises or is flagged in
+  the output; it is never skipped. Dispatch on a kind through a dict, and make a missing key
+  raise a `ValueError` that names it. Don't use an `else` that treats an unknown kind as a
+  default one.
+- **Raise your own error at a module boundary** **[review]**. If a library's exception would
+  escape, catch it and raise one that names the `radar_forge` operation, chained with `from`.
+  Callers should not depend on which library sits underneath.
 - Do not use `assert` for validation **[ruff: S101 in src]** — `python -O` removes it.
 - `warnings.warn` for a recoverable situation the user should know about (aliasing, an
   under-sampled pattern), with a `stacklevel` so it points at the caller.
@@ -498,6 +519,8 @@ reader must be able to tell an approximation from a bug.
   go in the docstring (§4), where they cannot drift from it.
 - **TODOs name an owner and an issue** **[ruff: TD]**: `# TODO(author): what — <issue link>`.
   An unowned TODO is never done.
+- **A `# noqa` is a last resort** **[review]**. Fix what ruff flags. One that must stay names
+  its rule and says why on the same line, as a `# type: ignore` does (§5).
 
 ---
 
