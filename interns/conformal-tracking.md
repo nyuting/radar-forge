@@ -48,7 +48,7 @@ Nothing conformal is implemented in `radar-forge`. You will write it in your own
 ## Setup
 
 - Use this repository at the latest `main`, and record the commit hash you used in your report.
-- Run `uv sync --extra dev --extra viz`. Add `--extra ml` only for the optional learned model.
+- Run `uv sync --extra dev --extra visualisation`. Add `--extra ml` only for the optional learned model.
 - `uv run python scripts/run_scenario.py scenarios/scenario_003_tracking.toml --out out/s1 --no-iq`
   runs the chain end to end. Read that script to see how the pieces fit together. Don't commit
   `out/`.

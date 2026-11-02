@@ -85,7 +85,7 @@ radar-forge/
         |-- array/               # phased array pattern generation, tapering, null steering
         |-- raytracing/          # wrappers for Mitsuba/RadarSimPy ray-tracing backends
         |-- pipelines/           # scenario loop, trajectories, tracking, ML dataset exporters
-        `-- viz/                 # plots and scopes (range-Doppler map, track history, PPI, A-Scope)
+        `-- visualisation/                 # plots and scopes (range-Doppler map, track history, PPI, A-Scope)
 ```
 
 ---
@@ -155,7 +155,7 @@ The conventions `pipelines/datasets.py` and `pipelines/exporters/` export agains
 
 #### 3.1.6 Teaching and visualisation
 
-The blueprint for `viz/scopes/` and the intern onboarding path.
+The blueprint for `visualisation/scopes/` and the intern onboarding path.
 
 | Project Name | Description | Reason for Inclusion / Core Utility |
 | :--- | :--- | :--- |

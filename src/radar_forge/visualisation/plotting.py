@@ -1,6 +1,6 @@
-"""Plotting helpers shared by the viz scopes.
+"""Plotting helpers shared by the visualisation scopes.
 
-Everything in :mod:`radar_forge.viz` depends on ``matplotlib``, which is
+Everything in :mod:`radar_forge.visualisation` depends on ``matplotlib``, which is
 an optional extra rather than a core dependency: ``import radar_forge`` must
 succeed in an environment that has only ``numpy`` and ``scipy``. So the import
 happens inside :func:`require_pyplot` at call time, and the error names the
@@ -25,9 +25,9 @@ from numpy.typing import ArrayLike, NDArray
 __all__ = ["magnitude_db", "require_pyplot", "save_figure"]
 
 _VIZ_EXTRA_HINT = (
-    "matplotlib is required for radar_forge.viz but is not installed. "
-    "It ships in the 'viz' extra: install with `uv sync --extra viz`, "
-    "or `pip install 'radar-forge[viz]'`."
+    "matplotlib is required for radar_forge.visualisation but is not installed. "
+    "It ships in the 'visualisation' extra: install with `uv sync --extra visualisation`, "
+    "or `pip install 'radar-forge[visualisation]'`."
 )
 
 
@@ -42,7 +42,7 @@ def require_pyplot() -> ModuleType:
     Raises
     ------
     ImportError
-        If ``matplotlib`` is not installed. The message names the ``viz``
+        If ``matplotlib`` is not installed. The message names the ``visualisation``
         extra and gives the command to install it.
 
     Notes

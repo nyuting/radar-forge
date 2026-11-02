@@ -27,16 +27,16 @@ the dev dependencies, and activates the git hooks by pointing `core.hooksPath` a
 `.githooks/`. It is safe to re-run at any time, and you should re-run it after pulling
 changes to `pyproject.toml`.
 
-To render plots (range-Doppler maps, track histories), add the `viz` extra, which is matplotlib.
-To run Jupyter, add `notebooks` as well:
+To render plots (range-Doppler maps, track histories), add the `visualisation` extra, which is
+matplotlib. To run Jupyter, add `notebooks` as well:
 
 ```bash
-uv sync --extra dev --extra viz --extra notebooks
+uv sync --extra dev --extra visualisation --extra notebooks
 ```
 
 **Always list every extra you use.** `uv sync` makes the environment match exactly the extras
-on the command line and uninstalls the rest. `uv sync --extra viz` on its own removes ruff,
-mypy and pytest. `./scripts/setup-dev.sh` syncs only `dev`, so it removes Jupyter. Run the line
+on the command line and uninstalls the rest. `uv sync --extra visualisation` on its own removes
+ruff, mypy and pytest. `./scripts/setup-dev.sh` syncs only `dev`, so it removes Jupyter. Run the line
 above again after it. Don't reach for `--all-extras`: it pulls in PyTorch and Mitsuba.
 
 Confirm it worked:

@@ -96,7 +96,7 @@ The processing chain is scenario 001's unchanged. Only the geometry block differ
      range axis carries BISTATIC MEAN RANGE (R_t + R_r)/2
             |
             v
-  viz/scopes/rd_map.py  (axis LABEL differs; nothing else does)
+  visualisation/scopes/rd_map.py  (axis LABEL differs; nothing else does)
 ```
 
 ---
@@ -288,7 +288,7 @@ about 2.5 times — both fold, but B2's map is readable.
    Cassini rather than circles.
 3. **Decisions D6, D7 and D8 are added**, as stated in §4.1–§4.3.
 4. **The `range_m` axis produced by `core/dsp.py` is a bistatic mean range axis** in the bistatic
-   case. `core/dsp.py` itself is unchanged; only `viz/scopes/rd_map.py`'s axis label differs.
+   case. `core/dsp.py` itself is unchanged; only `visualisation/scopes/rd_map.py`'s axis label differs.
 
 The open question recorded in `spec/structure.md` — that the analytic backend is the only one under
 test until a GPU backend exists — stands unchanged.
@@ -302,7 +302,7 @@ scenarios/scenario_002_bistatic_{xband,sband}.toml
 spec/scenario-002-bistatic.md
 src/radar_forge/core/{radar,radar_equation,signal}.py
 src/radar_forge/pipelines/{trajectories,scenarios}.py
-src/radar_forge/viz/scopes/rd_map.py   (axis label only)
+src/radar_forge/visualisation/scopes/rd_map.py   (axis label only)
 ```
 
 `data/flight_coordinates.csv`, `scenarios/scenario_001_*.toml` and
@@ -342,7 +342,7 @@ geometry alongside the first.
   6. scenarios/scenario_002_bistatic_{xband,sband}.toml
              |
              v
-  7. viz/scopes/rd_map.py   axis LABEL only
+  7. visualisation/scopes/rd_map.py   axis LABEL only
              |
              v
   8. tests/pipelines/test_scenario_002.py   degeneracy test first
@@ -356,7 +356,7 @@ geometry alongside the first.
 | 4 | `pipelines/trajectories.py` *(edit)* | `BistaticTargetTrack` and `to_bistatic_radar_frame`. No `radial_velocity_mps` field: a bistatic target has two radial velocities and the Doppler shift measures neither. |
 | 5 | `pipelines/scenarios.py` *(edit)* | Siting selected by the presence of `[transmitter_site]`. The receiving site's coordinates are `[receiver_site]` and its chain `[receiver]`; the TOML layout row of §3 gives the order. |
 | 6 | `scenarios/*.toml` *(new)* | Two files differing in `[[burst]].f0_hz` alone. |
-| 7 | `viz/scopes/rd_map.py` *(edit)* | Axis label only. The array is the same array. |
+| 7 | `visualisation/scopes/rd_map.py` *(edit)* | Axis label only. The array is the same array. |
 | 8 | `tests/pipelines/test_scenario_002.py` *(new)* | Build the degeneracy test first; everything else is meaningless until it passes. |
 
 ---

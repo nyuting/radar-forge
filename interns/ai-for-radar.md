@@ -62,7 +62,7 @@ probability and detection. Use those definitions, or say where and why you depar
 PyTorch is in the `ml` extra. `uv sync` removes every extra you do not name, so name them all:
 
 ```bash
-uv sync --extra dev --extra viz --extra ml
+uv sync --extra dev --extra visualisation --extra ml
 ```
 
 ## Pick one task

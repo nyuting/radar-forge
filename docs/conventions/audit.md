@@ -6,7 +6,7 @@ here is why" is a valid result for anything audited.
 
 | Report | Covers |
 | :--- | :--- |
-| [`pipelines-audit.md`](../audits/pipelines-audit.md) | `pipelines/`, `viz/` and `scripts/run_scenario.py`, code against spec |
+| [`pipelines-audit.md`](../audits/pipelines-audit.md) | `pipelines/`, `visualisation/` and `scripts/run_scenario.py`, code against spec |
 | [`tests-audit.md`](../audits/tests-audit.md) | The test suite, classified and pruned |
 
 Not yet audited: the tracking package and its tests. That audit waits for the tracker migration,

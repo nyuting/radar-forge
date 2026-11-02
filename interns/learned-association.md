@@ -40,7 +40,7 @@ false-alarm scenario in your own script. Leave `src/` alone.
 ## Setup
 
 - Use this repository at the latest `main`, and record the commit hash you used in your report.
-- Run `uv sync --extra dev --extra viz --extra ml`.
+- Run `uv sync --extra dev --extra visualisation --extra ml`.
 - **Work at the measurement level.** You do not need IQ or range-Doppler maps for this task.
   Generate:
   - target trajectories, some of which cross or run close together;
