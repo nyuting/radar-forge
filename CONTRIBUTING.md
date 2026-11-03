@@ -59,7 +59,8 @@ make check                             # the full gate, before you push
 git push -u origin HEAD
 ```
 
-`make help` lists every target.
+`make help` lists every target. Once the PR merges, update `main` and remove the branch and its
+worktree, as [commits.md](docs/conventions/commits.md#after-a-merge) shows.
 
 ---
 
@@ -152,8 +153,8 @@ deliberately maintained as the worked example of every convention at once.
 ## 5. Pull requests
 
 - One logical change per PR. A refactor and a feature in the same diff cannot be reviewed.
-- The PR title becomes the squash-merge commit subject, so it must itself be a valid
-  Conventional Commit.
+- PRs land as merge commits, so the PR title and every commit on the branch must each be a
+  valid Conventional Commit ([commits.md](docs/conventions/commits.md#pull-requests)).
 - New physics or DSP needs a citation — the textbook section or paper it implements — in the
   docstring's `References`, and a test against analytic ground truth where one exists.
 - New dependencies need a justification in the PR description. Heavy or optional backends
