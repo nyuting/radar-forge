@@ -5,7 +5,11 @@ propagation model in the library. :mod:`radar_forge.core.propagation` describes
 how energy reaches a receiver as a :class:`~radar_forge.core.propagation.PropagationPaths`,
 and the generators here turn that into a baseband cube. That split is decision
 **D1** in ``spec/structure.md``: backends compute paths, this module computes
-signals, and a new backend therefore costs no new signal code.
+signals, and a new backend therefore costs no new signal code. Even the motion
+of a path from pulse to pulse is the path set's to answer, through
+:meth:`~radar_forge.core.propagation.PropagationPaths.range_sum_at_m`; what this
+module adds is when the receiver samples, and the phases a waveform puts on
+those samples.
 
 The generators implement two receive architectures:
 
@@ -219,21 +223,14 @@ def fmcw_deramp_baseband(
         )
         raise ValueError(msg)
 
-    pulse_repetition_interval_s = radar.transmitter.pulse_repetition_interval_s
     range_sum_rate_mps = range_sum_rate_from_doppler_mps(paths.doppler_hz, radar.wavelength_m)
     _warn_if_stop_and_hop_is_strained(range_sum_rate_mps, radar)
 
     # (n_pulses, n_paths): range sum held constant within a chirp, advancing
-    # between them. Broadcasting an outer difference, not tiling.
-    chirp_index = np.arange(n_pulses, dtype=np.float64)[:, None]
-    range_sum_m = (
-        paths.range_sum_m[None, :]
-        - range_sum_rate_mps[None, :] * chirp_index * pulse_repetition_interval_s
-    )
+    # between them.
+    range_sum_m = paths.range_sum_at_m(_slow_time_s(n_pulses, radar), radar.wavelength_m)
     delay_s = propagation_delay_s(range_sum_m)
-
-    n_samples = radar.n_samples_per_pri
-    fast_time_s = np.arange(n_samples, dtype=np.float64) / radar.receiver.sample_rate_hz
+    fast_time_s = _fast_time_s(radar)
 
     # (n_pulses, n_paths, 1) against (n_samples,) broadcasts to the full cube
     # without materialising an intermediate of that size per path.
@@ -326,19 +323,10 @@ def pulsed_baseband(
         )
         raise ValueError(msg)
 
-    pulse_repetition_interval_s = radar.transmitter.pulse_repetition_interval_s
-    range_sum_rate_mps = range_sum_rate_from_doppler_mps(paths.doppler_hz, radar.wavelength_m)
-
-    chirp_index = np.arange(n_pulses, dtype=np.float64)[:, None]
-    range_sum_m = (
-        paths.range_sum_m[None, :]
-        - range_sum_rate_mps[None, :] * chirp_index * pulse_repetition_interval_s
-    )
+    range_sum_m = paths.range_sum_at_m(_slow_time_s(n_pulses, radar), radar.wavelength_m)
     true_delay_s = propagation_delay_s(range_sum_m)
-    folded_delay_s = np.mod(true_delay_s, pulse_repetition_interval_s)
-
-    n_samples = radar.n_samples_per_pri
-    fast_time_s = np.arange(n_samples, dtype=np.float64) / radar.receiver.sample_rate_hz
+    folded_delay_s = np.mod(true_delay_s, radar.transmitter.pulse_repetition_interval_s)
+    fast_time_s = _fast_time_s(radar)
 
     elapsed_s = fast_time_s - folded_delay_s[..., None]
     within_pulse = (elapsed_s >= 0.0) & (elapsed_s < radar.transmitter.chirp_duration_s)
@@ -364,6 +352,22 @@ def pulsed_baseband(
     if rng is not None:
         cube = cube + thermal_noise(cube.shape, radar.receiver.noise_power_per_sample_w, rng=rng)
     return cube
+
+
+def _slow_time_s(n_pulses: int, radar: RadarLike) -> NDArray[np.float64]:
+    """Return the start time of each pulse, ``(n_pulses,)``, seconds."""
+    result: NDArray[np.float64] = (
+        np.arange(n_pulses, dtype=np.float64) * radar.transmitter.pulse_repetition_interval_s
+    )
+    return result
+
+
+def _fast_time_s(radar: RadarLike) -> NDArray[np.float64]:
+    """Return the sample instants within one pulse, ``(n_samples_per_pri,)``, seconds."""
+    result: NDArray[np.float64] = (
+        np.arange(radar.n_samples_per_pri, dtype=np.float64) / radar.receiver.sample_rate_hz
+    )
+    return result
 
 
 def _warn_if_stop_and_hop_is_strained(
