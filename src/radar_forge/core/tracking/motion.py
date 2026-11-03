@@ -54,8 +54,8 @@ typical change of velocity in one step, is about :math:`a_{max} T` [1]_, which g
 so that q only means what was intended at one update rate. With two sensors there is no one T.
 
 **The defaults**, :math:`\sigma_a = 4` m/s² and :math:`\tau = 1` s (so q = 32 m²/s³), were
-measured from a scenario's truth. ``docs/tracking/README.md`` records the measurement, and how
-well a 99.7 % gate held with them.
+measured from a scenario's truth. ``docs/user-guide/06-tracking.md`` records the measurement,
+and how well a 99.7 % gate held with them.
 
 A CA model instead treats the *jerk*, the rate of change of acceleration, as random. It takes
 ``sigma_jerk_mps3`` in m/s³ and the same :math:`\tau`, and its density

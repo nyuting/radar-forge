@@ -27,7 +27,7 @@ is done.
 This spec covers `core/tracking/`: filters, motion and measurement models, gating, association,
 track initiation and track lifecycle, and the interface they offer the pipelines. How to run the
 tracker, and how to choose its process noise, are in the user guide,
-[`docs/tracking/README.md`](../docs/tracking/README.md). This spec does not repeat them.
+[`docs/user-guide/06-tracking.md`](../docs/user-guide/06-tracking.md). This spec does not repeat them.
 
 ### 1.1 Scope
 
@@ -728,7 +728,7 @@ it would be later. The names and module moves are TD13's.
 
 0. **Renames that do not wait.** `SensorRoute` → `SensorRegistration`, `observable` → `covers`,
    `UKF.predict_to(time_s)` → `predict_to(timestamp_s)`. A small PR on main.
-   *Check:* `git grep -nE 'SensorRoute|^\s*observable ?:|observable=|\.observable\b|``observable``|def predict_to\(self, time_s' -- src tests docs/tracking`
+   *Check:* `git grep -nE 'SensorRoute|^\s*observable ?:|observable=|\.observable\b|``observable``|def predict_to\(self, time_s' -- src tests docs/user-guide`
    returns nothing. The pattern skips the observability prose in `kalman.py`, which stays.
 1. **Gate and GNN into `association.py`;** `kalman.py` imports them from there.
    *Check:* `git grep -n 'from radar_forge.core.tracking.kalman import' -- src/radar_forge/core/tracking/association.py`
@@ -792,7 +792,7 @@ it would be later. The names and module moves are TD13's.
    implementation"). *Check:* AC1, AC7 and AC8;
    `git grep -nE '^class (KalmanTracker|KalmanFilter|KalmanState|TrackModel|FrameResult|UKF)\b' -- src`
    returns nothing; and so does
-   `git grep -nE 'n_reacquire_frames|\bCartesianPosition\b|\bRadialMotion\b|def normalise|\.normalise\(|\.noise_density\b[^_]|self\.noise_density\b|sigma_accel_mps2' -- src tests scripts scenarios spec/scenario-003-tracking.md docs/tracking`.
+   `git grep -nE 'n_reacquire_frames|\bCartesianPosition\b|\bRadialMotion\b|def normalise|\.normalise\(|\.noise_density\b[^_]|self\.noise_density\b|sigma_accel_mps2' -- src tests scripts scenarios spec/scenario-003-tracking.md docs/user-guide`.
    If `kalman.py` survives as the teaching layer of §4.4, its module docstring says so; today
    it says "a linear Kalman filter", but the ENU models make it an extended one (`:138`,
    `:479`).
@@ -805,7 +805,7 @@ it would be later. The names and module moves are TD13's.
    ([`docs/conventions/audit.md`](../docs/conventions/audit.md)) left tracking out, because steps 0–7 replace most
    of it. Once step 7 has merged, run both audits over the tracking code as it then stands:
    - **Code against spec**, Q1–Q8 ([method](../docs/conventions/audit.md#1-auditing-code-against-the-spec)), over `src/radar_forge/core/tracking/**`. The reference
-     is this spec and [`docs/tracking/README.md`](../docs/tracking/README.md). Record the result
+     is this spec and [`docs/user-guide/06-tracking.md`](../docs/user-guide/06-tracking.md). Record the result
      in a new `docs/audits/tracking-audit.md`, numbering findings from F1 and R1.
    - **Test audit and pruning**, Sound / Redundant / Weak / Wrong, over
      `tests/core/tracking/**`, `tests/core/test_tracking.py` (or what survives it),

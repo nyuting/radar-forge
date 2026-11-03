@@ -90,5 +90,5 @@ pipeline, the pictures and the knobs. They are **not normative**; the `spec/` do
 
 API documentation and the intern onboarding tutorials land here as the modules are built.
 
-- [**tracking**](tracking/README.md) — what is in `core/tracking/`, the order one scan runs in,
+- [**tracking**](user-guide/06-tracking.md) — what is in `core/tracking/`, the order one scan runs in,
   a short example, choosing the process noise, and the tracker's limitations.
