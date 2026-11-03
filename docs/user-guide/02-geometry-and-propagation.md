@@ -63,9 +63,10 @@ from the two examples under [Try it](#try-it).
 | Baseline (B1) | $L$ | distance between the two sites | `BistaticRadar.baseline_m` | 19601.4 m |
 | Bistatic angle (B1) | $\beta$ | $\cos\beta = (R_t^2 + R_r^2 - L^2) / (2 R_t R_r)$ | `BistaticRadar.bistatic_angle_rad` | 119.17° |
 | Bistatic delay (B1) | $\tau$ | $\tau = (R_t + R_r) / c$ | `PropagationPaths.delay_s` | 74.4653 µs |
-| Path range (B1) | $R$ | $R = \tau c / 2 = (R_t + R_r) / 2$ | `PropagationPaths.range_m` | 11162.1 m |
-| Bisector velocity (B1) | $v_b$ | $v_b = -\tfrac{1}{2}\, d(R_t + R_r)/dt$ | `Frame.radial_velocity_mps` | 9.614 m/s |
-| Bistatic Doppler (B1) | $f_d$ | $f_d = 2 v_b / \lambda = (\vec{v}\cdot\hat{u}_t + \vec{v}\cdot\hat{u}_r) / \lambda$ | `bistatic_doppler_hz`, `PropagationPaths.doppler_hz` | 628.6 Hz |
+| Range sum (B1) | $R_\Sigma$ | $R_\Sigma = R_t + R_r = \tau c$ | `PropagationPaths.range_sum_m` | 22324.1 m |
+| Range-sum rate (B1) | $\dot{R}_\Sigma$ | $\dot{R}_\Sigma = -\,d(R_t + R_r)/dt = \vec{v}\cdot\hat{u}_t + \vec{v}\cdot\hat{u}_r$, closing positive | `range_sum_rate_mps` | 19.228 m/s |
+| Bisector velocity (B1) | $v_b$ | $v_b = \dot{R}_\Sigma / 2$ | `Frame.radial_velocity_mps` | 9.614 m/s |
+| Bistatic Doppler (B1) | $f_d$ | $f_d = \dot{R}_\Sigma / \lambda$ | `doppler_shift_hz`, `PropagationPaths.doppler_hz` | 628.6 Hz |
 
 Symbols used only on this page:
 
@@ -79,7 +80,10 @@ Symbols used only on this page:
 - $\mathrm{az}$, $\mathrm{el}$: azimuth and elevation (`azimuth_deg`, `elevation_deg`).
 - $a$ (in $\lvert a \rvert$, $\arg a$): a path's complex amplitude (`amplitude_linear`).
 - $L$: baseline between transmitter and receiver, m (`baseline_m`).
-- $v_b$: bisector velocity, m/s, closing positive (`bisector_velocity_mps`).
+- $R_\Sigma$, $\dot{R}_\Sigma$: range sum $R_t + R_r$, m (`range_sum_m`), and its rate, m/s,
+  closing positive (`range_sum_rate_mps`). Monostatic, $R_\Sigma = 2R$ and $\dot{R}_\Sigma = 2 v_r$.
+- $v_b$: bisector velocity, half the range-sum rate, m/s, closing positive
+  (`bisector_velocity_mps` on a bistatic track).
 - $\vec{v}$: target velocity in ENU; $\hat{u}_t$, $\hat{u}_r$: unit vectors from the target towards
   the transmitter and the receiver.
 
@@ -95,17 +99,15 @@ $$\tau = \frac{2R}{c}, \qquad f_d = \frac{2 v_r}{\lambda}$$
 The echo travels out and back, so it is delayed by twice the range and shifted by twice the
 closing speed in wavelengths.
 
-$$\tau = \frac{R_t + R_r}{c}, \qquad f_d = \frac{1}{\lambda}\left(\vec{v}\cdot\hat{u}_t + \vec{v}\cdot\hat{u}_r\right)$$
+$$\tau = \frac{R_\Sigma}{c}, \qquad f_d = \frac{\dot{R}_\Sigma}{\lambda}, \qquad \dot{R}_\Sigma = \vec{v}\cdot\hat{u}_t + \vec{v}\cdot\hat{u}_r$$
 
-With the sites apart, the delay is the whole route over $c$, and the Doppler shift is the rate the
-whole route shortens, in wavelengths. Put the sites together and both become the monostatic forms.
-
-$$R = \frac{R_t + R_r}{2}, \qquad v_b = -\frac{1}{2}\frac{d(R_t + R_r)}{dt}$$
-
-A bistatic path reports half the route and half its rate. The signal code only ever uses range
-as $2R/c$ and velocity as $2v/\lambda$, so the factor of a half cancels the factor of two, and it
-gets exactly the bistatic delay and Doppler. That is why the same signal code serves both sitings.
-The module docstring of `propagation` explains this in full.
+These are the general forms. The delay is the whole route over $c$, and the Doppler shift is the
+rate the whole route shortens, in wavelengths. A monostatic radar is the case where the two sites
+coincide, $R_t = R_r = R$, so $R_\Sigma = 2R$, $\dot{R}_\Sigma = 2 v_r$, and the pair above
+follows. `propagation` writes each relation once, as a function of the range sum
+(`propagation_delay_s`, `propagation_phase_rad`, `doppler_shift_hz`), and both sitings call the
+same functions. Only the range-Doppler map keeps the half-sum: its axes are labelled in
+$R_\Sigma/2$ and $\dot{R}_\Sigma/2$, so that a monostatic map reads in range and radial velocity.
 
 ## How it works, step by step
 
@@ -129,16 +131,19 @@ The module docstring of `propagation` explains this in full.
    per target and returns a `PropagationPaths` with `n_paths` = number of targets. Its fields are
    `delay_s`, `doppler_hz` and `amplitude_linear`, each shape `(n_paths,)`; `aoa_rad` and `aod_rad`
    of shape `(n_paths, 2)` as (azimuth, elevation); and `bounce_count`, which is 1 for a direct
-   return. The amplitude's magnitude comes from `radar_equation.received_power_w`. This module
-   adds no link-budget maths of its own.
+   return. `range_sum_m` is `delay_s` times $c$. The builder passes $2R$ and $2 v_r$ to the same
+   range-sum functions the bistatic builder uses. The amplitude's magnitude comes from
+   `radar_equation.received_power_w`. This module adds no link-budget maths of its own.
 6. **Bistatic paths.** For a `BistaticRadar`, `bistatic_line_of_sight_paths(radar, range_tx_m,
-   range_rx_m, bisector_velocity_mps, bistatic_rcs_m2)` does the same with two ranges and the
-   bisector velocity, and uses `radar_equation.bistatic_received_power_w`. If you have the target's
-   velocity vector rather than $v_b$, `bistatic_doppler_hz` gives $f_d$ from the vector form.
+   range_rx_m, range_sum_rate_mps, bistatic_rcs_m2)` does the same with two ranges and the
+   range-sum rate, and uses `radar_equation.bistatic_received_power_w`. A bistatic `Frame` carries
+   the bisector velocity, so pass twice it. If you have the target's velocity vector instead,
+   `range_sum_rate_mps(velocity_enu_mps, unit_vector_to_tx, unit_vector_to_rx)` gives
+   $\dot{R}_\Sigma$ from the vector form.
 7. **Hand-off.** `signal.fmcw_deramp_baseband(paths, radar, n_pulses)` or `signal.pulsed_baseband`
    turns the paths into a cube of shape `(n_pulses, n_samples)`. They use only
-   `abs(amplitude_linear)` and rebuild the phase from `delay_s`, so that the phase moves with the
-   delay from chirp to chirp.
+   `abs(amplitude_linear)` and rebuild the phase from the range sum, so that the phase moves with
+   the delay from chirp to chirp.
 
 ## Try it
 
@@ -201,22 +206,25 @@ scenario = load_scenario("scenarios/scenario_002_bistatic_xband.toml")
 pair = scenario.bursts[0]
 frame = next(iterate_frames(scenario))  # frame 0, t = 13329 s
 r_t, r_r, v_b = frame.range_tx_m, frame.range_rx_m, frame.radial_velocity_mps
-paths = bistatic_line_of_sight_paths(pair, r_t, r_r, v_b, scenario.target.rcs_m2)
+range_sum_rate_mps = 2.0 * v_b  # the frame carries the bisector velocity, half the rate
+paths = bistatic_line_of_sight_paths(pair, r_t, r_r, range_sum_rate_mps, scenario.target.rcs_m2)
 
 print(f"R_t = {r_t:.1f} m, R_r = {r_r:.1f} m, L = {pair.baseline_m:.1f} m")
 print(f"beta = {np.degrees(pair.bistatic_angle_rad(r_t, r_r)):.2f} deg")
 sum_delay_us = (r_t + r_r) / SPEED_OF_LIGHT_MPS * 1e6
 print(f"tau = {paths.delay_s[0] * 1e6:.4f} us, (R_t + R_r)/c = {sum_delay_us:.4f} us")
-print(f"range_m = {paths.range_m[0]:.1f} m (the half-sum)")
-print(f"v_b = {v_b:.3f} m/s, f_d = {paths.doppler_hz[0]:.1f} Hz")
+print(f"range_sum_m = {paths.range_sum_m[0]:.1f} m")
+print(f"v_b = {v_b:.3f} m/s, range-sum rate = {range_sum_rate_mps:.3f} m/s")
+print(f"f_d = {paths.doppler_hz[0]:.1f} Hz")
 ```
 
 ```text
 R_t = 14800.6 m, R_r = 7523.6 m, L = 19601.4 m
 beta = 119.17 deg
 tau = 74.4653 us, (R_t + R_r)/c = 74.4653 us
-range_m = 11162.1 m (the half-sum)
-v_b = 9.614 m/s, f_d = 628.6 Hz
+range_sum_m = 22324.1 m
+v_b = 9.614 m/s, range-sum rate = 19.228 m/s
+f_d = 628.6 Hz
 ```
 
 ## Try it in a scenario
@@ -255,10 +263,10 @@ Paths carry the true, unfolded shift. Folding happens later, when the slow-time 
 once per chirp: −1835.9 Hz folds to +164.1 Hz, so the map shows +2.51 m/s for a target opening at
 28.08 m/s. Page 4 covers this.
 
-**A bistatic path's `range_m` (11162.1 m) is neither $R_t$ (14800.6 m) nor $R_r$ (7523.6 m).**
-It is the half-sum, the range a monostatic radar would need to give the same delay. A bistatic
-map's range axis is in this unit too, labelled "bistatic mean range". Constant half-sum surfaces
-are ellipsoids with the two sites at the foci, not spheres.
+**A bistatic map's range axis reads 11162.1 m, which is neither $R_t$ (14800.6 m) nor $R_r$
+(7523.6 m).** The map labels its axis in half the range sum (22324.1 m / 2), the range a
+monostatic radar would need to give the same delay, and calls it "bistatic mean range". Constant
+range-sum surfaces are ellipsoids with the two sites at the foci, not spheres.
 
 **The bistatic delay (74.4653 µs) is longer than a real bistatic receiver would measure.** A real
 receiver times echoes from the direct pulse it hears from the transmitter, so it would measure
