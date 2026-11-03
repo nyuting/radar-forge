@@ -1,11 +1,21 @@
-# The tracking package
+# 6. Tracking
 
 `radar_forge.core.tracking` turns a stream of radar measurements into tracks. A **track** is
 the tracker's running estimate of one target: its state (for example its position and velocity),
-how uncertain that estimate is, and whether the tracker trusts it yet. This page says what is in
-the package, the order a scan runs in, how to try it, and what it can't do yet.
+how uncertain that estimate is, and whether the tracker trusts it yet. It is the last stage of
+[the chain](README.md#the-chain): it takes the detections from [page 5](05-detection.md), scan
+after scan. This page says what is in the package, the equations it runs, the order a scan runs
+in, how to try it, and what it can't do yet.
 
-## What's in the package
+## What this stage does
+
+One detection says where a target was at one moment, with some error. A track combines many of
+them: it predicts where the target should be next, compares that with what the radar reports,
+and corrects itself. Doing that well means answering three questions every scan. Which
+detection belongs to which track? How much should a new detection move the estimate? And when
+is a track real enough to report, or gone for good?
+
+### What's in the package
 
 The package runs two tracker loops for now. Both keep their tracks as the same `Track`
 (`tracks.py`), with the same `TrackStatus`, and both confirm and delete them with the same
@@ -43,7 +53,63 @@ measurement model, estimator, gate, associator, initiator and track manager. So 
 who moves on to Stone Soup will recognise them. Where the two differ, the module docstring
 says so.
 
-## Reading the tracker: one scan, step by step
+## Quantities and equations
+
+The filter is written once, as a Gaussian filter, for the KF, EKF and UKF alike. The worked
+values are for scenario 003's UKF run on the S1 waveform
+(`scenarios/scenario_003_ukf_fmcw_low_prf.toml`), whose state is range and range rate and whose
+scans come once a second.
+
+| Quantity | Symbol | Equation | In the code | Scenario 003, UKF on S1 |
+| :-- | :-- | :-- | :-- | --: |
+| State and its covariance | $\mathbf{x}$, $P$ | mean and covariance of the estimate | `StateEstimate.mean`, `.covariance` | $[R, \dot R]$ |
+| Transition over a step $T$ | $F$ | $R \to R - T\dot R$, $\dot R \to \dot R$ (matrix below) | `RadialMotion.transition` | $T$ = 1 s |
+| Process-noise density | $q$ | $q = 2\sigma_a^2\tau$ | `RadialMotion.noise_density_m2ps3` | 32.0 m²/s³ |
+| Process noise over a step | $Q(T)$ | $q$ times the matrix below | `RadialMotion.process_noise` | [[10.667, −16], [−16, 32]] m², m²/s, m²/s² |
+| Predict | $\mathbf{x}^-$, $P^-$ | $\mathbf{x}^- = F\mathbf{x}$, $P^- = FPF^\mathsf{T} + Q$ | `GaussianFilter.predict_to` | — |
+| Measurement noise | $R_z$ | one bin over $\sqrt{12}$, on the diagonal | from the map's bins | 21.6357 m, 0.01725 m/s |
+| Innovation | $\boldsymbol{\nu}$ | $\boldsymbol{\nu} = \mathbf{z} - h(\mathbf{x}^-)$ | `GaussianFilter.innovation_statistics` | — |
+| Innovation covariance | $S$ | $S = HP^-H^\mathsf{T} + R_z$ | same | — |
+| Normalised innovation squared (NIS) | $d^2$ | $d^2 = \boldsymbol{\nu}^\mathsf{T} S^{-1} \boldsymbol{\nu}$ | same | — |
+| Gate | $\gamma$ | accept when $d^2 \le \gamma = \chi^2_m(P_G)$ | `gate_threshold`, `ChiSquareGate` | 8.81 (range only), 11.62 (range and rate), $P_G$ = 0.997 |
+| Kalman gain | $K$ | $K = P^-H^\mathsf{T}S^{-1}$ | `GaussianFilter.update` | — |
+| Update | $\mathbf{x}^+$, $P^+$ | $\mathbf{x}^+ = \mathbf{x}^- + K\boldsymbol{\nu}$, $P^+ = (I-KH)P^-(I-KH)^\mathsf{T} + KR_zK^\mathsf{T}$ | same | — |
+| Confirmation | M of N | M hits in a track's first N scans | `LifecyclePolicy`, `TrackManager` | 3 of 5 |
+
+Symbols used only on this page: $\sigma_a$, the standard deviation of the target's
+acceleration; $\tau$, how long one acceleration lasts; $\mathbf{z}$, a measurement; $h$, the
+measurement model, with $H$ its Jacobian; $m$, the measurement's dimension; $P_G$, the gate
+probability; $\dot R$, the range rate, positive closing.
+
+Four equations carry the filter. The motion model gives $F$ and $Q$:
+
+$$F = \begin{bmatrix} 1 & -T \\ 0 & 1 \end{bmatrix}, \qquad
+Q(T) = q\begin{bmatrix} T^3/3 & -T^2/2 \\ -T^2/2 & T \end{bmatrix}$$
+
+The off-diagonal terms are negative because range rate is positive when closing, so a closing
+target's range falls.
+
+$$\mathbf{x}^- = F\mathbf{x}, \qquad P^- = FPF^\mathsf{T} + Q(T)$$
+
+Predict: move the estimate forward, and grow its uncertainty by what the target could have done
+in the meantime.
+
+$$d^2 = \boldsymbol{\nu}^\mathsf{T} S^{-1} \boldsymbol{\nu} \le \chi^2_m(P_G)$$
+
+Gate: a measurement is a candidate for a track only if it is no more surprising than a true one
+would be, $P_G$ of the time.
+
+$$K = P^-H^\mathsf{T}S^{-1}, \qquad \mathbf{x}^+ = \mathbf{x}^- + K\boldsymbol{\nu}$$
+
+Update: move the estimate towards the measurement, further when the prediction is uncertain
+($P^-$ large) and less when the measurement is noisy ($R_z$ large).
+
+The covariance update in the table is the Joseph form, which stays symmetric and positive in
+floating point. The KF and EKF use it, because their Taylor linearisation gives an $H$. The UKF
+has no $H$: it pushes sigma points through $h$ instead, and uses $P^- - KSK^\mathsf{T}$.
+`GaussianFilter.update`'s docstring shows that the two forms agree.
+
+## How it works, step by step
 
 `Tracker.process(batch)` takes one scan, meaning every measurement from one sensor at one time.
 It does these five steps in order:
@@ -84,6 +150,35 @@ It does these five steps in order:
 stop a new, unproven track from taking a confirmed track's measurement; `tracker.py`'s module
 docstring explains why.
 
+### Choosing the process noise
+
+Real targets don't move at exactly constant velocity. The **process noise** says how far they
+may stray from it. You give it as two physical numbers:
+
+- `sigma_acceleration_mps2`, σ_a: the standard deviation of the target's acceleration. If you
+  know a largest acceleration `a_max` and treat it as a 3σ bound, σ_a = a_max / 3.
+- `acceleration_correlation_time_s`, τ: roughly how long one acceleration lasts.
+
+The motion model turns them into the noise density $q = 2\sigma_a^2\tau$, and builds $Q(T)$
+from the actual time step at every prediction ([the equations above](#quantities-and-equations)).
+
+The defaults, σ_a = 4 m/s² and τ = 1 s (q = 32 m²/s³), are measured from the truth of
+scenario 001's 120 s window. The acceleration there has a standard deviation of 3.3 m/s² on the
+east and north axes, and 4.0 m/s² along the line of sight. Its correlation falls to between
+0.44 and 0.51 after 1 s, and changes sign by 2 s. Run through `RadialMotion` and the UKF on that
+truth, with scenario 003's measurement noise (21.6 m in range, 0.017 m/s in range rate), 0.35 %
+of the true measurements fall outside a 99.7 % gate, close to the 0.3 % the gate is designed
+for. The old default, q = 1 m²/s³, left 31 % outside.
+
+If σ_a is too small, the track lags a manoeuvring target until its measurements fall outside
+the gate. If it is too large, the track follows the noise.
+
+A common rule of thumb is q ≈ a_max² · T for a scan of length T. This repo doesn't use it,
+because the scan length stands in for τ there: the same q then means a different target at a
+different update rate, and with two sensors there is no single T. `motion.py`'s module
+docstring explains this, gives the CA case (`sigma_jerk_mps3`), and compares the model with
+`kalman.py`'s discrete noise model.
+
 ## Try it
 
 This tracks one target moving east at 20 m/s, from position measurements with a 2 m standard
@@ -118,41 +213,89 @@ hit:
 ...
 ```
 
-## Choosing the process noise
+The table's worked values come from this:
 
-Real targets don't move at exactly constant velocity. The **process noise** says how far they
-may stray from it. You give it as two physical numbers:
+```python
+import numpy as np
 
-- `sigma_acceleration_mps2`, σ_a: the standard deviation of the target's acceleration. If you
-  know a largest acceleration `a_max` and treat it as a 3σ bound, σ_a = a_max / 3.
-- `acceleration_correlation_time_s`, τ: roughly how long one acceleration lasts.
+from radar_forge.core.radar import Transmitter
+from radar_forge.core.tracking import RadialMotion, gate_threshold
+from radar_forge.core.waveforms import range_resolution_m
 
-The motion model turns them into a noise density, and builds Q from the actual time step at
-every prediction:
+# Scenario 003's UKF run: sigma_a = 4 m/s^2, tau = 1 s, one scan per second.
+motion = RadialMotion(sigma_acceleration_mps2=4.0, acceleration_correlation_time_s=1.0)
+print(f"q = {motion.noise_density_m2ps3:.1f} m^2/s^3")
+print("Q(1 s) =", motion.process_noise(np.zeros(2), 1.0).round(3).tolist())
 
-```text
-q = 2 · σ_a² · τ        (m²/s³)
-Q(T) = q · [[T³/3, T²/2], [T²/2, T]]
+# Measurement noise: one range bin, and one velocity bin, over sqrt(12).
+transmitter = Transmitter(
+    carrier_frequency_hz=9.8e9,
+    bandwidth_hz=2.0e6,
+    transmit_power_w=100.0,
+    gain_tx_dbi=30.0,
+    chirp_duration_s=1.0e-3,
+    prf_hz=1.0e3,
+)
+n_pulses = 256
+range_bin_m = range_resolution_m(transmitter.bandwidth_hz)
+cpi_s = n_pulses * transmitter.pulse_repetition_interval_s
+velocity_bin_mps = transmitter.wavelength_m / (2 * cpi_s)
+print(f"sigma_range = {range_bin_m / np.sqrt(12):.4f} m")
+print(f"sigma_rate = {velocity_bin_mps / np.sqrt(12):.5f} m/s")
+
+for dim in (1, 2):
+    print(f"gate on d^2 for {dim} dimension(s), P_G = 0.997: {gate_threshold(0.997, dim):.2f}")
 ```
 
-The defaults, σ_a = 4 m/s² and τ = 1 s (q = 32 m²/s³), are measured from the truth of
-scenario 001's 120 s window. The acceleration there has a standard deviation of 3.3 m/s² on the
-east and north axes, and 4.0 m/s² along the line of sight. Its correlation falls to between
-0.44 and 0.51 after 1 s, and changes sign by 2 s. Run through `RadialMotion` and the UKF on that
-truth, with scenario 003's measurement noise (21.6 m in range, 0.017 m/s in range rate), 0.35 %
-of the true measurements fall outside a 99.7 % gate, close to the 0.3 % the gate is designed
-for. The old default, q = 1 m²/s³, left 31 % outside.
+```text
+q = 32.0 m^2/s^3
+Q(1 s) = [[10.667, -16.0], [-16.0, 32.0]]
+sigma_range = 21.6357 m
+sigma_rate = 0.01725 m/s
+gate on d^2 for 1 dimension(s), P_G = 0.997: 8.81
+gate on d^2 for 2 dimension(s), P_G = 0.997: 11.62
+```
 
-If σ_a is too small, the track lags a manoeuvring target until its measurements fall outside
-the gate. If it is too large, the track follows the noise.
+## Try it in a scenario
 
-A common rule of thumb is q ≈ a_max² · T for a scan of length T. This repo doesn't use it,
-because the scan length stands in for τ there: the same q then means a different target at a
-different update rate, and with two sensors there is no single T. `motion.py`'s module
-docstring explains this, gives the CA case (`sigma_jerk_mps3`), and compares the model with
-`kalman.py`'s discrete noise model.
+Scenario 003 runs detection and tracking over scenario 001's S1 waveform. Its companion,
+[scenario 003 — tracking](../scenarios/scenario-003-tracking.md), walks through the outputs.
+Run the UKF variant:
 
-## Limitations
+```bash
+uv run python scripts/run_scenario.py scenarios/scenario_003_ukf_fmcw_low_prf.toml --out out/ukf
+```
+
+It prints a summary at the end: the track is confirmed in 118 of the 120 frames, under one
+track ID, with a range error (RMSE) of 7.6 m.
+
+**Now change one thing.** Copy the TOML, set `sigma_accel_mps2 = 0.3` (the filter now believes
+the aircraft barely accelerates), and run it again. The filter now trusts its prediction too
+much, so whenever the aircraft's range rate changes the track falls behind, until the
+detections land outside its gate. The summary now shows
+**three** confirmed track IDs instead of one: the target's track broke and restarted. The main
+track is confirmed in only 63 frames, and its range error grows to 38.6 m. `tracks.csv` and
+`metrics.csv` in the output folder hold the details, scan by scan.
+
+Want an open problem? [Where does the tracker break?](../../interns/tracker-breakpoint.md) and
+[Does the tracker know its own uncertainty?](../../interns/conformal-tracking.md) both start
+from here.
+
+## Things that look like bugs and aren't
+
+- **A track's range rate is positive while its range is falling.** Range rate is positive
+  closing, everywhere in the library, so $F$ has $-T$ where a textbook's has $+T$.
+- **The gate is a number, not a distance in metres.** It bounds $d^2$, which has no unit, and
+  its value depends on the measurement's dimension: 8.81 for range alone, 11.62 for range and
+  rate, at the same $P_G$. A track that starts range-only and later uses range rate changes
+  dimension mid-run, so the gate is never hard-coded.
+- **A target that turns makes the track fall behind, then catch up.** The motion model is
+  constant velocity, so a turn is "noise" to it. The process noise decides how quickly it
+  catches up; see [Choosing the process noise](#choosing-the-process-noise).
+- The scenario 003 companion lists [three more](../scenarios/scenario-003-tracking.md), seen in
+  its plots.
+
+## Limits
 
 **Not yet supported here:**
 
@@ -195,3 +338,23 @@ docstring explains this, gives the CA case (`sigma_jerk_mps3`), and compares the
 - GOSPA/OSPA: one score for a multi-target scenario.
 - Track purity and fragmentation rates.
 - JPDA or MHT against GNN, scored by the number of track swaps.
+
+## References
+
+- Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications to Tracking and
+  Navigation*, Wiley, 2001: §5.2.4 (the Kalman filter, its innovation and covariance), §5.4.2
+  (the NIS consistency test), §6.2 (continuous white-noise acceleration).
+- Y. Bar-Shalom and X. R. Li, *Multitarget-Multisensor Tracking: Principles and Techniques*,
+  YBS Publishing, 1995: §2.3.2 (the validation gate), §2.6.1 and §7.3 (M-of-N track
+  formation), §7.1.1 (association as an assignment problem).
+- S. Särkkä, *Bayesian Filtering and Smoothing*, Cambridge University Press, 2013: ch. 5 (the
+  EKF and UKF) and ch. 6 (one Gaussian filter, with the Taylor and unscented approximations).
+- E. A. Wan and R. van der Merwe, "The unscented Kalman filter for nonlinear estimation,"
+  *Proc. IEEE AS-SPCC*, 2000, pp. 153–158.
+- S. J. Julier, "The scaled unscented transformation," *Proc. American Control Conference*,
+  2002, pp. 4555–4559.
+- R. A. Singer, "Estimating optimal tracking filter performance for manned maneuvering
+  targets," *IEEE Trans. Aerospace and Electronic Systems*, vol. AES-6, no. 4, pp. 473–483,
+  1970.
+- [Stone Soup](https://stonesoup.readthedocs.io), whose split into components this package
+  follows.
