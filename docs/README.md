@@ -1,5 +1,20 @@
 # radar-forge documentation
 
+## User guide
+
+New to the library? Start with the [**user guide**](user-guide/README.md). It explains each stage
+of `radar_forge.core`, from geometry to tracks: what it does, a table of its quantities and
+equations with worked values, an example to run, and a scenario to try it in.
+
+1. [The radar and its link budget](user-guide/01-radar-and-link-budget.md)
+2. [Geometry and propagation](user-guide/02-geometry-and-propagation.md)
+3. [Waveforms and signals](user-guide/03-waveforms-and-signals.md)
+4. [Range-Doppler processing](user-guide/04-range-doppler-processing.md)
+5. [Detection](user-guide/05-detection.md)
+6. [Tracking](user-guide/06-tracking.md)
+
+The [scenario companions](#scenario-companions) below are where you try each page out.
+
 ## Conventions
 
 These are the rules the git hooks and CI enforce. Read them before your first contribution.
@@ -85,10 +100,3 @@ pipeline, the pictures and the knobs. They are **not normative**; the `spec/` do
 - [**scenario 009 — receiver chain**](scenarios/scenario-009-receiver-chain.md) — receiver chain: front end, DDC and polyphase filtering, hardware impairments, pilot-tone calibration. Not runnable yet.
 - [**scenario 010 — self calibration**](scenarios/scenario-010-self-calibration.md) — array perturbations: self-calibration, self-localisation and robust beamforming. Not runnable yet.
 - [**scenario 011 — terminal-area tracking**](scenarios/scenario-011-terminal-area-tracking.md) — dense civil traffic around Raleigh-Durham: a holding stack, crossings, turns, birds and rain clutter; IMM, JPDA, MHT and PMBM compared. Not runnable yet.
-
-## Library guides
-
-API documentation and the intern onboarding tutorials land here as the modules are built.
-
-- [**tracking**](tracking/README.md) — what is in `core/tracking/`, the order one scan runs in,
-  a short example, choosing the process noise, and the tracker's limitations.

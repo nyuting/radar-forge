@@ -509,7 +509,7 @@ In this order:
    this repo. Say which axis a naming finding is on. Also say whether it breaks a style.md rule or
    only departs from a habit of `main`.
 7. **Upstream.** Where a module says it follows Stone Soup (`core/tracking/`), check that the
-   divergences are deliberate and that the module docstring says so, as `docs/tracking/README.md`
+   divergences are deliberate and that the module docstring says so, as `docs/user-guide/06-tracking.md`
    promises. Check claims about Stone Soup, FilterPy and similar against their GitHub `main`, not
    memory, and say in the notes what was checked there.
 8. **Earlier reviews.** Every ask in the first review that this PR was meant to close, and every

@@ -1,5 +1,8 @@
 > 🎓 **Interns, look here!** Research tasks for intern candidates and interns:
 > [interns/README.md](interns/README.md)
+>
+> 📘 **New to the library?** Start with the [user guide](docs/user-guide/README.md): each stage
+> from geometry to tracks, with its equations, an example to run and a scenario to try.
 
 # radar-forge
 
@@ -22,8 +25,10 @@ stitching together seven incompatible codebases.
 
 ## Status
 
-**Pre-alpha — specification stage.** No code has been published yet. The design documents live in
-[`spec/`](spec/):
+**Pre-alpha.** Nothing is on PyPI yet. `core/`, `pipelines/` and `visualisation/` are built and
+tested, and scenarios 001–003 run end to end; the other areas under [Scope](#scope) are
+designed but not built. The [user guide](docs/user-guide/README.md) explains each `core/`
+module. The design documents live in [`spec/`](spec/):
 
 - [`spec/starter.md`](spec/starter.md) — project charter, ecosystem survey, high-level layout
 - [`spec/structure.md`](spec/structure.md) — comparative module map of the reference projects and the
@@ -59,7 +64,7 @@ stitching together seven incompatible codebases.
 Each scenario also has a visual, non-normative companion under
 [`docs/scenarios/`](docs/scenarios/), for running one for the first time.
 
-APIs shown below are targets, not shipping behaviour.
+The [Quickstart](#quickstart) below runs on today's `main`.
 
 ---
 
