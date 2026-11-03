@@ -933,7 +933,7 @@ here, and it is the mechanism §14.7 credits with the 6-ids-to-2 improvement. Th
 default stays at 5.0 — nothing measured argues for moving it — but it is no
 longer carried by the number quoted for it, and picking between 5.0 and 2.0 on
 fold selection needs a wider window than this one. Found by the pipelines
-audit (`docs/audits/pipelines-audit.md`); the code's own docstring had drifted to a third figure, 95%.
+audit (finding F3, `git show 7bfb654:docs/audits/pipelines-audit.md`); the code's own docstring had drifted to a third figure, 95%.
 
 ### 14.7 Criteria 3 and 4 are not achievable on S1, and that is the finding
 
@@ -990,7 +990,8 @@ before its fourth hit and those frames are 15% of a 20-frame window.
   range and range rate and nothing else, so an east-north plot would have to invent a bearing
   for every point. What is drawn is range against time, which is what the radar knows. Renamed
   `render_track_plan_view` -> `render_range_time_history`, and the wording corrected in both
-  specifications (`docs/audits/pipelines-audit.md`, Q6).
+  specifications (pipelines audit, finding F5, Q6:
+  `git show 7bfb654:docs/audits/pipelines-audit.md`).
 - `FrameTracks` stores *snapshots* of its tracks. A `Track` is mutable by
   design, so holding references made every recorded frame show the final state
   of every track, and anything built from the history — a plot, a CSV — was
