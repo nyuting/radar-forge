@@ -261,7 +261,8 @@ Every test runs on every push, so a domain test must clear all five:
    reason, or **wrong**, meaning it asserts something untrue or unphysical. Rewrite a weak
    test's setup or assertion. Fix a wrong one, and say in the commit what it was hiding.
    Labelling the test isn't enough. A test that fails items 2 or 3 is **redundant**: §10.10
-   says when it is deleted.
+   says when it is deleted. [§10.11](#1011-ways-a-test-passes-for-the-wrong-reason-review) lists the
+   usual ways a test turns out weak.
 
 Not tests:
 
@@ -406,3 +407,21 @@ Pruning is held to these rules:
 A rewrite keeps or tightens its bound (§2). Deleting a test is not loosening a tolerance, but a
 rewritten assertion is held to the same rule. Record the audit in `docs/audits/tests-audit.md`
 ([`audit.md`](audit.md) gives the layout).
+
+### 10.11 Ways a test passes for the wrong reason **[review]**
+
+The 2026-10 test audit found the same few mistakes again and again. Each one leaves a test green
+under the very bug it was written to catch. So check every test against this list.
+
+| Mistake | Example from the audit | Do instead |
+| :--- | :--- | :--- |
+| **Symmetric inputs hide an asymmetric bug** | Equal tx and rx gains hide an equation that squares one gain and drops the other. A 45° elevation reads the same from the zenith. An autocorrelation matches its own time-reversed conjugate | Make the inputs unequal: gains 3 dB apart, a (300, 400, 1200) point, an echo delayed and scaled |
+| **The assertion runs over an empty set** | A sign check over "frames where the path shortens", when no frame did. `np.all([])` is `True` | Assert the set is non-empty first, or choose a geometry where every element qualifies |
+| **The bound is looser than the bug** | An "exact bin" test that allows ±1 bin. A Doppler sign checked only as `> N/2`. A double canceller checked only as "smaller than the single one" | Put the target exactly on a bin and assert the integer index. Assert the closed-form value |
+| **The identity holds by construction** | GO + SO checked against their total, when the code computes GO as total − SO | Check against something that shares no code with the implementation, such as a numerical integration |
+| **Two quantities coincide in the fixture** | `time_s = arange(n)` equals the frame index. 0.5 prints the same under `repr` and `%.17g` | Choose values that tell the cases apart: times from 100 s in 2 s steps, 0.1 |
+| **The geometry makes the effect vanish** | A bistatic test where β = 0.09°, so a monostatic mapping passes too | Choose a geometry where the effect is large, and check that it is |
+| **Only "something happened" is asserted** | A plot test that checks a line was drawn. A wrapper test that passes no arguments, so dropped or swapped arguments pass | Assert the drawn data. Pass non-default arguments that differ from each other |
+
+Mutation is how you find these (§10.10 P6). Break the behaviour on purpose, then check that the
+test goes red.

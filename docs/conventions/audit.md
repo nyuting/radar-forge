@@ -6,8 +6,8 @@ here is why" is a valid result for anything audited.
 
 | Report | Covers |
 | :--- | :--- |
-| [`pipelines-audit.md`](../audits/pipelines-audit.md) | `pipelines/`, `visualisation/` and `scripts/run_scenario.py`, code against spec |
-| [`tests-audit.md`](../audits/tests-audit.md) | The test suite, classified and pruned |
+| [`pipelines-audit.md`](../audits/pipelines-audit.md) | Open items in `pipelines/`, `visualisation/` and `scripts/run_scenario.py`, code against spec |
+| [`tests-audit.md`](../audits/tests-audit.md) | Open items in the test suite, classified and pruned |
 
 Not yet audited: the tracking package and its tests. That audit waits for the tracker migration,
 and is [`tracker-001` §13](../../spec/tracker-001.md#13-migration-from-todays-code) step 9.
@@ -64,7 +64,7 @@ a test can pass and still describe a scenario no radar would meet.
 
 ## 4. Writing the report
 
-One file per area, in this directory. Each has:
+One file per area, in `docs/audits/`. When the audit lands, the file has:
 
 1. **Scope**: what was audited, at which commit, and what was left out and why.
 2. **A verdict key** and a **findings index**: one linked row per finding, so a reader jumps to
@@ -75,8 +75,19 @@ One file per area, in this directory. Each has:
 5. **A result**: for a test audit, counts before and after per file, the coverage comparison and
    the mutation table.
 
-When the audited code later moves, add a dated **Status** note at the top, saying what changed.
-Do not rewrite the findings as they were recorded.
+That full report is what the audit's PR lands. After that, the file is a to-do list:
+
+- **It lists only open items.** Each has a short section saying what is wrong, where, and the
+  suggested fix, and a linked summary table at the top. Items waiting on other work say what
+  they wait for. Decisions to leave something alone stay as one line each, with the reason, so
+  nobody reopens them by accident.
+- **An item is deleted in the commit that fixes it,** or when it stops applying. The commit body
+  says which, and why.
+- **A lesson that applies beyond the one case moves into a convention** (for example
+  [testing.md §10.11](testing.md#1011-ways-a-test-passes-for-the-wrong-reason-review)), and is not kept
+  in the audit.
+- **The full report stays in git.** The file names the commit to `git show` it from, so the
+  evidence for every closed finding can still be read.
 
 This method was first set out in `spec/refactor-002-spec-first-audit.md`, which was retired once
 its audits had landed. Git keeps the file.

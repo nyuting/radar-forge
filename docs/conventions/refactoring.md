@@ -137,10 +137,11 @@ option goes. 9f0aa5f added `Tracker(cost="legacy_nis")` so that scenario 003's m
 
 ### F8. Leave history alone
 
-`docs/reviews/` and `docs/audits/` record what the code was called when they were written. Don't
-rename inside them (4a0f1f4). Add a dated Status note instead
-([audit.md](audit.md#4-writing-the-report)). Code comments go the other way: they describe the
-code as it is now, so they don't cite the PR or commit that changed it (3652134).
+`docs/reviews/` records what the code was called when each review was written. Don't rename
+inside it (4a0f1f4). `docs/audits/` is different: it lists open items, so it uses current names,
+and a refactor that renames something an item cites updates the item
+([audit.md](audit.md#4-writing-the-report)). Code comments describe the code as it is now, so
+they don't cite the PR or commit that changed it (3652134).
 
 ### F9. Pass what travels together as one object
 
