@@ -24,7 +24,8 @@ These are the rules the git hooks and CI enforce. Read them before your first co
 ## Audits
 
 - [**pipelines-audit.md**](audits/pipelines-audit.md), [**tests-audit.md**](audits/tests-audit.md):
-  the reports for the pipelines and the tests, made by the method in [audit.md](conventions/audit.md).
+  the open items left from the audits of the pipelines and the tests, made by the method in
+  [audit.md](conventions/audit.md). Each file names the commit that holds its full report.
 
 ## Getting started
 
