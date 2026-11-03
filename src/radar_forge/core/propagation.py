@@ -168,6 +168,69 @@ class PropagationPaths:
         result: NDArray[np.float64] = self.delay_s * SPEED_OF_LIGHT_MPS
         return result
 
+    def range_sum_at_m(self, slow_time_s: ArrayLike, wavelength_m: float) -> NDArray[np.float64]:
+        r"""Return the range sum of each path at the given slow-time instants, metres.
+
+        .. math:: L_p(t) = L_p - \dot{L}_{c,p}\, t, \qquad \dot{L}_{c,p} = f_{d,p}\,\lambda
+
+        Each path's length shrinks at its range-sum rate, recovered from its
+        Doppler shift through :func:`range_sum_rate_from_doppler_mps`, so a
+        closing path gets shorter as ``slow_time_s`` grows. Velocity is held
+        constant, as everywhere in the generators. The signal generators pass
+        the start of each pulse, :math:`m \cdot T_{PRI}`, and hold the result
+        constant across that pulse, which is the stop-and-hop approximation [1]_.
+
+        Monostatic and bistatic paths are treated alike: both carry a range sum
+        and a Doppler shift, and nothing here depends on which siting built them.
+
+        Parameters
+        ----------
+        slow_time_s : array_like
+            Instants at which to evaluate, seconds, relative to the time this
+            path set describes. Normally ``(n_pulses,)`` pulse start times.
+        wavelength_m : float
+            Carrier wavelength, metres: the one ``doppler_hz`` was computed
+            with, normally ``radar.wavelength_m``.
+
+        Returns
+        -------
+        numpy.ndarray
+            Range sum in metres, shape ``slow_time_s.shape + (n_paths,)``, so
+            ``(n_pulses, n_paths)`` for a vector of pulse start times.
+
+        See Also
+        --------
+        propagation_delay_s : Turn the result into a delay.
+        propagation_phase_rad : Turn the result into a carrier phase.
+
+        References
+        ----------
+        .. [1] Richards (2014), §2.6.2; see the module References.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> paths = PropagationPaths(
+        ...     delay_s=np.array([1.0e-4]),
+        ...     doppler_hz=np.array([100.0]),
+        ...     amplitude_linear=np.array([1.0 + 0.0j]),
+        ...     aoa_rad=np.zeros((1, 2)),
+        ...     aod_rad=np.zeros((1, 2)),
+        ...     bounce_count=np.array([1]),
+        ... )
+        >>> range_sum_m = paths.range_sum_at_m([0.0, 1.0], wavelength_m=0.03)
+        >>> range_sum_m.shape
+        (2, 1)
+        >>> bool(range_sum_m[0, 0] == paths.range_sum_m[0])  # unchanged at t = 0
+        True
+        >>> round(float(range_sum_m[0, 0] - range_sum_m[1, 0]), 9)  # 100 Hz x 3 cm over 1 s
+        3.0
+        """
+        time_arr = np.asarray(slow_time_s, dtype=np.float64)
+        rate_mps = range_sum_rate_from_doppler_mps(self.doppler_hz, wavelength_m)
+        result: NDArray[np.float64] = self.range_sum_m - rate_mps * time_arr[..., None]
+        return result
+
 
 def propagation_delay_s(range_sum_m: ArrayLike) -> NDArray[np.float64]:
     r"""Return the time for energy to travel a path, in seconds.
