@@ -151,7 +151,7 @@ class TestApplyTaper:
             apply_taper(np.ones((4, 8)), np.ones((4, 8)), axis=1)
 
     def test_rejects_out_of_range_axis(self) -> None:
-        with pytest.raises(ValueError, match="out of range"):
+        with pytest.raises(ValueError, match="out of bounds"):
             apply_taper(np.ones((4, 8)), taper("hann", 8), axis=5)
 
 

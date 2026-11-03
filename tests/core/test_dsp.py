@@ -95,7 +95,7 @@ class TestMatchedFilter:
             matched_filter(np.ones(8), np.array([]))
 
     def test_rejects_out_of_range_axis(self) -> None:
-        with pytest.raises(ValueError, match="out of range"):
+        with pytest.raises(ValueError, match="out of bounds"):
             matched_filter(np.ones(8), np.ones(4), axis=3)
 
 
