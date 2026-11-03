@@ -148,10 +148,10 @@ Stated up front, in the same spirit as scenario 001 §2.2. These are properties 
 defects in the tracker, and §13 turns the first three into the work that follows this slice.
 
 - **The target is far too easy to detect.** Post-integration peak-to-floor over this scenario's
-  window measures **45–49 dB**, rising to about 69 dB at the track's 5.33 km closest approach,
+  window measures **48–52 dB**, rising to about 72 dB at the track's 5.33 km closest approach,
   against an 11.417 dB threshold factor: Pd is 1 to many decimal places. *(The figures 51.7 dB at
   17.87 km and 64.8 dB at 8.39 km, written before the geographic re-anchoring onto
-  Raleigh-Durham (`scripts/translate_flight_coordinates.py`), were recomputed against the current siting and window; the conclusion is unchanged.)* **Track maintenance under missed detections is therefore not exercised at the default
+  Raleigh-Durham (`scripts/translate_flight_coordinates.py`), were recomputed against the current siting and window; the conclusion is unchanged. The range then was 45–69 dB, measured while `core/signal.py` added `k·T₀·B·F` to each sample; it now adds `N0·fs`, 3.01 dB less at this burst's `fs/B = 0.5`, and every figure rises by that.)* **Track maintenance under missed detections is therefore not exercised at the default
   settings**, and neither is the coast-and-delete logic of §7, which exists here largely untested
   by the scenario. §13.1 is the fix.
 - **CFAR is one-dimensional.** This scenario's pipeline slides its window along range. That is
@@ -344,7 +344,7 @@ gate of 9.21. A mis-unfolded measurement is therefore rejected by the gate and c
 **miss**, never as a corrupted update. That is the desired behaviour and §12 asserts it.
 
 Scenario 001's S3 variant resolves the ambiguity in the waveform, via the existing
-`core/ambiguity.py`. Tracking over S3 needs none of this subsection, which is the argument for
+`core/ambiguity_resolution.py`. Tracking over S3 needs none of this subsection, which is the argument for
 doing it next (§13.4).
 
 ### 5.4 Measurement noise
@@ -734,7 +734,7 @@ begins.
 ### 10.1 What this scenario consumes but never edits
 
 `core/detection.py`, `core/dsp.py`, `core/windows.py`, `core/signal.py`, `core/geodesy.py`,
-`core/ambiguity.py`, `pipelines/trajectories.py`, and `data/flight_coordinates.csv`. If the
+`core/ambiguity_resolution.py`, `pipelines/trajectories.py`, and `data/flight_coordinates.csv`. If the
 tracker appears to need a change in any of them, that is a finding to raise, not a change to make
 inside this workstream. §13.1 and §13.2 in particular are changes to `scenarios/*.toml` and to
 `core/detection.py` respectively, and belong to their own slices.
@@ -879,7 +879,7 @@ now replaced by the `wrap_axes` option on `cluster_detections` itself — see
 
 ### 14.3 The target's own sidelobes become extra detections
 
-Scenario 001 applies no Doppler taper. At the 45–69 dB post-integration SNR §4
+Scenario 001 applies no Doppler taper. At the 48–72 dB post-integration SNR §4
 describes, the target's Doppler sidelobes sit tens of decibels above an 11.4 dB
 threshold and are detected at its range, each seeding a competing track. Over
 twelve frames the target gives one cluster of 30–95 cells at its true bin plus
@@ -1113,7 +1113,7 @@ change. Correcting `Radar.unambiguous_range_m` is a follow-up in `core/radar.py`
 **Dual-PRF pairing, both trackers.** Two detections, one per burst, are paired when they are within
 the range tolerance and each is the other's nearest in range. The two bursts' maps span different
 ranges, 60.0 and 50.0 km, so a target past 50 km reads differently on each. Range is therefore
-unfolded as velocity is, by the one period-agnostic solver in `core/ambiguity.py`
+unfolded as velocity is, by the one period-agnostic solver in `core/ambiguity_resolution.py`
 (`unfold_range_dual_prf`): the gap between two detections is the residual of the best true range
 for the pair, measured round the second map's circle, so a target at either map's wrap edge still
 pairs. The search bound defaults to the larger span, 60.0 km; a caller may raise it as far as the

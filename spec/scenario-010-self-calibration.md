@@ -185,7 +185,7 @@ ill-conditioned rather than assumed away.
 | :--- | :--- | :--- |
 | Site | Duke Receiver, 36.00250 °N, 78.94100 °W, 60 m | Scenario-001 §3.1 |
 | Array | ULA, `n_rx` = 16, `element_spacing_wavelengths` 0.5, phase centre at the origin | Scenario-006 D13 |
-| `f0_hz`, λ, d | 9.8 GHz, **30.5911 mm**, **15.2955 mm** | Scenario-001 |
+| `carrier_frequency_hz`, λ, d | 9.8 GHz, **30.5911 mm**, **15.2955 mm** | Scenario-001 |
 | Aperture `n_rx·d` | 0.24473 m; Fraunhofer distance `2D²/λ` **3.92 m** | Every source is far field |
 | HPBW at broadside (untapered) | **6.346°**, 0.11075 in `u`; 0.1 HPBW = **0.6346°** | Adaptive beamformers run untapered; 009's 8.52° is the Taylor-tapered beam |
 | Per-channel `gain_rx_dbi` | 20.0 | Scenario-006 §3.1 |

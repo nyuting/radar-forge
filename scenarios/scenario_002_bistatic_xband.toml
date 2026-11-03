@@ -1,7 +1,7 @@
 # Scenario 002 -- bistatic radar over the North Carolina Piedmont.
 # The Raleigh-Durham Airport ATC transmitter, received at the Duke Receiver.
 # See spec/scenario-002-bistatic.md. The two variants share every
-# block below except [[burst]].f0_hz; the carrier is the whole comparison.
+# block below except [[burst]].carrier_frequency_hz; the carrier is the whole comparison.
 
 [scenario]
 name = "scenario-002-bistatic-xband"
@@ -32,7 +32,7 @@ altitude_m = 25.0         # assumed ATC antenna height; configurable
 # Identical in every parameter to scenario_001_fmcw_low_prf.toml.
 [[burst]]
 waveform = "fmcw"
-f0_hz = 9.8e9
+carrier_frequency_hz = 9.8e9
 bandwidth_hz = 2.0e6
 transmit_power_w = 100.0
 gain_tx_dbi = 30.0

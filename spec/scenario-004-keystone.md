@@ -144,7 +144,7 @@ will be re-derived in tests from `core/radar.py` rather than read from this tabl
 | Parameter | Value | Why |
 | :--- | :--- | :--- |
 | Waveform | LFM pulse, matched filter | Scenario 001 S2's chain; the range spectrum after compression is what the keystone acts on |
-| `f0_hz` | 9.8 GHz → λ = **30.5911 mm** | Scenario 001's carrier, so the Doppler numbers compare directly |
+| `carrier_frequency_hz` | 9.8 GHz → λ = **30.5911 mm** | Scenario 001's carrier, so the Doppler numbers compare directly |
 | `bandwidth_hz` | 500 MHz → c/2B = **0.29979 m** | Fractional bandwidth B/f0 = **0.05102**. The keystone's correction scales with it; at 2 MHz it would be 2·10⁻⁴ and walk would not exist |
 | `chirp_duration_s` | 0.5 µs, time-bandwidth product **250** | Short enough that intra-pulse motion is 0.55 mm at 1100 m/s (§4.6) |
 | `sample_rate_hz` | 600 MHz, fs/B = 1.2 → range bin c/2fs = **0.24983 m** | Complex sampling with 20% margin; 300 reference samples |
@@ -286,7 +286,7 @@ that detection without the parent. It is a frozen dataclass in `core/datachip.py
 ```python
 @dataclass(frozen=True)
 class ChipProcessing:  # the parent's processing, as the chip needs it to refine
-    f0_hz: float
+    carrier_frequency_hz: float
     bandwidth_hz: float
     sample_rate_hz: float
     prf_hz: float
@@ -492,7 +492,7 @@ change to both specs.
 | 7–8 | TOMLs, tests | New. Three TOMLs differing only in `[target]` kinematics |
 
 `core/radar.py`, `core/waveforms.py` (`lfm_chirp`), `core/windows.py`, `core/detection.py`,
-`core/constants.py` and `core/ambiguity.py` are consumed unchanged.
+`core/constants.py` and `core/ambiguity_resolution.py` are consumed unchanged.
 
 ---
 

@@ -473,7 +473,7 @@ class TestBistaticScenarios:
         """The comparison the pair exists to make, asserted rather than trusted."""
         x_band = load_scenario(B1_TOML).bursts[0]
         s_band = load_scenario(B2_TOML).bursts[0]
-        assert x_band.transmitter.f0_hz != s_band.transmitter.f0_hz
+        assert x_band.transmitter.carrier_frequency_hz != s_band.transmitter.carrier_frequency_hz
         for field in ("bandwidth_hz", "transmit_power_w", "chirp_duration_s", "prf_hz", "waveform"):
             assert getattr(x_band.transmitter, field) == getattr(s_band.transmitter, field)
         assert x_band.receiver == s_band.receiver

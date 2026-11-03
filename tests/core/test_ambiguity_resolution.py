@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from radar_forge.core.ambiguity import (
+from radar_forge.core.ambiguity_resolution import (
     fold_into_period,
     fold_velocity_mps,
     unfold_doppler_dual_prf,

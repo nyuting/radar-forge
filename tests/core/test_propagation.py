@@ -49,7 +49,7 @@ class TestLineOfSightPaths:
         )
 
     def test_amplitude_squared_is_the_received_power(self) -> None:
-        """Keeps the cube on the same scale as Radar.noise_power_w."""
+        """Keeps the cube on the same scale as Receiver.noise_power_per_sample_w."""
         from radar_forge.core.radar_equation import received_power_w
 
         paths = line_of_sight_paths(S1_RADAR, 10_000.0, 0.0, 10.0)

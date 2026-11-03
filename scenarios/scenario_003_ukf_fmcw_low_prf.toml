@@ -24,7 +24,7 @@ frame_rate_hz = 1.0
 # 256 chirps = 256 ms of CPI inside each 1 s frame.
 [[burst]]
 waveform = "fmcw"
-f0_hz = 9.8e9
+carrier_frequency_hz = 9.8e9
 bandwidth_hz = 2.0e6
 transmit_power_w = 100.0
 gain_tx_dbi = 30.0

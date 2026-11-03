@@ -87,7 +87,7 @@ silent: the array still has the right shape. So we put the unit in the name.
 | :--- | :--- | :--- |
 | `_m` | metres | `range_m`, `wavelength_m`, `spacing_m` |
 | `_s` | seconds | `chirp_duration_s`, `pri_s`, `delay_s` |
-| `_hz` | hertz | `f0_hz`, `bandwidth_hz`, `doppler_hz` |
+| `_hz` | hertz | `carrier_frequency_hz`, `bandwidth_hz`, `doppler_hz` |
 | `_rad` / `_deg` | angle | `azimuth_rad`, `beamwidth_deg` |
 | `_w` / `_dbm` / `_dbw` | power | `transmit_power_w`, `noise_power_dbm` |
 | `_m2` / `_dbsm` | RCS | `rcs_m2`, `rcs_dbsm` |

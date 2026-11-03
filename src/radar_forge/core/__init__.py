@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from radar_forge.core import (
-    ambiguity,
+    ambiguity_resolution,
     constants,
     detection,
     dsp,
@@ -17,7 +17,7 @@ from radar_forge.core import (
     waveforms,
     windows,
 )
-from radar_forge.core.ambiguity import (
+from radar_forge.core.ambiguity_resolution import (
     fold_into_period,
     fold_velocity_mps,
     unfold_doppler_dual_prf,
@@ -163,7 +163,7 @@ __all__ = [
     "Transmitter",
     "UpdateResult",
     "WaveformKind",
-    "ambiguity",
+    "ambiguity_resolution",
     "apply_taper",
     "associate_gnn",
     "beat_frequency_hz",

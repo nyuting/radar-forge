@@ -36,7 +36,7 @@ is how a dual-PRF radar resolves the ambiguity neither rate can resolve alone,
 and they stay separate all the way through: two different sweep rates cannot
 be coherently integrated together, so each burst gets its own cube, its own
 range-Doppler map at its own scales, and the pair meets only at the level of
-*measurements* in :func:`radar_forge.core.ambiguity.unfold_doppler_dual_prf`.
+*measurements* in :func:`radar_forge.core.ambiguity_resolution.unfold_doppler_dual_prf`.
 That is also how the hardware does it, and it is why :attr:`Frame.iq` is a
 tuple rather than an array.
 
@@ -72,7 +72,7 @@ from typing import Any, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from radar_forge.core.ambiguity import fold_velocity_mps
+from radar_forge.core.ambiguity_resolution import fold_velocity_mps
 from radar_forge.core.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.core.dsp import (
     doppler_bin_centers_mps,
@@ -120,7 +120,7 @@ _TARGET_KEYS = frozenset({"rcs_dbsm", "altitude_m", "name"})
 _TRAJECTORY_KEYS = frozenset({"path", "start_time_s", "duration_s", "frame_rate_hz"})
 _BURST_KEYS = frozenset(
     {
-        "f0_hz",
+        "carrier_frequency_hz",
         "bandwidth_hz",
         "transmit_power_w",
         "gain_tx_dbi",
@@ -383,7 +383,7 @@ def _burst_radar(
     """
     waveform: WaveformKind = burst.get("waveform", "fmcw")
     transmitter = Transmitter(
-        f0_hz=float(burst["f0_hz"]),
+        carrier_frequency_hz=float(burst["carrier_frequency_hz"]),
         bandwidth_hz=float(burst["bandwidth_hz"]),
         transmit_power_w=float(burst["transmit_power_w"]),
         gain_tx_dbi=float(burst["gain_tx_dbi"]),
@@ -742,7 +742,7 @@ class RangeDopplerProduct:
         float
             Positive closing, folded into ``[-velocity_period_mps / 2,
             velocity_period_mps / 2)`` as
-            :func:`~radar_forge.core.ambiguity.fold_velocity_mps` folds it.
+            :func:`~radar_forge.core.ambiguity_resolution.fold_velocity_mps` folds it.
         """
         bin_mps = float(self.velocity_axis_mps[1] - self.velocity_axis_mps[0])
         velocity_mps = float(self.velocity_axis_mps[0]) + index * bin_mps
@@ -873,6 +873,7 @@ def form_range_doppler_map(
             burst.transmitter.bandwidth_hz,
             burst.transmitter.chirp_duration_s,
             burst.receiver.sample_rate_hz,
+            start_frequency_hz=-burst.transmitter.bandwidth_hz / 2.0,
         )
         group_delay_samples = reference.size - 1
         compressed = matched_filter(baseband, reference, axis=-1)

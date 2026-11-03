@@ -28,7 +28,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from radar_forge import __version__
-from radar_forge.core.ambiguity import fold_velocity_mps
+from radar_forge.core.ambiguity_resolution import fold_velocity_mps
 from radar_forge.core.radar import BistaticRadar
 from radar_forge.pipelines.scenarios import (
     Frame,
@@ -197,7 +197,7 @@ def burst_metadata(scenario: Scenario) -> list[dict[str, Any]]:
             {
                 "index": index,
                 "waveform": burst.transmitter.waveform,
-                "f0_hz": burst.transmitter.f0_hz,
+                "carrier_frequency_hz": burst.transmitter.carrier_frequency_hz,
                 "bandwidth_hz": burst.transmitter.bandwidth_hz,
                 "chirp_duration_s": burst.transmitter.chirp_duration_s,
                 "prf_hz": burst.transmitter.prf_hz,
@@ -207,7 +207,7 @@ def burst_metadata(scenario: Scenario) -> list[dict[str, Any]]:
                 "range_resolution_m": burst.range_resolution_m,
                 "unambiguous_range_m": burst.unambiguous_range_m,
                 "unambiguous_velocity_mps": burst.unambiguous_velocity_mps,
-                "noise_power_w": burst.noise_power_w,
+                "noise_power_w": burst.receiver.noise_power_per_sample_w,
             }
         )
     return bursts
@@ -389,9 +389,11 @@ def detection_rows(
     for record in frames:
         claimed = {index: track_id for track_id, index in record.associations.items()}
         for detection_id, measurement in enumerate(record.measurements):
-            # snr_db is against the burst's thermal noise power, not the CFAR
+            # snr_db is against the thermal noise power per sample, not the CFAR
             # estimate of the local floor (data-001 §6.5).
-            noise_power_w = scenario.bursts[measurement.burst_index].noise_power_w
+            noise_power_w = scenario.bursts[
+                measurement.burst_index
+            ].receiver.noise_power_per_sample_w
             yield {
                 "frame": record.frame_index,
                 "time_s": record.time_s,

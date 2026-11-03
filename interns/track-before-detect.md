@@ -73,7 +73,7 @@ power first:
 ### Noise-only maps
 
 Setting a TBD threshold takes many noise-only runs. You do not need the full scenario for them:
-`radar_forge.core.signal.thermal_noise((n_pulses, n_samples), burst.noise_power_w, rng=...)`
+`radar_forge.core.signal.thermal_noise((n_pulses, n_samples), burst.receiver.noise_power_per_sample_w, rng=...)`
 passed through the same `form_range_doppler_map` gives a noise-only map with the same statistics
 as the real one. Check that claim yourself before you rely on it.
 

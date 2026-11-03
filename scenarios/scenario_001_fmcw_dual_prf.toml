@@ -20,12 +20,12 @@ frame_rate_hz = 1.0
 
 # Two bursts, 128 pulses each, alternating. Both cover the track in range;
 # their per-burst unambiguous velocities of +-38.24 and +-45.89 m/s are
-# combined by core.ambiguity.unfold_doppler_dual_prf.
+# combined by core.ambiguity_resolution.unfold_doppler_dual_prf.
 #
 # Burst A: 200 us sweep at 10 GHz/s, 4 MHz -> 800 samples. PRF 5.0 kHz.
 [[burst]]
 waveform = "fmcw"
-f0_hz = 9.8e9
+carrier_frequency_hz = 9.8e9
 bandwidth_hz = 2.0e6
 transmit_power_w = 100.0
 gain_tx_dbi = 30.0
@@ -40,7 +40,7 @@ n_pulses = 128
 # before this one finished.
 [[burst]]
 waveform = "fmcw"
-f0_hz = 9.8e9
+carrier_frequency_hz = 9.8e9
 bandwidth_hz = 2.0e6
 transmit_power_w = 100.0
 gain_tx_dbi = 30.0

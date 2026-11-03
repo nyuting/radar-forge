@@ -139,7 +139,7 @@ cell, so the only lever is the array.
 | Parameter | Value | Source |
 | :--- | :--- | :--- |
 | Site | Duke Receiver, 36.00250 °N, 78.94100 °W, 60 m | scenario-001 §3.1 |
-| Waveform | scenario-001 **S2** unchanged: LFM pulse, `chirp_duration_s` = 10 µs, `bandwidth_hz` = 2.0 MHz, `prf_hz` = 25 kHz, `sample_rate_hz` = 2.5 MHz, `n_pulses` = 256, `f0_hz` = 9.8 GHz | scenario-001 S2; its matched filter and Doppler FFT give the processing gains of §3.4 |
+| Waveform | scenario-001 **S2** unchanged: LFM pulse, `chirp_duration_s` = 10 µs, `bandwidth_hz` = 2.0 MHz, `prf_hz` = 25 kHz, `sample_rate_hz` = 2.5 MHz, `n_pulses` = 256, `carrier_frequency_hz` = 9.8 GHz | scenario-001 S2; its matched filter and Doppler FFT give the processing gains of §3.4 |
 | `transmit_power_w`, `gain_tx_dbi` | 1 kW, 30.0 dBi (separate transmit aperture, on boresight) | scenario-001 S2 |
 | `noise_figure_db` | 3.0 dB, every channel | scenario-001 |
 | Receive array | 16-element ULA on x, `element_spacing_m` = λ/2 = **15.2955 mm**, aperture `n_rx·d` **0.24473 m**, phase centre at the origin | shared ground array, scenario-006 D13 and §3.1 |

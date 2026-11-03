@@ -5,6 +5,13 @@ unambiguous Doppler, never both: their product is fixed at
 :math:`c\lambda/8` by the carrier alone, so no choice of PRF escapes the trade.
 Scenario 001 S1 and S2 each accept one half of that loss.
 
+The limits themselves are properties of the radar,
+:attr:`radar_forge.core.radar.Radar.unambiguous_range_m` and
+:attr:`~radar_forge.core.radar.Radar.unambiguous_velocity_mps`; this module
+takes them as inputs. It is not the *ambiguity function*
+:math:`\chi(\tau, \nu)` of a waveform, which belongs in
+:mod:`radar_forge.core.waveforms`.
+
 The way out is to measure twice at two different repetition rates. A target
 folded at both rates produces a *pair* of false readings, and if the two
 folding periods are coprime multiples of a common base, only one true value is

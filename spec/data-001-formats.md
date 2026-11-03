@@ -205,7 +205,7 @@ the ones marked *new*.
 | `conventions` *new* | object | Fixed strings restating §5, so a reader can check rather than assume: `frame: "enu"`, `azimuth_reference: "true_north_clockwise"`, `velocity_sign: "closing_positive"`, `cube_layout: "frame,pulse,sample[,rx]"`, `rd_layout: "frame,doppler,range"` |
 | `scenario` | object | As today: name, description, seed, `start_time_s`, `duration_s`, `frame_rate_hz`, `n_frames`, `trajectory_path`, `target_altitude_m` |
 | `sites`, `target` | object | As today |
-| `bursts` | array | As today, one object per burst: waveform, `f0_hz`, `bandwidth_hz`, `prf_hz`, `n_pulses`, `n_samples`, resolutions, unambiguous range and velocity, `noise_power_w` |
+| `bursts` | array | As today, one object per burst: waveform, `carrier_frequency_hz`, `bandwidth_hz`, `prf_hz`, `n_pulses`, `n_samples`, resolutions, unambiguous range and velocity, `noise_power_w` (thermal noise per complex IQ sample, `N0·fs` = `Receiver.noise_power_per_sample_w`) |
 | `detection` | object or null | As today: the resolved `[detection]` table |
 | `tracking` | object or null | As today, including `simulated_angles` (`spec/scenario-003-tracking.md` §6.3). **Adds** `state_model` and `state_fields`: the ordered list of state-vector column names, e.g. `["east_m", "north_m", "east_rate_mps", "north_rate_mps"]`. §6.6's covariance columns are indexed by it. **Adds** `range_period_m`: when the tracker measures range modulo a period, that period, and every `range_m` in `detections.csv` and `tracks.csv` lies in `[0, range_period_m)`. `null` when range is absolute. **Adds** `unused`: the names of the settings, among those recorded, that the chosen `estimator` did not read, so that no recorded value is mistaken for one the run used |
 | `provenance` | object | As today, `radar_forge_version` and `git_commit`. **Adds** `python_version`, `numpy_version`, and `command` (the argv that produced the run). **Adds** (1.3.0) `physics_sha256`, the hash of the resolved physics settings excluding `[runtime]` (`spec/instrumentation-001.md` §4.1), and `machine`: `platform`, `processor`, `cpu_count`, `devices` (list of strings) |
@@ -301,7 +301,7 @@ polar position, a Doppler speed and an amplitude. The units are SI, not ASTERIX'
 | `burst_index` | int | — | R | *new*. The burst whose map the detection was found in, `0` for a single-burst run. `range_index` and `velocity_index` index that burst's map |
 | `status` | enum | — | R | *new*. What became of the detection on its way to the tracker: `accepted` (passed to it); or, for a dual-PRF pair, `missing_pair` (no detection in the other burst within the range tolerance), `ambiguous_pair` (one within it, but not mutually nearest) or `unresolved_velocity` (paired, but the two folded velocities agree on no unfolded one). Only the first burst's `accepted` detections reach the tracker |
 | `pair_id` | int | — | R | *new*. The same integer on the two detections of a dual-PRF pair, unique within the frame. Empty for a detection that was not paired |
-| `range_unfolded_m` | float64 | m | R | *new*. The true range the two detections of an `accepted` dual-PRF pair agree on, from `core.ambiguity.unfold_range_dual_prf`; the same on both. `range_m` stays each burst's own folded reading. Empty for any other detection |
+| `range_unfolded_m` | float64 | m | R | *new*. The true range the two detections of an `accepted` dual-PRF pair agree on, from `core.ambiguity_resolution.unfold_range_dual_prf`; the same on both. `range_m` stays each burst's own folded reading. Empty for any other detection |
 | `injected` | bool | — | O | *new* (1.3.0). `1` for the plot matched to a synthetic built-in test target (`spec/instrumentation-001.md` §12), which never reaches the tracker; `0` otherwise. Absent when the run injected nothing |
 
 ### 6.6 `tracks.csv`
@@ -343,7 +343,7 @@ is written in the same closing-positive sign as the state it describes.
 │                                          epoch_utc, created_utc, radar_forge_version, git_commit,
 │                                          source ("simulated" | "recorded")
 └── iq/
-    ├── burst0/                     attrs: waveform, f0_hz, bandwidth_hz, prf_hz, sample_rate_hz,
+    ├── burst0/                     attrs: waveform, carrier_frequency_hz, bandwidth_hz, prf_hz, sample_rate_hz,
     │   │                                  chirp_duration_s, n_pulses, n_samples
     │   ├── data                    (n_frames, n_pulses, n_samples[, n_rx])  complex128
     │   ├── frame                   (n_frames,)   int64    — dimension scale, axis 0
@@ -386,7 +386,7 @@ the range-Doppler stage runs (DF5).
 │   ├── velocity_mps                (n_doppler_bins,)  float64, fftshifted: zero at n // 2,
 │   │                                                  closing-positive; attr fftshifted = 1
 │   ├── frame, frame_time_s         (n_frames,)
-│   └── noise_power_w               (n_frames,)        float64, the burst's thermal noise power
+│   └── noise_power_w               (n_frames,)        float64, the burst's thermal noise per IQ sample
 ├── rt/burst{k}/data                (n_frames, n_pulses, n_range_bins)  complex128, data_rfst
 ├── cfar/burst{k}/threshold_w       (n_frames, n_doppler_bins, n_range_bins)  float64
 └── cfar/burst{k}/mask              (n_frames, n_doppler_bins, n_range_bins)  uint8
@@ -398,7 +398,7 @@ the range-Doppler stage runs (DF5).
 - The `data` attributes are as in §6.7, with `domain = "rv"` or `"rfst"`, plus `produced_by`: the
   qualified name of the function that produced the array, and the window it applied. Scaling is
   whatever that function returns. The spec does not renormalise.
-- `/rd/burst{k}/noise_power_w` is the burst's thermal noise power, the `bursts[].noise_power_w`
+- `/rd/burst{k}/noise_power_w` is the burst's thermal noise per IQ sample, the `bursts[].noise_power_w`
   of §6.1 and the reference `snr_db` is defined against (§6.5). It is not a CFAR estimate: CFAR
   estimates the floor per cell, not per frame, and that estimate is `cfar/burst{k}/threshold_w`
   divided by the threshold factor α. An earlier draft described this dataset as "the noise
@@ -585,7 +585,7 @@ stream reshaped, so the conversion is a mapping, not a transformation.
 | :--- | :--- |
 | `global.core:datatype` `cf64_le` / `cf32_le` / `ci16_le` | `data` dtype `complex128` / `complex64` / `{int16, int16}` (§6.7) |
 | `global.core:sample_rate` | `burst{k}` attr `sample_rate_hz` |
-| `captures[n].core:frequency` | `burst{k}` attr `f0_hz` |
+| `captures[n].core:frequency` | `burst{k}` attr `carrier_frequency_hz` |
 | `captures[n].core:datetime` | `epoch_utc + frame_time_s[n]` |
 | One capture per frame, `core:sample_start = n · n_pulses · n_samples` | Frame `n` of `data` |
 | Extension namespace `radar_forge:` in `global`, declared in `core:extensions`: `n_pulses`, `n_samples`, `prf_hz`, `bandwidth_hz`, `chirp_duration_s`, `waveform` | `burst{k}` attrs of the same names |

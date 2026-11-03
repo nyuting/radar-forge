@@ -26,7 +26,7 @@ to understand and to test; if a step is hard to test on its own, split it. The f
   `--all-extras` (it pulls in torch).
 - **`make check` must pass before you say you are done.** It runs lint, types,
   conventions and the full test suite — the same gate as `pre-push` and CI.
-- **SI units, with the unit in the name**: `range_m`, `f0_hz`, `chirp_duration_s`, `rcs_dbsm`,
+- **SI units, with the unit in the name**: `range_m`, `carrier_frequency_hz`, `chirp_duration_s`, `rcs_dbsm`,
   `power_w`. Linear internally; decibels only at API boundaries, and named `_db*`. Dimensionless
   ratios say which: `gain_tx_linear` or `gain_tx_dbi`, never `gain_tx`. A commit hook rejects bare
   names, matching on the leading token.
@@ -55,6 +55,11 @@ to understand and to test; if a step is hard to test on its own, split it. The f
 - Do not add a dependency without saying, in the PR, what it buys and why the existing
   `numpy`/`scipy` stack cannot do it. Heavy or optional backends go in an extra, never core.
 - Prefer analytic ground truth in tests (a known null, an exact bin) over recorded output.
+- Check a spec before you implement it. Re-derive its numbers, and check each definition
+  against the code it touches and the reference it cites. A spec can be wrong: `f0_hz` was
+  documented as the carrier but used as the sweep start, and the noise per sample used the
+  swept bandwidth, not the sample rate. Fix the spec in a `docs(spec)` commit first rather
+  than coding the error in.
 - `--no-verify` is not a fix. CI runs the same checks.
 
 ## Where things are

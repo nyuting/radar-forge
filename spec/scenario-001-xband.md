@@ -72,7 +72,7 @@ The DSP path this scenario builds, end to end:
                v
         RangeDopplerProduct (rd_map, range_axis_m, velocity_axis_mps)
                |
-               +---> core/ambiguity.py  unfold_doppler_dual_prf   (S3 only)
+               +---> core/ambiguity_resolution.py  unfold_doppler_dual_prf   (S3 only)
                |
                v
   visualisation/scopes/rd_map.py -> rd_{frame}.png,  truth.csv,  metadata.json
@@ -93,6 +93,7 @@ frame cadence. They differ only in `[[burst]]`. This is the comparison the scena
 | `sample_rate_hz` | 1.0 MHz | 2.5 MHz | 4.0 MHz |
 | `fs / B` | **0.50** | 1.25 | 2.00 |
 | Samples per PRI | 1000 | 100 | 800 / 667 |
+| Thermal noise per IQ sample, `N0·fs` | 7.9888e-15 W | 1.9972e-14 W | 3.1955e-14 W |
 | `n_pulses` | 256 | 256 | 128 + 128 |
 | CPI | 256.0 ms | 10.24 ms | 25.60 + 21.33 ≈ 47 ms |
 | Unambiguous range | 37.474 km | **5.996 km** | 29.979 / 24.983 km |
@@ -102,7 +103,7 @@ frame cadence. They differ only in `[[burst]]`. This is the comparison the scena
 | Extra algorithm needed | — | — | `unfold_doppler_dual_prf` |
 | IQ cube per frame | `(256, 1000)`, 4.1 MB | `(256, 100)`, 0.4 MB | 2 × `(128, 800/667)` |
 
-Range resolution is **74.9481 m** in all three, since all three carry `f0_hz = 9.8e9` and
+Range resolution is **74.9481 m** in all three, since all three carry `carrier_frequency_hz = 9.8e9` and
 `bandwidth_hz = 2.0e6`.
 
 > **Why the three sampling rates differ** (an audit; no rate was changed).
@@ -174,17 +175,20 @@ These are properties of the input, not defects in the simulation.
 
 | Parameter | Value |
 | :--- | :--- |
-| Carrier `f0_hz` | 9.8 GHz → λ = **30.5911 mm** |
+| Carrier `carrier_frequency_hz` | 9.8 GHz → λ = **30.5911 mm** |
 | Bandwidth `bandwidth_hz` | 2.0 MHz → range resolution c/2B = **74.9481 m** |
-| Thermal noise power | 1.598e-14 W (kT₀·B·F at B = **2 MHz**, F = 3 dB) |
+| Noise density `N0 = k·T₀·F` | 7.9888e-21 W/Hz (−170.98 dBm/Hz at F = 3 dB) |
+| Matched-receiver noise `k·T₀·B·F` | 1.598e-14 W at B = **2 MHz** (`Radar.noise_power_matched_w`) |
 
-> The bandwidth in that product is the **transmitted** bandwidth, 2.0 MHz, which is what
-> `core/radar.py`'s `Radar.noise_power_w` uses as the noise bandwidth of a matched receiver.
-> An earlier draft of this row said `B = 1 MHz`, which is S1's *sample rate*; the stated
-> 1.598e-14 W was always the 2 MHz figure (1 MHz would give 7.989e-15 W), and only the
-> parenthetical was wrong. It has to be the transmitted bandwidth for this quantity to sit
-> in §3.2 at all: the three variants sample at 1.0, 2.5 and 4.0 MHz, so a sample-rate-based
-> noise power would not be waveform-independent. Corrected by the `core/` audit (PR #24).
+> Two noise powers, because there are two bandwidths. The matched-receiver figure uses the
+> **transmitted** bandwidth, the noise bandwidth of a receiver matched to the waveform; it is the
+> noise term of the radar-equation SNR and is waveform-independent, so it sits here. The noise
+> actually in the IQ cube fills the **sampled** band instead, `N0·fs` per complex sample
+> (`Receiver.noise_power_per_sample_w`), and so differs by variant (§2.1, the row under samples per
+> PRI): 3.01 dB below the matched figure in S1, 0.97 dB above in S2, 3.01 dB above in S3. The
+> pipeline gains are consistent with it: a matched filter over `fs·T` samples or an FMCW range FFT
+> over `fs·T` samples gives `E/N0` either way. An earlier version of `core/signal.py` added the
+> matched figure to every sample, which put each variant's noise floor off by `B/fs`.
 
 ### 3.3 Derived geometry, computed from the CSV against the radar site
 
@@ -210,7 +214,7 @@ predictably.
 
 ### 3.4 Per-variant waveform matrix
 
-All three share `f0_hz = 9.8e9`, `bandwidth_hz = 2.0e6`, 74.9481 m range resolution, a 1 Hz frame
+All three share `carrier_frequency_hz = 9.8e9`, `bandwidth_hz = 2.0e6`, 74.9481 m range resolution, a 1 Hz frame
 cadence, and a short CPI within each 1 s frame (not a contiguous 1 s CPI — see §4.2).
 
 **S1 — `fmcw-low-prf`: Doppler folds.** Build this one first. The target is unambiguous in range
@@ -426,7 +430,7 @@ begins.
              |     [ 5. core/dsp.py, core/windows.py -- already built elsewhere ]
              |          consumed, never edited; see §4.3 for the seam
              v
-  5a. core/ambiguity.py         unfold_doppler_dual_prf          (S3 only)
+  5a. core/ambiguity_resolution.py         unfold_doppler_dual_prf          (S3 only)
              |
              v
   6. pipelines/trajectories.py  CSV -> frame grid -> radar frame
@@ -452,7 +456,7 @@ begins.
 | 3 | `core/targets.py` | `PointTarget`, constant RCS, **Swerling 0 only**. Swerling 1–4 stay unimplemented and are named as such. |
 | 4 | `core/signal.py` | `PropagationPaths` exactly as specified in D1, plus `line_of_sight_paths`, `fmcw_deramp_baseband`, `pulsed_baseband`, `thermal_noise`. Reuses `radar_equation.received_power_w` and `waveforms.lfm_chirp` / `beat_frequency_hz` — **adds no new waveform or link-budget mathematics**. |
 | 5 | `core/dsp.py`, `core/windows.py` | **Already built by the parallel workstream** (commit 64f1b62) and consumed, not written, by this scenario: `range_fft`, `doppler_fft`, `range_doppler_map`, `matched_filter`, `mti_filter`, `range_bin_centers_m`, `doppler_bin_centers_mps`, `taper`. See §4.3. |
-| 5a | `core/ambiguity.py` *(new)* | `unfold_doppler_dual_prf`, needed only by S3. Kept out of `core/dsp.py` because that module belongs to the other workstream and is already near the 400-line guidance of `docs/conventions/style.md` §9. |
+| 5a | `core/ambiguity_resolution.py` *(new)* | `unfold_doppler_dual_prf`, needed only by S3. Kept out of `core/dsp.py` because that module belongs to the other workstream and is already near the 400-line guidance of `docs/conventions/style.md` §9. |
 | 6 | `pipelines/trajectories.py` | CSV load, resample to the frame grid, transform to the radar frame. |
 | 7 | `pipelines/scenarios.py` | Scenario TOML (`tomllib`, stdlib) → `Scenario`; `iterate_frames` is a **generator**, not a list. |
 | 8 | `visualisation/plotting.py`, `visualisation/scopes/rd_map.py` | `matplotlib` lazily imported; `ImportError` names the `visualisation` extra. |
