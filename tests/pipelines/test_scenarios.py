@@ -258,6 +258,31 @@ class TestScenarioValidation:
         with pytest.raises(ValueError, match="frame_rate_hz"):
             replace(load_scenario(S1_TOML), frame_rate_hz=0.0)
 
+    def test_rejects_a_monostatic_burst_beside_a_bistatic_one(self) -> None:
+        """Catches the bistatic burst being simulated with the monostatic track.
+
+        The track is computed once, against the first burst. A bistatic burst
+        after a monostatic one would then take the monostatic path with a one-way
+        range, and the run would complete with the wrong physics.
+        """
+        monostatic = load_scenario(S1_TOML)
+        bistatic = load_scenario(B1_TOML).bursts[0]
+        with pytest.raises(ValueError, match="share one siting"):
+            replace(monostatic, bursts=(monostatic.bursts[0], bistatic), n_pulses=(64, 64))
+
+    def test_rejects_bistatic_bursts_with_different_transmitters(self) -> None:
+        """Catches a second burst whose geometry the first burst's track does not describe."""
+        scenario = load_scenario(B1_TOML)
+        pair = scenario.bursts[0]
+        assert isinstance(pair, BistaticRadar)
+        moved = replace(pair, transmitter_latitude_deg=pair.transmitter_latitude_deg + 0.01)
+        with pytest.raises(ValueError, match="share one siting"):
+            replace(scenario, bursts=(pair, moved), n_pulses=(64, 64))
+
+    def test_a_dual_prf_scenario_shares_one_siting(self) -> None:
+        """Catches the siting check rejecting bursts that differ only in waveform."""
+        assert len(load_scenario(S3_TOML).bursts) == 2
+
 
 class TestDegenerateWindows:
     """Windows the frame grid cannot difference into a radial velocity."""

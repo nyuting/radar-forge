@@ -160,6 +160,23 @@ _TRACKING_KEYS = frozenset(
 )
 
 
+def _siting(radar: RadarLike) -> tuple[str, tuple[float, ...]]:
+    """Return the radar's kind and its sites' coordinates, for comparing two bursts."""
+    if isinstance(radar, BistaticRadar):
+        return (
+            "bistatic",
+            (
+                radar.transmitter_latitude_deg,
+                radar.transmitter_longitude_deg,
+                radar.transmitter_altitude_m,
+                radar.receiver_latitude_deg,
+                radar.receiver_longitude_deg,
+                radar.receiver_altitude_m,
+            ),
+        )
+    return ("monostatic", (radar.latitude_deg, radar.longitude_deg, radar.altitude_m))
+
+
 @dataclass(frozen=True)
 class Scenario:
     """Everything needed to play a scenario back, resolved from its TOML.
@@ -239,6 +256,14 @@ class Scenario:
             raise ValueError(msg)
         if self.frame_rate_hz <= 0.0:
             msg = f"frame_rate_hz must be strictly positive; got {self.frame_rate_hz!r}."
+            raise ValueError(msg)
+        sitings = [_siting(burst) for burst in self.bursts]
+        if any(siting != sitings[0] for siting in sitings[1:]):
+            msg = (
+                "every burst must share one siting, the same radar kind at the same sites, "
+                "because the target's geometry is computed once against the first burst; "
+                f"got {sitings}."
+            )
             raise ValueError(msg)
 
     @property
