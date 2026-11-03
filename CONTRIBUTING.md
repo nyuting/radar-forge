@@ -159,6 +159,9 @@ deliberately maintained as the worked example of every convention at once.
   docstring's `References`, and a test against analytic ground truth where one exists.
 - New dependencies need a justification in the PR description. Heavy or optional backends
   (ray-tracing engines, PyTorch) belong in an extra, never in the core dependency list.
+- Before implementing a step from [`spec/`](spec/), check that the spec is right: re-derive its
+  numbers and check its definitions against the code and the cited reference. If it is wrong,
+  fix it in a `docs(spec)` commit before the code, so the code does not inherit the error.
 - `.github/PULL_REQUEST_TEMPLATE.md` pre-fills every PR description with these rules as a checklist.
 
 ## 6. Reporting bugs

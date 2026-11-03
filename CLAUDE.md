@@ -55,6 +55,11 @@ to understand and to test; if a step is hard to test on its own, split it. The f
 - Do not add a dependency without saying, in the PR, what it buys and why the existing
   `numpy`/`scipy` stack cannot do it. Heavy or optional backends go in an extra, never core.
 - Prefer analytic ground truth in tests (a known null, an exact bin) over recorded output.
+- Check a spec before you implement it. Re-derive its numbers, and check each definition
+  against the code it touches and the reference it cites. A spec can be wrong: `f0_hz` was
+  documented as the carrier but used as the sweep start, and the noise per sample used the
+  swept bandwidth, not the sample rate. Fix the spec in a `docs(spec)` commit first rather
+  than coding the error in.
 - `--no-verify` is not a fix. CI runs the same checks.
 
 ## Where things are
