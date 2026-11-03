@@ -1,10 +1,10 @@
 """Tests for propagation paths.
 
 Ground truth is analytic throughout: a path's delay, Doppler shift and amplitude
-are checked against the closed-form two-way transit time, the closing-positive
-Doppler of ``spec/structure.md`` D5, and the radar range equation. The bistatic
-builder is checked against its monostatic limit and the two geometries that
-null bistatic Doppler.
+are checked against the closed-form transit time over the range sum, the
+closing-positive Doppler of ``spec/structure.md`` D5, and the radar range
+equation. The bistatic builder is checked against its monostatic limit and the
+range-sum rate against the two geometries that null it.
 """
 
 from __future__ import annotations
@@ -15,9 +15,14 @@ import pytest
 from radar_forge.core.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.core.propagation import (
     PropagationPaths,
-    bistatic_doppler_hz,
     bistatic_line_of_sight_paths,
+    doppler_shift_hz,
     line_of_sight_paths,
+    path_amplitude_linear,
+    propagation_delay_s,
+    propagation_phase_rad,
+    range_sum_rate_from_doppler_mps,
+    range_sum_rate_mps,
 )
 from radar_forge.core.radar import BistaticRadar, Radar, Receiver, Transmitter
 
@@ -133,7 +138,7 @@ class TestBistaticLineOfSightPaths:
         range_m, velocity_mps, rcs_m2 = 12.0e3, 80.0, 10.0
 
         monostatic = line_of_sight_paths(S1_RADAR, range_m, velocity_mps, rcs_m2)
-        bistatic = bistatic_line_of_sight_paths(pair, range_m, range_m, velocity_mps, rcs_m2)
+        bistatic = bistatic_line_of_sight_paths(pair, range_m, range_m, 2.0 * velocity_mps, rcs_m2)
 
         # Identical arithmetic in a different grouping, so float64 exactness.
         np.testing.assert_allclose(bistatic.delay_s, monostatic.delay_s, rtol=1e-12)
@@ -142,16 +147,16 @@ class TestBistaticLineOfSightPaths:
             bistatic.amplitude_linear, monostatic.amplitude_linear, rtol=1e-12
         )
 
-    def test_equivalent_range_is_half_the_path_sum(self) -> None:
-        """Pins the convention every generator silently depends on.
-
-        ``range_m`` is (R_t + R_r) / 2, not a distance to anything. A later
-        "correction" of it to the full path sum, or to either range, would leave
-        every cube in this module wrong by a factor of two with no other test
-        necessarily noticing, so this one states it outright.
-        """
+    def test_range_sum_is_the_whole_route(self) -> None:
+        """Pins what a path's length means: R_t + R_r, not either range nor half."""
         paths = bistatic_line_of_sight_paths(S1_PAIR, 12.0e3, 15.0e3, 0.0, 10.0)
-        np.testing.assert_allclose(paths.range_m, 13.5e3, rtol=1e-12)
+        np.testing.assert_allclose(paths.range_sum_m, 27.0e3, rtol=1e-12)
+        np.testing.assert_allclose(paths.delay_s, 27.0e3 / SPEED_OF_LIGHT_MPS, rtol=1e-15)
+
+    def test_doppler_is_the_range_sum_rate_over_the_wavelength(self) -> None:
+        """No factor of two: the rate passed in is already the whole route's."""
+        paths = bistatic_line_of_sight_paths(S1_PAIR, 12.0e3, 15.0e3, 160.0, 10.0)
+        np.testing.assert_allclose(paths.doppler_hz, 160.0 / S1_PAIR.wavelength_m, rtol=1e-15)
 
     def test_arrival_and_departure_angles_are_kept_separate(self) -> None:
         """Departure happens at one site and arrival at another, so they differ."""
@@ -175,7 +180,7 @@ class TestBistaticLineOfSightPaths:
             S1_PAIR, ranges_tx_m, ranges_rx_m, np.array([10.0, -20.0, 30.0]), 10.0
         )
         assert paths.n_paths == 3
-        np.testing.assert_allclose(paths.range_m, (ranges_tx_m + ranges_rx_m) / 2.0, rtol=1e-12)
+        np.testing.assert_allclose(paths.range_sum_m, ranges_tx_m + ranges_rx_m, rtol=1e-12)
 
     def test_zero_cross_section_gives_a_null_path(self) -> None:
         paths = bistatic_line_of_sight_paths(S1_PAIR, 12.0e3, 15.0e3, 0.0, 0.0)
@@ -191,15 +196,15 @@ class TestBistaticLineOfSightPaths:
             bistatic_line_of_sight_paths(S1_PAIR, 12.0e3, 15.0e3, 0.0, -1.0)
 
 
-class TestBistaticDoppler:
-    """The bisector projection, and the two geometries that null it."""
+class TestRangeSumRate:
+    """The bisector projection, its monostatic limit, and the two geometries that null it."""
 
     def test_matches_the_bisector_projection(self) -> None:
-        """Isoceles geometry: f_d = (2 v / lambda) cos(beta / 2) along the bisector.
+        """Isoceles geometry: the rate is 2 v cos(beta / 2) along the bisector.
 
         The target sits on the perpendicular bisector of the baseline and closes
         along it, so delta = 0 and the textbook form reduces to the cosine of
-        half the bistatic angle (Willis §6.1).
+        half the bistatic angle (Willis section 6.1).
         """
         half_baseline_m, offset_m = 11.0e3, 20.0e3
         # Sites at (-L/2, 0, 0) and (+L/2, 0, 0); target on the north bisector.
@@ -210,14 +215,20 @@ class TestBistaticDoppler:
 
         speed_mps = 80.0
         velocity = np.array([0.0, -speed_mps, 0.0])  # straight down the bisector
-        wavelength_m = S1_PAIR.wavelength_m
 
         half_angle_rad = np.arctan2(half_baseline_m, offset_m)
-        expected_hz = 2.0 * speed_mps * np.cos(half_angle_rad) / wavelength_m
+        expected_mps = 2.0 * speed_mps * np.cos(half_angle_rad)
         np.testing.assert_allclose(
-            bistatic_doppler_hz(wavelength_m, velocity, unit_to_tx, unit_to_rx),
-            expected_hz,
-            rtol=1e-12,
+            range_sum_rate_mps(velocity, unit_to_tx, unit_to_rx), expected_mps, rtol=1e-12
+        )
+
+    def test_is_twice_the_radial_velocity_when_the_sites_coincide(self) -> None:
+        """The monostatic limit: both unit vectors are the same line of sight."""
+        to_site = np.array([3.0, 4.0, 12.0]) / 13.0
+        velocity = np.array([30.0, 40.0, 0.0])
+        radial_velocity_mps = float(velocity @ to_site)  # 250 / 13 m/s, closing
+        np.testing.assert_allclose(
+            range_sum_rate_mps(velocity, to_site, to_site), 2.0 * radial_velocity_mps, rtol=1e-15
         )
 
     def test_is_zero_crossing_the_bisector(self) -> None:
@@ -227,11 +238,10 @@ class TestBistaticDoppler:
         unit_to_tx = to_tx / np.linalg.norm(to_tx)
         unit_to_rx = to_rx / np.linalg.norm(to_rx)
         velocity = np.array([80.0, 0.0, 0.0])  # across the bisector
-        # A cancellation to a true null, so an absolute bound against a kHz scale.
+        # A cancellation to a true null, so an absolute bound: round-off on an
+        # 80 m/s scale is around 1e-14 m/s.
         np.testing.assert_allclose(
-            bistatic_doppler_hz(S1_PAIR.wavelength_m, velocity, unit_to_tx, unit_to_rx),
-            0.0,
-            atol=1e-9,
+            range_sum_rate_mps(velocity, unit_to_tx, unit_to_rx), 0.0, atol=1e-12
         )
 
     def test_is_zero_moving_along_the_baseline(self) -> None:
@@ -246,13 +256,61 @@ class TestBistaticDoppler:
         unit_to_rx = np.array([1.0, 0.0, 0.0])
         velocity = np.array([80.0, 0.0, 0.0])
         np.testing.assert_allclose(
-            bistatic_doppler_hz(S1_PAIR.wavelength_m, velocity, unit_to_tx, unit_to_rx),
-            0.0,
-            atol=1e-9,
+            range_sum_rate_mps(velocity, unit_to_tx, unit_to_rx), 0.0, atol=1e-12
         )
 
     def test_rejects_vectors_that_are_not_three_dimensional(self) -> None:
         with pytest.raises(ValueError, match="three components"):
-            bistatic_doppler_hz(
-                S1_PAIR.wavelength_m, np.zeros((1, 2)), np.zeros((1, 3)), np.zeros((1, 3))
-            )
+            range_sum_rate_mps(np.zeros((1, 2)), np.zeros((1, 3)), np.zeros((1, 3)))
+
+
+class TestPathRelations:
+    """The relations every path builder shares, each against its closed form."""
+
+    def test_delay_is_the_range_sum_at_the_speed_of_light(self) -> None:
+        np.testing.assert_allclose(propagation_delay_s(27.0e3), 27.0e3 / 299_792_458.0, rtol=1e-15)
+
+    def test_delay_and_range_sum_are_inverses(self) -> None:
+        """PropagationPaths.range_sum_m undoes propagation_delay_s."""
+        ranges_m = np.array([20.0e3, 27.0e3, 63.4e3])
+        paths = PropagationPaths(
+            delay_s=propagation_delay_s(ranges_m),
+            doppler_hz=np.zeros(3),
+            amplitude_linear=np.zeros(3, dtype=np.complex128),
+            aoa_rad=np.zeros((3, 2)),
+            aod_rad=np.zeros((3, 2)),
+            bounce_count=np.ones(3, dtype=np.int_),
+        )
+        # A divide then a multiply by the same constant: one ulp each way.
+        np.testing.assert_allclose(paths.range_sum_m, ranges_m, rtol=1e-15)
+
+    def test_one_wavelength_of_route_is_one_cycle_of_lag(self) -> None:
+        wavelength_m = S1_RADAR.wavelength_m
+        np.testing.assert_allclose(
+            propagation_phase_rad(3.0 * wavelength_m, wavelength_m), -6.0 * np.pi, rtol=1e-15
+        )
+
+    def test_doppler_of_a_monostatic_closing_target_is_two_v_over_lambda(self) -> None:
+        wavelength_m = S1_RADAR.wavelength_m
+        np.testing.assert_allclose(
+            doppler_shift_hz(2.0 * 80.0, wavelength_m), 160.0 / wavelength_m, rtol=1e-15
+        )
+
+    def test_doppler_and_range_sum_rate_are_inverses(self) -> None:
+        rates_mps = np.array([-160.0, 0.0, 37.5, 900.0])
+        wavelength_m = S1_RADAR.wavelength_m
+        # A divide then a multiply by the same wavelength: one ulp each way.
+        np.testing.assert_allclose(
+            range_sum_rate_from_doppler_mps(
+                doppler_shift_hz(rates_mps, wavelength_m), wavelength_m
+            ),
+            rates_mps,
+            rtol=1e-15,
+        )
+
+    def test_amplitude_squared_is_the_power_whatever_the_phase(self) -> None:
+        power_w = np.array([1.0e-12, 4.0e-15, 0.0])
+        phase_rad = np.array([0.3, -2.0e3, 1.0])
+        amplitude = path_amplitude_linear(power_w, phase_rad)
+        np.testing.assert_allclose(np.abs(amplitude) ** 2, power_w, rtol=1e-14)
+        np.testing.assert_allclose(np.angle(amplitude[:1]), phase_rad[:1], rtol=1e-15)

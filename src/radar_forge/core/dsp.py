@@ -39,6 +39,7 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.signal import fftconvolve
 
 from radar_forge.core._validation import _normalize_axis
+from radar_forge.core.propagation import range_sum_rate_from_doppler_mps
 from radar_forge.core.waveforms import range_from_beat_frequency_m
 from radar_forge.core.windows import apply_taper
 
@@ -398,6 +399,11 @@ def range_bin_centers_m(
     :func:`radar_forge.pipelines.scenarios.range_axis_m` derives the same span
     for a burst.
 
+    The axis is in the monostatic convention, **half the range sum**
+    :math:`(R_t + R_r)/2`. That is the range to the target when the sites are
+    collocated, and an ellipse label rather than a distance to anything when
+    they are not; see :mod:`radar_forge.core.propagation`.
+
     Examples
     --------
     >>> import numpy as np
@@ -482,7 +488,8 @@ def doppler_bin_centers_mps(
         raise ValueError(msg)
 
     doppler_hz = np.fft.fftshift(np.fft.fftfreq(n_bins, d=pulse_repetition_interval_s))
-    result: NDArray[np.float64] = wavelength_m * doppler_hz / 2.0
+    # The axis is labelled in the monostatic convention, half the range-sum rate.
+    result: NDArray[np.float64] = range_sum_rate_from_doppler_mps(doppler_hz, wavelength_m) / 2.0
     return result
 
 

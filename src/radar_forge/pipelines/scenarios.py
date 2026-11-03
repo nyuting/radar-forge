@@ -631,7 +631,8 @@ def iterate_frames(scenario: Scenario) -> Iterator[Frame]:
                     burst_radar,
                     float(bistatic_track.range_tx_m[sample]),
                     float(bistatic_track.range_rx_m[sample]),
-                    radial_velocity_mps,
+                    # The frame carries the bisector rate, half the range-sum rate.
+                    2.0 * radial_velocity_mps,
                     rcs_m2,
                     transmit_azimuth_deg=float(bistatic_track.transmit_azimuth_deg[sample]),
                     transmit_elevation_deg=float(bistatic_track.transmit_elevation_deg[sample]),

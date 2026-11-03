@@ -143,14 +143,14 @@ def test_cartesian_position_rejects_a_state_of_the_wrong_length() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_the_bistatic_path_range_is_out_and_back_for_co_sited_assets() -> None:
+def test_the_bistatic_range_sum_is_out_and_back_for_co_sited_assets() -> None:
     _, estimate, pose = _scene("CV")
     model = BistaticRangeDopplerModel(estimate.state_layout, pose, pose)
     # A 3-4-12 triangle: 13 m each way. A norm and an add, so float64 round-off only.
     np.testing.assert_allclose(model.predict(estimate.mean)[0], 26.0, rtol=1e-12)
 
 
-def test_the_bistatic_path_rate_is_positive_when_closing() -> None:
+def test_the_bistatic_range_sum_rate_is_positive_when_closing() -> None:
     _, estimate, pose = _scene("CV")
     model = BistaticRangeDopplerModel(estimate.state_layout, pose, pose)
     # Closing at 25/13 m/s each way: (3, 4, 12) / 13 . (-3, -4, 0) = -25/13.

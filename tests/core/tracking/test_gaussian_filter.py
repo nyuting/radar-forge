@@ -318,8 +318,8 @@ def test_the_covariance_stays_positive_definite_over_200_steps(
     assert min(smallest) > 0.0
 
 
-# A bistatic pair 20 km apart, with a target 3 km up flying across the baseline. The path
-# range and path rate are nonlinear in the state, so here the centre sigma point's weight
+# A bistatic pair 20 km apart, with a target 3 km up flying across the baseline. The range
+# sum and its rate are nonlinear in the state, so here the centre sigma point's weight
 # matters (UKF Notes, "Why alpha = 1 and kappa = 0").
 BISTATIC_TRANSMITTER_M = (0.0, 0.0, 0.0)
 BISTATIC_RECEIVER_M = (20_000.0, 0.0, 0.0)
