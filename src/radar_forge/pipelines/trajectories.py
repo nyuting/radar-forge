@@ -516,7 +516,9 @@ def to_bistatic_radar_frame(trajectory: Trajectory, radar: BistaticRadar) -> Bis
     ------
     ValueError
         If a trajectory position is exactly on the transmitter or the receiver
-        site.
+        site, where the look angles from that site are undefined. This is the
+        package's one rule for a target on a site; see
+        :meth:`~radar_forge.core.radar.BistaticRadar.target_enu_m`.
 
     Notes
     -----
@@ -559,21 +561,8 @@ def to_bistatic_radar_frame(trajectory: Trajectory, radar: BistaticRadar) -> Bis
     >>> bool(np.all(track.bisector_velocity_mps == 0.0))  # a stationary target
     True
     """
-    transmit_enu_m = geodetic_to_enu_m(
-        trajectory.latitude_deg,
-        trajectory.longitude_deg,
-        trajectory.altitude_m,
-        radar.transmitter_latitude_deg,
-        radar.transmitter_longitude_deg,
-        radar.transmitter_altitude_m,
-    )
-    receive_enu_m = geodetic_to_enu_m(
-        trajectory.latitude_deg,
-        trajectory.longitude_deg,
-        trajectory.altitude_m,
-        radar.receiver_latitude_deg,
-        radar.receiver_longitude_deg,
-        radar.receiver_altitude_m,
+    transmit_enu_m, receive_enu_m = radar.target_enu_m(
+        trajectory.latitude_deg, trajectory.longitude_deg, trajectory.altitude_m
     )
     _reject_targets_on_site(transmit_enu_m, trajectory.time_s, "transmitter site")
     _reject_targets_on_site(receive_enu_m, trajectory.time_s, "receiver site")
