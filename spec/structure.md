@@ -746,7 +746,11 @@ class PropagationPaths:
 ```
 
 `core/propagation.py` defines `PropagationPaths` and the analytic path builders that are the zeroth-order
-backend. `core/signal.py` owns the path→baseband synthesis for every backend. This keeps waveform changes in one
+backend. A path set also answers how long each path is at a later instant, through
+`PropagationPaths.range_sum_at_m(slow_time_s, wavelength_m)`, so the motion of a path from pulse to pulse
+is propagation's to state, and scenario 004's polynomial kinematics extends that method rather than the
+generators. `core/signal.py` owns the path→baseband synthesis for every backend: the sampling grids,
+range folding and the waveform phases. This keeps waveform changes in one
 place, makes backends comparable on identical geometry, and makes them testable without synthesising
 signals. Backends that natively produce baseband (RadarSimPy, ovrtx) may additionally implement an
 optional `trace_baseband()` fast path; `base.py` declares it, and `generate.py` prefers it only when the
