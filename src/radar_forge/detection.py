@@ -103,6 +103,10 @@ def cfar_reference_cell_count(
     ----------
     n_train, n_guard : int or tuple of int
         Cells per side, one count per window axis; a bare int is one axis.
+
+    References
+    ----------
+    Richards [6]_, §6.5.
     """
     train, guard = _window(n_train, n_guard)
     outer = math.prod(2 * (g + t) + 1 for t, g in zip(train, guard, strict=True))
@@ -217,9 +221,19 @@ def cfar_detect_2d(
     power_w : array_like
         Square-law power, at least 2-D, e.g. ``(n_doppler, n_range)``.
     n_train, n_guard : tuple of int
-        Cells per side for the last two axes; zero on one gives :func:`cfar_detect`.
+        Cells per side for the last two axes. Both zero on one axis gives :func:`cfar_detect`
+        along the other; ``n_train`` zero with ``n_guard`` non-zero is refused.
     wrap_axes : tuple of int, optional
-        Circular axes among the last two, as array axes: ``(0,)`` for Doppler.
+        Circular axes among the last two, counted from the end: ``(-2,)`` for Doppler.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``(detected, threshold_w)``, each the shape of ``power_w``; ``nan`` where untested.
+
+    References
+    ----------
+    Richards [6]_, §6.5.
     """
     values_w = _power(power_w, min_ndim=2)
     circular = {_axis(axis, values_w.ndim) for axis in wrap_axes}
@@ -289,20 +303,25 @@ def cluster_detections(
     Parameters
     ----------
     wrap_axes : tuple of int, optional
-        Circular axes. Pass the Doppler axis, or a target on the velocity wrap is two.
+        Circular axes, counted from the end: ``(-2,)`` for Doppler, or a target on the
+        velocity wrap is two.
+
+    References
+    ----------
+    Rosenfeld and Pfaltz [7]_ (labelling).
 
     Examples
     --------
     >>> power_w = np.zeros(16)
     >>> power_w[[15, 0]] = 4.0
-    >>> [d.centroid_index for d in cluster_detections(power_w > 0, power_w, wrap_axes=(0,))]
+    >>> [d.centroid_index for d in cluster_detections(power_w > 0, power_w, wrap_axes=(-1,))]
     [(15.5,)]
     """
     flags = np.asarray(mask, dtype=bool)
     values_w = np.asarray(power_w, dtype=np.float64)
-    nan_w = np.full_like(values_w, np.nan)
-    at_peak_w = nan_w if threshold_w is None else np.asarray(threshold_w, dtype=np.float64)
-    if not flags.shape == values_w.shape == at_peak_w.shape:
+    at_peak_w = None if threshold_w is None else np.asarray(threshold_w, dtype=np.float64)
+    shapes = {flags.shape, values_w.shape} | ({at_peak_w.shape} if at_peak_w is not None else set())
+    if len(shapes) > 1:
         msg = f"mask {flags.shape}, power_w {values_w.shape} and threshold_w do not match."
         raise ValueError(msg)
     labels, n_groups = label_connected_cells(flags, connectivity=connectivity, wrap_axes=wrap_axes)
@@ -312,7 +331,9 @@ def cluster_detections(
     total_w = ndimage.sum_labels(values_w, labels, index)
     n_cells = np.bincount(labels.ravel(), minlength=n_groups + 1)[1:]
     peaks = np.array(ndimage.maximum_position(values_w, labels, index), dtype=np.intp)
-    centroids = np.array(ndimage.center_of_mass(values_w, labels, index), dtype=np.float64)
+    # errstate-exempt: a cluster with no power has no weighted centroid, and nan says so.
+    with np.errstate(invalid="ignore"):
+        centroids = np.array(ndimage.center_of_mass(values_w, labels, index), dtype=np.float64)
     for axis in {_axis(axis, flags.ndim) for axis in wrap_axes}:
         centroids[:, axis] = _circular_centroid(values_w, labels, peaks[:, axis], axis, total_w)
     found = [
@@ -322,7 +343,7 @@ def cluster_detections(
             peak_power_w=float(values_w[tuple(peak)]),
             total_power_w=float(total),
             n_cells=int(count),
-            cfar_threshold_w=float(at_peak_w[tuple(peak)]),
+            cfar_threshold_w=math.nan if at_peak_w is None else float(at_peak_w[tuple(peak)]),
         )
         for peak, centroid, total, count in zip(peaks, centroids, total_w, n_cells, strict=True)
     ]
@@ -368,7 +389,8 @@ def _cfar(
             msg = f"circular axis {axis} is shorter than its {2 * margin + 1}-cell window."
             raise ValueError(msg)
     leading, lagging = _footprint(train, guard)
-    n_reference = int(leading.sum() + lagging.sum())
+    footprint = leading | lagging
+    n_reference = int(footprint.sum())
     rank = _rank(rank, n_reference) if variant == "os" else 0
 
     # Window axes go last, so a footprint of shape (1, ..., 1, *window) filters every line and
@@ -380,27 +402,35 @@ def _cfar(
     # filter reads zeros (mode="constant"), which is what clips the footprint.
     pad = [(0, 0)] * (values_w.ndim - n_window)
     pad += [(m, m) if w else (0, 0) for m, w in zip(margins, wraps, strict=True)]
-    padded_w = np.pad(values_w, pad, mode="wrap")
+    padded_w = np.pad(values_w, pad, mode="wrap") if any(wraps) else values_w
     crop = _crop(pad, values_w.shape)
     ones = np.ones(padded_w.shape[-n_window:])
 
-    def in_map(half: NDArray[np.bool_]) -> tuple[NDArray[np.float64], NDArray[np.int64]]:
-        """Sum of a half's in-map cells around every cell, and how many there are."""
-        sum_w = ndimage.correlate(padded_w, half[lead].astype(float), mode="constant")[crop]
-        count = ndimage.correlate(ones, half.astype(float), mode="constant")[crop[-n_window:]]
-        return sum_w, np.rint(count).astype(np.int64)
+    def in_map_sum_w(cells: NDArray[np.bool_]) -> NDArray[np.float64]:
+        """Sum of the in-map ``cells`` around every cell under test, in watts."""
+        sum_w: NDArray[np.float64] = ndimage.correlate(
+            padded_w, cells[lead].astype(float), mode="constant"
+        )
+        return sum_w[crop]
 
-    (lead_w, n_lead), (lag_w, n_lag) = in_map(leading), in_map(lagging)
-    n_cells = n_lead + n_lag
-    estimate_w = (lead_w + lag_w) / np.maximum(n_cells, 1)
-    if variant in ("go", "so"):
+    def in_map_count(cells: NDArray[np.bool_]) -> NDArray[np.int64]:
+        """How many of ``cells`` lie in the map, per position along the window axes."""
+        count = ndimage.correlate(ones, cells.astype(float), mode="constant")[crop[-n_window:]]
+        return np.asarray(np.rint(count), dtype=np.int64)
+
+    n_cells = in_map_count(footprint)
+    if variant == "os":
+        rank_w = ndimage.rank_filter(padded_w, rank - 1, footprint=footprint[lead], mode="constant")
+        estimate_w = rank_w[crop]
+    elif variant == "ca":
+        estimate_w = in_map_sum_w(footprint) / np.maximum(n_cells, 1)
+    else:
+        lead_w, lag_w = in_map_sum_w(leading), in_map_sum_w(lagging)
+        n_lead, n_lag = in_map_count(leading), in_map_count(lagging)
         pick = np.maximum if variant == "go" else np.minimum
         halves_w = pick(lead_w / np.maximum(n_lead, 1), lag_w / np.maximum(n_lag, 1))
-        estimate_w = np.where(n_cells == n_reference, halves_w, estimate_w)
-    elif variant == "os":
-        footprint = (leading | lagging)[lead]
-        estimate_w = ndimage.rank_filter(padded_w, rank - 1, footprint=footprint, mode="constant")
-        estimate_w = estimate_w[crop]
+        mean_w = (lead_w + lag_w) / np.maximum(n_cells, 1)
+        estimate_w = np.where(n_cells == n_reference, halves_w, mean_w)
 
     # A Python loop over the distinct in-map counts, one in the interior and a few at the
     # edges, so that each count is calibrated once rather than once per cell.
@@ -483,6 +513,10 @@ def _window(
     if min(train) < 0 or max(train) < 1:
         msg = f"n_train must be at least 1 (zero on all but one axis), got {n_train!r}."
         raise ValueError(msg)
+    if any(t == 0 and g > 0 for t, g in zip(train, guard, strict=True)):
+        # A guard with no training beside it would widen the ring, not remove the axis.
+        msg = f"n_guard must be zero on an axis where n_train is, got {n_train!r}, {n_guard!r}."
+        raise ValueError(msg)
     return train, guard
 
 
@@ -503,6 +537,9 @@ def _variant(variant: str) -> str:
 def _rank(rank: int | None, n_reference: int) -> int:
     """Return the OS rank, defaulting to round(3M/4), checked against ``1 .. M``."""
     k = default_os_rank(n_reference // 2) if rank is None else rank
+    if isinstance(k, bool) or not isinstance(k, int | np.integer):
+        msg = f"rank must be an integer, got {k!r}."
+        raise ValueError(msg)
     if not 1 <= k <= n_reference:
         msg = f"rank must be a one-based index into the {n_reference} reference cells, got {k!r}."
         raise ValueError(msg)
@@ -522,13 +559,17 @@ def _crop(pad: list[tuple[int, int]], shape: tuple[int, ...]) -> tuple[slice, ..
 
 
 def _power(power_w: ArrayLike, *, min_ndim: int) -> NDArray[np.float64]:
-    """Return ``power_w`` as float64, refusing too few dimensions or a negative power."""
+    """Return ``power_w`` as float64: the one data scan, at the public boundary.
+
+    A nan or inf would spread into every window that holds it; a negative value means an
+    amplitude or a dB value was passed.
+    """
     values_w = np.asarray(power_w, dtype=np.float64)
     if values_w.ndim < min_ndim:
         msg = f"power_w must have at least {min_ndim} dimension(s), got {values_w.ndim}."
         raise ValueError(msg)
-    if np.any(values_w < 0.0):
-        msg = "power_w must be non-negative: pass |x| ** 2, not an amplitude or a dB value."
+    if not np.all(np.isfinite(values_w) & (values_w >= 0.0)):
+        msg = "power_w must be finite and non-negative: pass |x| ** 2, not an amplitude or dB."
         raise ValueError(msg)
     return values_w
 
@@ -548,7 +589,10 @@ def _circular_centroid(
     index = np.arange(n).reshape([-1 if a == axis else 1 for a in range(values_w.ndim)])
     peak_of_cell = np.concatenate([[0], peaks])[labels]
     offset = (index - peak_of_cell + n // 2) % n - n // 2
-    mean_offset = ndimage.sum_labels(values_w * offset, labels, np.arange(1, peaks.size + 1))
-    centroid = (peaks + mean_offset / total_w) % n
+    moment_w = ndimage.sum_labels(values_w * offset, labels, np.arange(1, peaks.size + 1))
+    # A cluster with no power has no weighted centroid: nan, as center_of_mass gives.
+    no_power = np.full(peaks.size, np.nan)
+    mean_offset = np.divide(moment_w, total_w, out=no_power, where=total_w > 0.0)
+    centroid = (peaks + mean_offset) % n
     # A tiny negative offset can round up to exactly n.
-    return np.where(centroid < n, centroid, 0.0)
+    return np.where(centroid >= n, 0.0, centroid)

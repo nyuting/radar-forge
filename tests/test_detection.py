@@ -19,7 +19,7 @@ import numpy as np
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from scipy import integrate
+from scipy import integrate, ndimage
 from scipy.stats import beta, gamma
 
 from radar_forge.detection import (
@@ -203,12 +203,13 @@ def test_reference_cell_count_matches_the_explicit_footprint():
 
 
 def test_scenario_003_calibration_matches_its_specification():
-    """spec/scenario-003-tracking.md §12: 256 000 cells tested, 11.417 dB inside, 12.268 at ends.
+    """spec/scenario-003-tracking.md §2 and §12: cells tested, and alpha inside and at the ends.
 
     CA along range, N = 16, guard 4, pfa = 1e-5 on (256, 1000). Interior M = 32:
-    32 (1e5^(1/32) - 1) = 13.8564 = 11.4165 dB. The outermost n_guard + 1 cells of each end
-    keep only the far band, M = 16: 16 (1e5^(1/16) - 1) = 16.8564 = 12.2676 dB. On a unit
-    floor the threshold is alpha itself.
+    32 (1e5^(1/32) - 1) = 13.8564 = 11.4165 dB. The outermost n_guard + 1 = 5 cells of each
+    end keep only the far band, M = 16: 16 (1e5^(1/16) - 1) = 16.8564 = 12.2676 dB. Cell 10
+    keeps the far band and 6 near cells (indices 0..5), M = 22: 15.1275 = 11.7977 dB. On a
+    unit floor the threshold is alpha itself.
     """
     scenario = tomllib.loads(
         (Path(__file__).parents[1] / "scenarios" / "scenario_003_tracking.toml").read_text()
@@ -222,8 +223,8 @@ def test_scenario_003_calibration_matches_its_specification():
     assert np.count_nonzero(np.isfinite(threshold_w)) == 256_000
     # atol 1e-4 dB: the spec quotes three decimals.
     np.testing.assert_allclose(
-        10 * np.log10(threshold_w[0, [500, 0, 4, -1]]),
-        [11.4165, 12.2676, 12.2676, 12.2676],
+        10 * np.log10(threshold_w[0, [500, 0, 4, -1, 10, -11]]),
+        [11.4165, 12.2676, 12.2676, 12.2676, 11.7977, 11.7977],
         atol=1e-4,
     )
 
@@ -391,6 +392,55 @@ def test_clipped_order_statistic_takes_the_shifted_rank_of_the_in_map_cells(rng,
     np.testing.assert_allclose(pfa, 1e-3, rtol=1e-9)
 
 
+def first_merged_engine_estimate_w(power_w, variant):
+    """The ring's noise estimate as the engine first computed it, rebuilt from scipy alone.
+
+    Every variant took two half-footprint correlate passes, halves written out by offset
+    here, and OS a rank filter over the ring. Doppler (axis -2) wraps; range is clipped.
+    """
+    o0, o1 = np.meshgrid(np.arange(-3, 4), np.arange(-6, 7), indexing="ij")
+    ring = ~((abs(o0) <= 1) & (abs(o1) <= 2))
+    halves = [
+        ring & ((o1 > 0) | ((o1 == 0) & (o0 > 0))),
+        ring & ((o1 < 0) | ((o1 == 0) & (o0 < 0))),
+    ]
+    padded_w = np.pad(power_w, ((0, 0), (3, 3), (0, 0)), mode="wrap")
+    ones = np.ones(padded_w.shape[1:])
+    sums_w = [ndimage.correlate(padded_w, h[None] * 1.0, mode="constant")[:, 3:-3] for h in halves]
+    counts = [np.rint(ndimage.correlate(ones, h * 1.0, mode="constant")[3:-3]) for h in halves]
+    n_cells = counts[0] + counts[1]
+    if variant == "os":
+        rank = default_os_rank(RING_N_REFERENCE // 2)
+        return ndimage.rank_filter(padded_w, rank - 1, footprint=ring[None], mode="constant")[
+            :, 3:-3
+        ]
+    mean_w = (sums_w[0] + sums_w[1]) / n_cells
+    if variant == "ca":
+        return mean_w
+    pick = np.maximum if variant == "go" else np.minimum
+    halves_w = pick(sums_w[0] / counts[0], sums_w[1] / counts[1])
+    return np.where(n_cells == RING_N_REFERENCE, halves_w, mean_w)
+
+
+@pytest.mark.parametrize("variant", CFAR_VARIANTS)
+def test_one_pass_engine_matches_the_first_merged_engine(rng, variant):
+    """CA now sums the whole ring in one pass, and OS and CA no longer compute half sums.
+
+    GO, SO and OS select or divide the same numbers, so they are bit for bit the same. CA adds
+    the 76 ring cells in one grouping instead of two half sums, which moves the last bits:
+    measured at 1.3e-15 relative at most, so rtol 4e-15 (about 18 ulp).
+    """
+    power_w = rng.exponential(1.0, size=(3, 24, 60))
+    window = ((2, 4), (1, 2), variant, None, (1, 2), (True, False))
+    threshold_w, estimate_w, alpha_linear = _cfar(power_w, 1e-3, *window)
+    expected_w = first_merged_engine_estimate_w(power_w, variant)
+    if variant == "ca":
+        np.testing.assert_allclose(estimate_w, expected_w, rtol=4e-15)
+    else:
+        np.testing.assert_array_equal(estimate_w, expected_w)
+    np.testing.assert_array_equal(threshold_w, alpha_linear * estimate_w)
+
+
 def test_an_order_statistic_rank_with_no_cells_left_is_not_tested():
     """Rank 1 of 32 has no rank left once one cell is missing: every clipped cell goes untested.
 
@@ -410,9 +460,10 @@ def test_greatest_and_smallest_of_reduce_to_cell_averaging_where_clipped(rng, va
     power_w = rng.exponential(1.0, size=(4, 60))
     _, half_w = cfar_detect(power_w, 1e-3, n_train=8, n_guard=2, variant=variant)
     _, mean_w = cfar_detect(power_w, 1e-3, n_train=8, n_guard=2, variant="ca")
-    np.testing.assert_array_equal(half_w[:, :10], mean_w[:, :10])
-    np.testing.assert_array_equal(half_w[:, -10:], mean_w[:, -10:])
-    assert not np.array_equal(half_w[:, 10:-10], mean_w[:, 10:-10])
+    # rtol 4e-15: CA sums the window in one pass, GO/SO's fallback as two half sums.
+    np.testing.assert_allclose(half_w[:, :10], mean_w[:, :10], rtol=4e-15)
+    np.testing.assert_allclose(half_w[:, -10:], mean_w[:, -10:], rtol=4e-15)
+    assert not np.allclose(half_w[:, 10:-10], mean_w[:, 10:-10], rtol=1e-6)
 
 
 def test_the_halves_split_on_the_last_axis_then_on_the_first():
@@ -590,6 +641,15 @@ def test_a_detection_carries_the_threshold_at_its_peak_or_nan():
     assert math.isnan(cluster_detections(detected, power_w)[0].cfar_threshold_w)
 
 
+@pytest.mark.parametrize("wrap_axes", [(), (-2,), (-2, -1)])
+def test_a_cluster_with_no_power_has_a_nan_centroid_on_every_axis(wrap_axes):
+    """Zero weights define no weighted mean: nan on a linear axis and on a circular one alike."""
+    mask = np.zeros((8, 8), dtype=bool)
+    mask[7, 3] = True
+    (found,) = cluster_detections(mask, np.zeros((8, 8)), wrap_axes=wrap_axes)
+    assert np.isnan(found.centroid_index).all()
+
+
 def test_clustering_an_empty_mask_returns_nothing():
     assert cluster_detections(np.zeros(16, dtype=bool), np.zeros(16)) == []
 
@@ -656,7 +716,20 @@ def test_a_target_on_the_doppler_wrap_gives_one_detection(rng):
             lambda: cfar_detect_2d(np.ones((8, 8)), 1e-3, n_train=(2, 4, 6), n_guard=(1, 1, 1)),
             "one count per",
         ),
-        (lambda: cfar_detect(-np.ones(32), 1e-3, n_train=4), "power_w must be non-negative"),
+        (lambda: cfar_detect(-np.ones(32), 1e-3, n_train=4), "finite and non-negative"),
+        (lambda: cfar_detect(np.r_[np.nan, np.ones(31)], 1e-3, n_train=4), "finite and non"),
+        (
+            lambda: cfar_detect_2d(np.r_[np.inf, np.ones(99)].reshape(10, 10), 1e-3, **RING),
+            "finite",
+        ),
+        (
+            lambda: cfar_detect_2d(np.ones((8, 40)), 1e-3, n_train=(0, 5), n_guard=(2, 2)),
+            "n_guard must be zero on an axis where n_train is",
+        ),
+        (
+            lambda: cfar_detect(np.ones(32), 1e-3, n_train=4, variant="os", rank=2.5),
+            "rank must be an integer",
+        ),
         (lambda: cfar_detect(1.0, 1e-3, n_train=4), "at least 1 dimension"),
         (lambda: cfar_detect_2d(np.ones(64), 1e-3, **RING), "at least 2 dimension"),
         (lambda: cfar_detect(np.ones((4, 32)), 1e-3, n_train=4, axis=5), "out of bounds"),
