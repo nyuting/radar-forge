@@ -23,7 +23,7 @@ lint:  ## Check formatting and lint (no writes)
 	uv run ruff format --check .
 	uv run ruff check .
 
-type:  ## Type-check src/
+type:  ## Type-check src/, scripts/ and tools/
 	uv run mypy
 
 test:  ## Run the full test suite
@@ -35,10 +35,10 @@ test-fast:  ## Run everything except tests marked slow
 cov:  ## Run tests with a coverage report
 	uv run pytest --cov --cov-report=term-missing
 
-conventions:  ## Check repo layout conventions
-	python3 scripts/check_conventions.py
+conventions:  ## Check repo conventions (rules R1-R12)
+	uv run python scripts/check_conventions.py
 
-check: lint type conventions test  ## Everything the pre-push hook and CI run
+check: lint type conventions test  ## Everything CI runs; pre-push runs it with test-fast
 
 clean:  ## Remove caches and build artefacts
 	rm -rf .pytest_cache .mypy_cache .ruff_cache dist build htmlcov .coverage

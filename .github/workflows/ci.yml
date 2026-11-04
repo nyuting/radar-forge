@@ -1,6 +1,10 @@
-# Mirrors the .githooks/pre-push gate. The hooks can be bypassed with
-# --no-verify; this cannot. Both call the same Makefile targets so that
+# The .githooks/pre-push gate, plus the slow tests. The hooks can be bypassed
+# with --no-verify; this cannot. Both call the same Makefile targets so that
 # "it passed locally" means exactly one thing.
+#
+# Two test jobs run in parallel: `fast` (everything not marked slow, the same
+# selection as pre-push) answers in minutes; `check` runs the whole suite with
+# coverage, as before, and keeps its name so required status checks still match.
 name: CI
 
 on:
@@ -14,6 +18,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  fast:
+    name: fast tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --extra dev
+
+      - name: Tests not marked slow
+        run: make test-fast
+
   check:
     name: lint · types · tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -44,7 +71,7 @@ jobs:
       - name: Conventions
         run: make conventions
 
-      - name: Tests
+      - name: Tests, slow ones included
         run: uv run pytest --cov --cov-report=term-missing
 
   commit-messages:
