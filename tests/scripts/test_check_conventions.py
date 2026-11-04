@@ -1,7 +1,8 @@
-"""Tests for scripts/check_conventions.py: R7 slugs, R8 comment style, R9 control characters."""
+"""Tests for scripts/check_conventions.py: R7 slugs, R8 comments, R9 control, R10-R12."""
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import sys
 from pathlib import Path
@@ -73,9 +74,10 @@ def test_every_tracked_python_file_passes_r8() -> None:
     problems = [
         problem
         for rel in checker.git_paths(staged=False)
-        if rel.suffix == ".py"
-        for problem in checker.check_file(rel, set())
-        if problem.rule == "R8 comments"
+        if rel.suffix == ".py" and (REPO_ROOT / rel).is_file()
+        for problem in checker.check_comment_style(
+            rel, (REPO_ROOT / rel).read_text(encoding="utf-8").splitlines()
+        )
     ]
     assert problems == []
 
@@ -120,3 +122,106 @@ def test_a_heading_slugs_the_way_github_does(heading: str, slug: str) -> None:
 def test_a_repeated_heading_is_reached_with_a_numbered_suffix() -> None:
     """Catches R7 rejecting ``#notes-1``, GitHub's anchor for a file's second ``Notes``."""
     assert checker.heading_slugs(["Notes", "Notes", "Notes"]) == {"notes", "notes-1", "notes-2"}
+
+
+LIBRARY_MODULE = Path("src/radar_forge/pipelines/x.py")
+HOT_PATH_MODULE = Path("src/radar_forge/core/x.py")
+
+
+def _blocking(problems: list) -> list[bool]:
+    return [problem.blocking for problem in problems]
+
+
+@pytest.mark.parametrize(
+    ("n_lines", "expected"),
+    [(500, []), (501, [False]), (800, [False]), (801, [True])],
+)
+def test_module_length_warns_past_500_and_fails_past_800(n_lines: int, expected: list) -> None:
+    """Catches an off-by-one at either limit, or a warning that blocks the commit."""
+    assert _blocking(checker.check_module_length(LIBRARY_MODULE, n_lines)) == expected
+
+
+def test_a_grandfathered_module_only_warns() -> None:
+    rel = Path("src/radar_forge/core/detection.py")
+    assert _blocking(checker.check_module_length(rel, 5_000)) == [False]
+
+
+def test_tests_and_markdown_have_no_length_limit() -> None:
+    assert checker.check_module_length(Path("tests/core/test_x.py"), 5_000) == []
+    assert checker.check_module_length(Path("src/radar_forge/x.md"), 5_000) == []
+
+
+def test_every_grandfathered_module_still_needs_it() -> None:
+    """Catches a split module left in the set, so the set can only shrink."""
+    for rel in checker.LONG_MODULE_GRANDFATHER:
+        n_lines = len((REPO_ROOT / rel).read_text(encoding="utf-8").splitlines())
+        assert n_lines > checker.MODULE_MAX_LINES, f"{rel} is {n_lines} lines: drop it"
+
+
+def _r11_lines(source: str, rel: Path = HOT_PATH_MODULE) -> list[int]:
+    problems = checker.check_hot_path(ast.parse(source), rel)
+    assert all(problem.rule == "R11 hot path" for problem in problems)
+    return [problem.line for problem in problems]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "print(x)",
+        "import logging",
+        "import logging.handlers",
+        "from logging import getLogger",
+        "t = time.perf_counter()",
+        "t = time.time()",
+        "from time import perf_counter",
+        "f = open(path)",
+        "path.write_text(x)",
+        "Path(p).write_bytes(x)",
+    ],
+)
+def test_the_hot_path_rejects_io_logging_and_timing(line: str) -> None:
+    assert _r11_lines(f"x = 1\n{line}\n") == [2]
+
+
+def test_the_hot_path_allows_warnings_and_non_clock_time_names() -> None:
+    """Catches R11 rejecting warnings.warn, which style.md asks for, or any `.time` attribute."""
+    source = "import warnings\nwarnings.warn(msg, stacklevel=2)\nt = state.time_s\nimport time\n"
+    assert _r11_lines(source) == []
+
+
+def test_r11_applies_only_to_core() -> None:
+    assert _r11_lines("print(x)\n", LIBRARY_MODULE) == []
+
+
+def _r12_lines(source: str, rel: Path = LIBRARY_MODULE) -> list[int]:
+    problems = checker.check_errstate(ast.parse(source), rel, source.splitlines())
+    assert all(problem.rule == "R12 errstate" for problem in problems)
+    return [problem.line for problem in problems]
+
+
+@pytest.mark.parametrize(
+    "line",
+    ['with np.errstate(divide="ignore"):\n    y = 1 / x', 'np.seterr(all="ignore")'],
+)
+def test_silencing_floating_point_warnings_is_flagged(line: str) -> None:
+    assert _r12_lines(f"x = 1\n{line}\n") == [2]
+
+
+@pytest.mark.parametrize("on_line_above", [True, False])
+def test_an_errstate_exempt_comment_satisfies_r12(on_line_above: bool) -> None:
+    reason = "# errstate-exempt: forward scatter gives an infinite resolution"
+    call = 'with np.errstate(divide="ignore"):'
+    source = f"{reason}\n{call}\n" if on_line_above else f"{call}  {reason}\n"
+    assert _r12_lines(source + "    y = 1 / x\n") == []
+
+
+def test_an_empty_exempt_comment_does_not_satisfy_r12() -> None:
+    assert _r12_lines('with np.errstate(all="ignore"):  # errstate-exempt:\n    y = 1\n') == [1]
+
+
+def test_every_errstate_grandfathered_file_still_needs_it() -> None:
+    """Catches a file whose calls were justified but which was left in the set."""
+    for rel in checker.ERRSTATE_GRANDFATHER:
+        source = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        assert checker.check_errstate(tree, Path("src/x.py"), source.splitlines()), rel
