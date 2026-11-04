@@ -17,30 +17,21 @@ The [scenario companions](#scenario-companions) below are where you try each pag
 
 ## Conventions
 
-These are the rules the git hooks and CI enforce. Read them before your first contribution.
+The rules, and the check that enforces each, are summarised in [CLAUDE.md](../CLAUDE.md).
 
-- [**commits.md**](conventions/commits.md) — Conventional Commits, branch naming, PR titles,
-  changelog policy.
-- [**style.md**](conventions/style.md) — naming, the SI **unit-suffix convention**, the shared
-  **constants module**, NumPy docstrings and citation policy, typing, public API surface, NumPy
-  practice, errors. Every rule is tagged with what enforces it: `[ruff]`, `[mypy]`, `[hook]` or
-  `[review]`.
-- [**testing.md**](conventions/testing.md) — test layout, float-comparison tolerances,
-  analytic ground truth over golden data, fixtures and seeding, property-based tests, markers,
-  and radar-domain verification: which physics and statistics tests each pipeline stage needs.
-- [**review.md**](conventions/review.md) — doing and writing a PR review: where it lives, the order
-  the work is done in, its layout, how a finding and a check are phrased, the voice, and what to
-  review against.
-- [**refactoring.md**](conventions/refactoring.md) — what a refactor is for (one definition per
-  relation, visible steps, names that hold up) and how to show it changed nothing.
-- [**audit.md**](conventions/audit.md) — auditing existing code against the spec (Q1–Q8), the
-  changes an audit may make (C1–C4), and auditing and pruning the test suite.
+- [**style.md**](conventions/style.md) — what each tool enforces, then the judgement calls:
+  units, naming, data layout, docstrings and citations, typing, public API, NumPy practice, errors.
+- [**testing.md**](conventions/testing.md) — layout, tolerances, ground truth, markers, and which
+  radar-domain tests each stage needs.
+- [**review.md**](conventions/review.md) — reviewing a PR (also `/pr-review`), auditing code
+  against the spec (Q1–Q8) and refactoring (F1–F9).
+- [**commits.md**](conventions/commits.md) — Conventional Commits, branches, squash-merged PRs.
 
 ## Audits
 
 - [**pipelines-audit.md**](audits/pipelines-audit.md), [**tests-audit.md**](audits/tests-audit.md):
   the open items left from the audits of the pipelines and the tests, made by the method in
-  [audit.md](conventions/audit.md). Each file names the commit that holds its full report.
+  [review.md §5](conventions/review.md#5-auditing-existing-code). Each file names the commit that holds its full report.
 
 ## Getting started
 
