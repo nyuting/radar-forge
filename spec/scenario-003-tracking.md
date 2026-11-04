@@ -207,7 +207,7 @@ Added by this scenario, in new TOML blocks:
 | CFAR variant | CA, along the **range** axis (`axis = -1`) |
 | `n_train`, `n_guard` | 16, 4 per side. All 256,000 cells are tested. Where `wrap_range` is off, the 10,240 within 20 cells of a range end use a one-sided window of 16 cells; where it is on, a wrapped one |
 | `pfa` | **1e-5** — see §3 |
-| Threshold factor α | 11.417 dB, or 12.268 dB in the one-sided edge cells, from `cfar_threshold_factors` |
+| Threshold factor α | 11.417 dB inside. At a range end that does not wrap, `radar_forge.detection` clips the window and recalibrates each cell for the reference cells it keeps: 12.268 dB in the outermost `n_guard + 1` = 5 cells (16 cells), falling through cells 5 to 19 (11.798 dB at cell 10, 22 cells) towards 11.417 dB |
 | Measurement | slant range **and unfolded** range rate — see §5 |
 | `sigma_range_m` | 21.64 m — see §5.4 |
 | `sigma_velocity_mps` | 0.01725 m/s — see §5.4 |
@@ -835,7 +835,7 @@ what was measured against it.
 | 8 | The pictures exist | `track_00000.png`, `rd_00000.png` with markers, `tracks.csv`, `detections.csv` | `tests/visualisation/test_track_plot.py`, `tests/pipelines/test_scenario_003.py` |
 | — | `gate_threshold` matches the tabulated chi^2 quantile at each `dim` | 6.635 / 9.210 / 11.345 / 13.277 | `tests/core/test_tracking.py` |
 | — | EKF Jacobians match a central-difference derivative of `h` | 1e-8 | same |
-| — | `cfar_valid_mask` cell count, `cfar_threshold_factor` and the edge factor from `cfar_threshold_factors`, at the shipped TOML's operating point | 256 000 cells; alpha = 13.856 = 11.417 dB, 16.856 = 12.268 dB at the 20 cells of each end | `tests/core/test_detection.py::test_scenario_003_calibration_matches_its_specification` |
+| — | Tested cell count and threshold factors of `radar_forge.detection.cfar_detect` at the shipped TOML's operating point | 256 000 cells; alpha = 13.856 = 11.417 dB inside, 16.856 = 12.268 dB in the outermost 5 cells of each end, 15.127 = 11.798 dB at cell 10 | `tests/test_detection.py::test_scenario_003_calibration_matches_its_specification` |
 
 Run over **20 frames** rather than §12's 15: the bootstrap holds a track range-only for ten frames
 and S1's first fold change is at frame 17. Criterion 1 is measured from the first confirmation,
