@@ -148,8 +148,7 @@ and raises `ImportError` naming the extra to install.
 ## 8. Errors
 
 - **Guards first.** Validation is one block of `if …: msg = "…"; raise ValueError(msg)` at the
-  top; the maths follows uninterrupted. `tools/generate_reading_view.py` strips that block, so
-  code that mixes the two reads as a puzzle there.
+  top; the maths follows uninterrupted, so code that mixes the two is harder to read.
 - The message says what is wrong and what is expected.
 - `ValueError` for bad values, `TypeError` for bad types, `ImportError` for a missing extra.
   Never a bare `Exception`, never a silent clamp.

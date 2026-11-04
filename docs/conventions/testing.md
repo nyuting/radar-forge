@@ -7,7 +7,7 @@ and every warning is an error.
 ## 1. Layout
 
 `tests/` mirrors `src/radar_forge/` (`tests/core/`, `tests/core/tracking/`, `tests/pipelines/`,
-`tests/visualisation/`), plus `tests/scripts/` and `tests/tools/` for `scripts/` and `tools/`,
+`tests/visualisation/`), plus `tests/scripts/` for `scripts/`,
 package-wide checks at the top level (`test_import.py`, `test_public_api.py`,
 `test_docstrings.py`), and `tests/data/golden/`. One test module per source module. A test name
 states the property: `test_inverse_fourth_power_scaling`, not `test_received_power_2`. Fixtures

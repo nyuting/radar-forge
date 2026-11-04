@@ -1,5 +1,9 @@
 # Tracker 001 — Tracking architecture
 
+> Status: target architecture for the Phase 2 tracking PR. Until it merges the code exports
+> `UnscentedLinearisation`, `NearestNeighbour`, `RadialMotion`, `BistaticRangeDopplerModel`,
+> `MeasurementBatch` and the legacy `KalmanTracker`; see `src/radar_forge/core/tracking/`.
+>
 > The tracker after the tracking refactor: one Gaussian filter, a batched track bank, one
 > correction core, one scan loop. Running it is in [the user guide](../docs/user-guide/06-tracking.md).
 
@@ -225,11 +229,11 @@ not yet built; none changes the loop.
 
 ## 7. Integration, performance and validation
 
-**Data flow.** `core.detection.Detection` (cell indices, W) is converted by `pipelines/tracking.py`
-to the pipeline's detection report (m, m/s, positive receding), built into a `Scan` of
-`Measurement`s, passed to `Tracker.process(scan)`, and returned as one `TrackSnapshot` per live
-track plus the scan's association. `scripts/run_scenario.py` writes `tracks.csv` and
-`detections.csv` (`spec/data-001-formats.md` §6.5, §6.6). Settings come from the scenario TOML's
+**Data flow.** `core.detection.Detection` (cell indices, W) will be converted by
+`pipelines/tracking.py` to the pipeline's detection report (m, m/s, positive receding), built into
+a `Scan` of `Measurement`s, passed to `Tracker.process(scan)`, and returned as one `TrackSnapshot`
+per live track plus the scan's association. `scripts/run_scenario.py` will write `tracks.csv` and
+`detections.csv` from them (`spec/data-001-formats.md` §6.5, §6.6). Settings come from the scenario TOML's
 `[tracking]` table, read once by the pipeline; scenario-only settings stay in `pipelines/`. Every
 measurement in a scan carries the scan's time and scans arrive in order. Every sensor registers in
 one `Tracker`, so one target has one track whichever sensor sees it.

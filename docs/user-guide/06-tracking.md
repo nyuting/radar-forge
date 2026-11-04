@@ -292,8 +292,6 @@ from here.
 - **A target that turns makes the track fall behind, then catch up.** The motion model is
   constant velocity, so a turn is "noise" to it. The process noise decides how quickly it
   catches up; see [Choosing the process noise](#choosing-the-process-noise).
-- Scenario 003 shows [three more](../../scenarios/scenario_003_tracking.toml), seen
-  in its plots.
 
 ## Limits
 
@@ -358,3 +356,19 @@ from here.
   1970.
 - [Stone Soup](https://stonesoup.readthedocs.io), whose split into components this package
   follows.
+
+## Three things that look like bugs and are not
+
+Scenario 003's plots show three behaviours that read as faults and are not.
+
+- **The range-1D transition matrix carries $-T$, not $+T$.** While the library is closing-positive
+  a closing target's range must shrink, so the matrix is the textbook constant-velocity pair with
+  the sign of the rate flipped. A $+T$ version gives a plausible picture in which the filter
+  dead-reckons the target the wrong way down the line of sight.
+- **A track spends its first ten or so frames measuring range only.** Track-aided unfolding needs
+  a velocity prediction to select a fold, and a new track has none, so it bootstraps on a batch
+  range-slope estimator instead.
+- **On S1 the fold index is right about 86 % of the time, and no tracker can do better.** The
+  target's range rate moves by more than half a fold span in 3.4 % of frames, so the information
+  is not there. The dual-PRF variant is right every frame, because the waveform resolves what the
+  tracker cannot.

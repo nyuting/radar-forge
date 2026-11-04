@@ -55,7 +55,7 @@ out/<run>/
 ├── tracks.csv             # §6.6 (tracking runs)
 ├── metrics.csv            # §6.9 (tracking runs)
 ├── iq_00000.npz …         # §6.7, one per frame; --no-iq skips them
-├── rd_00000.png …         # §6.8
+├── rd{suffix}_00000.png … # §6.8, suffix empty or _burst{i}
 └── track_00000.png …
 ```
 
@@ -109,9 +109,12 @@ scenario file may contain.
 ### 6.3 Trajectory input
 
 A CSV, one row per fix, read by `load_flight_csv` in `pipelines/trajectories.py`. Columns:
-`time_s` (s, from the first fix), `latitude_deg`, `longitude_deg` (WGS-84), and optionally
-`altitude_m` (above the ellipsoid) and `target_id`. It rejects the old `timestamp,lat,lon` header
-with a message naming the new columns.
+exactly one of `time_utc` (ISO 8601, a trailing `Z` accepted) and `time_s` (s, for a synthetic
+track), then `latitude_deg` and `longitude_deg` (WGS-84), and optionally `target_id` and
+`altitude_m` (above the ellipsoid). `epoch_utc` in §5 and §6.1 is non-null only when the file has
+`time_utc`: it is the first fix's time, and `time_s` is then measured from it. A `time_s` file has
+no epoch. The loader rejects the old `timestamp,lat,lon` header with a message naming the new
+columns, and a file whose `target_id` names more than one target.
 
 ### 6.4 `truth.csv`
 
@@ -185,8 +188,10 @@ output and is regenerable from the scenario file and seed.
 
 ### 6.8 Figures
 
-`rd_NNNNN.png`, `track_NNNNN.png` and an `.mp4` assembled from them, in the run root. They are
-decibel renderings for people, and nothing reads them back.
+`rd{suffix}_NNNNN.png` and `track_NNNNN.png`, in the run root, where `suffix` is empty for a
+single burst and `_burst{i}` for each burst of a multi-burst run. Movies are assembled from them
+under the same rule: `rd{suffix}.mp4` and `track.mp4`. They are decibel renderings for people, and
+nothing reads them back.
 
 ### 6.9 `metrics.csv`
 
@@ -195,7 +200,7 @@ Tidy and long, one row per metric per scope. The unit is in the metric's name, s
 
 | Column | dtype | Req. | Meaning |
 | :--- | :--- | :--- | :--- |
-| `metric` | string | R | `range_rmse_m`, `range_rate_rmse_mps`, `mean_nis_dim2`, `track_breaks`. NIS is averaged per measurement dimension `k` because its expected value is `k` |
+| `metric` | string | R | `range_rmse_m`, `range_rate_rmse_mps`, `mean_nis_dim{k}`, with `k` the measurement dimension of that run (1 for range-only, 2 for range and rate); its expected value is `k` |
 | `track_id`, `target_id` | string | O | Empty for a run-level metric |
 | `frame_start`, `frame_end` | int | R | The inclusive frame window the metric covers |
 | `value` | float64 | R | |
@@ -215,7 +220,15 @@ Tidy and long, one row per metric per scope. The unit is in the metric's name, s
 
 ## 8. Decisions
 
-Moved here from the retired structure spec; each binds the code.
+Target architecture for Phase 2. Until the physics PR merges, the code has `Radar` and
+`BistaticRadar` selected by the presence of a `[transmitter_site]` table. Moved here from the
+retired structure spec.
+
+### D5 — Velocity sign
+
+The current code is closing-positive; §5 of this file states the derivative convention (positive
+receding) that the Phase 2 physics PR switches the repo to. Until then every `*_rate_mps` and
+velocity column in the files is closing-positive.
 
 ### D1 — The path set is the backend contract
 

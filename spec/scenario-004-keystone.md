@@ -445,7 +445,7 @@ This scenario claims:
 
 ```
 scenarios/scenario_004_keystone_{k1,k2,k3}.toml
-spec/scenario-004-keystone.md, docs/scenarios/scenario-004-keystone.md
+spec/scenario-004-keystone.md, a row in the Scenarios table of docs/README.md
 src/radar_forge/core/{migration,datachip}.py                       (new)
 src/radar_forge/core/propagation.py   (widened: two path fields, kinematics)
 src/radar_forge/core/signal.py        (widened: polynomial range, range gate)
