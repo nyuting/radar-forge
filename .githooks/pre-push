@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Full gate: everything CI runs, run before anything leaves your machine.
+# Push gate: lint, types, conventions and the fast tests (everything not marked
+# slow). CI runs the full suite, slow tests included, on every pull request.
 # Order is cheapest-first so a formatting slip fails in a second, not a minute.
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,7 +30,7 @@ done
 [ "$HAS_WORK" = "0" ] && exit 0
 
 require_uv
-say "running the full gate (lint → types → tests)…"
+say "running the push gate (lint → types → conventions → fast tests)…"
 
 uv run ruff format --check . >/dev/null || fail \
     "Repository is not formatted." "Fix:  make fmt"
@@ -40,18 +41,17 @@ uv run ruff check . || fail \
 ok "ruff check"
 
 uv run mypy || fail \
-    "mypy found type errors in src/." \
+    "mypy found type errors." \
     "Public functions need complete annotations; see docs/conventions/style.md."
 ok "mypy"
 
-python3 "${HOOK_DIR}/../scripts/check_conventions.py" || exit 1
+uv run python "${HOOK_DIR}/../scripts/check_conventions.py" || exit 1
 
-if ! uv run pytest -q; then
-    fail "The test suite failed." \
-         "Re-run it directly:  make test" \
-         "If the slow tests are the bottleneck day to day, iterate with:  make test-fast" \
-         "(pre-push still runs everything — that is deliberate.)"
+if ! uv run pytest -m "not slow" -q; then
+    fail "The fast test suite failed." \
+         "Re-run it directly:  make test-fast" \
+         "CI also runs the slow tests; run them locally with:  make test"
 fi
-ok "pytest"
+ok "pytest (not slow)"
 
 say "${GREEN}all checks passed${RESET} — pushing."

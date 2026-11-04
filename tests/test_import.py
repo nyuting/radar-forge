@@ -10,6 +10,8 @@ this module runs, the test session has usually imported visualisation already.
 import subprocess
 import sys
 
+import pytest
+
 import radar_forge
 
 
@@ -23,6 +25,7 @@ def test_the_public_api_is_what_it_re_exports():
         assert hasattr(radar_forge, name)
 
 
+@pytest.mark.slow
 def test_importing_the_package_does_not_pull_in_the_visualisation_extra():
     """visualisation needs matplotlib, so importing it at top level costs everyone.
 
@@ -30,6 +33,8 @@ def test_importing_the_package_does_not_pull_in_the_visualisation_extra():
     ``pipelines``: scenario-001 A8 and spec/structure.md B.2 rule 2 both ask
     for the pipelines without extras, and a second subprocess cost 0.7 s for
     that one attribute.
+
+    Slow: a fresh interpreter pays the whole cold import of numpy and scipy.
     """
     result = subprocess.run(
         [

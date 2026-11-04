@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Enforce the conventions that ruff and mypy cannot express.
 
-Pure standard library on purpose: this runs from a git hook, possibly before
-``uv sync`` has happened, and from CI.
+Pure standard library on purpose: the hooks and CI call it through ``uv run``,
+but it must also run under any Python with no environment at all.
 
 Rules
 -----
@@ -21,13 +21,19 @@ R8  Python comments carry no hash banners and no ``Inputs:``/``Outputs:``
     blocks; parameters and returns belong in the NumPy docstring.
 R9  Python and Markdown files hold no control characters other than tab, line
     feed and carriage return, such as the BEL a tool writes for ``\\alpha``.
+R10 A Python module under ``src/``, ``scripts/`` or ``tools/`` warns past 500
+    lines and fails past 800, except the files grandfathered below.
+R11 The hot path, ``src/radar_forge/core/``, does no I/O, logging or timing: no
+    ``print``, ``open``, ``Path.write_*``, ``logging`` or ``time`` clocks.
+R12 ``np.errstate``/``np.seterr`` in ``src/`` carry ``# errstate-exempt: <reason>``.
 
-Each failure prints the rule, the fix, and where the rule is documented.
+Each failure prints the rule, the fix, and where the rule is documented. A
+warning (R10 between the two limits) is printed and does not block.
 
 Usage
 -----
-    python3 scripts/check_conventions.py            # every tracked file
-    python3 scripts/check_conventions.py --staged   # staged files only (hook)
+    uv run python scripts/check_conventions.py            # every tracked file
+    uv run python scripts/check_conventions.py --staged   # staged files only (hook)
 """
 
 from __future__ import annotations
@@ -56,6 +62,7 @@ class Problem(NamedTuple):
     message: str
     fix: str
     doc: str = STYLE
+    blocking: bool = True
 
     def render(self) -> str:
         loc = f"{self.path}:{self.line}" if self.line else str(self.path)
@@ -67,9 +74,7 @@ class Problem(NamedTuple):
         )
 
 
-# --------------------------------------------------------------------------- #
-# R1 — configuration lives in TOML
-# --------------------------------------------------------------------------- #
+# --- R1 — configuration lives in TOML ---
 
 BANNED_CONFIG = {
     "setup.py": "declare the build in pyproject.toml [build-system] / [project]",
@@ -85,19 +90,12 @@ BANNED_CONFIG = {
     "requirements-dev.txt": "dev deps go in [project.optional-dependencies].dev",
 }
 
-# --------------------------------------------------------------------------- #
-# R2 — the import package is Python
-# --------------------------------------------------------------------------- #
+# --- R2 — the import package is Python ---
 
 ALLOWED_PACKAGE_SUFFIXES = {".py", ".pyi", ".typed", ".json", ".toml", ".csv"}
 
-# --------------------------------------------------------------------------- #
-# R4 — constants are defined once
-# --------------------------------------------------------------------------- #
+# --- R4 — constants are defined once ---
 
-# Literal values that must only ever appear in core/constants.py, mapped to the
-# canonical name to import instead. Matched on the normalised numeric token, so
-# 3e8, 3.0e8 and 300000000.0 are all caught.
 # Literal values that must only ever appear in core/constants.py, paired with
 # the canonical name to import instead. Written as pairs rather than a dict
 # because several spellings collapse to the same float (6_371_000.0 is 6.371e6),
@@ -134,9 +132,7 @@ def canonical_constant_names() -> set[str]:
     return set()
 
 
-# --------------------------------------------------------------------------- #
-# R5 — unit suffixes
-# --------------------------------------------------------------------------- #
+# --- R5 — unit suffixes ---
 
 # Bare physical-quantity names, mapped to the suffixes that would make them
 # unambiguous. The point is that `gain` does not say linear-or-dB and `range`
@@ -182,48 +178,18 @@ BARE_UNIT_NAMES: dict[str, str] = {
 }
 
 # A name is considered unit-bearing if it ends in one of these.
+# fmt: off
 UNIT_SUFFIXES = (
-    "_m",
-    "_m2",
-    "_km",
-    "_cm",
-    "_mm",
-    "_s",
-    "_us",
-    "_ns",
-    "_ms",
-    "_hz",
-    "_khz",
-    "_mhz",
-    "_ghz",
-    "_rad",
-    "_deg",
-    "_w",
-    "_kw",
-    "_mw",
-    "_dbm",
-    "_dbw",
-    "_db",
-    "_dbi",
-    "_dbsm",
-    "_mps",
-    "_kmh",
-    "_k",
-    "_j",
-    "_v",
-    "_bins",
-    "_samples",
-    "_wavelengths",
-    "_linear",
-    "_norm",
+    "_m", "_m2", "_km", "_cm", "_mm", "_s", "_us", "_ns", "_ms", "_hz", "_khz", "_mhz", "_ghz",
+    "_rad", "_deg", "_w", "_kw", "_mw", "_dbm", "_dbw", "_db", "_dbi", "_dbsm", "_mps", "_kmh",
+    "_k", "_j", "_v", "_bins", "_samples", "_wavelengths", "_linear", "_norm",
 )
+# fmt: on
 
 # Names that look bare but are dimensionless, a count, or an index.
 UNIT_EXEMPT = {"n", "i", "j", "k", "idx", "axis", "out", "dtype", "rng", "seed", "self", "cls"}
 
-# --------------------------------------------------------------------------- #
-# R6 — broadcasting
-# --------------------------------------------------------------------------- #
+# --- R6 — broadcasting ---
 
 BROADCAST_EXEMPT = re.compile(r"#\s*broadcast-exempt:\s*\S")
 TILE_FUNCS = {"tile", "repeat", "broadcast_to"}
@@ -348,9 +314,7 @@ def check_broadcast(tree: ast.AST, rel: Path, lines: list[str]) -> list[Problem]
             continue
         if not (isinstance(func.value, ast.Name) and func.value.id in {"np", "numpy"}):
             continue
-        # An explanation on the call line or the line above satisfies the rule.
-        window = lines[max(0, node.lineno - 2) : node.lineno]
-        if any(BROADCAST_EXEMPT.search(line) for line in window):
+        if is_justified(node.lineno, lines, BROADCAST_EXEMPT):
             continue
         problems.append(
             Problem(
@@ -364,6 +328,12 @@ def check_broadcast(tree: ast.AST, rel: Path, lines: list[str]) -> list[Problem]
             )
         )
     return problems
+
+
+def is_justified(lineno: int, lines: list[str], pattern: re.Pattern[str]) -> bool:
+    """Return True if line *lineno* (1-based) or the line above matches *pattern*."""
+    window = lines[max(0, lineno - 2) : lineno]
+    return any(pattern.search(line) for line in window)
 
 
 def check_path_rules(rel: Path) -> list[Problem]:
@@ -476,9 +446,7 @@ def check_markdown_anchors(rel: Path) -> list[Problem]:
     return problems
 
 
-# --------------------------------------------------------------------------- #
-# R8 — comment style
-# --------------------------------------------------------------------------- #
+# --- R8 — comment style ---
 
 # Ten or more leading hashes: a decorative banner. The section header used in
 # this file ("# ---- #") starts "# " and so never matches.
@@ -530,9 +498,7 @@ def check_comment_style(rel: Path, lines: list[str]) -> list[Problem]:
     return problems
 
 
-# --------------------------------------------------------------------------- #
-# R9 — no control characters
-# --------------------------------------------------------------------------- #
+# --- R9 — no control characters ---
 
 # C0 controls and DEL, except tab, line feed and carriage return: a CRLF working
 # copy is the editor's business, and git normalises it on commit.
@@ -564,6 +530,189 @@ def check_control_characters(rel: Path, text: str) -> list[Problem]:
     return problems
 
 
+# --- R10 — module length ---
+
+MODULE_WARN_LINES = 500
+MODULE_MAX_LINES = 800
+LENGTH_SCOPE = {"src", "scripts", "tools"}
+
+# Modules already over MODULE_MAX_LINES when R10 was added. They warn instead of
+# failing. The set only shrinks: once a module is split below the limit, delete
+# its line (tests/scripts/test_check_conventions.py fails until you do).
+LONG_MODULE_GRANDFATHER: frozenset[Path] = frozenset(
+    {
+        PKG / "core" / "detection.py",
+        PKG / "core" / "radar.py",
+        PKG / "core" / "tracking" / "kalman.py",
+        PKG / "core" / "tracking" / "measurement_models.py",
+        PKG / "core" / "tracking" / "tracker.py",
+        PKG / "pipelines" / "scenarios.py",
+        PKG / "pipelines" / "tracking.py",
+        Path("scripts") / "run_scenario.py",
+    }
+)
+
+
+def check_module_length(rel: Path, n_lines: int) -> list[Problem]:
+    """R10: a long module is a prompt to split it; a very long one must be split."""
+    if rel.suffix != ".py" or rel.parts[0] not in LENGTH_SCOPE or n_lines <= MODULE_WARN_LINES:
+        return []
+    grandfathered = n_lines > MODULE_MAX_LINES and rel in LONG_MODULE_GRANDFATHER
+    over_max = n_lines > MODULE_MAX_LINES and not grandfathered
+    limit = MODULE_WARN_LINES if n_lines <= MODULE_MAX_LINES else MODULE_MAX_LINES
+    note = " (grandfathered: split it before it grows)" if grandfathered else ""
+    return [
+        Problem(
+            rel,
+            0,
+            "R10 length",
+            f"{n_lines} lines, over the {limit}-line limit{note}.",
+            "split it along the concepts it holds: one coherent concept per module.",
+            blocking=over_max,
+        )
+    ]
+
+
+# --- R11 — the hot path does no I/O, logging or timing ---
+
+HOT_PATH = PKG / "core"
+# Modules under core/ that broke R11 when it was added. None did.
+HOT_PATH_GRANDFATHER: frozenset[Path] = frozenset()
+HOT_PATH_BUILTINS = {"print", "open"}
+HOT_PATH_CLOCKS = {"time", "time_ns", "perf_counter", "perf_counter_ns", "monotonic"}
+HOT_PATH_WRITES = {
+    "write_text",
+    "write_bytes",
+    "write",
+    "open",
+    "save",
+    "savetxt",
+    "savez",
+    "savez_compressed",
+    "tofile",
+}
+
+
+def module_aliases(tree: ast.AST, module: str) -> set[str]:
+    """Return every local name bound to *module* by ``import module [as name]``."""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == module:
+                    names.add(alias.asname or alias.name)
+    return names
+
+
+def hot_path_offence(node: ast.AST, time_names: set[str]) -> str | None:
+    """Name what *node* does that the hot path may not, or return None."""
+    if isinstance(node, ast.Import):
+        if any(alias.name.split(".")[0] == "logging" for alias in node.names):
+            return "imports logging"
+        return None
+    if isinstance(node, ast.ImportFrom):
+        root = (node.module or "").split(".")[0]
+        if root == "logging":
+            return "imports logging"
+        if root == "time" and any(alias.name in HOT_PATH_CLOCKS for alias in node.names):
+            return "imports a clock from time"
+        return None
+    if not isinstance(node, ast.Call):
+        return None
+    func = node.func
+    if isinstance(func, ast.Name) and func.id in HOT_PATH_BUILTINS:
+        return f"calls {func.id}()"
+    if isinstance(func, ast.Attribute) and func.attr in HOT_PATH_WRITES:
+        return f"calls .{func.attr}()"
+    if (
+        isinstance(func, ast.Attribute)
+        and func.attr in HOT_PATH_CLOCKS
+        and isinstance(func.value, ast.Name)
+        and func.value.id in time_names
+    ):
+        return f"calls time.{func.attr}()"
+    return None
+
+
+def check_hot_path(tree: ast.AST, rel: Path) -> list[Problem]:
+    """R11: core/ computes; the layers around it log, time and write."""
+    if rel.parts[: len(HOT_PATH.parts)] != HOT_PATH.parts or rel in HOT_PATH_GRANDFATHER:
+        return []
+    problems: list[Problem] = []
+    time_names = module_aliases(tree, "time") | {"time"}
+    for node in ast.walk(tree):
+        offence = hot_path_offence(node, time_names)
+        if offence is None:
+            continue
+        problems.append(
+            Problem(
+                rel,
+                getattr(node, "lineno", 0),
+                "R11 hot path",
+                f"core/ {offence}; the hot path does no I/O, logging or timing.",
+                "return the value and let pipelines/ or scripts/ print, log, time or "
+                "write it. Tell the user about a recoverable problem with warnings.warn.",
+            )
+        )
+    return problems
+
+
+# --- R12 — floating-point warnings are not silenced without a reason ---
+
+ERRSTATE_EXEMPT = re.compile(r"#\s*errstate-exempt:\s*\S")
+ERRSTATE_FUNCS = {"errstate", "seterr"}
+# Files that called np.errstate with no exempt comment when R12 was added. The
+# change that added R12 could not edit src/; Phase 2 of the governance plan adds
+# `# errstate-exempt: <reason>` to each call and empties this set.
+ERRSTATE_GRANDFATHER: frozenset[Path] = frozenset(
+    {
+        PKG / "core" / "radar.py",
+        PKG / "visualisation" / "plotting.py",
+    }
+)
+
+
+def check_errstate(tree: ast.AST, rel: Path, lines: list[str]) -> list[Problem]:
+    """R12: silencing a floating-point warning hides the next bug along with it."""
+    if rel in ERRSTATE_GRANDFATHER:
+        return []
+    numpy_names = module_aliases(tree, "numpy") | {"np", "numpy"}
+    bare_names = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "numpy"
+        for alias in node.names
+        if alias.name in ERRSTATE_FUNCS
+    }
+    problems: list[Problem] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in ERRSTATE_FUNCS:
+            if not (isinstance(func.value, ast.Name) and func.value.id in numpy_names):
+                continue
+            called = func.attr
+        elif isinstance(func, ast.Name) and func.id in bare_names:
+            called = func.id
+        else:
+            continue
+        if is_justified(node.lineno, lines, ERRSTATE_EXEMPT):
+            continue
+        problems.append(
+            Problem(
+                rel,
+                node.lineno,
+                "R12 errstate",
+                f"np.{called}() silences a floating-point warning with no stated reason.",
+                "rearrange the maths, mask the case, or raise ValueError. If the NaN or inf "
+                "is the documented answer, scope the narrowest category to one expression "
+                "and add  # errstate-exempt: <reason>",
+            )
+        )
+    return problems
+
+
 def check_file(rel: Path, canonical: set[str]) -> list[Problem]:
     """Run every rule against one repository-relative path."""
     problems = check_path_rules(rel)
@@ -579,6 +728,7 @@ def check_file(rel: Path, canonical: set[str]) -> list[Problem]:
     if rel.suffix == ".py" and (REPO / rel).is_file():
         lines = (REPO / rel).read_text(encoding="utf-8").splitlines()
         problems += check_comment_style(rel, lines)
+        problems += check_module_length(rel, len(lines))
 
     if rel.parts[:2] != PKG.parts or rel.suffix != ".py":
         return problems
@@ -607,6 +757,8 @@ def check_file(rel: Path, canonical: set[str]) -> list[Problem]:
     problems += check_units(tree, rel)
     problems += check_constants(tree, rel, canonical)
     problems += check_broadcast(tree, rel, lines)
+    problems += check_hot_path(tree, rel)
+    problems += check_errstate(tree, rel, lines)
     return problems
 
 
@@ -628,9 +780,13 @@ def main() -> int:
     for rel in git_paths(staged="--staged" in sys.argv[1:]):
         problems += check_file(rel, canonical)
 
-    if problems:
+    for problem in problems:
+        if not problem.blocking:
+            print(f"  warning [{problem.rule}] {problem.path}: {problem.message}")
+    blocking = [problem for problem in problems if problem.blocking]
+    if blocking:
         print("\n\033[0;31m\033[1m✗ blocked:\033[0m repository convention violations\n")
-        for problem in problems:
+        for problem in blocking:
             print(problem.render())
             print()
         return 1

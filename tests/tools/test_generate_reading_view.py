@@ -141,6 +141,9 @@ def generated(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, list[Path
     return out, tool.generate(PACKAGE_ROOT, out)
 
 
+# Slow, with every test that uses `generated`: that fixture regenerates the
+# reading view of the whole package.
+@pytest.mark.slow
 def test_generate_runs_clean_over_the_package(generated: tuple[Path, list[Path]]) -> None:
     out, written = generated
 
@@ -150,6 +153,7 @@ def test_generate_runs_clean_over_the_package(generated: tuple[Path, list[Path]]
     assert (out / "index.html") in written
 
 
+@pytest.mark.slow
 def test_generated_package_is_valid_stripped_python(generated: tuple[Path, list[Path]]) -> None:
     out, _ = generated
 
@@ -167,6 +171,7 @@ def test_generated_package_is_valid_stripped_python(generated: tuple[Path, list[
                 assert not isinstance(node.body[-1], ast.Raise), f"guard survived in {path}"
 
 
+@pytest.mark.slow
 def test_generated_package_keeps_imports_and_returns(generated: tuple[Path, list[Path]]) -> None:
     out, _ = generated
 
@@ -186,6 +191,7 @@ def test_generated_package_keeps_imports_and_returns(generated: tuple[Path, list
     assert reading_returns == source_returns
 
 
+@pytest.mark.slow
 def test_index_links_every_generated_file(generated: tuple[Path, list[Path]]) -> None:
     out, _ = generated
 
@@ -194,6 +200,7 @@ def test_index_links_every_generated_file(generated: tuple[Path, list[Path]]) ->
         assert f'href="{path.relative_to(out).as_posix()}.html"' in index
 
 
+@pytest.mark.slow
 def test_every_module_has_a_page_showing_its_code(generated: tuple[Path, list[Path]]) -> None:
     out, _ = generated
 

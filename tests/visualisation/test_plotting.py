@@ -77,6 +77,7 @@ class TestRequirePyplot:
 
 
 class TestSaveFigure:
+    @pytest.mark.slow  # over a second: matplotlib import
     def test_writes_the_file_and_closes_the_figure(self, tmp_path) -> None:
         """Closing is the contract: a 16,500-frame run must not keep its figures.
 

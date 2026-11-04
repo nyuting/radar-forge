@@ -3,7 +3,8 @@
 Split in two. The helpers -- fold arithmetic, the least-squares slope, the
 bootstrap sizing -- have closed-form answers and are tested against them. The
 detection path needs a real range-Doppler map, so those tests synthesise one
-frame of scenario 001's S1 and are marked slow.
+frame of scenario 001's S1. The classes that run `ScenarioTracker` over many
+such frames (`TestScenarioTrackerUnfolding`, `TestUkfPath`) are marked slow.
 
 The Doppler-wrap test is the one worth reading. A target sitting on the
 velocity wrap is returned by `cluster_detections` as two clusters at opposite
@@ -419,6 +420,8 @@ class TestFrameDetections:
             assert measurement.fold_index is None
 
 
+# Slow: each test runs ScenarioTracker over several synthesised frames.
+@pytest.mark.slow
 class TestScenarioTrackerUnfolding:
     """The three unfolding modes of §5.3."""
 
@@ -1014,6 +1017,8 @@ UKF_SETTINGS = TrackingConfig(
 )
 
 
+# Slow: each test runs the UKF tracker over several synthesised frames.
+@pytest.mark.slow
 class TestUkfPath:
     """The UKF tracker on hand-built maps, where the truth is known exactly."""
 

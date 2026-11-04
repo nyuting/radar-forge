@@ -388,6 +388,8 @@ def test_each_crossing_track_carries_its_own_targets_velocity() -> None:
     np.testing.assert_allclose([s.state[1] for s in snapshots], [3, -3], rtol=0, atol=0.1)
 
 
+# Slow: runs the full tracker over many scans of clutter.
+@pytest.mark.slow
 def test_a_target_keeps_one_track_through_clutter_and_missed_detections(
     rng: np.random.Generator,
 ) -> None:

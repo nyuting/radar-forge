@@ -53,6 +53,8 @@ def test_the_gate_threshold_grows_with_dimension() -> None:
     assert len(set(thresholds)) == len(thresholds)
 
 
+# Slow: a Monte Carlo over enough innovations to bound the acceptance rate.
+@pytest.mark.slow
 def test_the_gate_accepts_the_fraction_of_true_measurements_it_claims(
     rng: np.random.Generator,
 ) -> None:

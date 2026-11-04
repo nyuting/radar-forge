@@ -72,7 +72,7 @@ ok "no debug statements or conflict markers"
 NB_FILES="$(staged_files ipynb)"
 if [ -n "$NB_FILES" ]; then
     for nb in $NB_FILES; do
-        if ! python3 "${HOOK_DIR}/../scripts/check_notebook_clean.py" "$nb"; then
+        if ! uv run python "${HOOK_DIR}/../scripts/check_notebook_clean.py" "$nb"; then
             fail "'$nb' has stored cell outputs or execution counts." \
                  "Clear them:  uv run jupyter nbconvert --clear-output --inplace '$nb'" \
                  "Teaching notebooks are reviewed as source, and outputs make diffs unreadable."
@@ -82,4 +82,4 @@ if [ -n "$NB_FILES" ]; then
 fi
 
 # --- 6. Repo conventions ---------------------------------------------------
-python3 "${HOOK_DIR}/../scripts/check_conventions.py" --staged || exit 1
+uv run python "${HOOK_DIR}/../scripts/check_conventions.py" --staged || exit 1
