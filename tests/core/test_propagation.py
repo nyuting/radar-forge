@@ -314,3 +314,31 @@ class TestPathRelations:
         amplitude = path_amplitude_linear(power_w, phase_rad)
         np.testing.assert_allclose(np.abs(amplitude) ** 2, power_w, rtol=1e-14)
         np.testing.assert_allclose(np.angle(amplitude[:1]), phase_rad[:1], rtol=1e-15)
+
+
+class TestRangeSumAt:
+    """How a path set answers "how long is each path at time t"."""
+
+    def test_unchanged_at_time_zero(self) -> None:
+        paths = line_of_sight_paths(S1_RADAR, [10.0e3, 15.0e3], [80.0, -40.0], 10.0)
+        range_sum_m = paths.range_sum_at_m(0.0, S1_RADAR.wavelength_m)
+        np.testing.assert_array_equal(range_sum_m, paths.range_sum_m)
+
+    def test_shape_is_slow_time_by_paths(self) -> None:
+        paths = line_of_sight_paths(S1_RADAR, [10.0e3, 15.0e3, 20.0e3], 0.0, 10.0)
+        slow_time_s = np.arange(5) * S1_RADAR.transmitter.pulse_repetition_interval_s
+        assert paths.range_sum_at_m(slow_time_s, S1_RADAR.wavelength_m).shape == (5, 3)
+
+    def test_monostatic_closing_target_shortens_at_twice_its_velocity(self) -> None:
+        """A closing target at v shortens the two-way route by 2 v t."""
+        paths = line_of_sight_paths(S1_RADAR, 10.0e3, 80.0, 10.0)
+        slow_time_s = np.array([0.0, 0.5, 1.0])
+        range_sum_m = paths.range_sum_at_m(slow_time_s, S1_RADAR.wavelength_m)[:, 0]
+        np.testing.assert_allclose(range_sum_m, 20.0e3 - 2.0 * 80.0 * slow_time_s, rtol=1e-12)
+
+    def test_bistatic_path_shortens_at_its_range_sum_rate(self) -> None:
+        """No factor of two: the bistatic rate is already the whole route's."""
+        paths = bistatic_line_of_sight_paths(S1_PAIR, 12.0e3, 15.0e3, 160.0, 10.0)
+        slow_time_s = np.array([0.0, 0.25, 2.0])
+        range_sum_m = paths.range_sum_at_m(slow_time_s, S1_PAIR.wavelength_m)[:, 0]
+        np.testing.assert_allclose(range_sum_m, 27.0e3 - 160.0 * slow_time_s, rtol=1e-12)
