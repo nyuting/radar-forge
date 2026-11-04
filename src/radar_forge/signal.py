@@ -1,41 +1,17 @@
 r"""Baseband signals: the transmitted waveform, and propagation paths to complex IQ.
 
 :func:`lfm_chirp` is the waveform, :func:`ambiguity_function` what it can
-resolve, and the FMCW relations (:func:`beat_frequency_hz` and its inverse) map
-a bistatic range to the tone a deramping receiver hears. The generators turn a
-:class:`~radar_forge.propagation.PropagationPaths` into a ``(n_pulses,
-n_samples)`` cube, monostatic and bistatic alike:
-
-:func:`fmcw_deramp_baseband`
-    A continuous chirp, deramped against the transmitted sweep: range appears
-    as a beat frequency.
-:func:`pulsed_baseband`
-    A pulse train sampled over each repetition interval, left for a matched
-    filter: range appears as a delay, folded modulo the interval.
-
-**Doppler sign.** A path's Doppler shift is positive closing
-(:func:`~radar_forge.propagation.doppler_shift_hz`), and both cubes carry it so:
-a closing target advances in slow-time phase. In an FMCW deramp the range and
-Doppler signs are locked together, since both come from one delay; a **down**
-sweep is the one that puts range at a positive beat frequency and Doppler on
-its true sign, so the FMCW generator models a down sweep [1]_, [2]_.
-
-**Approximations.** Stop-and-hop: a route's length is held across each pulse
-and advanced between pulses [1]_, which the FMCW generator checks and warns
-about. Constant Doppler rate within a coherent interval.
-
-**Memory.** The per-path signal, ``(n_pulses, n_paths, n_samples)`` complex,
-is summed over chunks of paths no larger than ``max_bytes``, so memory does not
-grow with the path count. Paths are added in the same order whatever the
-chunking, so the cube is bit-identical to an unchunked sum.
+resolve, and the FMCW relations map a bistatic range to its beat tone. The
+generators turn a :class:`~radar_forge.propagation.PropagationPaths` into a
+``(n_pulses, n_samples)`` cube, monostatic and bistatic alike, under
+stop-and-hop: range as a beat frequency (:func:`fmcw_deramp_baseband`) or as a
+delay folded modulo the PRI (:func:`pulsed_baseband`). A closing target
+advances in slow-time phase.
 
 References
 ----------
-.. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
-       McGraw-Hill, 2014, §2.6.2 (stop-and-hop), ch. 4 (the matched filter and
-       the ambiguity function), §4.6.1 (linear FM), §4.6.5 (stretch processing).
-.. [2] G. L. Charvat, *Small and Short-Range Radar Systems*, CRC Press, 2014,
-       ch. 3 (FMCW deramp and the beat frequency).
+.. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed., McGraw-Hill, 2014.
+.. [2] G. L. Charvat, *Small and Short-Range Radar Systems*, CRC Press, 2014.
 """
 
 from __future__ import annotations
@@ -71,7 +47,7 @@ _BYTES_PER_COMPLEX = 16
 
 
 def range_resolution_m(bandwidth_hz: ArrayLike) -> NDArray[np.float64]:
-    r"""Return the monostatic range resolution :math:`c/2B`, m, set by bandwidth alone [1]_."""
+    r"""Return the monostatic range resolution :math:`c/2B`, m (Richards [1], §4.6.1)."""
     result: NDArray[np.float64] = SPEED_OF_LIGHT_MPS / (
         2.0 * np.asarray(bandwidth_hz, dtype=np.float64)
     )
@@ -79,7 +55,7 @@ def range_resolution_m(bandwidth_hz: ArrayLike) -> NDArray[np.float64]:
 
 
 def sweep_rate_hzps(bandwidth_hz: ArrayLike, chirp_duration_s: ArrayLike) -> NDArray[np.float64]:
-    r"""Return the chirp slope :math:`\alpha = B/T`, Hz/s, of the broadcast inputs [1]_."""
+    r"""Return the chirp slope :math:`\alpha = B/T`, Hz/s."""
     result: NDArray[np.float64] = np.asarray(bandwidth_hz, dtype=np.float64) / np.asarray(
         chirp_duration_s, dtype=np.float64
     )
@@ -89,17 +65,7 @@ def sweep_rate_hzps(bandwidth_hz: ArrayLike, chirp_duration_s: ArrayLike) -> NDA
 def beat_frequency_hz(
     bistatic_range_m: ArrayLike, bandwidth_hz: ArrayLike, chirp_duration_s: ArrayLike
 ) -> NDArray[np.float64]:
-    r"""Return the deramped beat frequency of a route, :math:`f_b = \alpha R_b / c`, Hz [2]_.
-
-    The delay :math:`R_b/c` displaces the echo along the sweep, leaving a tone
-    linear in the bistatic range (m). No factor of two: monostatic, :math:`R_b = 2R`.
-    Inputs broadcast together.
-
-    Examples
-    --------
-    >>> round(float(beat_frequency_hz(30_000.0, 2.0e6, 1.0e-3)), 3)  # 2 GHz/s for 100 us
-    200138.457
-    """
+    r"""Return the deramped beat :math:`\alpha R_b / c`, Hz: no factor of 2 (Charvat [2] ch. 3)."""
     result: NDArray[np.float64] = (
         sweep_rate_hzps(bandwidth_hz, chirp_duration_s)
         * np.asarray(bistatic_range_m, dtype=np.float64)
@@ -111,10 +77,7 @@ def beat_frequency_hz(
 def bistatic_range_from_beat_frequency_m(
     beat_hz: ArrayLike, bandwidth_hz: ArrayLike, chirp_duration_s: ArrayLike
 ) -> NDArray[np.float64]:
-    r"""Return the bistatic range behind a beat frequency, :math:`R_b = c f_b/\alpha`, m.
-
-    The inverse of :func:`beat_frequency_hz` [2]_; halve it for a monostatic range.
-    """
+    r"""Return the bistatic range :math:`c f_b/\alpha` behind a beat, m; halve for monostatic."""
     result: NDArray[np.float64] = (
         SPEED_OF_LIGHT_MPS
         * np.asarray(beat_hz, dtype=np.float64)
@@ -132,49 +95,9 @@ def lfm_chirp(
     amplitude_linear: float = 1.0,
     sweep_direction: Literal["up", "down"] = "up",
 ) -> NDArray[np.complex128]:
-    r"""Return one complex-baseband linear-FM chirp.
+    r"""Return one linear-FM chirp on the half-open :math:`[0, T)` (Richards [1] §4.6.1).
 
-    .. math::
-
-        s(t) = A \exp\left[j 2\pi \left(f_0 t \pm \tfrac{1}{2}\alpha t^2\right)\right],
-        \qquad 0 \le t < T,\quad \alpha = B/T
-
-    Sampled on the half-open :math:`[0, T)`: the sample at :math:`T` starts the
-    next chirp. Matched filtering compresses it by the time-bandwidth product
-    :math:`BT` [1]_.
-
-    Parameters
-    ----------
-    bandwidth_hz : float
-        Swept bandwidth :math:`B`, Hz.
-    chirp_duration_s : float
-        Sweep duration :math:`T`, s.
-    sample_rate_hz : float
-        Complex sample rate, Hz, at least ``bandwidth_hz``.
-    start_frequency_hz : float, optional
-        Frequency :math:`f_0` at :math:`t = 0`, Hz. Default: the sweep is
-        centred on zero, starting at :math:`-B/2` up or :math:`+B/2` down.
-    amplitude_linear : float, optional
-        Amplitude :math:`A` of the unit-modulus waveform. Default 1.0.
-    sweep_direction : {"up", "down"}, optional
-        Whether frequency rises or falls. Default ``"up"``.
-
-    Returns
-    -------
-    numpy.ndarray
-        Chirp samples, ``(n_samples,)``, ``n_samples = round(chirp_duration_s * sample_rate_hz)``.
-
-    Raises
-    ------
-    ValueError
-        If a parameter is non-positive, the sample rate is below the bandwidth,
-        the sweep is too short for one sample, or the direction is unknown.
-
-    Examples
-    --------
-    >>> chirp = lfm_chirp(1.0e6, 1.0e-3, 2.0e6)
-    >>> chirp.shape, bool(np.allclose(np.abs(chirp), 1.0))
-    ((2000,), True)
+    By default it is centred on zero, starting at :math:`-B/2` up or :math:`+B/2` down.
     """
     for name, value in (
         ("bandwidth_hz", bandwidth_hz),
@@ -210,18 +133,7 @@ def lfm_chirp(
 def thermal_noise(
     shape: tuple[int, ...], noise_power_w: float, *, rng: np.random.Generator
 ) -> NDArray[np.complex128]:
-    r"""Draw circularly-symmetric complex Gaussian receiver noise.
-
-    Real and imaginary parts each have variance :math:`N/2`, so the expected
-    ``abs(noise) ** 2`` of the returned ``shape`` array is ``noise_power_w`` (W
-    per sample, normally :attr:`~radar_forge.radar.Receiver.noise_power_per_sample_w`;
-    zero is exactly silent). ``rng`` is a seeded generator.
-
-    Raises
-    ------
-    ValueError
-        If ``noise_power_w`` is negative.
-    """
+    """Draw circular complex Gaussian noise, ``noise_power_w`` per sample, half in I, half in Q."""
     if noise_power_w < 0.0:
         msg = f"noise_power_w must be non-negative; got {noise_power_w!r}."
         raise ValueError(msg)
@@ -239,52 +151,15 @@ def fmcw_deramp_baseband(
     rng: np.random.Generator | None,
     max_bytes: int = 256 * 2**20,
 ) -> NDArray[np.complex128]:
-    r"""Synthesise a deramped FMCW baseband cube.
+    """Synthesise a deramped FMCW cube, ``(n_pulses, n_samples_per_pri)``; noiseless if rng=None.
 
-    A **down** sweep from :math:`f_c + B/2` to :math:`f_c - B/2`, mixed as
-    :math:`s_{rx} s_{tx}^*` [2]_:
-
-    .. math::
-
-        s[m, n] = \sum_p |a_p|\,
-            e^{-j 2\pi (f_c + B/2)\, \tau_p[m]}\,
-            e^{+j 2\pi \alpha\, \tau_p[m]\, t_n}
-
-    with :math:`\tau_p[m] = R_{b,p}(mT_{PRI})/c` held across chirp :math:`m`
-    and :math:`t_n = n/f_s`. The first factor becomes Doppler across slow time,
-    the second the beat frequency :math:`\alpha\tau` across fast time. Read at
-    a range bin, the slow-time phase advances at the carrier :math:`f_c`, so
-    Doppler converts to rate with :math:`\lambda = c/f_c`.
-
-    Parameters
-    ----------
-    paths : radar_forge.propagation.PropagationPaths
-        The paths to synthesise.
-    radar : radar_forge.radar.Radar
-        The observing radar; must be FMCW.
-    n_pulses : int
-        Chirps in the coherent interval, at least one.
-    rng : numpy.random.Generator or None
-        Generator for receiver noise of
-        :attr:`~radar_forge.radar.Receiver.noise_power_per_sample_w`, or
-        ``None`` for a noiseless cube.
-    max_bytes : int, optional
-        Largest per-path intermediate to hold at once, bytes. Default 256 MiB.
-
-    Returns
-    -------
-    numpy.ndarray
-        Complex baseband, ``(n_pulses, n_samples_per_pri)``.
-
-    Raises
-    ------
-    ValueError
-        If ``n_pulses`` is below one, or the radar is not FMCW.
-
-    Warns
-    -----
-    UserWarning
-        If a path moves more than a quarter of a range bin within one chirp.
+    The sweep is modelled **down**, from f_c + B/2: range and Doppler signs are
+    locked in a deramp, and only a down sweep puts range at a positive beat and
+    Doppler on its true sign. Paths are summed in chunks of
+    ``max(1, max_bytes // (16 n_pulses n_samples))``, each added onto the
+    running sum, so memory does not grow with the path count and the cube is
+    bit-identical however it is chunked. Warns if a path moves a quarter of a
+    range bin within one chirp (Charvat [2] ch. 3; Richards [1] §4.6.5).
     """
     _check_dwell(radar, n_pulses, "fmcw")
     _warn_if_stop_and_hop_is_strained(paths, radar)
@@ -323,28 +198,11 @@ def pulsed_baseband(
     rng: np.random.Generator | None,
     max_bytes: int = 256 * 2**20,
 ) -> NDArray[np.complex128]:
-    r"""Synthesise a pulsed baseband cube, before pulse compression.
+    """Synthesise a pulsed cube before compression, ``(n_pulses, n_samples_per_pri)``.
 
-    Each path contributes a delayed copy of the transmitted pulse :math:`p`,
-    ``lfm_chirp(B, T, f_s)`` swept from :math:`-B/2` to :math:`+B/2` about the
-    carrier:
-
-    .. math::
-
-        s[m, n] = \sum_p |a_p|\, p\left(t_n - \tau_p[m] \bmod T_{PRI}\right)\,
-                  e^{-j 2\pi f_c \tau_p[m]}
-
-    The delay is folded modulo the repetition interval, which is how a pulsed
-    radar folds range; the carrier phase keeps the true delay, which is what
-    keeps the Doppler right [1]_.
-
-    Parameters, return and errors are those of :func:`fmcw_deramp_baseband`,
-    except that the radar must be pulsed. The cube is not pulse-compressed.
-
-    Notes
-    -----
-    Eclipsing is not modelled: an echo arriving while the transmitter is on is
-    received rather than lost.
+    Each path is ``lfm_chirp(B, T, f_s)`` at its delay folded modulo the PRI (how
+    range folds) with the carrier phase of the true delay (which keeps Doppler
+    right). No eclipsing. Chunking and ``rng`` as :func:`fmcw_deramp_baseband`.
     """
     _check_dwell(radar, n_pulses, "pulsed")
     transmitter = radar.transmitter
@@ -386,59 +244,17 @@ def ambiguity_function(
     dopplers_hz: ArrayLike | None = None,
     reference: ArrayLike | None = None,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    r"""Return the normalised magnitude of a waveform's ambiguity function.
+    r"""Return :math:`|\chi(\tau, f_D)|`, normalised by :math:`\sqrt{E_s E_r}`, with its axes.
 
-    The matched-filter response to an echo of ``waveform`` shifted by a Doppler
-    :math:`f_D`, at delay :math:`\tau` [1]_:
-
-    .. math::
-
-        |\chi(\tau, f_D)| = \frac{\left|\sum_n s[n]\,e^{j 2\pi f_D n / f_s}\,
-                            r^*[n - \tau f_s]\right|}{\sqrt{E_s E_r}}
-
-    with :math:`r` the reference (``waveform`` itself unless given). A positive
-    delay is a later echo. Normalised by the energies, so it is 1 at the origin
-    of an auto-ambiguity and nowhere larger. An up-chirp's ridge runs along
-    :math:`f_D = -\alpha\tau`.
-
-    Parameters
-    ----------
-    waveform : array_like
-        Complex samples, ``(n_samples,)``: one pulse, or a pulse train.
-    sample_rate_hz : float
-        Sample rate, Hz.
-    prf_hz : float, optional
-        Pulse repetition frequency of a pulse train. Only narrows the default
-        Doppler grid to one repetition, :math:`[-\mathrm{PRF}/2, \mathrm{PRF}/2)`.
-    delays_s : array_like, optional
-        Delays to evaluate, s, rounded to whole samples. Default: every lag at
-        which the two overlap.
-    dopplers_hz : array_like, optional
-        Doppler shifts to evaluate, Hz. Default: :math:`[-f_s/2, f_s/2)`, or one
-        PRF, at a spacing of half the inverse waveform duration.
-    reference : array_like, optional
-        Filter reference, for a cross-ambiguity (a mismatched filter). Default: ``waveform``.
-
-    Returns
-    -------
-    magnitude : numpy.ndarray
-        :math:`|\chi|`, ``(n_dopplers, n_delays)``: Doppler down the rows, as
-        MATLAB's ``ambgfun`` returns it.
-    delays_s : numpy.ndarray
-        The delays evaluated, s, ``(n_delays,)``.
-    dopplers_hz : numpy.ndarray
-        The Doppler shifts evaluated, Hz, ``(n_dopplers,)``.
-
-    Raises
-    ------
-    ValueError
-        If a waveform is not a non-empty vector or the sample rate is not positive.
-
-    Notes
-    -----
-    One Doppler-shifted correlation per Doppler row, all rows in a single
-    :func:`scipy.signal.fftconvolve` call, vectorised across delay and Doppler.
-    Memory is ``n_dopplers * (n_samples + n_reference - 1)`` complex values.
+    The matched-filter response at delay :math:`\tau` to an echo shifted by
+    :math:`f_D`: 1 at the origin of an auto-ambiguity and nowhere larger. A later
+    echo has positive delay, so an up-chirp's ridge runs along :math:`f_D = -\alpha\tau`.
+    One Doppler-shifted correlation per row, all in one :func:`scipy.signal.fftconvolve`.
+    Delays are rounded to whole samples (default: every overlap); Doppler defaults to
+    :math:`[-f_s/2, f_s/2)`, or one ``prf_hz``, every half inverse duration. A
+    ``reference`` gives a cross-ambiguity. Returns the ``(n_dopplers, n_delays)``
+    magnitude, as MATLAB's ``ambgfun``, and the delays and Dopplers evaluated
+    (Richards [1] ch. 4).
 
     Examples
     --------
@@ -534,11 +350,7 @@ def _fast_time_s(radar: Radar) -> NDArray[np.float64]:
 
 
 def _warn_if_stop_and_hop_is_strained(paths: PropagationPaths, radar: Radar) -> None:
-    r"""Warn when a path moves a noticeable fraction of a range bin within one chirp.
-
-    The route moves at :math:`\lambda |f_D|` against a bin of :math:`c/B` (the
-    best case; a wide bistatic angle coarsens it). One reduction, before any chunk.
-    """
+    r"""Warn when a path moves a quarter of a range bin (:math:`c/B` of route) within one chirp."""
     fastest_mps = float(np.max(np.abs(paths.doppler_hz), initial=0.0)) * radar.wavelength_m
     bin_fraction = (
         fastest_mps * radar.transmitter.chirp_duration_s / (2.0 * radar.range_resolution_m)
