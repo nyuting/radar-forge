@@ -85,15 +85,15 @@ A page may add a symbol of its own. When it does, it defines it in its own table
 
 ## Which scenario to try each page in
 
-The scenarios in `scenarios/` are complete, runnable set-ups built from these modules. Each has
-a companion page in [`docs/scenarios/`](../scenarios/) that walks through it. Each page of this
+The scenarios in `scenarios/` are complete, runnable set-ups built from these modules. Each is
+a TOML file you can read and edit. Each page of this
 guide ends by sending you to one of them, with one setting to change and what to look for.
 
 | Scenario | Pages it exercises | Run it with |
 | :-- | :-- | :-- |
-| [001, X-band](../scenarios/scenario-001-xband.md): one site, three waveforms | 1, 2, 3, 4 | `uv run python scripts/run_scenario.py scenarios/scenario_001_fmcw_low_prf.toml --out out/s1` |
-| [002, bistatic](../scenarios/scenario-002-bistatic.md): two sites | 1, 2, 3 | `uv run python scripts/run_scenario.py scenarios/scenario_002_bistatic_xband.toml --out out/b1` |
-| [003, tracking](../scenarios/scenario-003-tracking.md): detection and tracking | 5, 6 | `uv run python scripts/run_scenario.py scenarios/scenario_003_tracking.toml --out out/t1` |
+| [001, X-band](../../scenarios/scenario_001_fmcw_low_prf.toml): one site, three waveforms | 1, 2, 3, 4 | `uv run python scripts/run_scenario.py scenarios/scenario_001_fmcw_low_prf.toml --out out/s1` |
+| [002, bistatic](../../scenarios/scenario_002_bistatic_xband.toml): two sites | 1, 2, 3 | `uv run python scripts/run_scenario.py scenarios/scenario_002_bistatic_xband.toml --out out/b1` |
+| [003, tracking](../../scenarios/scenario_003_tracking.toml): detection and tracking | 5, 6 | `uv run python scripts/run_scenario.py scenarios/scenario_003_tracking.toml --out out/t1` |
 
 Set up once with `uv sync --extra dev --extra visualisation`. Add `--frames 10` to any run for
 a quick look.

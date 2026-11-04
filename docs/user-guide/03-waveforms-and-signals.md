@@ -167,7 +167,7 @@ noise per sample 7.9888e-15 W
 
 ## Try it in a scenario
 
-Read the companion first: [scenario 001, X-band](../scenarios/scenario-001-xband.md). Run S1:
+Read the scenario file first: [scenario 001, X-band](../../scenarios/scenario_001_fmcw_low_prf.toml). Run S1:
 
 ```bash
 uv run python scripts/run_scenario.py scenarios/scenario_001_fmcw_low_prf.toml --out out/s1 --frames 10

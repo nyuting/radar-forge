@@ -18,7 +18,7 @@ see one direction done properly than a tour of all of them.
 
 **AI, machine learning and deep learning are not currently implemented in `radar-forge`.** There
 is no learned model, no training code and no PyTorch import anywhere in `src/`. The project
-`README.md` and [`spec/structure.md`](../spec/structure.md) describe a `pipelines/datasets.py`
+`README.md` describes a `pipelines/datasets.py`
 with PyTorch wrappers; it does not exist yet. There is no clutter either: the background is
 thermal noise only. You will build what you need yourself, in your own script, on top of what the
 library already produces. That is the point of this task. As always, leave `src/` alone.

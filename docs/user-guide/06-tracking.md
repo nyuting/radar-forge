@@ -258,8 +258,8 @@ gate on d^2 for 2 dimension(s), P_G = 0.997: 11.62
 
 ## Try it in a scenario
 
-Scenario 003 runs detection and tracking over scenario 001's S1 waveform. Its companion,
-[scenario 003 — tracking](../scenarios/scenario-003-tracking.md), walks through the outputs.
+Scenario 003 runs detection and tracking over scenario 001's S1 waveform. Its scenario file,
+[scenario 003 — tracking](../../scenarios/scenario_003_tracking.toml), sets the run up.
 Run the UKF variant:
 
 ```bash
@@ -292,8 +292,8 @@ from here.
 - **A target that turns makes the track fall behind, then catch up.** The motion model is
   constant velocity, so a turn is "noise" to it. The process noise decides how quickly it
   catches up; see [Choosing the process noise](#choosing-the-process-noise).
-- The scenario 003 companion lists [three more](../scenarios/scenario-003-tracking.md), seen in
-  its plots.
+- Scenario 003 shows [three more](../../scenarios/scenario_003_tracking.toml), seen
+  in its plots.
 
 ## Limits
 

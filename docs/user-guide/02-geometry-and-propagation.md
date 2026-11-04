@@ -32,7 +32,7 @@ free space. The next module, `signal` (page 3), turns paths into samples.
  (delay, Doppler, amplitude, angles)  ---> signal (page 3)
 ```
 
-That split between paths and samples is decision **D1** in `spec/structure.md`: a propagation
+That split between paths and samples is decision **D1** in `spec/data-001-formats.md` §8: a propagation
 model (this module now, a ray tracer later) computes paths, and only `signal` computes samples.
 A new propagation model therefore needs no new signal code. Scenario 002 put this to the test by
 moving the transmitter 19.6 km away from the receiver. The same `PropagationPaths` class and the
@@ -229,7 +229,7 @@ f_d = 628.6 Hz
 
 ## Try it in a scenario
 
-Read the companion page [scenario 002, bistatic](../scenarios/scenario-002-bistatic.md), then run
+Read the scenario file [scenario 002, bistatic](../../scenarios/scenario_002_bistatic_xband.toml), then run
 B1:
 
 ```bash
@@ -292,7 +292,7 @@ carries the right carrier phase. `bistatic_line_of_sight_paths`'s Notes say so.
   generators assume one isotropic channel.
 - **Bistatic:** the sites are perfectly synchronised in time and phase, the direct signal from
   transmitter to receiver is not modelled, and the bistatic RCS is one fixed number at every
-  $\beta$ (`BistaticRadar`'s Notes, and the scenario 002 companion).
+  $\beta$ (`BistaticRadar`'s Notes, and scenario 002).
 - **Radial velocity is a smoothed difference.** The pipeline differences an interpolated range,
   so $v_r$ is the mean closing rate between fixes, not the instantaneous one
   (`to_radar_frame`'s Notes).
@@ -309,5 +309,5 @@ carries the right carrier phase. `bistatic_line_of_sight_paths`'s Notes say so.
   radar range equation), §2.6.1 (the two-way propagation phase and Doppler shift).
 - N. J. Willis, *Bistatic Radar*, 2nd ed., SciTech Publishing, 2005, §6.1 (target Doppler) and
   ch. 3 (the range-sum ellipse).
-- `spec/structure.md`, decisions D1 (paths, not samples) and D6 (`PropagationPaths` covers
+- `spec/data-001-formats.md` §8, decisions D1 (paths, not samples) and D6 (`PropagationPaths` covers
   bistatic geometry unchanged).

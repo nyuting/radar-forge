@@ -77,7 +77,7 @@ geometry is one-dimensional. Only range and its derivatives matter, so there is 
 file. The target follows a polynomial range history about the centre of the CPI:
 
 ```
-   R(t) = R0 - v t - a t^2/2 - j t^3/6          closing positive (structure.md D5)
+   R(t) = R0 - v t - a t^2/2 - j t^3/6          closing positive (superseded: receding positive, data-001 §5)
           t in [-T/2, T/2),  t = 0 at pulse n_pulses // 2
 
    [ radar ]  <-----------  R0 = 2500 m  ------------  [ target ]  ===> closing at v
@@ -356,7 +356,7 @@ reasons:
 
 Functions return a result dataclass with the corrected `data_rfst` and their intermediates
 (range-frequency axis, scale factors, search curves), never a bare array. That satisfies
-`spec/starter.md` §1.1 item 6. The cube is never modified in place.
+the bar in `CLAUDE.md`. The cube is never modified in place.
 
 The keystone's slow-time interpolation has one known artefact, and the spec records it rather
 than hiding it: band-limited (DFT) interpolation treats the CPI as periodic, so the **first and
@@ -376,7 +376,7 @@ describe constant velocity. Two fields are added, each **defaulting to zero**:
 Every existing builder and test therefore produces the same cube bit for bit (§6 A15).
 `line_of_sight_paths` gains `radial_acceleration_mps2` and `radial_jerk_mps3` keywords, default 0.
 `pulsed_baseband` advances range per pulse with the full polynomial instead of `v·t`. This widens
-D1 rather than changing it, and `structure.md` D1 should record it (§4.8).
+D1 rather than changing it, and D1 below records it.
 
 The alternative considered was a `range_history_m` override argument on the generator. It was
 rejected because it puts geometry into the signal generator and would let a ray-tracing backend
@@ -584,3 +584,13 @@ starts producing outliers (the threshold effect [13]). That region is plotted, n
 .. [17] E. Aboutanios and B. Mulgrew, "Iterative frequency estimation by interpolation on Fourier
         coefficients," *IEEE Trans. Signal Processing*, 53(4), pp. 1237-1242, 2005.
         doi:10.1109/TSP.2005.843719.
+
+## Decisions inherited
+
+From the retired structure spec.
+
+- **D1, widened.** A propagation backend returns `PropagationPaths`, never baseband; `core/signal.py`
+  synthesises samples from any path set. Here the path set gains polynomial range motion, through
+  `line_of_sight_paths` keywords and `bistatic_range_at_m`.
+- **D5, sign.** The closing-positive Doppler sign is superseded: range rate is positive receding and
+  Doppler is `-rate/wavelength` (`spec/data-001-formats.md` §5).

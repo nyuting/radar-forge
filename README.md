@@ -30,39 +30,12 @@ tested, and scenarios 001–003 run end to end; the other areas under [Scope](#s
 designed but not built. The [user guide](docs/user-guide/README.md) explains each `core/`
 module. The design documents live in [`spec/`](spec/):
 
-- [`spec/starter.md`](spec/starter.md) — project charter, ecosystem survey, high-level layout
-- [`spec/structure.md`](spec/structure.md) — comparative module map of the reference projects and the
-  file-level design of `radar_forge`
-- [`spec/scenario-001-xband.md`](spec/scenario-001-xband.md) — the first vertical
-  slice: a real aircraft trajectory to baseband IQ to a range-Doppler map, in three ambiguity variants
-- [`spec/scenario-002-bistatic.md`](spec/scenario-002-bistatic.md) — the same path
-  over a two-site geometry: the Raleigh-Durham transmitter received at the Duke Receiver
-- [`spec/scenario-003-tracking.md`](spec/scenario-003-tracking.md) — the third
-  slice, stacked on it: CFAR detection, data association and Kalman tracking. Its §14 records what
-  building it changed, including why velocity unfolding is only 86% reliable at S1's PRF and why a
-  dual-PRF variant ships alongside
-- [`spec/scenario-004-keystone.md`](spec/scenario-004-keystone.md) — Fast sounding rocket: keystone, polynomial-phase motion compensation, datachip and fine estimation. *Specified, not
-  implemented*
-- [`spec/scenario-005-leakage-cancellation.md`](spec/scenario-005-leakage-cancellation.md) — Transmitter leakage and near-range clutter in a continuous-wave radar. *Specified, not
-  implemented*
-- [`spec/scenario-006-parallel-approach-doa.md`](spec/scenario-006-parallel-approach-doa.md) — Two aircraft on closely spaced parallel approaches in one range-Doppler cell: spatial super-resolution (MUSIC, ESPRIT, IAA). *Specified, not
-  implemented*
-- [`spec/scenario-007-interference.md`](spec/scenario-007-interference.md) — Strong RF interference against a weak target: SLC, MVDR, LCMV, mainlobe suppression. *Specified, not
-  implemented*
-- [`spec/scenario-008-stap.md`](spec/scenario-008-stap.md) — Airborne clutter ridge: space-time adaptive processing with RASPNet and MCARM radar parameters. *Specified, not
-  implemented*
-- [`spec/scenario-009-receiver-chain.md`](spec/scenario-009-receiver-chain.md) — Receiver chain: front end, DDC and polyphase filtering, hardware impairments, pilot-tone calibration. *Specified, not
-  implemented*
-- [`spec/scenario-010-self-calibration.md`](spec/scenario-010-self-calibration.md) — Array perturbations: self-calibration, self-localisation and robust beamforming. *Specified, not
-  implemented*
-- [`spec/scenario-011-terminal-area-tracking.md`](spec/scenario-011-terminal-area-tracking.md) — Dense terminal-area traffic: crossings, clutter, manoeuvres and closely spaced aircraft (IMM, JPDA, MHT, PMBM). *Specified, not
-  implemented*
-- [`spec/tracker-001.md`](spec/tracker-001.md) — tracking architecture in `core/tracking/`: one
-  tracker loop with interchangeable KF, EKF and UKF filters, GNN association and explicit
-  measurement models, and the path from today's two trackers to one
-
-Each scenario also has a visual, non-normative companion under
-[`docs/scenarios/`](docs/scenarios/), for running one for the first time.
+- [`spec/data-001-formats.md`](spec/data-001-formats.md): the files a run writes, with columns,
+  units and conventions
+- [`spec/tracker-001.md`](spec/tracker-001.md): the tracking architecture, one Gaussian filter, a
+  batched track bank and one scan loop
+- `spec/scenario-*.md`: one specification per scenario; the table in
+  [`docs/README.md`](docs/README.md#scenarios) says which run today
 
 The [Quickstart](#quickstart) below runs on today's `main`.
 
@@ -179,9 +152,6 @@ radar-forge/
         ├── pipelines/          # ML dataset generation & COCO / range-Doppler exporters
         └── visualisation/                # Plots and scopes (range-Doppler map, track history)
 ```
-
-See [`spec/structure.md`](spec/structure.md) for the file-level breakdown and the upstream module
-each part draws from.
 
 ---
 

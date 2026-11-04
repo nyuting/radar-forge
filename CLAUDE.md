@@ -2,7 +2,7 @@
 
 `radar-forge` is a radar workbench for research and education: current methods with correct,
 cited maths, in plain code that shows its intermediate quantities, read by practitioners, interns
-and students. Neither half is traded for the other ([`spec/starter.md` §1.1](spec/starter.md#11-the-bar)).
+and students. Neither half is traded for the other.
 
 ## Non-negotiables (and what enforces each)
 
