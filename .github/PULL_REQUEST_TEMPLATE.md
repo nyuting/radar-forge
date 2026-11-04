@@ -1,4 +1,4 @@
-<!-- PRs land as merge commits: the title and every commit must each be a valid
+<!-- PRs squash-merge: the title becomes the commit subject, so it and every commit must be a valid
      Conventional Commit, e.g. `fix(core): correct 1/R^4 term in range equation`.
      A breaking change takes `!` after the scope and a `BREAKING CHANGE:` paragraph below.
      See docs/conventions/commits.md. -->
