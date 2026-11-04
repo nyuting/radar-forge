@@ -82,6 +82,8 @@ select = [
     "ANN",  # flake8-annotations
     "RUF",  # ruff-specific rules
     "TD",   # flake8-todos: TODO(author): what — <issue link>
+    "EM",   # flake8-errmsg: msg = "..." on its own line, then raise
+    "S101", # no assert for validation: python -O strips it
 ]
 ignore = [
     "D203",  # conflicts with D211 (no blank line before class docstring)
@@ -94,8 +96,9 @@ ignore = [
 convention = "numpy"
 
 [tool.ruff.lint.per-file-ignores]
-# Tests document themselves through their names; notebooks and scripts are tools.
-"tests/**" = ["D", "ANN"]
+# Tests document themselves through their names, and assert is how pytest checks;
+# notebooks and scripts are tools.
+"tests/**" = ["D", "ANN", "EM", "S101"]
 "scripts/**" = ["D", "ANN", "T201"]
 
 [tool.ruff.lint.isort]
@@ -134,7 +137,7 @@ ignore_missing_imports = true
 # --------------------------------------------------------------------------- #
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# importlib import mode: tests mirror src/ per docs/conventions/testing.md §1,
+# importlib import mode: tests mirror src/ (docs/conventions/testing.md §1),
 # so two modules may share a basename (tests/core/test_tracking.py and
 # tests/pipelines/test_tracking.py). The default prepend mode derives a module
 # name from the basename alone and refuses the collision.
