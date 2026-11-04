@@ -100,12 +100,13 @@ before fitting a slope to it.
 
 ## 4. Docstrings
 
-Sections in order: summary, extended description (the maths in LaTeX, in the reference's
-notation), Parameters, Returns, Raises, Notes, References, Examples. Then:
+Lean NumPy style: one summary line; a citation with equation number; Parameters and Returns only
+where a unit, shape or convention is not already in the name; no Raises or Examples unless the
+example is the test. Doctests that are present run (`tests/test_docstrings.py`).
 
 - **Cite the source.** Physics or DSP carries a `References` entry naming the section or
   equation, e.g. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed., §2.2.1.
-- **Write out array shapes** with the `n_` names, and what each axis means.
+- **Write out array shapes** with the `n_` names, where a shape is documented.
 - **LaTeX goes in a raw string**, `r"""…"""`. Never write source through a string that reads
   escapes (Python in a shell heredoc): `\alpha` lands as BEL (R9 catches it).
 
