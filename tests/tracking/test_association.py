@@ -23,11 +23,11 @@ from radar_forge.tracking.association import (
     greedy_nearest_neighbour,
 )
 from radar_forge.tracking.filters import TaylorLinearisation, TrackBank, innovate
-from radar_forge.tracking.measurement_models import (
+from radar_forge.tracking.models import (
+    CartesianMotion,
     LinearMeasurement,
     RangeAzimuthElevationRangeRate,
 )
-from radar_forge.tracking.models import CartesianMotion
 
 ALL = np.ones((2, 2), dtype=bool)
 

@@ -1,33 +1,22 @@
 r"""The Gaussian filter over a bank of tracks: the KF, the EKF and the UKF in one flow.
 
-A track is a row of a :class:`TrackBank`, a struct of arrays, and every step runs over every
-row at once:
-
-- :func:`predict`: :math:`\hat{x}^- = f(\hat{x})`, :math:`P^- = F P F^T + Q`.
-- :func:`innovate`: every row against every measurement of a scan, the innovation
-  :math:`\nu = z - \hat{z}` ``(n_tracks, n_meas, m)``, :math:`S = H P^- H^T + R`, the NIS and
-  the log-likelihood, from one batched Cholesky factorisation and no loop over pairs.
-- :func:`update`: the one correction core, for the rows given a measurement.
-
-The three filters differ only in their :class:`Linearisation` [2]_, how a mean and covariance
-go through a function: :class:`TaylorLinearisation` (the KF on linear models, the EKF
-otherwise) or :class:`UnscentedTransform` (the UKF). Nothing here asks which one it holds; the
-correction core asks only whether a measurement matrix H exists.
-
-Validation happens once, in :meth:`TrackBank.append`; predict, innovate and update trust their
-inputs. Scenario 011 plugs in without new files: an IMM mixes banks of mode rows, and JPDA
-passes association weights to :func:`update`.
+A track is a row of a :class:`TrackBank`, a struct of arrays. :func:`predict` moves every row;
+:func:`innovate` scores every row against every measurement of a scan, ``(n_tracks, n_meas)``
+pairs from one batched Cholesky factorisation and no loop over pairs; :func:`update` is the one
+correction core. The filters differ only in their :class:`Linearisation` [2]:
+:class:`TaylorLinearisation` (KF on linear models, EKF otherwise) or :class:`UnscentedTransform`
+(UKF). Nothing asks which one it holds; the core only asks whether H exists. Validation happens
+once, in :meth:`TrackBank.append`. Scenario 011 plugs in here: an IMM mixes banks of mode rows,
+and JPDA passes association weights to :func:`update`.
 
 References
 ----------
 .. [1] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications to Tracking
-       and Navigation*, Wiley, 2001, §5.2.4 (the Kalman filter), §5.2.6 (the innovations and
-       the likelihood function), §5.4.2 (the NIS) and §10.3 (the extended Kalman filter).
-.. [2] S. Särkkä, *Bayesian Filtering and Smoothing*, Cambridge University Press, 2013, ch. 5
-       (the extended and unscented Kalman filters) and ch. 6 (general Gaussian filtering).
+       and Navigation*, Wiley, 2001.
+.. [2] S. Särkkä, *Bayesian Filtering and Smoothing*, Cambridge University Press, 2013.
 .. [3] E. A. Wan and R. van der Merwe, "The unscented Kalman filter for nonlinear estimation,"
        *Proc. IEEE Adaptive Systems for Signal Processing, Communications, and Control
-       Symposium*, 2000, pp. 153-158, §3 (the UKF and its weights).
+       Symposium*, 2000, pp. 153-158.
 """
 
 from __future__ import annotations
@@ -40,8 +29,7 @@ from typing import Any, Protocol
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from radar_forge.tracking.measurement_models import MeasurementModel
-from radar_forge.tracking.models import MotionModel, StateLayout
+from radar_forge.tracking.models import MeasurementModel, MotionModel, StateLayout
 
 __all__ = [
     "Innovation",
@@ -63,12 +51,7 @@ _ROUNDOFF_TOLERANCE = 1e-10
 
 
 class TrackStatus(IntEnum):
-    """Where a track is in its life, stored as int8 in :attr:`TrackBank.status`.
-
-    ``TENTATIVE`` has not passed M-of-N; ``CONFIRMED`` has, and was hit this scan;
-    ``COASTING`` is confirmed but missed this scan; ``DELETED`` is reported once, in the scan
-    it dies, and then dropped.
-    """
+    """A track's place in its life, stored as int8; ``DELETED`` is reported once, then dropped."""
 
     TENTATIVE = 0
     CONFIRMED = 1
@@ -78,25 +61,7 @@ class TrackStatus(IntEnum):
 
 @dataclass(frozen=True, eq=False)
 class TrackSnapshot:
-    """A frozen copy of one track after a scan, for callers that want one object per track.
-
-    Attributes
-    ----------
-    track_id : int
-        Fixed for the track's life.
-    status : TrackStatus
-        After the scan.
-    mean, covariance : numpy.ndarray
-        Read-only, ``(n_state,)`` and ``(n_state, n_state)``.
-    time_s : float
-        Time of the estimate.
-    nis : float or None
-        NIS of this scan's update, or None without one.
-    measurement_index : int or None
-        The scan row the track took or was born from, or None.
-    n_hits, n_misses : int
-        Scans with a measurement since birth, and misses in a row.
-    """
+    """A frozen copy of one bank row; ``nis`` and ``measurement_index`` are None without one."""
 
     track_id: int
     status: TrackStatus
@@ -149,37 +114,12 @@ def _column(value: ArrayLike, n_rows: int, dtype: type[np.generic], name: str) -
 
 @dataclass(frozen=True, eq=False)
 class TrackBank:
-    """Every track as one row of a struct of arrays; treat it as immutable.
+    """Every track as one row: ``mean`` ``(n_tracks, n_state)``, ``covariance`` stacked.
 
-    Every function returns a new bank. Build one with :meth:`empty` and :meth:`append`, which
-    validate; the constructor trusts its arguments.
-
-    Attributes
-    ----------
-    layout : StateLayout
-        Shared by every row.
-    mean, covariance : numpy.ndarray
-        ``(n_tracks, n_state)`` and ``(n_tracks, n_state, n_state)``.
-    time_s, last_hit_time_s : numpy.ndarray
-        Time of each estimate and of its last measurement, ``(n_tracks,)``.
-    track_id : numpy.ndarray
-        int64 identifiers.
-    status : numpy.ndarray
-        int8 :class:`TrackStatus` values.
-    n_hits, n_misses, n_scans : numpy.ndarray
-        int32 counts: scans with a measurement, misses in a row, scans taken part in; birth
-        counts as a scan and a hit.
-    nis : numpy.ndarray
-        NIS of this scan's update, NaN without one.
-    measurement_index : numpy.ndarray
-        int64 scan row each track took or was born from this scan, -1 for none.
-
-    Examples
-    --------
-    >>> from radar_forge.tracking.models import RadialConstantVelocity
-    >>> bank = TrackBank.empty(RadialConstantVelocity().state_layout)
-    >>> bank.append([[1000.0, 5.0]], [np.eye(2)], 0.0, [7], [0]).track_id
-    array([7])
+    Treat it as immutable; every function returns a new bank. :meth:`empty` and
+    :meth:`append` validate, the constructor trusts. The counts are int32 (a birth is one scan
+    and one hit), ``status`` int8 :class:`TrackStatus`, ``nis`` NaN and ``measurement_index``
+    -1 for a row with no measurement this scan.
     """
 
     layout: StateLayout
@@ -197,7 +137,7 @@ class TrackBank:
 
     @classmethod
     def empty(cls, layout: StateLayout) -> TrackBank:
-        """Return a bank with no rows in ``layout``."""
+        """Return a bank with no rows."""
         n_state = layout.dimension
         columns = {f.name: np.zeros(0, dtype=_DTYPES[f.name]) for f in fields(cls)[3:]}
         return cls(layout, np.zeros((0, n_state)), np.zeros((0, n_state, n_state)), **columns)
@@ -216,34 +156,7 @@ class TrackBank:
         status: ArrayLike,
         measurement_index: ArrayLike | None = None,
     ) -> TrackBank:
-        """Return the bank with new rows, each born from one measurement or cue.
-
-        This is where state enters the bank, so it is validated here, once.
-
-        Parameters
-        ----------
-        mean : array_like
-            ``(n_new, n_state)``.
-        covariance : array_like
-            ``(n_new, n_state, n_state)``, symmetric positive semidefinite.
-        time_s : float
-            Their time.
-        track_id, status : array_like
-            ``(n_new,)`` identifiers and :class:`TrackStatus` values.
-        measurement_index : array_like or None, optional
-            ``(n_new,)`` scan rows they came from; None for -1 (none).
-
-        Returns
-        -------
-        TrackBank
-            The old rows, then the new.
-
-        Raises
-        ------
-        ValueError
-            If a shape is wrong, a value is not finite, or a covariance is not symmetric
-            positive semidefinite to within roundoff.
-        """
+        """Return the bank with new rows ``(n_new, n_state)``, validated: the API boundary."""
         n_state = self.layout.dimension
         new_mean = np.array(mean, dtype=np.float64)
         if new_mean.ndim != 2 or new_mean.shape[1] != n_state or not np.all(np.isfinite(new_mean)):
@@ -271,7 +184,7 @@ class TrackBank:
         return TrackBank(self.layout, **columns)
 
     def compact(self, keep: ArrayLike) -> TrackBank:
-        """Return the rows where ``keep``, shape ``(n_tracks,)``, is True, in order."""
+        """Return the rows where ``keep``, ``(n_tracks,)`` bool, is True, in order."""
         rows = np.asarray(keep, dtype=bool)
         columns: dict[str, NDArray[Any]] = {
             f.name: getattr(self, f.name)[rows] for f in fields(self)[1:]
@@ -279,7 +192,7 @@ class TrackBank:
         return TrackBank(self.layout, **columns)
 
     def snapshots(self) -> tuple[TrackSnapshot, ...]:
-        """Return a frozen :class:`TrackSnapshot` of each row, in row order."""
+        """Return a frozen, read-only :class:`TrackSnapshot` of each row, in row order."""
         mean, covariance = self.mean.copy(), self.covariance.copy()
         mean.setflags(write=False)
         covariance.setflags(write=False)
@@ -315,19 +228,12 @@ _DTYPES = {
 
 @dataclass(frozen=True, eq=False)
 class MeasurementMoments:
-    r"""What a linearisation says about the measurement each row should produce.
+    r"""What a linearisation says each row should measure.
 
-    Attributes
-    ----------
-    predicted_measurement : numpy.ndarray
-        :math:`\hat{z}`, ``(n_tracks, n_meas)``.
-    cross_covariance : numpy.ndarray
-        :math:`P_{xz}`, ``(n_tracks, n_state, n_meas)``.
-    predicted_measurement_covariance : numpy.ndarray
-        :math:`H P H^T`, or its sigma-point equivalent: S *without* R, which
-        :func:`innovate` adds. ``(n_tracks, n_meas, n_meas)``.
-    measurement_matrix : numpy.ndarray or None
-        H or the Jacobian, ``(n_tracks, n_meas, n_state)``, when the linearisation has one.
+    ``predicted_measurement`` :math:`\hat{z}` is ``(n_tracks, m)``, ``cross_covariance``
+    :math:`P_{xz}` ``(n_tracks, n_state, m)``, ``predicted_measurement_covariance``
+    :math:`H P H^T` ``(n_tracks, m, m)``, S without R; ``measurement_matrix`` is H
+    ``(n_tracks, m, n_state)``, or None for a linearisation without one.
     """
 
     predicted_measurement: NDArray[np.float64]
@@ -354,19 +260,13 @@ class Linearisation(Protocol):
 class TaylorLinearisation:
     r"""First-order Taylor: the KF on linear models, the EKF otherwise.
 
-    With F and H the Jacobians at the mean (F and H themselves on linear models) this is the
-    textbook Kalman filter, line for line [1]_:
-
-    .. math::
-
-        \hat{x}^- = f(\hat{x}), \quad P^- = F P F^T + Q, \quad \hat{z} = h(\hat{x}^-), \quad
-        P_{xz} = P^- H^T, \quad S - R = H P^- H^T.
-
-    It hands H to the correction core, which then uses the Joseph form.
+    With F and H the Jacobians at the mean this is the textbook filter line for line:
+    :math:`P^- = F P F^T + Q`, :math:`P_{xz} = P^- H^T`, :math:`S - R = H P^- H^T`. It hands H
+    to the correction core, which then takes the Joseph form.
 
     References
     ----------
-    .. [1] Bar-Shalom, Li and Kirubarajan (2001), §5.2.4 and §10.3; see the module References.
+    Bar-Shalom [1], §5.2.4 (KF) and §10.3 (EKF).
     """
 
     def predict(
@@ -412,50 +312,23 @@ def _unscented_weights(
 
 @dataclass(frozen=True)
 class UnscentedTransform:
-    r"""The unscented transform, the linearisation of the UKF.
+    r"""The unscented transform, the UKF's linearisation; sigma points ``(n_tracks, 2n+1, n)``.
 
-    It needs no derivatives [1]_. Each row gets :math:`2n + 1` sigma points,
-    :math:`\chi_0 = \hat{x}` and :math:`\chi_{\pm i} = \hat{x} \pm \sqrt{c} L_i` with
-    :math:`L_i` column i of the Cholesky factor of P and :math:`c = \alpha^2 (n + \kappa)`,
-    every row at once as ``(n_tracks, 2n + 1, n)``. The moments are weighted sums over the
-    pushed points, with :math:`W^{(m)}_0 = 1 - n/c`, :math:`W^{(c)}_0 = W^{(m)}_0 + 1 -
-    \alpha^2 + \beta` and :math:`W_i = 1/(2c)`, cached per state size. Means are weighted
-    offsets from the centre point, through the layout's ``residual`` and ``wrap``, so points
-    straddling an azimuth wrap average the short way.
+    :math:`\chi_{\pm i} = \hat{x} \pm \sqrt{c} L_i`, :math:`c = \alpha^2 (n + \kappa)`, with
+    weights :math:`W^{(m)}_0 = 1 - n/c`, :math:`W^{(c)}_0 = W^{(m)}_0 + 1 - \alpha^2 + \beta`,
+    :math:`W_i = 1/(2c)`, cached per size. Without H the core uses :math:`P^- - K S K^T`, the
+    Schur complement of S, positive semidefinite only when every covariance weight is; so
+    :math:`W^{(c)}_0 < 0` is refused, including the small :math:`\alpha` of [3] §3. Means are
+    offsets from the centre point through the layout, so an azimuth wrap averages the short
+    way. On linear models the ± pairs cancel and the centre deviation is zero, so the moments
+    are the KF's for any accepted weights.
 
-    **Every covariance weight must be nonnegative.** Without H the correction core uses
-    :math:`P^- - K S K^T`, the Schur complement of S in the joint covariance, positive
-    semidefinite only then; so :math:`W^{(c)}_0 < 0` is refused. The defaults give
-    :math:`W^{(m)}_0 = 0`, :math:`W^{(c)}_0 = 2`, :math:`W_i = 1/(2n)`; the usual small
-    :math:`\alpha` of [1]_ is refused on purpose.
-
-    **On linear models the UKF is the KF.** The ± pairs cancel through a linear map, the
-    centre point's deviation is zero so :math:`\beta` drops out, and :math:`\sum_i 2 \cdot
-    \frac{1}{2c} c F L_i L_i^T F^T = F P F^T`: the moments are :class:`TaylorLinearisation`'s,
-    and the two covariance forms agree at the optimal gain (:func:`update`).
-
-    Parameters
-    ----------
-    alpha : float, default 1.0
-        Spread of the points; positive.
-    beta : float, default 2.0
-        Prior-distribution term, 2 for a Gaussian; nonnegative.
-    kappa : float, default 0.0
-        Secondary spread; ``n + kappa`` must be positive.
-
-    Raises
-    ------
-    ValueError
-        If a setting is not finite, alpha is not positive or beta is negative.
+    >>> UnscentedTransform().weights(2)
+    (array([0.  , 0.25, 0.25, 0.25, 0.25]), array([2.  , 0.25, 0.25, 0.25, 0.25]))
 
     References
     ----------
-    .. [1] Wan and van der Merwe (2000), §3; Särkkä (2013), ch. 5. See the module References.
-
-    Examples
-    --------
-    >>> UnscentedTransform().weights(2)
-    (array([0.  , 0.25, 0.25, 0.25, 0.25]), array([2.  , 0.25, 0.25, 0.25, 0.25]))
+    Wan and van der Merwe [3], §3; Särkkä [2], ch. 5.
     """
 
     alpha: float = 1.0
@@ -470,13 +343,7 @@ class UnscentedTransform:
             raise ValueError(msg)
 
     def weights(self, n_state: int) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-        """Return the read-only mean and covariance weights, each ``(2 n_state + 1,)``.
-
-        Raises
-        ------
-        ValueError
-            If ``n_state + kappa`` is not positive or the centre covariance weight is negative.
-        """
+        """Return the read-only mean and covariance weights, each ``(2 n_state + 1,)``."""
         return _unscented_weights(self.alpha, self.beta, self.kappa, n_state)
 
     def sigma_points(self, bank: TrackBank) -> NDArray[np.float64]:
@@ -521,24 +388,7 @@ class UnscentedTransform:
 def predict(
     bank: TrackBank, motion: MotionModel, linearisation: Linearisation, time_s: float
 ) -> TrackBank:
-    """Return every row predicted to ``time_s``, each by its own step.
-
-    Parameters
-    ----------
-    bank : TrackBank
-        No row later than ``time_s``; the caller checks.
-    motion : MotionModel
-        In the bank's layout.
-    linearisation : Linearisation
-        How the moments go through it.
-    time_s : float
-        The new time.
-
-    Returns
-    -------
-    TrackBank
-        New means, covariances and times.
-    """
+    """Return every row predicted to ``time_s``, each by its own step; none may be later."""
     dt_s = time_s - bank.time_s
     mean, covariance = linearisation.predict(motion, bank, dt_s)
     return replace(bank, mean=mean, covariance=covariance, time_s=np.full_like(dt_s, time_s))
@@ -548,20 +398,10 @@ def predict(
 class Innovation:
     r"""Every row scored against every measurement of a scan.
 
-    Attributes
-    ----------
-    innovation : numpy.ndarray
-        :math:`\nu = z - \hat{z}`, short way round, ``(n_tracks, n_meas, m)``.
-    innovation_covariance : numpy.ndarray
-        :math:`S = H P^- H^T + R`, ``(n_tracks, n_meas, m, m)``: each measurement has its R.
-    nis : numpy.ndarray
-        :math:`\nu^T S^{-1} \nu`, ``(n_tracks, n_meas)``.
-    log_likelihood : numpy.ndarray
-        :math:`\ln \mathcal{N}(\nu; 0, S)`, ``(n_tracks, n_meas)``.
-    moments : MeasurementMoments
-        What the linearisation returned.
-    measurement_noise : numpy.ndarray
-        R of each measurement, ``(n_meas, m, m)``.
+    ``innovation`` :math:`\nu` is ``(n_tracks, n_meas, m)``, short way round;
+    ``innovation_covariance`` S ``(n_tracks, n_meas, m, m)``, since each measurement has its
+    own R; ``nis`` and ``log_likelihood`` ``(n_tracks, n_meas)``; ``measurement_noise`` R
+    ``(n_meas, m, m)``.
     """
 
     innovation: NDArray[np.float64]
@@ -579,33 +419,16 @@ def innovate(
     measurements: ArrayLike,
     noise_covariance: ArrayLike,
 ) -> Innovation:
-    r"""Score every row against every measurement: innovation, S, NIS and log-likelihood.
+    r"""Score every row against every measurement ``(n_meas, m)``, all pairs at once.
 
-    All pairs are factorised in one call, :math:`L L^T = S`. The whitened innovation
-    :math:`w = L^{-1} \nu` gives :math:`d^2 = w^T w` and :math:`\ln|S| = 2 \sum \ln L_{ii}`,
-    so :math:`S^{-1}` is never formed [1]_. Cost O(n_tracks n_meas m³), no loop over pairs.
-
-    Parameters
-    ----------
-    bank : TrackBank
-        The predicted tracks.
-    model : MeasurementModel
-        Explains the measurements, in the bank's layout.
-    linearisation : Linearisation
-        How the measurement moments are formed.
-    measurements : array_like
-        z, ``(n_meas, m)``.
-    noise_covariance : array_like
-        R, ``(n_meas, m, m)``, or one ``(m, m)`` shared by every measurement.
-
-    Returns
-    -------
-    Innovation
-        Everything gating, assignment and :func:`update` need.
+    One Cholesky factor per pair, :math:`L L^T = S`; the whitened :math:`w = L^{-1} \nu` gives
+    :math:`d^2 = w^T w` and :math:`\ln|S| = 2 \sum \ln L_{ii}`, so :math:`S^{-1}` is never
+    formed. ``noise_covariance`` is ``(n_meas, m, m)``, or one ``(m, m)`` for all. Cost
+    O(n_tracks n_meas m³).
 
     References
     ----------
-    .. [1] Bar-Shalom, Li and Kirubarajan (2001), §5.2.6 and §5.4.2; see the module References.
+    Bar-Shalom [1], §5.2.6 (likelihood) and §5.4.2 (NIS).
     """
     measurements = np.asarray(measurements, dtype=np.float64)
     n_meas, size = measurements.shape
@@ -632,46 +455,17 @@ def update(
     *,
     weights: ArrayLike | None = None,
 ) -> TrackBank:
-    r"""Correct each row with the measurement assigned to it: the one correction core.
+    r"""Correct each row with its measurement ``assigned`` ``(n_tracks,)``, -1 for none.
 
-    :math:`K = P_{xz} S^{-1}`, by solving :math:`S K^T = P_{xz}^T`, never inverting S, and
-    :math:`\hat{x} = \hat{x}^- + K \nu`, wrapped by the *state* layout [1]_. The covariance:
-
-    - with H (KF, EKF), the Joseph form :math:`(I - K H) P^- (I - K H)^T + K R K^T`, positive
-      semidefinite for any K, both terms being :math:`A M A^T`;
-    - without H (UKF), :math:`P^- - K S K^T`, the Schur complement of S in a joint covariance
-      that is positive semidefinite when every sigma-point covariance weight is.
-
-    At the optimal gain they agree: with :math:`S = H P^- H^T + R` and :math:`P_{xz} = P^-
-    H^T` the Joseph form is :math:`P^- - K P_{xz}^T - P_{xz} K^T + K S K^T`, and each of the
-    last three terms is :math:`K S K^T`. They differ only in roundoff; the symmetric part is
-    taken last.
-
-    Parameters
-    ----------
-    bank : TrackBank
-        The predicted tracks ``innovation`` came from.
-    innovation : Innovation
-        From :func:`innovate`.
-    assigned : array_like of int
-        The measurement each row takes, ``(n_tracks,)``, -1 for none.
-    weights : array_like or None, optional
-        Reserved for PDA and JPDA association weights, ``(n_tracks, n_meas + 1)``, the last
-        column for "no measurement" (scenario 011 D28).
-
-    Returns
-    -------
-    TrackBank
-        The assigned rows corrected, the rest unchanged.
-
-    Raises
-    ------
-    NotImplementedError
-        If ``weights`` is given.
+    :math:`K = P_{xz} S^{-1}` by solving, never inverting; the mean wraps by the *state*
+    layout. With H (KF, EKF) the covariance is the Joseph form :math:`(I - K H) P^- (I -
+    K H)^T + K R K^T`, positive semidefinite for any K; without H (UKF) it is :math:`P^- - K S
+    K^T`. At the optimal gain the two are equal and differ only in roundoff. ``weights``
+    ``(n_tracks, n_meas + 1)`` is reserved for PDA and JPDA (scenario 011 D28).
 
     References
     ----------
-    .. [1] Bar-Shalom, Li and Kirubarajan (2001), §5.2.4; Särkkä (2013), ch. 6.
+    Bar-Shalom [1], §5.2.4; Särkkä [2], ch. 6.
     """
     if weights is not None:
         msg = "association weights (PDA, JPDA) arrive with scenario 011 D28."

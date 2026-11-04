@@ -1,30 +1,25 @@
-r"""The scan-loop tracker over a bank of tracks, and its lifecycle rules.
+r"""The scan loop over a bank of tracks: its lifecycle rules, initiators and :class:`Tracker`.
 
-:meth:`Tracker.process` takes one :class:`Scan`, everything one sensor measured at one time,
-and returns the bank after it. Each step runs over every track and measurement at once:
-
-1. **Predict** every row to the scan time. A row whose last hit is older than
-   ``max_coast_time_s`` is deleted before it can take a measurement.
-2. **Innovate and gate** every live row against every measurement, through each model the
-   selector offers (by default the scan's own); a pair keeps the first model it passes.
-3. **Assign.** Confirmed tracks pick first, tentative ones from what is left, and no track
-   starts inside a confirmed gate (``"confirmed_first"``, the default); or one solve over every
-   track (``"joint"``), which scenario 003 measured better (tracker-001 §7.3).
-4. **Update** the assigned rows, one batched correction per model offered.
-5. **Lifecycle**: hits, misses, M-of-N confirmation, coasting and deletion, as integer
-   arithmetic on the count columns [1]_. On the miss that opens re-acquisition, the
-   coordinates in ``reacquire_reset`` return to the prior's variance.
-6. **Initiate** a tentative row from each measurement no track took (``initiation.py``).
-7. **Compact**: a deleted row is reported once, in the returned bank, then dropped.
-
-The bank is immutable and is replaced only when a scan completes, so an error at any step
-leaves the tracker as it was. M-of-N at M = 3, N = 5: hit, miss, hit, miss, hit confirms on
-scan 5; hit, miss, miss, miss deletes on scan 4, when 1 hit and 1 scan left cannot reach 3.
+:meth:`Tracker.process` takes one :class:`Scan` and runs, over every track and measurement at
+once: predict; drop rows past ``max_coast_time_s``; innovate and gate through each model the
+selector offers, a pair keeping the first it passes; assign, confirmed tracks first (the
+default) or in one ``"joint"`` solve, which scenario 003 measured better (tracker-001 §7.3);
+update, once per model offered; count hits and misses as integer arithmetic, confirming by
+M-of-N [1] and, on the miss that opens re-acquisition, resetting ``reacquire_reset``; start a
+row from each unclaimed measurement (in two-stage assignment, none inside a confirmed gate);
+report deleted rows once and drop them. The bank is immutable and replaced only when a scan
+completes, so an error leaves the tracker as it was. At M = 3, N = 5: hit, miss, hit, miss, hit
+confirms on scan 5; hit, miss, miss, miss deletes on scan 4.
 
 References
 ----------
 .. [1] Y. Bar-Shalom and X. R. Li, *Multitarget-Multisensor Tracking: Principles and
-       Techniques*, YBS Publishing, 1995, §2.6.1 (a logic-based track formation procedure).
+       Techniques*, YBS Publishing, 1995.
+.. [2] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications to Tracking
+       and Navigation*, Wiley, 2001.
+.. [3] S. Bordonaro, P. Willett and Y. Bar-Shalom, "Decorrelated unbiased converted
+       measurement Kalman filter," *IEEE Trans. Aerosp. Electron. Syst.*, vol. 50, no. 2,
+       pp. 1431-1444, 2014, as restated by W. Wang et al., arXiv:1412.5524, §III-B.
 """
 
 from __future__ import annotations
@@ -55,15 +50,23 @@ from radar_forge.tracking.filters import (
     predict,
     update,
 )
-from radar_forge.tracking.initiation import Initiator, Rows
-from radar_forge.tracking.measurement_models import MarginalModel, MeasurementModel
-from radar_forge.tracking.models import MotionModel
+from radar_forge.tracking.models import (
+    LinearMeasurement,
+    MarginalModel,
+    MeasurementModel,
+    MotionModel,
+    RangeAzimuthElevationRangeRate,
+)
 
 __all__ = [
+    "DebiasedSphericalInitiator",
+    "DirectStateInitiator",
+    "Initiator",
     "LifecyclePolicy",
     "ModelSelector",
     "Scan",
     "Tracker",
+    "debiased_spherical_to_enu",
 ]
 
 # Two times this close are one time: one scan time computed two ways differs by roundoff far
@@ -72,33 +75,20 @@ _TIME_TOLERANCE_S = 1e-6
 
 _CONFIRMED = (TrackStatus.CONFIRMED, TrackStatus.COASTING)
 
+Rows = tuple[NDArray[np.float64], NDArray[np.float64]]
+
 
 @dataclass(frozen=True)
 class LifecyclePolicy:
-    """The numbers that decide when a track is confirmed or deleted.
+    """When a track is confirmed (M hits in its first N scans) or deleted.
 
-    Parameters
+    ``n_reacquire_scans`` extra misses are allowed a confirmed track only. ``reacquire_reset``
+    names coordinates whose variances return to the prior, and cross-covariances to zero, on
+    the miss that opens re-acquisition (tracker-001 §8.3).
+
+    References
     ----------
-    n_confirm_hits : int, default 3
-        M: hits a tentative track needs, within its first N scans, to be confirmed.
-    n_confirm_scans : int, default 5
-        N, counted from birth; a tentative track dies once M is out of reach.
-    n_delete_misses : int, default 5
-        Misses in a row after which a track is deleted.
-    n_reacquire_scans : int, default 0
-        Extra misses in a row a confirmed track survives, to re-acquire its target.
-    max_coast_time_s : float, default 30.0
-        Seconds since the last hit after which any track is deleted; exactly this is kept.
-    reacquire_reset : tuple of str, default ()
-        Coordinates forgotten on the miss that opens re-acquisition: their variances return
-        to the initiator's prior and their cross-covariances to zero (tracker-001 §8.3).
-
-    Raises
-    ------
-    ValueError
-        If a count is not an int, M is not in [1, N], ``n_delete_misses`` < 1,
-        ``n_reacquire_scans`` < 0, ``max_coast_time_s`` is not finite and positive, or
-        ``reacquire_reset`` is not a tuple of unique names.
+    Bar-Shalom and Li [1], §2.6.1.
     """
 
     n_confirm_hits: int = 3
@@ -110,14 +100,9 @@ class LifecyclePolicy:
 
     def __post_init__(self) -> None:
         """Reject a policy that could not work."""
-        counts = (
-            self.n_confirm_hits,
-            self.n_confirm_scans,
-            self.n_delete_misses,
-            self.n_reacquire_scans,
-        )
+        counts = (self.n_confirm_hits, self.n_confirm_scans, self.n_delete_misses)
         # A bool is an int in Python, so the exact type is tested.
-        if any(type(n) is not int for n in counts) or not (
+        if any(type(n) is not int for n in (*counts, self.n_reacquire_scans)) or not (
             1 <= self.n_confirm_hits <= self.n_confirm_scans
             and self.n_delete_misses >= 1
             and self.n_reacquire_scans >= 0
@@ -134,26 +119,10 @@ class LifecyclePolicy:
 
 @dataclass(frozen=True, eq=False)
 class Scan:
-    """Everything one sensor measured at one time, explained by one model.
+    """Everything one sensor measured at one time: z ``(n_meas, m)`` and R, checked and frozen.
 
-    The constructor is the boundary where measurements are checked, copied and frozen.
-
-    Parameters
-    ----------
-    time_s : float
-        Time of every measurement.
-    measurements : array_like
-        z, ``(n_meas, m)``; ``(0, m)`` for a scan that saw nothing.
-    noise_covariance : array_like
-        R per measurement, ``(n_meas, m, m)``, or one ``(m, m)`` for all; stored as the stack.
-    model_id : str
-        The tracker's ID of the model that explains them.
-
-    Raises
-    ------
-    ValueError
-        If the time is not finite, the model ID is empty, a value is not finite, a shape is
-        wrong, or a covariance is not symmetric positive semidefinite.
+    ``noise_covariance`` may be one ``(m, m)`` for every measurement; it is stored as the
+    ``(n_meas, m, m)`` stack. ``(0, m)`` measurements is a scan that saw nothing.
     """
 
     time_s: float
@@ -182,12 +151,209 @@ class Scan:
         object.__setattr__(self, "noise_covariance", noise)
 
 
-class ModelSelector(Protocol):
-    """Which models each track may use a scan through, best first (tracker-001 §8.3).
+class Initiator(Protocol):
+    """Starts tracks from a prior ``(n_state,)``; the re-acquisition reset reads it too."""
 
-    Called once per scan with the predicted bank and the scan's model ID. Each model offered
-    must be the scan's own or a registered marginal of it. Scenario 003's offers range and
-    rate to tracks that can unfold their Doppler, then range alone to every track.
+    prior_mean: NDArray[np.float64]
+    prior_covariance: NDArray[np.float64]
+
+    def initiate(
+        self,
+        measurements: NDArray[np.float64],
+        noise_covariance: NDArray[np.float64],
+        model: MeasurementModel,
+    ) -> Rows | None:
+        """Return a mean and covariance per measurement, or None if ``model`` cannot seed."""
+        ...
+
+
+class _PriorInitiator:
+    """A prior, checked once, and the rule for writing measured coordinates into it."""
+
+    def __init__(self, prior_mean: ArrayLike, prior_covariance: ArrayLike) -> None:
+        mean = np.array(prior_mean, dtype=np.float64)
+        if mean.ndim != 1 or not np.all(np.isfinite(mean)):
+            msg = f"prior_mean must be a finite vector; got shape {mean.shape}."
+            raise ValueError(msg)
+        self.prior_mean = mean
+        shape = (len(mean), len(mean))
+        self.prior_covariance = _check_covariances(prior_covariance, shape, "prior_covariance")
+
+    def _seed(
+        self, rows: Sequence[int], values: NDArray[np.float64], blocks: NDArray[np.float64]
+    ) -> Rows:
+        """Copy the prior per measurement, and replace the measured rows and their block."""
+        index = np.asarray(rows, dtype=np.intp)
+        # Replacing a block the prior ties to other coordinates would leave cross terms that
+        # no longer fit, and the covariance could stop being positive semidefinite.
+        if np.any(np.delete(self.prior_covariance[index], index, axis=1) != 0):
+            msg = f"the prior ties the measured coordinates {index.tolist()} to the others."
+            raise ValueError(msg)
+        mean = np.zeros((len(values), len(self.prior_mean))) + self.prior_mean
+        covariance = np.zeros((len(values), *self.prior_covariance.shape)) + self.prior_covariance
+        mean[:, index] = values
+        covariance[:, index[:, None], index[None, :]] = blocks
+        return mean, covariance
+
+
+class DirectStateInitiator(_PriorInitiator):
+    """Start a track by writing a linear measurement's coordinates and their R into a prior.
+
+    Unmeasured coordinates keep the prior, whose measured block must be uncorrelated with the
+    rest. ``seed_names`` copies only those, such as range while a folded rate is untrusted.
+    A model that is not a :class:`~radar_forge.tracking.models.LinearMeasurement` starts none.
+
+    References
+    ----------
+    Bar-Shalom [2], §5.5.
+    """
+
+    def __init__(
+        self,
+        prior_mean: ArrayLike,
+        prior_covariance: ArrayLike,
+        *,
+        seed_names: Sequence[str] | None = None,
+    ) -> None:
+        super().__init__(prior_mean, prior_covariance)
+        self.seed_names = None if seed_names is None else tuple(seed_names)
+
+    def initiate(
+        self,
+        measurements: NDArray[np.float64],
+        noise_covariance: NDArray[np.float64],
+        model: MeasurementModel,
+    ) -> Rows | None:
+        """Return the seeded rows, or None for a model that is not linear."""
+        if not isinstance(model, LinearMeasurement):
+            return None
+        names = self.seed_names or model.measurement_layout.names
+        rows = np.asarray(model.measurement_layout.indices(names))
+        blocks = noise_covariance[:, rows[:, None], rows[None, :]]
+        return self._seed(model.state_layout.indices(names), measurements[:, rows], blocks)
+
+
+def _angle_moments(
+    angle_rad: NDArray[np.float64], sigma_rad: NDArray[np.float64]
+) -> tuple[NDArray[np.float64], ...]:
+    """Return E[cos a], E[sin a], E[cos² a], E[sin² a], E[sin a cos a] for a Gaussian angle.
+
+    E[cos a] = λ cos ā with λ = exp(-sigma²/2); the double angle's damping is λ⁴.
+    """
+    damping, double_damping = np.exp(-(sigma_rad**2) / 2), np.exp(-2 * sigma_rad**2)
+    cos_2a = np.cos(2 * angle_rad)
+    return (
+        damping * np.cos(angle_rad),
+        damping * np.sin(angle_rad),
+        (1 + double_damping * cos_2a) / 2,
+        (1 - double_damping * cos_2a) / 2,
+        double_damping * np.sin(2 * angle_rad) / 2,
+    )
+
+
+def debiased_spherical_to_enu(
+    range_m: ArrayLike,
+    azimuth_rad: ArrayLike,
+    elevation_rad: ArrayLike,
+    sigma_range_m: ArrayLike,
+    sigma_azimuth_rad: ArrayLike,
+    sigma_elevation_rad: ArrayLike = 0.0,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    r"""Return the ENU offset ``(..., 3)`` and covariance of the true position, without bias.
+
+    The naive conversion is biased towards the radar: the mean of cos(θ + w) is λ cos θ with
+    λ = exp(-sigma²/2). Given z, the true range and angles are Gaussians about the measured
+    ones, so with p = r d, :math:`E[p] = r_m E[d]` and :math:`\operatorname{cov} p = (r_m^2 +
+    \sigma_r^2) E[d d^T] - r_m^2 E[d] E[d]^T`: exact for Gaussian errors, and the posterior
+    under a flat prior. Azimuth is clockwise from north; elevation 0 for a 2-D radar.
+
+    >>> position_m, _ = debiased_spherical_to_enu(20_000.0, 0.0, 0.0, 10.0, 0.1)
+    >>> round(float(position_m[1]), 1)
+    19900.2
+
+    References
+    ----------
+    Bordonaro, Willett and Bar-Shalom [3], restated as eqs. (8)-(14) of arXiv:1412.5524.
+    """
+    given = (range_m, azimuth_rad, elevation_rad, sigma_range_m, sigma_azimuth_rad)
+    values = np.broadcast_arrays(
+        *(np.asarray(v, dtype=np.float64) for v in given),
+        np.asarray(sigma_elevation_rad, dtype=np.float64),
+    )
+    radius_m, azimuth, elevation, sigma_r, sigma_az, sigma_el = values
+    if not np.all(np.isfinite(values)) or np.any(radius_m <= 0) or np.any(np.stack(values[3:]) < 0):
+        msg = "need finite values, positive ranges and nonnegative standard deviations."
+        raise ValueError(msg)
+    cos_az, sin_az, cos2_az, sin2_az, sincos_az = _angle_moments(azimuth, sigma_az)
+    cos_el, sin_el, cos2_el, sin2_el, sincos_el = _angle_moments(elevation, sigma_el)
+    direction = np.stack([cos_el * sin_az, cos_el * cos_az, sin_el], axis=-1)
+    # E[d dᵀ]: azimuth and elevation are independent, so each entry factorises.
+    rows = [
+        [cos2_el * sin2_az, cos2_el * sincos_az, sincos_el * sin_az],
+        [cos2_el * sincos_az, cos2_el * cos2_az, sincos_el * cos_az],
+        [sincos_el * sin_az, sincos_el * cos_az, sin2_el],
+    ]
+    second_moment = np.stack([np.stack(row, axis=-1) for row in rows], axis=-2)
+    position_m = radius_m[..., None] * direction
+    outer = position_m[..., :, None] * position_m[..., None, :]
+    covariance_m2 = (radius_m**2 + sigma_r**2)[..., None, None] * second_moment - outer
+    return position_m, (covariance_m2 + np.swapaxes(covariance_m2, -1, -2)) / 2
+
+
+class DebiasedSphericalInitiator(_PriorInitiator):
+    """Start a track at a spherical measurement's debiased position; the rest keeps the prior.
+
+    Needs a :class:`~radar_forge.tracking.models.RangeAzimuthElevationRangeRate` model that
+    reports range and azimuth, with independent errors; the height keeps the prior when no
+    elevation is reported. Every later update uses the spherical model itself.
+
+    References
+    ----------
+    Bordonaro, Willett and Bar-Shalom [3].
+    """
+
+    def initiate(
+        self,
+        measurements: NDArray[np.float64],
+        noise_covariance: NDArray[np.float64],
+        model: MeasurementModel,
+    ) -> Rows | None:
+        """Return the converted rows, or None for a model without range and azimuth."""
+        if not isinstance(model, RangeAzimuthElevationRangeRate) or not (
+            {"range_m", "azimuth_rad"} <= set(model.components)
+        ):
+            return None
+        names = [n for n in ("range_m", "azimuth_rad", "elevation_rad") if n in model.components]
+        rows = np.asarray(model.measurement_layout.indices(names))
+        block = noise_covariance[:, rows[:, None], rows[None, :]]
+        if np.any(block != block * np.eye(len(rows))):
+            msg = f"the debiased conversion needs independent errors in {names}."
+            raise ValueError(msg)
+        value, sigma = measurements[:, rows], np.sqrt(np.diagonal(block, axis1=1, axis2=2))
+        elevation = len(rows) == 3
+        position_m, covariance_m2 = debiased_spherical_to_enu(
+            value[:, 0],
+            value[:, 1],
+            value[:, 2] if elevation else 0.0,
+            sigma[:, 0],
+            sigma[:, 1],
+            sigma[:, 2] if elevation else 0.0,
+        )
+        layout = model.state_layout
+        axes = [a for a in "xyz" if f"{a}_m" in layout.names and (a != "z" or elevation)]
+        enu = np.array(["xyz".index(a) for a in axes])
+        return self._seed(
+            layout.indices([f"{a}_m" for a in axes]),
+            (position_m + model.sensor_enu_m)[:, enu],
+            covariance_m2[:, enu[:, None], enu[None, :]],
+        )
+
+
+class ModelSelector(Protocol):
+    """The models each track may use a scan through, best first (tracker-001 §8.3).
+
+    Called once per scan; each model offered is the scan's own or a registered marginal of it.
+    Scenario 003's offers range and rate to tracks that can unfold, then range alone to all.
     """
 
     def __call__(self, bank: TrackBank, model_id: str) -> Sequence[tuple[str, NDArray[np.bool_]]]:
@@ -201,7 +367,7 @@ def _m_of_n(
     n_scans: NDArray[np.int32],
     policy: LifecyclePolicy,
 ) -> NDArray[np.int8]:
-    """Confirm a tentative row on its M-th hit, and delete it once M is out of reach."""
+    """Confirm a tentative row on its M-th hit; delete it once M is out of reach."""
     tentative = status == TrackStatus.TENTATIVE
     confirm = tentative & (n_hits >= policy.n_confirm_hits)
     reachable = n_hits + np.maximum(policy.n_confirm_scans - n_scans, 0)
@@ -212,59 +378,26 @@ def _m_of_n(
 
 
 def _births(n_new: int, policy: LifecyclePolicy) -> NDArray[np.int8]:
-    """Return the status of new rows: tentative, or confirmed at once under 1-of-N."""
+    """Return new rows' status: tentative, or confirmed at once under 1-of-N."""
     ones = np.ones(n_new, dtype=np.int32)
     return _m_of_n(np.zeros(n_new, dtype=np.int8), ones, ones, policy)
 
 
 class Tracker:
-    """Track many targets from scans, every track a row of one bank (module docstring).
+    """Track many targets from scans, every track a row of one bank.
 
     Parameters
     ----------
     models : mapping of str to MeasurementModel
-        Every measurement model by ID, including any marginal a selector offers, each in the
-        motion model's state layout.
-    motion : MotionModel
-        How every track moves.
+        Every model by ID, marginals included, all in the motion model's layout.
     linearisation : Linearisation
-        The filter: ``TaylorLinearisation()`` (KF, EKF) or ``UnscentedTransform()`` (UKF).
-    gate_probability : float
-        :math:`P_G` of the chi-square gate, in (0, 1).
-    associator : Associator
-        ``GlobalNearestNeighbour()`` or ``GreedyNearestNeighbour()``.
-    initiator : Initiator
-        Starts tracks; its prior in the motion model's layout.
-    policy : LifecyclePolicy or None, optional
-        None for the defaults.
+        ``TaylorLinearisation()`` (KF, EKF) or ``UnscentedTransform()`` (UKF).
     cost : {"nis", "negative_log_likelihood_ratio"}, default "nis"
-        How a gated pair is scored. NIS cannot compare pairs of different dimensions, so a
-        scan that would mix them raises; the likelihood ratio can.
+        NIS cannot compare pairs of different dimensions, so a scan that mixes them raises.
     clutter_density : mapping of str to float or None, optional
-        λ per model ID: required for every model under the likelihood ratio, refused
-        otherwise.
-    assignment : {"confirmed_first", "joint"}, default "confirmed_first"
-        Who picks first (module docstring, step 3).
+        λ per model ID: required for every model by the likelihood ratio, refused otherwise.
     model_selector : ModelSelector or None, optional
         None offers the scan's own model to every track.
-
-    Attributes
-    ----------
-    bank : TrackBank
-        The live tracks after the last scan.
-    time_s : float or None
-        Time of the last scan, None before the first.
-
-    Raises
-    ------
-    ValueError
-        If a model's layout is not the motion model's, a setting is invalid, the densities
-        do not suit the cost, the prior has the wrong size, or ``reacquire_reset`` names an
-        unknown coordinate.
-
-    References
-    ----------
-    .. [1] Bar-Shalom and Li (1995), §2.6.1; see the module References.
     """
 
     def __init__(
@@ -320,15 +453,7 @@ class Tracker:
         self._next_track_id = 1
 
     def seed(self, mean: ArrayLike, covariance: ArrayLike, time_s: float) -> NDArray[np.int64]:
-        """Add tracks ``(n_new, n_state)`` from outside knowledge, and return their IDs.
-
-        This is how a tracker whose model cannot start tracks (bistatic) gets them.
-
-        Raises
-        ------
-        ValueError
-            If ``time_s`` is before the last scan, or as :meth:`TrackBank.append`.
-        """
+        """Add tracks ``(n_new, n_state)`` from a cue and return their IDs; bistatic needs it."""
         if self.time_s is not None and time_s < self.time_s - _TIME_TOLERANCE_S:
             msg = f"cannot seed at {time_s} s, before the last scan at {self.time_s} s."
             raise ValueError(msg)
@@ -339,18 +464,7 @@ class Tracker:
         return ids
 
     def process(self, scan: Scan) -> TrackBank:
-        """Run one scan (empty: a miss for every track) and return the bank after it.
-
-        The returned bank holds survivors then births; a row deleted this scan appears once,
-        with status ``DELETED``, and is gone from :attr:`bank`.
-
-        Raises
-        ------
-        ValueError
-            If the scan is out of sequence, or its model unknown or of the wrong dimension;
-            or, while gating, the selector offers a model that is neither the scan's nor a
-            marginal of it, or NIS costs would mix dimensions. The tracker is left as it was.
-        """
+        """Run one scan; return survivors then births, this scan's deleted rows included once."""
         model = self._check(scan)
         time_s = max(scan.time_s, float(self.bank.time_s.max(initial=scan.time_s)))
         bank = predict(self.bank, self.motion, self.linearisation, time_s)
@@ -395,17 +509,17 @@ class Tracker:
     ) -> tuple[NDArray[np.float64], NDArray[np.intp], list[Innovation]]:
         """Gate every pair; return costs, each pair's model index (-1 none) and innovations."""
         everyone = [(scan.model_id, np.ones(bank.n_tracks, dtype=bool))]
-        offered = (
-            everyone if self.model_selector is None else self.model_selector(bank, scan.model_id)
-        )
+        selector = self.model_selector
+        offered = everyone if selector is None else selector(bank, scan.model_id)
         cost = np.full((bank.n_tracks, len(scan.measurements)), np.inf)
         chosen = np.full(cost.shape, -1, dtype=np.intp)
         innovations: list[Innovation] = []
         # A loop over the few models offered; each is batched over every pair.
         for k, (model_id, allowed) in enumerate(offered):
             measurements, noise = self._view(scan, model_id)
-            model = self.models[model_id]
-            innovation = innovate(bank, model, self.linearisation, measurements, noise)
+            innovation = innovate(
+                bank, self.models[model_id], self.linearisation, measurements, noise
+            )
             threshold = chi_square_gate_threshold(self.gate_probability, measurements.shape[1])
             passed = gate(innovation.nis, threshold) & (chosen < 0) & (live & allowed)[:, None]
             pair_cost = association_cost(innovation, self.cost, self.clutter_density.get(model_id))
