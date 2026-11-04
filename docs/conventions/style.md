@@ -1,607 +1,170 @@
 # Coding style
 
-`ruff` (formatting + lint), `mypy --strict` and `scripts/check_conventions.py` enforce most of
-this document; `make fmt` fixes much of what they catch. What follows explains the rest — and,
-for the mechanical rules, *why* they are switched on.
+Copy the shape of [`src/radar_forge/core/radar_equation.py`](../../src/radar_forge/core/radar_equation.py);
+it follows every rule here. The tools enforce most of them, and `make fmt` fixes much of what
+they catch. This page lists what each tool enforces in one line, then the judgement calls a tool
+cannot make, which are what review checks.
 
-The single best reference is the worked example:
-[`src/radar_forge/core/radar_equation.py`](../../src/radar_forge/core/radar_equation.py).
-It demonstrates every convention below at once. Copy its shape.
+## What the tools enforce
 
-## What is enforced, and by what
-
-Every rule below is tagged. Nothing here relies on you remembering it, except the handful
-tagged **[review]** — which are the ones a tool genuinely cannot judge.
-
-| Tag | Meaning |
+| Rule | Enforced by |
 | :--- | :--- |
-| **[ruff]** | `ruff format` / `ruff check` — runs on staged files at commit, whole repo at push |
-| **[mypy]** | `mypy --strict` over `src/` — runs at push and in CI |
-| **[hook]** | `scripts/check_conventions.py` — runs at commit, push and in CI |
-| **[review]** | A human judgement call. Not automated, and honestly cannot be |
+| Formatting, line length 100, import order, naming case, Python ≥ 3.11 syntax | `ruff format`; ruff `E W I N UP` |
+| NumPy docstring on every public module, class and function | ruff `D` (numpy convention); R3 for module docstrings |
+| Docstring examples run and print what they claim; every public name documented | `tests/test_docstrings.py` |
+| Complete annotations | `mypy --strict` over `src`, `scripts`, `tools`; ruff `ANN` |
+| Every module defines `__all__`; no duplicate or private exports; `ArrayLike` in, float64 out | `tests/test_public_api.py` |
+| `msg = "..."` on its own line, then `raise`; no `assert` for validation | ruff `EM`, `S101` (tests exempt) |
+| No legacy `np.random.*` global functions | ruff `NPY002` |
+| `# TODO(author): what` with an issue link | ruff `TD` |
+| Configuration only in `pyproject.toml` | R1 |
+| Only Python (and package data) under `src/radar_forge/` | R2 |
+| Physical constants defined once, in `core/constants.py`; no literal `3e8`, `1.38e-23` … | R4, and `typing.Final` checked by mypy |
+| A unit suffix on every physical-quantity parameter (`gain_tx` is as bare as `gain`) | R5 |
+| `np.tile`/`np.repeat`/`np.broadcast_to` carry `# broadcast-exempt: <reason>` | R6 |
+| In-file Markdown links `](#anchor)` resolve | R7 |
+| No `##########` banners, no `# Inputs:`/`# Outputs:` comments | R8 |
+| No control characters in `.py`/`.md` (a BEL written for `\alpha`) | R9 |
+| Modules warn past 500 lines, fail past 800 (a grandfathered set only warns) | R10 |
+| `core/` does no `print`, `open`, `Path.write_*`, `logging` or `time` clocks | R11 |
+| `np.errstate`/`np.seterr` in `src/` carry `# errstate-exempt: <reason>` | R12 |
+| A floating-point warning in a test is an error | pytest `filterwarnings = ["error", …]` |
 
-`scripts/check_conventions.py` implements eight rules:
+R-numbers are the rules in [`scripts/check_conventions.py`](../../scripts/check_conventions.py),
+run at commit, push and in CI. When a judgement call below turns out to be checkable, add it
+there or to a test rather than writing more prose.
 
-| Rule | Catches |
-| :--- | :--- |
-| R1 `toml` | `setup.py`, `setup.cfg`, `.flake8`, `requirements.txt`, standalone linter configs |
-| R2 `layout` | Non-Python files inside the import package |
-| R3 `docstring` | A library module with no module docstring |
-| R4 `constants` | Redefining a shared constant, or hardcoding its literal value |
-| R5 `units` | A parameter named `range`, `gain_tx`, `power`… with no unit suffix |
-| R6 `broadcast` | `np.tile`/`np.repeat`/`np.broadcast_to` without a justification comment |
-| R7 `anchor` | An in-file Markdown link `](#section)` with no matching heading (§12) |
-| R8 `comments` | A `##########` banner comment, or an `# Inputs:`/`# Outputs:` comment block |
-| R9 `control` | A control character other than tab, LF or CR in a `.py` or `.md` file, usually a BEL that a script wrote for `\alpha` |
+## 0. The audience rule
 
-Each failure prints the rule, the offending line, the fix, and a pointer back here.
-
-When a **[review]** rule turns out to be checkable mechanically, add it to
-`scripts/check_conventions.py` or a test rather than writing more prose about it.
-
----
-
-## 0. The audience rule **[review]**
-
-This library is read by interns and students learning radar. When clarity and cleverness
-conflict, clarity wins — every time, without discussion. A vectorised one-liner that needs a
-paragraph to explain is worse than four named intermediate steps.
-
-Concretely: name the intermediate quantities of a derivation after the symbols in the
-reference, so a reader holding the textbook can follow along.
-
-```python
-# Good — the reader can match this against Richards §2.2.1.
-numerator = transmit_power_w * gain_tx * gain_rx * wavelength_m**2 * rcs_m2
-denominator = (4 * np.pi) ** 3 * range_m**4 * loss
-return numerator / denominator
-```
-
----
+The library is read by interns and students learning radar. When clarity and cleverness
+conflict, clarity wins. Name the intermediate quantities of a derivation after the symbols in
+the cited reference, so a reader holding the textbook can follow along.
 
 ## 1. Language and configuration
 
-- **Python ≥ 3.11** **[ruff]**. Use modern syntax: `X | None` over `Optional[X]`, builtin generics,
-  `match` where it genuinely reads better. `from __future__ import annotations` at the top of
-  every module regardless.
-- **All configuration is TOML, in `pyproject.toml`** **[hook: R1]** — build, deps, ruff, mypy, pytest,
-  coverage. No `setup.py`, `setup.cfg`, `.flake8`, `tox.ini`, `requirements*.txt`, or a
-  standalone `ruff.toml`/`mypy.ini`. `scripts/check_conventions.py` blocks them at commit
-  time. One file means one place to look, and no chance of two tools disagreeing.
-- **src layout** **[hook: R2]**. Everything importable as `radar_forge` lives under `src/radar_forge/`;
-  nothing else does. This makes it impossible to accidentally test against the source tree
-  instead of the installed package.
-- Line length **100** **[ruff]**. Radar code carries long but meaningful names; 79 would force
-  abbreviation, which costs more than it saves.
+Enforced (table above). Use `X | None`, builtin generics and `from __future__ import annotations`.
 
----
+## 2. Units
 
-## 2. Units — the most important convention here
+R5 checks parameter names. The rest is judgement:
 
-Unit confusion is the single most common source of wrong answers in radar code, and it is
-silent: the array still has the right shape. So we put the unit in the name.
+1. **Linear internally, decibels only at the API boundary**, and the converted name says `_db*`.
+2. **Radians internally.** A constructor may take `_deg` for convenience and converts on its
+   first line.
+3. **Locals follow the same rule.** R5 checks only parameters; review checks the rest.
+4. **The docstring states the unit**, including linear or dB, as `received_power_w` does.
 
-**Every physical quantity carries its unit as a suffix.**
-
-| Suffix | Unit | Example |
-| :--- | :--- | :--- |
-| `_m` | metres | `range_m`, `wavelength_m`, `spacing_m` |
-| `_s` | seconds | `chirp_duration_s`, `pri_s`, `delay_s` |
-| `_hz` | hertz | `carrier_frequency_hz`, `bandwidth_hz`, `doppler_hz` |
-| `_rad` / `_deg` | angle | `azimuth_rad`, `beamwidth_deg` |
-| `_w` / `_dbm` / `_dbw` | power | `transmit_power_w`, `noise_power_dbm` |
-| `_m2` / `_dbsm` | RCS | `rcs_m2`, `rcs_dbsm` |
-| `_mps` | velocity | `radial_velocity_mps` |
-| `_db` / `_dbi` | ratio / gain | `snr_db`, `gain_dbi` |
-
-Rules:
-
-1. **Linear internally, decibels only at the boundary.** Every internal computation is in
-   linear SI. Convert at the API edge, and name the converted quantity `_db*`. A function
-   never accepts "gain" and guesses whether you meant 30 or 1000.
-2. **Angles in radians internally** (`_rad`), because that is what NumPy's trig takes.
-   User-facing constructors may accept `_deg` for convenience — but then the parameter is
-   named `_deg` and converted immediately, on the first line.
-3. **No bare unit names** **[hook: R5]**. `range`, `power`, `gain`, `freq` are rejected
-   automatically. The check matches the *leading token*, so a qualifier does not launder a
-   bare name: `gain_tx` is exactly as ambiguous as `gain` and is rejected too — hence
-   `gain_tx_linear` or `gain_tx_dbi`. A name ending in a recognised suffix passes.
-
-   ```
-   ✗ def received_power(range, gain_tx, power): ...
-   ✓ def received_power_w(range_m, gain_tx_linear, transmit_power_w): ...
-   ```
-
-   The check runs over function parameters — the API surface, where a mix-up crosses a
-   module boundary and becomes someone else's bug. Local variables are **[review]**; the
-   same discipline applies, but a hook that policed every local would be more noise than
-   signal.
-
-   Recognised suffixes: `_m _m2 _km _cm _mm _s _us _ns _ms _hz _khz _mhz _ghz _rad _deg
-   _w _kw _mw _dbm _dbw _db _dbi _dbsm _mps _kmh _k _j _v _bins _samples _wavelengths
-   _linear _norm`. Counts are `n_`-prefixed and exempt. To add one, edit `UNIT_SUFFIXES` in
-   `scripts/check_conventions.py`.
-4. **State the unit in the docstring too** **[review]**, including the linear-vs-dB
-   expectation and how to convert. See `received_power_w` for the pattern.
-
-### Physical constants **[hook: R4]**
-
-**Every physical constant is defined once, in
-[`core/constants.py`](../../src/radar_forge/core/constants.py), and imported from there.**
-
-```python
-from radar_forge.core.constants import SPEED_OF_LIGHT_MPS
-```
-
-A second definition of the speed of light is not a style problem, it is a correctness
-problem: two modules disagreeing in the ninth digit produce range errors that look like a
-calibration issue and take days to find. Three things stop that happening:
-
-1. Each constant is annotated `typing.Final`, so **[mypy]** rejects any reassignment —
-   including `radar_forge.core.constants.SPEED_OF_LIGHT_MPS = 3e8` from another module.
-2. **[hook: R4]** rejects any other file that *binds* one of those names.
-3. **[hook: R4]** rejects the literal *values* appearing anywhere else — `299792458`,
-   `3e8`, `2.998e8`, `1.38e-23`, `6371000` and friends — so you cannot sidestep the rule by
-   retyping the number under a different name.
-
-`3e8` is called out specifically because it is 0.07% high: 70 cm of range error at 1 km,
-which is worse than the range resolution of a 1 GHz-bandwidth automotive radar.
-
-Adding a constant: define it in `constants.py` with a `Final` annotation, a docstring
-giving its source and any convention it encodes, and add it to `__all__`. Add near-miss
-approximations of it to `CONSTANT_LITERALS` in `scripts/check_conventions.py` so the
-shortcut is caught too. `tests/core/test_constants.py` checks the values themselves.
-
-Python cannot make a module attribute genuinely immutable at runtime — nothing stops
-`constants.SPEED_OF_LIGHT_MPS = 3e8` in a live interpreter session. `Final` plus the hook
-catches it in anything committed, which is the case that matters.
-
----
+Suffixes: `_m _m2 _s _hz _rad _deg _w _dbm _dbw _db _dbi _dbsm _mps _k _linear _bins _samples`
+and the scaled forms in `UNIT_SUFFIXES`. Counts are `n_`-prefixed. To add a constant, give it
+`Final`, a docstring with its source, an `__all__` entry, and add its near-miss approximations
+to `CONSTANT_LITERALS`.
 
 ## 3. Naming
 
-- `snake_case` functions and variables, `PascalCase` classes, `UPPER_SNAKE` module constants. **[ruff]**
-- Array-dimension counts are `n_`-prefixed **[review]**: `n_pulses`, `n_samples`, `n_elements`, `n_targets`.
-  Use the same names in shape annotations so `(n_pulses, n_samples)` is unambiguous everywhere.
-- `_index` names a position in an ordered sequence; `_id` names a key **[review]**. An index
-  is only meaningful against its array: `range_index` is a bin of the map, `burst_index`
-  picks `scenario.bursts[burst_index]`, and reordering the array changes it. An id is a label
-  other records look a thing up by, and it does not change if the order does: `track_id`,
-  `sensor_id = "rx0"`. An id may be an integer counted from 0 (`detection_id`), but it is
-  still a key, not an index; never use it to index an array. `kalman.py` uses both:
-  `track_index` is a row of the cost matrix, and `track.track_id` is the track's label.
-  Plurals are `_indices` and `_ids`. Never write `_idx`.
-- Single letters are allowed **only** where they are the standard symbol in the cited
-  reference, and only inside a function whose docstring maps them: `R`, `sigma`, `lambda_`
-  (trailing underscore — `lambda` is a keyword). Never as a parameter of a public function.
-- Verb-first function names for actions (`compute_`, `estimate_`, `export_`, `simulate_`);
-  noun names for quantities returned (`received_power_w`, `beam_pattern_db`).
-- A verb keeps one meaning across the package **[review]**. Once `estimate_` or `export_` means
-  something, don't use another verb for the same action, or that verb for a different one. Name
-  a function for what it returns or produces, not for how it works.
-- `_leading_underscore` for everything not in the public API (§6).
-- Name a thing by what it does or holds, not by who it is for **[review]**: `visualisation`, not
-  `teaching`. A name that is nearly right gets renamed ([refactoring.md](refactoring.md) F5).
-- Never reuse a term that already means something here or in the field **[review]**.
-  `noise_power_w` is thermal noise, so a CFAR estimate is `cfar_noise_estimate_w`.
-  "Observable" means observability in estimation, so a field-of-view test is `covers`.
-- Never shadow a parameter, a builtin or an imported module with a local or a loop variable
-  **[review]**. Pick another word: a loop over `track` inside a function that takes `track` reads
-  as the same object.
+- Counts are `n_pulses`, `n_samples`, `n_targets`, and shape annotations use the same names.
+- `_index` is a position in an ordered sequence; `_id` is a key that survives reordering.
+  Never index an array with an id. Never write `_idx`.
+- Single letters only where they are the cited reference's symbol, inside a function whose
+  docstring maps them, never as a public parameter.
+- Verb-first names for actions (`estimate_`, `export_`), noun names for returned quantities
+  (`received_power_w`). A verb keeps one meaning across the package.
+- Name a thing for what it does or holds, not who it is for (`visualisation`, not `teaching`).
+- Never reuse a term the field or the repo already owns: a CFAR estimate is
+  `cfar_noise_estimate_w` because `noise_power_w` is thermal noise.
+- Never shadow a parameter, builtin or module with a local or loop variable.
 
-### 3.1 Data layout and array names **[review]**
+### 3.1 Data layout and array names
 
-**The cube is `(n_pulses, n_samples)`.** Slow time is axis 0, fast time is axis 1.
-Extra receive channels go on the end: `(n_pulses, n_samples, n_rx)`.
+The cube is `(n_pulses, n_samples)`: slow time on axis 0 (becomes Doppler), fast time on axis 1
+(becomes range); extra channels go last. A *pulse* is one slow-time sample on both paths, one
+chirp of an FMCW dwell included. An array that crosses a function boundary is named for its
+domains, fast axis first: `data_ftst` (raw baseband), `data_rfst` (after range compression),
+`data_rv` (the range-Doppler map). `img` and `img_db` are for display only; never feed one back
+into a detector. On disk, the layout is [data-001](../../spec/data-001-formats.md)'s.
 
-| Axis | Index | What it is | What it becomes |
-| :--- | :---- | :--------- | :-------------- |
-| 0 | `n_pulses` | **Slow time** — one sample per pulse, spaced by the PRI | **Doppler**, via an FFT along axis 0 |
-| 1 | `n_samples` | **Fast time** — samples within one chirp or pulse | **Range**, via a deramp FFT or a matched filter |
+### 3.2 Spelling
 
-A *pulse* is one slow-time sample on both paths: one chirp of an FMCW dwell, one
-pulse of a pulsed one. That is why the count is `n_pulses` and not `n_chirps` —
-it names the axis, not the waveform. `chirp_duration_s`, `lfm_chirp` and
-`n_samples_per_chirp` describe the waveform occupying the *fast* axis and are
-correct as they stand.
+British spelling (`normalise`, `behaviour`, `visualisation`, `licence` as a noun) in names,
+docs, comments and commits, except a name that mirrors an outside API (matplotlib's `color=`),
+a quotation, or a released name that renaming would break. Say why in a comment if not obvious.
 
-**Name an array for the domain each axis is in**, as a `_<fast><slow>` suffix
-reading fast axis first, then slow — the order the axes are processed in, not
-the order they are stored in:
+### 3.3 Circular axes
 
-| Name | Shape | Both axes | Typical source |
-| :--- | :---- | :-------- | :------------- |
-| `data_ftst` | `(n_pulses, n_samples)` | **f**ast **t**ime × **s**low **t**ime | raw baseband, straight out of `signal` |
-| `data_rfst` | `(n_pulses, n_range_bins)` | **r**ange × **s**low **t**ime | after `range_fft` or `matched_filter` |
-| `data_rv` | `(n_doppler_bins, n_range_bins)` | **r**ange × **v**elocity | after `doppler_fft`; the range-Doppler map |
-
-The point is that the suffix tells the reader which transforms have already been
-applied, so a function that needs a range-Doppler map cannot silently be handed
-raw baseband. Use the suffixed name for any array that crosses a function
-boundary; a short-lived local inside one function may be named for what it is.
-
-**`img` and `img_db` are what you plot**, not what you compute on. An `img` is a
-real-valued 2-D array prepared for display — magnitudes, already reduced over any
-channel axis — and `img_db` is that in decibels (§2: decibels at the boundary
-only, and the boundary here is the screen). Never feed an `img_db` back into a
-detector or an estimator; take it from the `data_*` array it came from.
-
-**On disk, the layout is data-001's.** File formats, column names, units and axis order for
-every file a run reads or writes are in
-[`spec/data-001-formats.md`](../../spec/data-001-formats.md).
-
-### 3.2 Spelling **[review]**
-
-**British spelling is preferred, unless there is a good reason not to.** That covers names,
-docstrings, comments, Markdown and commit messages: `normalise`, `vectorise`, `behaviour`,
-`visualisation`, `licence` as a noun.
-
-Good reasons to use another spelling:
-
-- **The name mirrors an outside API.** A keyword passed through to matplotlib stays `color=`,
-  and a helper named after NumPy's `normalize_axis_index` may stay `_normalize_axis`. A reader
-  who knows the library should recognise the name.
-- **It is quoted.** The title of a cited book or paper, an error message from another library,
-  or a proper noun keeps its own spelling.
-- **Changing it would break something.** A public name, a file column or a CLI flag that is
-  already released keeps its spelling until there is a reason to rename it anyway. Don't churn
-  working code just to respell it.
-
-If you keep an American spelling for one of these reasons and the reason isn't obvious, say why
-in a comment.
-
-### 3.3 Circular axes **[review]**
-
-Some axes are circles: Doppler always, range when a return can come from
-beyond one repetition interval, and an angle such as azimuth. On a circle, the last
-bin's neighbour is bin 0, and a difference is the shorter way round. Most wrap bugs come
-from treating such an axis as a line, so:
-
-- **Declare the period once, where the axis is made.** That is `Coordinate.period` for a
-  state or measurement coordinate, and `RangeDopplerProduct.range_period_m` /
-  `velocity_period_mps` for a map. Do not recompute it elsewhere from bin counts.
-- **Apply it in the layer that consumes the values.** Use `wrap`/`wrap_axes` in detection
-  and clustering, and `StateLayout.wrap` and `StateLayout.residual` in tracking. The
-  producer only labels the axis.
-- **Never pad, roll or `np.interp` across an edge.** Padding invents cells, a roll moves the
-  edge somewhere else rather than removing it, and `np.interp` clamps at the end bins.
-- **Convert an index to a value with the axis's own formula**
-  (`RangeDopplerProduct.range_at_index_m`, `velocity_at_index_mps`), so that a fractional
-  index past the last bin wraps instead of clamping.
-- **Keep a fold half-open.** In floating point, `x % p` can round up to exactly `p`, so fold
-  that case back to 0, as `StateLayout.wrap` does (9cae072).
-- **Average about a reference point.** A weighted mean of angles is `wrap(r + Σ wᵢ·residual(xᵢ,
-  r))` about a nearby `r` (`StateLayout.weighted_mean_about`). The circular mean of unit vectors
-  is a different quantity: it is biased for unequal weights, and undefined when the vectors
-  cancel (5ff1fa9).
-- **Unwrap a history before fitting to it.** A slope fitted across a fold is wrong by a period
-  per sample. Unwrap the series as it grows, then fit (ea860c5).
-
----
+Doppler is always a circle; range is one when returns come from beyond one repetition interval;
+so is azimuth. Declare the period once where the axis is made (`Coordinate.period`,
+`RangeDopplerProduct.range_period_m`) and apply it where values are consumed (`wrap`,
+`StateLayout.residual`). Never pad, roll or `np.interp` across the edge. Convert an index to a
+value with the axis's own formula, so a fractional index wraps. Keep a fold half-open (`x % p` can
+round to `p`). Average angles about a nearby reference, not as unit vectors. Unwrap a history
+before fitting a slope to it.
 
 ## 4. Docstrings
 
-**NumPy style** **[ruff]** (`pydocstyle` with `convention = "numpy"`), on every public
-module, class and function. Module docstrings are additionally **[hook: R3]**. Sections, in order:
+Sections in order: summary, extended description (the maths in LaTeX, in the reference's
+notation), Parameters, Returns, Raises, Notes, References, Examples. Then:
 
-```
-Summary line, imperative, one line, ends with a period.
+- **Cite the source.** Physics or DSP carries a `References` entry naming the section or
+  equation, e.g. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed., §2.2.1.
+- **Write out array shapes** with the `n_` names, and what each axis means.
+- **LaTeX goes in a raw string**, `r"""…"""`. Never write source through a string that reads
+  escapes (Python in a shell heredoc): `\alpha` lands as BEL (R9 catches it).
 
-Extended description. The maths, in LaTeX, matching the reference's notation.
+### 4.1 Checking a citation
 
-Parameters
-Returns
-Raises          (whenever the function validates its inputs)
-Notes           (assumptions, limitations, numerical caveats)
-References      (required for any physics or DSP — see below)
-Examples        (doctest-formatted; they are real, runnable examples)
-```
-
-Two requirements specific to this project:
-
-**Cite your source** **[review]**. Any function implementing physics or a DSP block carries a
-`References` section naming the textbook section, equation number, or paper. This is what
-makes the library teachable, and it is what lets a reviewer check the maths rather than
-trusting it. Use the reference's own notation in the LaTeX so the two can be read side by
-side.
-
-```
-References
-----------
-.. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed.,
-       McGraw-Hill, 2014, §2.2.1 (the simple point-target radar range equation).
-```
-
-**Write a docstring that holds LaTeX as a raw string** **[review]**: `r"""…"""`. And never
-write source through a string that reads escapes, such as Python in a shell heredoc: `\alpha`,
-`\beta` and `\frac` then land in the file as the control bytes BEL, BS and FF. No linter shows
-them, and the rendered formula silently loses its symbols (cd568eb, 23a0ccd).
-
-**Write out array shapes** **[review]**. Every array parameter and return states its shape using the
-`n_` names, and says what the axes *mean*:
-
-```
-Parameters
-----------
-baseband : numpy.ndarray
-    Complex baseband cube of shape ``(n_pulses, n_samples, n_rx)``; fast time
-    along axis 1, slow time along axis 0.
-```
-
-### 4.1 Checking a citation **[review]**
-
-A wrong section number is worse than none: the student opens the book at the wrong page and
-concludes they have misunderstood. PR #11 found about half the repository's citations wrong.
-So a citation, in a docstring, a test or a spec, passes only if all three hold:
-
-1. **The record matches.** Authors, title, venue, volume, issue, pages and year agree with the
-   publisher's record.
-2. **The number can be seen.** The section, equation or chapter number is visible in the source
-   or its table of contents.
-3. **The title fits the claim.** What that section is about supports the sentence the citation
-   is attached to.
-
-**Evidence**, best first: the source itself; a scanned table of contents or the publisher's
-front matter; the publisher's listing or the DOI record (`https://api.crossref.org/works/<doi>`)
-for the bibliographic details. A secondary source, such as another paper describing the
-first, only corroborates. Memory and search-engine summaries are not evidence.
-
-**When the number can't be seen,** cite the level you can see (the chapter rather than its
-§11.6), or remove the citation, as #11 removed Blackman & Popoli. When only the title is visible
-(a paywalled book), the text claims no more than the title says, and the commit lists that
-citation as "title only".
-
-**What a citation covers.**
-
-- **Scope.** A paper is cited only for what it covers: Lerro & Bar-Shalom (1993) debias 2-D
-  polar measurements, so a 3-D conversion also cites Suchomski (1999).
-- **Attribution.** An attribution names the paper that made the claim: κ = 3 − n is the
-  heuristic of Julier & Uhlmann (1997), not of Julier's later scaled transform.
-- **Reference lists.** Every entry in a `References` list is cited in the text; an entry
-  nothing cites is removed.
-
-**Pointers into the repository** (a spec's §, a decision ID such as DF7, `file:line`, a review's
-#N) are checked the same way: the target exists and says what is claimed. In historical
-documents, a line number that has since moved is marked as true when written, not updated.
-
-**Who checks.**
-
-- **The PR's author** checks, in one pass, every citation the PR adds or changes.
-- **An audit** checks a package, a new spec, or the whole repository, as #11 and the tracker-001
-  check did. Two passes work independently, neither seeing the other's results. Their results
-  are reconciled, and anything only one pass saw is re-checked by hand.
-
-Either way, the commit message records each correction with its evidence (the URL and what was
-seen there), and lists what was left as "title only" or removed.
-
----
+A citation passes only if the record matches the publisher's (authors, title, venue, pages,
+year), the cited section or equation number can be seen in the source or its table of contents,
+and that section's subject supports the sentence. Evidence is the source, its scanned contents,
+or the publisher or Crossref record; memory and search summaries are not. If the number cannot
+be seen, cite the level you can see or remove the citation. Every `References` entry is cited
+in the text. The commit message records each correction with its evidence.
 
 ## 5. Typing
 
-**[mypy]** `mypy --strict` runs over `src/` and must pass.
-
-- **Annotate everything public, completely.** Defaults included.
-- Arrays: accept `numpy.typing.ArrayLike`, return `numpy.typing.NDArray[np.float64]` (or
-  `np.complex128`). Being liberal on input and precise on output means callers can pass a
-  list, and the type checker still knows what came back.
-- Be explicit about dtype in the return type. `NDArray[Any]` defeats the point.
-- No `# type: ignore` without a trailing comment saying why and, ideally, an issue link.
-- `TYPE_CHECKING` imports for anything needed only for annotations, so optional heavy
-  backends (`torch`, `mitsuba`) never become an import-time cost.
-
-Shapes are not in the type system; that is why §4 requires them in the docstring. If shape
-errors become a recurring source of bugs, runtime validation belongs in a shared helper, not
-in scattered `assert`s.
-
----
+Accept `ArrayLike`, return `NDArray[np.float64]` (or `complex128`), never `NDArray[Any]`. A
+`# type: ignore` names its error code and says why. Optional heavy backends are imported under
+`TYPE_CHECKING` or inside the function that needs them.
 
 ## 6. Public API
 
-**The public API is exactly what a package's `__init__.py` re-exports in `__all__`.**
-Anything else — even without a leading underscore — is an implementation detail that may
-change in any release.
-
-- Each subpackage `__init__.py` imports its public names and lists them in `__all__`.
-- **Every module defines `__all__`, not only every package** **[review]**. A module-level
-  `__all__` is the reading order: it names what the module is for, and it lets a reader skip
-  the `_private_func` helpers underneath without first working out which ones are helpers.
-  A module whose `__all__` needs a paragraph to justify is doing two things (§9).
-- Private helpers get a `_` prefix. Modules that are wholly internal get one too
-  (`_backends.py`).
-- Keep `__init__.py` import-light. Optional backends are imported lazily, inside the function
-  that needs them, and raise a clear `ImportError` naming the extra to install:
-
-  ```python
-  msg = "Ray tracing requires the raytracing extra: pip install 'radar-forge[raytracing]'"
-  raise ImportError(msg) from exc
-  ```
-
----
+The public API is what a package's `__init__.py` re-exports in `__all__`; every module also
+defines `__all__` (`tests/test_public_api.py`). Private helpers and wholly internal modules get a
+leading `_`. Keep `__init__.py` import-light: an optional backend is imported inside the function
+and raises `ImportError` naming the extra to install.
 
 ## 7. NumPy practice
 
-- **Vectorise** **[review]**. Python loops over array elements will be sent back. If a loop
-  is genuinely unavoidable (a sequential filter, a tracker update), write a comment saying
-  why. This one really is review-only: no checker can tell a legitimate sequential recursion
-  from a lazy `for i in range(len(arr))`.
-- **Broadcast rather than tile** **[hook: R6]**. A function taking scalars should also accept
-  arrays for those arguments with no extra code; `received_power_w` is the model, where every
-  argument broadcasts. `np.tile`, `np.repeat` and `np.broadcast_to` materialise a copy that
-  broadcasting usually makes unnecessary, so the hook stops them unless the call carries a
-  justification on its line or the line above:
-
-  ```python
-  # broadcast-exempt: the FFT plan below requires a contiguous replicated axis.
-  steering = np.tile(np.arange(n_pulses), 2)
-  ```
-
-  The escape hatch is deliberate — these functions have legitimate uses. The rule is not
-  "never tile", it is "say why", so the next reader knows it was a decision and not a habit.
-- Always pass `dtype=np.float64` **[review]** / `np.complex128` explicitly at array construction.
-  Silent float32 demotion is very hard to spot and changes results at the tolerances we test at.
-- Use `np.asarray` (no copy when possible), not `np.array`, to normalise inputs.
-- `rng = np.random.default_rng(seed)` **[ruff: NPY002]** — never the legacy `np.random.*`
-  global functions.
-  Any function with randomness takes a `rng` or `seed` parameter; reproducibility is not
-  optional in a dataset-synthesis library.
-- Prefer `np.pi`-based expressions in a named constant when reused (`_FOUR_PI_CUBED`), so
-  the reader sees the equation rather than a magic number.
-- **A floating-point warning is a finding, not noise** **[review]**. pytest turns every
-  `RuntimeWarning` into an error, so a divide-by-zero or invalid-value warning stops the
-  suite at the operation that went wrong. Before silencing one, decide whether the NaN or
-  inf is the right answer or a sign of bad input:
-  - *It is the right answer and the docstring says so.* Mask it explicitly and say why in a
-    comment, as the 2-D CFAR does for cells with an incomplete reference ring
-    (`np.greater(..., where=tested)` in `core/detection.py`). Or scope the narrowest
-    `np.errstate` category to the one expression that produces it, as
-    `BistaticRadar.range_resolution_m` does with `divide="ignore"` at forward scatter. Name
-    the NaN in `Returns` and test that it appears where it should.
-  - *It can be avoided by rearranging the maths.* Do that instead.
-    `BistaticRadar.target_ranges_m` takes norms rather than going through an `arcsin` that is
-    0/0 for a target on a site.
-  - *It means the input is singular or invalid.* Raise `ValueError` at the boundary
-    (see [§8](#8-errors)). Then the caller sees what is wrong rather than a NaN three calls
-    later.
-
-  Never use `np.errstate(all=...)`, `np.seterr` or a `warnings` filter in `src/`. Each one
-  hides the next real bug along with the warning it was added for.
-
----
+- **Vectorise.** A Python loop that must stay (a sequential filter, a tracker update) carries a
+  comment saying why.
+- **Broadcast** so scalar arguments also accept arrays with no extra code (R6 for the escapes).
+- Pass `dtype=np.float64`/`np.complex128` explicitly at construction; use `np.asarray` on input.
+- Randomness takes an `rng: np.random.Generator` or a `seed` from the caller.
+- **A floating-point warning is a finding.** If the NaN or inf is the documented answer, mask it
+  explicitly or scope the narrowest `np.errstate` category to one expression with
+  `# errstate-exempt: <reason>` (R12), and test that it appears. If rearranging the maths avoids
+  it, do that. If it means bad input, raise `ValueError` at the boundary. Never `np.seterr` or a
+  `warnings` filter in `src/`.
 
 ## 8. Errors
 
-- Validate inputs at public API boundaries, and say what is wrong *and what is expected*:
-
-  ```python
-  msg = "range_m must be strictly positive; the range equation diverges at R = 0."
-  raise ValueError(msg)
-  ```
-
-  Assign the message to `msg` first (ruff `EM`-style, and it keeps the `raise` line short).
-- **Keep the guard clauses out of the maths** **[review]**. Validation is a block of
-  `if …: raise ValueError(…)` at the top of the function; the vectorised NumPy/SciPy body
-  starts after it and contains no further raising. Do not interleave a check with the
-  computation it protects, and do not hide one inside a comprehension or a branch of the
-  maths.
-
-  ```python
-  def received_power_w(range_m, gain_tx_linear):
-      if np.any(np.asarray(range_m) <= 0.0):  # guards first, together
-          msg = "range_m must be strictly positive; the range equation diverges at R = 0."
-          raise ValueError(msg)
-
-      numerator = gain_tx_linear * ...  # then the maths, uninterrupted
-      return numerator / denominator
-  ```
-
-  Two reasons. A reader tracing a derivation against the textbook can then skip one
-  contiguous block and read only the equations — which is exactly what
-  `tools/generate_reading_view.py` does mechanically, stripping the guard blocks to produce
-  the reading view. And defensive scaffolding mixed into a broadcast expression is where
-  shape bugs hide.
-- `ValueError` for bad values, `TypeError` for bad types, `ImportError` for a missing
-  optional backend. Never a bare `Exception`, never a silent clamp.
-- **Never drop data silently** **[review]**. Input that cannot be read raises or is flagged in
-  the output; it is never skipped. Dispatch on a kind through a dict, and make a missing key
-  raise a `ValueError` that names it. Don't use an `else` that treats an unknown kind as a
-  default one.
-- **Raise your own error at a module boundary** **[review]**. If a library's exception would
-  escape, catch it and raise one that names the `radar_forge` operation, chained with `from`.
-  Callers should not depend on which library sits underneath.
-- **An error leaves the state as it was** **[review]**. A method that changes several objects
-  either finishes, or puts every one back before it re-raises. `Tracker.process` restores every
-  track if predicting or gating any of them fails (6b04059), so a caller that catches the error
-  still holds a consistent tracker.
-- Do not use `assert` for validation **[ruff: S101 in src]** — `python -O` removes it.
-- `warnings.warn` for a recoverable situation the user should know about (aliasing, an
-  under-sampled pattern), with a `stacklevel` so it points at the caller.
-
----
+- **Guards first.** Validation is one block of `if …: msg = "…"; raise ValueError(msg)` at the
+  top; the maths follows uninterrupted. `tools/generate_reading_view.py` strips that block, so
+  code that mixes the two reads as a puzzle there.
+- The message says what is wrong and what is expected.
+- `ValueError` for bad values, `TypeError` for bad types, `ImportError` for a missing extra.
+  Never a bare `Exception`, never a silent clamp.
+- **Never drop data silently.** Dispatch on a kind through a dict; an unknown key raises.
+- **Raise your own error at a module boundary**, chained with `from`.
+- **An error leaves the state as it was**: a method that changes several objects finishes or
+  restores them all before re-raising (`Tracker.process` does).
+- `warnings.warn(…, stacklevel=2)` for a recoverable condition the user should know about.
 
 ## 9. Imports and modules
 
-- Ordered by `ruff` isort **[ruff]**: stdlib, third-party, first-party `radar_forge`, local.
-- Absolute imports (`from radar_forge.core import ...`), never relative.
-- **Every module has a docstring** **[hook: R3]** saying what it models and citing its
-  reference. The hook enforces that one exists; **[review]** enforces that it says something.
-- One coherent concept per module. When a module passes ~400 lines, that is a prompt to ask
-  whether it is doing two things.
-
----
+Absolute imports only. One coherent concept per module; R10 warns at 500 lines and fails at 800.
+The module docstring (R3) says what the module models and cites its reference.
 
 ## 10. Comments
 
-**[review]** Comment the **why**, never the what. The code already says what it does.
-
-```python
-# Bad
-range_arr = np.asarray(range_m)  # convert range to an array
-
-# Good
-# asarray rather than array: callers frequently pass an existing ndarray in a
-# hot loop, and a defensive copy per call showed up in the profiler.
-range_arr = np.asarray(range_m, dtype=np.float64)
-```
-
-Mark deliberate deviations from a reference, and known approximations, explicitly — a future
-reader must be able to tell an approximation from a bug.
-
-```python
-# Small-angle approximation: valid to <0.1 dB within the 3 dB beamwidth,
-# which is the only region export_coco() samples. See issue #17.
-```
-
-- **No hash banners, no `Inputs:`/`Outputs:` blocks** **[hook: R8]**. A row of `#` adds noise,
-  not structure; if a module needs sections, use one `# ---- #` header. Parameters and returns
-  go in the docstring (§4), where they cannot drift from it.
-- **TODOs name an owner and an issue** **[ruff: TD]**: `# TODO(author): what — <issue link>`.
-  An unowned TODO is never done.
-- **A `# noqa` is a last resort** **[review]**. Fix what ruff flags. One that must stay names
-  its rule and says why on the same line, as a `# type: ignore` does (§5).
-
----
-
-## 11. Architectural rules for readability **[review]**
-
-Three rules exist because the library is read more often than it is run. Each is stated in
-full in the section that owns it; this table is the index.
-
-| Rule | Statement | Where it lives |
-| :--- | :--- | :--- |
-| Explicit unit suffixes | Every physical variable and argument declares its unit in the identifier: `_m`, `_s`, `_hz`, `_w`, `_rad`, `_mps` | §2, already **[hook: R5]** — not a new rule, and no separate check is needed |
-| Explicit public exports | Every module defines `__all__`, so a reader can skip the `_private_func` helpers | §6 |
-| Vector-mechanics isolation | Vectorised NumPy/SciPy code stays distinct from the validation guard clauses (`if …: raise ValueError`) | §8 |
-
-The unit-suffix row is listed for completeness only. It is the same rule as §2.3, enforced by
-rule R5 in `scripts/check_conventions.py`; it is recorded here so the three readability rules
-can be cited as a set, not so it can be restated as a second, drifting copy.
-
-`tools/generate_reading_view.py` mechanises what the second and third rules buy: it strips the
-docstrings, comments, annotations and guard blocks from `src/radar_forge/` and writes what is
-left to `radar_forge_reading/`, which is what the code *computes*. Code that follows §6 and §8
-survives that transform legibly; code that does not comes out as a puzzle.
-
-## 12. Summary tables link to their sections **[hook: R7]**
-
-A **navigational** table — one whose rows stand for sections further down the same file — carries
-an explicit anchor link per row, so a reader jumps straight to the detail instead of scrolling for
-it:
-
-```markdown
-| [A.1](#a1-radarsimpy) | RadarSimPy | GPL-3.0 | Transmitter/Receiver/Radar composition |
-```
-
-The invariant is narrow on purpose. It applies **only** to navigational tables. It does not apply
-to parameter matrices, acceptance matrices, comparison tables or mapping tables, whose rows are
-data and have no section to point at — linking those would produce hundreds of links to nothing.
-The test is whether a row *names a section of this document*.
-
-Rule R7 in `scripts/check_conventions.py` checks the half that rots: every in-file `](#anchor)`
-must resolve to a real heading in that file. It slugifies headings the way GitHub does — lowercase,
-backticks and punctuation dropped, whitespace to hyphens — because that is what a reader's browser
-resolves. Anchors inside fenced code blocks are skipped, so a document like this one can quote an
-example without tripping its own rule.
-
-R7 cannot tell a navigational table from a parameter matrix, so it does not try. It never asks for
-a link that is missing; it only guarantees that every link present goes somewhere real. Deciding
-that a table deserves links is a judgement, and stays with the author.
+Comment the **why**, never the what. Mark a deliberate deviation from the reference, or an
+approximation, so the next reader can tell it from a bug. A `# noqa` is a last resort and names
+its rule and reason on the same line.
