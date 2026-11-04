@@ -715,40 +715,93 @@ class BistaticRadar(_RadarChain):
         A target standing exactly on one of the sites gives zero for that range.
         That is the honest answer geometrically, but it is not a usable input to
         the range equation or to :meth:`bistatic_angle_rad`, both of which
-        require strictly positive ranges and will say so.
+        require strictly positive ranges and will say so. The rule for a target
+        on a site is the same across the package; see :meth:`target_enu_m`.
 
         See Also
         --------
-        radar_forge.core.geodesy.geodetic_to_enu_m : The conversion used for each
-            site in turn.
+        target_enu_m : The two site-to-target vectors these are the lengths of.
         """
         # Only the magnitudes are wanted, so take the norms rather than going
         # through enu_to_range_azimuth_elevation_deg: its arcsin(up / range) is 0/0
         # for a target standing on a site, which is a legitimate thing to ask
         # about here and would come back NaN with a warning.
-        range_tx_m = np.linalg.norm(
-            geodetic_to_enu_m(
-                latitude_deg,
-                longitude_deg,
-                altitude_m,
-                self.transmitter_latitude_deg,
-                self.transmitter_longitude_deg,
-                self.transmitter_altitude_m,
-            ),
-            axis=-1,
+        transmit_enu_m, receive_enu_m = self.target_enu_m(latitude_deg, longitude_deg, altitude_m)
+        return np.linalg.norm(transmit_enu_m, axis=-1), np.linalg.norm(receive_enu_m, axis=-1)
+
+    def target_enu_m(
+        self,
+        latitude_deg: ArrayLike,
+        longitude_deg: ArrayLike,
+        altitude_m: ArrayLike,
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Return geodetic target positions in each site's local east, north, up frame.
+
+        Each site is the origin of its own local tangent plane, so one target
+        has one vector from the transmitter and another from the receiver.
+        Every bistatic quantity that depends on where the target is (the two
+        ranges, both sets of look angles) starts from these two vectors.
+
+        Parameters
+        ----------
+        latitude_deg, longitude_deg, altitude_m : array_like
+            Target geodetic positions, degrees and metres, broadcast against one
+            another. Shape ``(n_targets,)`` for a set of targets.
+
+        Returns
+        -------
+        transmit_enu_m : numpy.ndarray
+            Target position about the transmitter site, metres, shape
+            ``(n_targets, 3)``.
+        receive_enu_m : numpy.ndarray
+            Target position about the receiver site, metres, shape
+            ``(n_targets, 3)``.
+
+        Notes
+        -----
+        A target standing exactly on a site is a zero vector from that site.
+        The range there is zero, and :meth:`target_ranges_m` returns it as
+        such. The direction from that site is undefined, so everything built on
+        it (look angles, :meth:`bistatic_angle_rad`, the range-sum rate) raises
+        rather than return a number.
+
+        See Also
+        --------
+        radar_forge.core.geodesy.geodetic_to_enu_m : The conversion used for each
+            site in turn.
+        target_ranges_m : The lengths of these two vectors.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from radar_forge.core.radar import BistaticRadar, Receiver, Transmitter
+        >>> tx = Transmitter(9.8e9, 2.0e6, 100.0, 30.0, 1.0e-3, 1.0e3)
+        >>> pair = BistaticRadar(
+        ...     tx, Receiver(1.0e6, 30.0, 3.0), 36.0, -78.9, 60.0, 36.0, -78.7, 60.0
+        ... )
+        >>> transmit_enu_m, receive_enu_m = pair.target_enu_m(36.0, -78.7, 60.0)
+        >>> bool(np.allclose(receive_enu_m, 0.0))  # the target is on the receiver
+        True
+        >>> bool(np.isclose(np.linalg.norm(transmit_enu_m), pair.baseline_m))
+        True
+        """
+        transmit_enu_m = geodetic_to_enu_m(
+            latitude_deg,
+            longitude_deg,
+            altitude_m,
+            self.transmitter_latitude_deg,
+            self.transmitter_longitude_deg,
+            self.transmitter_altitude_m,
         )
-        range_rx_m = np.linalg.norm(
-            geodetic_to_enu_m(
-                latitude_deg,
-                longitude_deg,
-                altitude_m,
-                self.receiver_latitude_deg,
-                self.receiver_longitude_deg,
-                self.receiver_altitude_m,
-            ),
-            axis=-1,
+        receive_enu_m = geodetic_to_enu_m(
+            latitude_deg,
+            longitude_deg,
+            altitude_m,
+            self.receiver_latitude_deg,
+            self.receiver_longitude_deg,
+            self.receiver_altitude_m,
         )
-        return range_tx_m, range_rx_m
+        return transmit_enu_m, receive_enu_m
 
 
 RadarLike = Radar | BistaticRadar

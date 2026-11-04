@@ -58,6 +58,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 import numpy as np
 from numpy.typing import NDArray
 
+from radar_forge.core import propagation
 from radar_forge.core.geodesy import enu_to_range_azimuth_elevation_rad, geodetic_to_enu_m
 from radar_forge.core.tracking._validation import (
     as_covariance,
@@ -1027,10 +1028,11 @@ class BistaticRangeDopplerModel:
         geodetic positions. Not used here: the tracking state is in local ENU
         metres, and converting every sigma point back to latitude, longitude and
         altitude would only add work and roundoff.
-    radar_forge.core.propagation.range_sum_rate_mps : The same rate, from unit
-        vectors that point from the target to each site. Not used here: the
-        Jacobian below needs the site-to-target vectors and ranges anyway, and
-        :func:`radar_forge.core.propagation.doppler_shift_hz` turns either into Hz.
+    radar_forge.core.propagation.range_sum_rate_mps : Computes the rate for
+        :meth:`predict`, so the tracker and the simulator share one definition.
+        It takes unit vectors from the target towards each site, which are
+        :math:`-u_{tx}` and :math:`-u_{rx}` here.
+        :func:`radar_forge.core.propagation.doppler_shift_hz` turns it into Hz.
 
     References
     ----------
@@ -1106,8 +1108,15 @@ class BistaticRangeDopplerModel:
         baseline_m = float(np.linalg.norm(self._tx.pose.position_m - self._rx.pose.position_m))
 
         range_sum_m = range_tx_m + range_rx_m - (baseline_m if self.excess_range else 0.0)
-        unit_sum = to_target_tx_m / range_tx_m[..., None] + to_target_rx_m / range_rx_m[..., None]
-        range_sum_rate_mps = -np.sum(unit_sum * velocity_mps, axis=-1)
+        # The rate is the one propagation writes for the simulator, so the
+        # tracker and the IQ it tracks cannot disagree on it. That function
+        # takes unit vectors from the target towards each site, and works on
+        # (n_targets, 3), so the result is reshaped back to the batch shape.
+        range_sum_rate_mps = propagation.range_sum_rate_mps(
+            velocity_mps,
+            -to_target_tx_m / range_tx_m[..., None],
+            -to_target_rx_m / range_rx_m[..., None],
+        ).reshape(range_sum_m.shape)
         return np.stack([range_sum_m, range_sum_rate_mps], axis=-1)
 
     def _check_off_sites(self, position_m: NDArray[np.float64]) -> None:

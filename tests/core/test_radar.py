@@ -257,6 +257,20 @@ class TestBistaticGeometry:
         np.testing.assert_allclose(range_tx_m[0], 0.0, atol=1e-6)
         np.testing.assert_allclose(range_rx_m[0], pair.baseline_m, rtol=1e-9)
 
+    def test_a_target_on_the_receiver_is_the_receiver_seen_from_the_transmitter(self) -> None:
+        """Catches the two site frames swapped, or one target vector built about the wrong site.
+
+        A target standing on the receiver is, from the transmitter, exactly the
+        receiver site, which receiver_enu_m computes on its own. From the
+        receiver it is the origin.
+        """
+        pair = _bistatic(S1_TRANSMITTER, S1_RECEIVER)
+        transmit_enu_m, receive_enu_m = pair.target_enu_m(*[np.array([v]) for v in RDU_SITE])
+        # The same geodetic_to_enu_m call with the same arguments, so equal to
+        # the bit; any tolerance would let a near-miss frame through.
+        np.testing.assert_array_equal(transmit_enu_m[0], pair.receiver_enu_m)
+        np.testing.assert_allclose(receive_enu_m[0], 0.0, atol=1e-6)
+
 
 class TestBistaticResolution:
     """Range resolution stops being a function of bandwidth alone."""
