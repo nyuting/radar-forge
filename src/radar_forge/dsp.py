@@ -297,12 +297,14 @@ def range_bin_centers_m(
 
     **Not halved**: twice the monostatic range for collocated sites. Bin :math:`k` holds
     :math:`R_k = c k f_s T / (B N)`, on a circle of circumference :math:`c f_s T / B`.
+    ``sample_rate_hz`` is the ADC rate after deramp.
 
     References
     ----------
     Charvat [4]_, ch. 3; Willis [5]_, ch. 3.
     """
-    if n_bins < 1 or min(bandwidth_hz, chirp_duration_s, sample_rate_hz) <= 0.0:
+    # `not x > 0` rather than `x <= 0`, so NaN is rejected too.
+    if n_bins < 1 or not all(x > 0.0 for x in (bandwidth_hz, chirp_duration_s, sample_rate_hz)):
         msg = "n_bins must be >= 1, and bandwidth, sweep time and sample rate positive."
         raise ValueError(msg)
 
@@ -319,7 +321,8 @@ def doppler_bin_centers_mps(
 
     :math:`\dot{R} = -\lambda f_d`, **not halved**, and so **decreasing** with index over
     :math:`(-v_{ua}, +v_{ua}]`, :math:`v_{ua} = \lambda / (2 T_{\mathrm{PRI}})`; zero at
-    ``n_bins // 2``.
+    ``n_bins // 2``. The interval and bin 0 at exactly :math:`+v_{ua}` hold for even
+    ``n_bins``; an odd count is symmetric, :math:`\pm (N-1)/2` steps, strictly inside it.
 
     References
     ----------
@@ -327,15 +330,16 @@ def doppler_bin_centers_mps(
 
     Examples
     --------
-    >>> [float(r) for r in doppler_bin_centers_mps(4, 1e-3, 0.03) + 0.0]
+    >>> [float(r) for r in doppler_bin_centers_mps(4, 1e-3, 0.03)]
     [15.0, 7.5, 0.0, -7.5]
     """
-    if n_bins < 1 or min(pulse_repetition_interval_s, wavelength_m) <= 0.0:
+    if n_bins < 1 or not all(x > 0.0 for x in (pulse_repetition_interval_s, wavelength_m)):
         msg = "n_bins must be >= 1, and pulse_repetition_interval_s, wavelength_m positive."
         raise ValueError(msg)
 
     doppler_hz = np.fft.fftshift(np.fft.fftfreq(n_bins, d=pulse_repetition_interval_s))
-    result: NDArray[np.float64] = -wavelength_m * doppler_hz
+    # Adding +0.0 turns the stationary bin's -0.0 (from negating 0 Hz) into +0.0.
+    result: NDArray[np.float64] = -wavelength_m * doppler_hz + 0.0
     return result
 
 
@@ -411,7 +415,9 @@ def unfold_dual_period(
     >>> float(unfold_dual_period(4.0, 2.0, 6.0, 5.0, **bounds, tolerance=0.1)[0])
     22.0
     """
-    if min(period_a, period_b, tolerance) <= 0.0 or upper_bound < lower_bound:
+    # Written as `not ...` so NaN fails each test instead of slipping past it.
+    positive = all(x > 0.0 for x in (period_a, period_b, tolerance))
+    if not positive or not upper_bound >= lower_bound:
         msg = "periods and tolerance must be positive, and upper_bound >= lower_bound."
         raise ValueError(msg)
     if period_a == period_b and upper_bound - lower_bound > period_a:
@@ -442,7 +448,8 @@ def fold_velocity_mps(
 
     Closed at the top, unlike :func:`fold_into_period`: rate is :math:`-\lambda f_d` and the
     shifted Doppler axis is :math:`[-\mathrm{PRF}/2, +\mathrm{PRF}/2)`. For
-    :func:`doppler_bin_centers_mps` the half-interval is :math:`\lambda / (2 T_{\mathrm{PRI}})`.
+    :func:`doppler_bin_centers_mps` the half-interval is :math:`\lambda / (2 T_{\mathrm{PRI}})`,
+    and its map has a bin on the closed edge only for an even number of bins.
 
     References
     ----------
@@ -472,10 +479,12 @@ def unfold_doppler_dual_prf(
     Richards [1]_, §5.5.4.
     """
     smaller_mps = min(unambiguous_velocity_a_mps, unambiguous_velocity_b_mps)
-    if smaller_mps <= 0.0 or unambiguous_velocity_a_mps == unambiguous_velocity_b_mps:
+    halves = (unambiguous_velocity_a_mps, unambiguous_velocity_b_mps)
+    if not all(x > 0.0 for x in halves) or halves[0] == halves[1]:
         msg = "the two unambiguous velocities must be positive and different."
         raise ValueError(msg)
-    if max_velocity_mps <= smaller_mps:
+    # `not >` so a NaN bound is rejected here rather than inside np.arange.
+    if not max_velocity_mps > smaller_mps:
         msg = "max_velocity_mps must exceed the smaller half-interval, or nothing is folded."
         raise ValueError(msg)
     return unfold_dual_period(
@@ -524,7 +533,11 @@ def unfold_range_dual_prf(
 def _wrap(value: NDArray[np.float64], period: ArrayLike, lower: ArrayLike) -> NDArray[np.float64]:
     """Return ``value`` folded into ``[lower, lower + period)``, unchecked."""
     lower_arr = np.asarray(lower, dtype=np.float64)
-    result: NDArray[np.float64] = np.mod(value - lower_arr, period) + lower_arr
+    upper_arr = lower_arr + np.asarray(period, dtype=np.float64)
+    wrapped = np.mod(value - lower_arr, period) + lower_arr
+    # np.mod of a tiny negative offset rounds up to the divisor itself, which would
+    # land on the open top edge; that point is the bottom of the next fold.
+    result: NDArray[np.float64] = np.where(wrapped >= upper_arr, lower_arr, wrapped)
     return result
 
 

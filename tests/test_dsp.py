@@ -355,6 +355,18 @@ class TestBinCenters:
         with pytest.raises(ValueError, match="positive"):
             doppler_bin_centers_mps(n_bins, 0.0 if n_bins else 1e-3, WAVELENGTH_M)
 
+    def test_the_stationary_bin_is_positive_zero(self) -> None:
+        """Negating 0 Hz gives -0.0, which prints as "-0.0" on an axis label."""
+        rate_mps = doppler_bin_centers_mps(N_PULSES, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)
+        assert rate_mps[N_PULSES // 2] == 0.0
+        assert not np.signbit(rate_mps[N_PULSES // 2])
+
+    def test_an_odd_bin_count_is_symmetric_inside_the_interval(self) -> None:
+        """N = 5: rates +-2 and +-1 steps of lambda/(N T), so no bin sits on +v_ua = 15 m/s."""
+        np.testing.assert_allclose(
+            doppler_bin_centers_mps(5, 1e-3, 0.03), [12.0, 6.0, 0.0, -6.0, -12.0], atol=1e-12
+        )
+
 
 class TestRangeDopplerMap:
     def deramped_cube(self, range_bin: int, rate_bin: int) -> np.ndarray:
@@ -452,6 +464,10 @@ class TestFold:
     def test_fold_into_period_is_half_open_at_the_top(self) -> None:
         np.testing.assert_allclose(fold_into_period(130_000.0, SPAN_A_M, lower=0.0), 10_000.0)
         np.testing.assert_allclose(fold_into_period(SPAN_A_M, SPAN_A_M, lower=0.0), 0.0)
+
+    def test_a_tiny_negative_value_folds_to_the_bottom_not_the_top(self) -> None:
+        """np.mod(-1e-17, 15.3) rounds to 15.3 itself, the open edge; it must read 0.0."""
+        assert float(fold_into_period(-1e-17, 15.3, lower=0.0)) == 0.0
 
     def test_fold_velocity_is_closed_at_the_top_as_the_map_is(self) -> None:
         """Both edges read +v_ua, since rate bin 0 is +v_ua: catches the closing-positive edge."""
@@ -559,6 +575,33 @@ class TestUnfold:
         )
         assert np.isnan(velocity_mps)
         assert residual_mps > 1.0
+
+    def test_a_value_on_the_lower_bound_is_recovered(self) -> None:
+        """A reading of -1e-17 is the lower bound, 0, not a candidate grid starting at 6."""
+        value, residual = unfold_dual_period(
+            -1e-17, 0.0, 6.0, 5.0, lower_bound=0.0, upper_bound=29.0, tolerance=0.1
+        )
+        np.testing.assert_allclose(value, 0.0, atol=1e-12)
+        assert residual < 1e-12
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            lambda: unfold_dual_period(
+                0.0, 0.0, 6.0, 5.0, lower_bound=0.0, upper_bound=np.nan, tolerance=0.1
+            ),
+            lambda: unfold_doppler_dual_prf(
+                0.0, 0.0, V_UA_A, V_UA_B, max_velocity_mps=np.nan, tolerance_mps=1.0
+            ),
+            lambda: range_bin_centers_m(8, np.nan, 40e-6, 1e6),
+            lambda: doppler_bin_centers_mps(8, np.nan, WAVELENGTH_M),
+        ],
+        ids=["unfold_dual_period", "unfold_doppler_dual_prf", "range_bins", "rate_bins"],
+    )
+    def test_nan_is_rejected_at_the_boundary(self, call) -> None:
+        """NaN fails every comparison, so `x <= 0` lets it through; `not x > 0` does not."""
+        with pytest.raises(ValueError, match=r"positive|must exceed|upper_bound"):
+            call()
 
     def test_equal_periods_resolve_within_one_period_only(self) -> None:
         value, _ = unfold_dual_period(
