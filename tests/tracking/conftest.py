@@ -1,7 +1,7 @@
 """Shared fixtures for the batched tracking package's tests.
 
 ``LINEARISATIONS`` is the one list of filters. The drift guards and the consistency tests of
-``spec/tracker-001.md`` §4.5 take the ``linearisation`` fixture, so a new linearisation joins
+``spec/tracker-001.md`` §3 take the ``linearisation`` fixture, so a new linearisation joins
 every guard by being added here once.
 """
 

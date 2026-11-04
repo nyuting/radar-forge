@@ -64,7 +64,12 @@ def chi_square_gate_threshold(probability: float, dim: int) -> float:
 
 
 def gate(nis: ArrayLike, threshold: float) -> NDArray[np.bool_]:
-    """Return which pairs pass: NIS at most the threshold."""
+    """Return which pairs pass: NIS at most the threshold.
+
+    References
+    ----------
+    Bar-Shalom and Li [1], §2.3.2 (the validation region).
+    """
     return np.asarray(nis, dtype=np.float64) <= threshold
 
 

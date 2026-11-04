@@ -6,8 +6,7 @@ pairs from one batched Cholesky factorisation and no loop over pairs; :func:`upd
 correction core. The filters differ only in their :class:`Linearisation` [2]:
 :class:`TaylorLinearisation` (KF on linear models, EKF otherwise) or :class:`UnscentedTransform`
 (UKF). Nothing asks which one it holds; the core only asks whether H exists. Validation happens
-once, in :meth:`TrackBank.append`. Scenario 011 plugs in here: an IMM mixes banks of mode rows,
-and JPDA passes association weights to :func:`update`.
+once, in :meth:`TrackBank.append`.
 
 References
 ----------
@@ -29,7 +28,12 @@ from typing import Any, Protocol
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from radar_forge.tracking.models import MeasurementModel, MotionModel, StateLayout
+from radar_forge.tracking.models import (
+    MeasurementModel,
+    MotionModel,
+    StateLayout,
+    check_covariances,
+)
 
 __all__ = [
     "Innovation",
@@ -44,10 +48,6 @@ __all__ = [
     "predict",
     "update",
 ]
-
-# The roundoff a covariance may carry, relative to its largest entry: products of a few small
-# matrices carry about n float64 epsilons, 1e-15, and 1e-10 leaves a wide margin over that.
-_ROUNDOFF_TOLERANCE = 1e-10
 
 
 class TrackStatus(IntEnum):
@@ -85,24 +85,6 @@ def _symmetrise(matrix: NDArray[Any]) -> NDArray[np.float64]:
     return result
 
 
-def _check_covariances(value: ArrayLike, shape: tuple[int, ...], name: str) -> NDArray[np.float64]:
-    """Return a float64 copy of a stack of covariances, checked symmetric and semidefinite."""
-    covariance = np.array(value, dtype=np.float64)
-    if covariance.shape != shape or not np.all(np.isfinite(covariance)):
-        msg = f"{name} must be finite with shape {shape}; got shape {covariance.shape}."
-        raise ValueError(msg)
-    allowance = _ROUNDOFF_TOLERANCE * np.max(np.abs(covariance), axis=(-2, -1), initial=0.0)
-    asymmetry = np.max(np.abs(covariance - _transpose(covariance)), axis=(-2, -1), initial=0.0)
-    if np.any(asymmetry > allowance):
-        msg = f"{name} must be symmetric to within roundoff."
-        raise ValueError(msg)
-    covariance = _symmetrise(covariance)
-    if np.any(np.linalg.eigvalsh(covariance)[..., 0] < -allowance):
-        msg = f"{name} must be positive semidefinite; one has a negative eigenvalue."
-        raise ValueError(msg)
-    return covariance
-
-
 def _column(value: ArrayLike, n_rows: int, dtype: type[np.generic], name: str) -> NDArray[Any]:
     """Return one column of new rows, checked to have one entry per row."""
     column = np.array(value, dtype=dtype)
@@ -120,6 +102,10 @@ class TrackBank:
     :meth:`append` validate, the constructor trusts. The counts are int32 (a birth is one scan
     and one hit), ``status`` int8 :class:`TrackStatus`, ``nis`` NaN and ``measurement_index``
     -1 for a row with no measurement this scan.
+
+    References
+    ----------
+    Bar-Shalom [1], §5.2.1 (the state estimate and its covariance).
     """
 
     layout: StateLayout
@@ -169,7 +155,7 @@ class TrackBank:
         index = np.full(n_new, -1) if measurement_index is None else measurement_index
         new = {
             "mean": new_mean,
-            "covariance": _check_covariances(covariance, (n_new, n_state, n_state), "covariance"),
+            "covariance": check_covariances(covariance, (n_new, n_state, n_state), "covariance"),
             "time_s": np.full(n_new, time_s, dtype=np.float64),
             "track_id": _column(track_id, n_new, np.int64, "track_id"),
             "status": _column(status, n_new, np.int8, "status"),
@@ -180,6 +166,9 @@ class TrackBank:
             "nis": np.full(n_new, np.nan),
             "measurement_index": _column(index, n_new, np.int64, "measurement_index"),
         }
+        if not np.all(np.isin(new["status"], list(TrackStatus))):
+            msg = f"status must hold TrackStatus values; got {new['status'].tolist()}."
+            raise ValueError(msg)
         columns = {name: np.concatenate([getattr(self, name), new[name]]) for name in new}
         return TrackBank(self.layout, **columns)
 
@@ -261,8 +250,9 @@ class TaylorLinearisation:
     r"""First-order Taylor: the KF on linear models, the EKF otherwise.
 
     With F and H the Jacobians at the mean this is the textbook filter line for line:
-    :math:`P^- = F P F^T + Q`, :math:`P_{xz} = P^- H^T`, :math:`S - R = H P^- H^T`. It hands H
-    to the correction core, which then takes the Joseph form.
+    :math:`\hat{x}^- = F \hat{x}`, :math:`P^- = F P F^T + Q`, :math:`P_{xz} = P^- H^T`,
+    :math:`S - R = H P^- H^T`, with one F per step for both mean and covariance (every motion
+    model is linear). It hands H to the correction core, which then takes the Joseph form.
 
     References
     ----------
@@ -272,10 +262,10 @@ class TaylorLinearisation:
     def predict(
         self, motion: MotionModel, bank: TrackBank, dt_s: NDArray[np.float64]
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-        r"""Return :math:`f(\hat{x})` and :math:`F P F^T + Q` for every row."""
+        r"""Return :math:`F \hat{x}` and :math:`F P F^T + Q` for every row, from one F."""
         transition = motion.jacobian(bank.mean, dt_s)
         noise = motion.process_noise(bank.mean, dt_s)
-        mean = bank.layout.wrap(motion.transition(bank.mean, dt_s))
+        mean = bank.layout.wrap((transition @ bank.mean[..., None])[..., 0])
         return mean, _symmetrise(transition @ bank.covariance @ _transpose(transition) + noise)
 
     def measure(self, model: MeasurementModel, bank: TrackBank) -> MeasurementMoments:
@@ -349,6 +339,8 @@ class UnscentedTransform:
     def sigma_points(self, bank: TrackBank) -> NDArray[np.float64]:
         """Return every row's sigma points, ``(n_tracks, 2 n_state + 1, n_state)``."""
         n_state = bank.layout.dimension
+        # The weights refuse n + kappa <= 0, which would put every sigma point on the mean.
+        self.weights(n_state)
         # Row i of Lᵀ is column i of L, so each row of the offsets is one spread direction.
         root = _transpose(np.linalg.cholesky(bank.covariance))
         offsets = np.sqrt(self.alpha**2 * (n_state + self.kappa)) * root
@@ -402,6 +394,10 @@ class Innovation:
     ``innovation_covariance`` S ``(n_tracks, n_meas, m, m)``, since each measurement has its
     own R; ``nis`` and ``log_likelihood`` ``(n_tracks, n_meas)``; ``measurement_noise`` R
     ``(n_meas, m, m)``.
+
+    References
+    ----------
+    Bar-Shalom [1], §5.2.4 (the innovation and its covariance) and §5.2.6 (likelihood).
     """
 
     innovation: NDArray[np.float64]
@@ -452,24 +448,18 @@ def update(
     bank: TrackBank,
     innovation: Innovation,
     assigned: ArrayLike,
-    *,
-    weights: ArrayLike | None = None,
 ) -> TrackBank:
     r"""Correct each row with its measurement ``assigned`` ``(n_tracks,)``, -1 for none.
 
     :math:`K = P_{xz} S^{-1}` by solving, never inverting; the mean wraps by the *state*
     layout. With H (KF, EKF) the covariance is the Joseph form :math:`(I - K H) P^- (I -
     K H)^T + K R K^T`, positive semidefinite for any K; without H (UKF) it is :math:`P^- - K S
-    K^T`. At the optimal gain the two are equal and differ only in roundoff. ``weights``
-    ``(n_tracks, n_meas + 1)`` is reserved for PDA and JPDA (scenario 011 D28).
+    K^T`. At the optimal gain the two are equal and differ only in roundoff.
 
     References
     ----------
     Bar-Shalom [1], §5.2.4; Särkkä [2], ch. 6.
     """
-    if weights is not None:
-        msg = "association weights (PDA, JPDA) arrive with scenario 011 D28."
-        raise NotImplementedError(msg)
     choice = np.asarray(assigned, dtype=np.intp)
     rows = np.flatnonzero(choice >= 0)
     cols = choice[rows]

@@ -115,7 +115,7 @@ def test_a_hit_resets_the_misses_and_confirms_a_coasting_track_again() -> None:
 
 def test_reacquisition_scans_extend_only_a_confirmed_track() -> None:
     policy = LifecyclePolicy(
-        n_confirm_hits=3, n_confirm_scans=10, n_delete_misses=2, n_reacquire_scans=2
+        n_confirm_hits=3, n_confirm_scans=10, n_delete_misses=2, n_reacquire_misses=2
     )
     assert _statuses(_one_axis(policy), "hmm")[-1] == [DELETED]
     statuses = _statuses(_one_axis(policy), "hhhmmmm")
@@ -235,8 +235,17 @@ def test_a_scan_of_an_unknown_model_or_the_wrong_dimension_is_rejected(scan: Sca
 def test_a_scan_checks_its_measurements_once_at_the_boundary(
     time_s: float, z: Any, noise: Any
 ) -> None:
-    with pytest.raises(ValueError, match=r"finite|shape|semidefinite"):
+    with pytest.raises(ValueError, match=r"finite|shape|definite"):
         Scan(time_s, z, noise, "x")
+
+
+@pytest.mark.parametrize(
+    "noise", [np.diag([25.0, 0.0]), [[[25.0, 0.0], [0.0, 1.0]], [[0.0, 0.0], [0.0, 1.0]]]]
+)
+def test_a_scan_refuses_a_noise_covariance_with_a_zero_variance(noise: Any) -> None:
+    """A zero variance in R makes S singular and the likelihood ratio meaningless."""
+    with pytest.raises(ValueError, match="positive definite"):
+        Scan(0.0, [[1.0, 2.0], [3.0, 4.0]], noise, "both")
 
 
 def test_a_scan_stores_one_shared_r_as_a_frozen_stack() -> None:
@@ -250,7 +259,7 @@ def test_a_scan_stores_one_shared_r_as_a_frozen_stack() -> None:
         {"n_confirm_hits": 0},
         {"n_confirm_hits": 6},
         {"n_delete_misses": 0},
-        {"n_reacquire_scans": -1},
+        {"n_reacquire_misses": -1},
         {"n_confirm_hits": True},
         {"max_coast_time_s": 0.0},
         {"reacquire_reset": ("x_m", "x_m")},
@@ -261,7 +270,7 @@ def test_a_policy_that_could_not_work_is_rejected(settings: dict[str, Any]) -> N
         LifecyclePolicy(**settings)
 
 
-# The scenario mechanisms (tracker-001 §7.2, §8.3): the selector, its range-only retry, the
+# The scenario mechanisms (tracker-001 §5.1, §5.4): the selector, its range-only retry, the
 # likelihood ratio and the re-acquisition reset. q = 1 m²/s³, so a settled track's rate gate
 # is about a metre per second wide and a detection 40 m/s out, a wrong fold, fails it.
 RADIAL = RadialConstantVelocity(1.0, acceleration_correlation_time_s=0.5)
@@ -299,7 +308,7 @@ def _radial_scan(time_s: float, detections: Any) -> Scan:
 
 
 def test_a_pair_that_fails_its_rate_gate_is_kept_through_range_alone() -> None:
-    """§8.3's retry: a wrong fold costs the rate, not the range."""
+    """Spec §5.4's retry: a wrong fold costs the rate, not the range."""
     plain = _radial()
     retrying = _radial(
         cost="negative_log_likelihood_ratio",
@@ -338,7 +347,7 @@ def test_the_retry_reports_the_nis_of_the_model_it_passed() -> None:
 
 
 def test_nis_costs_of_two_dimensions_in_one_scan_are_refused_and_change_nothing() -> None:
-    """§7.2: a 1-D NIS undercuts a 2-D one. One detection gates at two components, the other
+    """Spec §5.1: a 1-D NIS undercuts a 2-D one. One detection gates at two components, the other
     through range alone."""
     tracker = _radial(model_selector=_full_then_range)
     bank = tracker.bank
@@ -368,9 +377,9 @@ def test_the_selector_may_offer_only_the_scans_model_or_a_marginal_of_it() -> No
 def test_the_reset_forgets_the_rate_on_the_miss_that_opens_reacquisition() -> None:
     """On the n_delete_misses-th miss the rate returns to exactly the prior's variance."""
     policy = LifecyclePolicy(
-        n_delete_misses=2, n_reacquire_scans=3, reacquire_reset=("bistatic_range_rate_mps",)
+        n_delete_misses=2, n_reacquire_misses=3, reacquire_reset=("bistatic_range_rate_mps",)
     )
-    reset, twin = _radial(policy), _radial(LifecyclePolicy(n_delete_misses=2, n_reacquire_scans=3))
+    reset, twin = _radial(policy), _radial(LifecyclePolicy(n_delete_misses=2, n_reacquire_misses=3))
     first = reset.process(_radial_scan(6.0, []))
     twin.process(_radial_scan(6.0, []))
     kept, plain = reset.process(_radial_scan(7.0, [])), twin.process(_radial_scan(7.0, []))
@@ -509,7 +518,7 @@ def test_a_target_keeps_one_track_through_clutter_and_missed_detections(
 
 
 def test_unscented_and_taylor_trackers_agree_on_a_linear_scene() -> None:
-    """On linear models the UKF is the KF (§4.4), so the whole loop gives the same banks."""
+    """On linear models the UKF is the KF (spec §3), so the whole loop gives the same banks."""
     banks = []
     for linearisation in (TaylorLinearisation(), UnscentedTransform()):
         tracker = _one_axis(linearisation=linearisation)

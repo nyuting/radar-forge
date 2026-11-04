@@ -2,9 +2,10 @@ r"""State layouts, motion models and measurement models, batched over leading ax
 
 Every model takes states ``(..., n_state)``, so a bank of tracks or all its sigma points go
 through one call. :class:`StateLayout` names each coordinate and holds the package's one wrap
-of periodic values. Motion: :class:`CartesianMotion` and :class:`RadialConstantVelocity`
-(:class:`CoordinatedTurn` is reserved for scenario 011). Measurement: :class:`LinearMeasurement`,
-:class:`RangeAzimuthElevationRangeRate`, :class:`BistaticRangeRateModel` and :func:`marginal`.
+of periodic values; :func:`check_covariances` is the one boundary check of a covariance.
+Motion: :class:`CartesianMotion` and :class:`RadialConstantVelocity`. Measurement:
+:class:`LinearMeasurement`, :class:`RangeAzimuthElevationRangeRate`,
+:class:`BistaticRangeRateModel` and :func:`marginal`.
 
 Conventions: ENU metres (x east, y north, z up). A range rate is the range's time derivative,
 positive receding, and ``doppler_hz = -bistatic_range_rate_mps / wavelength_m``. Bistatic range
@@ -28,7 +29,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Literal, NoReturn, Protocol
+from typing import Literal, Protocol
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -39,7 +40,6 @@ __all__ = [
     "BistaticRangeRateModel",
     "CartesianMotion",
     "Coordinate",
-    "CoordinatedTurn",
     "LinearMeasurement",
     "MarginalModel",
     "MeasurementModel",
@@ -47,12 +47,55 @@ __all__ = [
     "RadialConstantVelocity",
     "RangeAzimuthElevationRangeRate",
     "StateLayout",
+    "check_covariances",
     "marginal",
 ]
 
 ProcessNoise = Literal["cwna", "dwna"]
 
 _AXES = ("x", "y", "z")
+
+# The roundoff a covariance may carry, relative to its largest entry: products of a few small
+# matrices carry about n float64 epsilons, 1e-15, and 1e-10 leaves a wide margin over that.
+_ROUNDOFF_TOLERANCE = 1e-10
+
+
+def _is_positive_definite(matrix: NDArray[np.float64]) -> bool:
+    """Return whether a Cholesky factorisation of ``matrix`` succeeds."""
+    try:
+        np.linalg.cholesky(matrix)
+    except np.linalg.LinAlgError:
+        return False
+    return True
+
+
+def check_covariances(value: ArrayLike, shape: tuple[int, ...], name: str) -> NDArray[np.float64]:
+    """Return a float64 copy of covariances of ``shape``, checked symmetric and positive definite.
+
+    Definite, not semidefinite: the unscented transform factorises every covariance and S must be
+    invertible, so a zero variance is refused here, at the boundary, and never mid-scan.
+
+    References
+    ----------
+    Bar-Shalom [1], §5.2.1 (the state estimate and its covariance).
+    """
+    covariance = np.array(value, dtype=np.float64)
+    if covariance.shape != shape or not np.all(np.isfinite(covariance)):
+        msg = f"{name} must be finite with shape {shape}; got shape {covariance.shape}."
+        raise ValueError(msg)
+    transposed = np.swapaxes(covariance, -1, -2)
+    allowance = _ROUNDOFF_TOLERANCE * np.max(np.abs(covariance), axis=(-2, -1), initial=0.0)
+    if np.any(np.max(np.abs(covariance - transposed), axis=(-2, -1), initial=0.0) > allowance):
+        msg = f"{name} must be symmetric to within roundoff."
+        raise ValueError(msg)
+    covariance = (covariance + transposed) / 2
+    if not _is_positive_definite(covariance):
+        stack = covariance.reshape(-1, *shape[-2:])
+        # Only on the error path: one factorisation per matrix names the ones that fail.
+        rows = [i for i, matrix in enumerate(stack) if not _is_positive_definite(matrix)]
+        msg = f"{name} must be positive definite; the matrices at rows {rows} are not."
+        raise ValueError(msg)
+    return covariance
 
 
 @dataclass(frozen=True)
@@ -149,7 +192,12 @@ class StateLayout:
 
 
 class MotionModel(Protocol):
-    """A motion model; ``dt_s`` broadcasts against the states' leading axes ``(...)``."""
+    """A linear motion model: ``transition(x)`` is ``jacobian(x) @ x``.
+
+    ``dt_s`` broadcasts against the states' leading axes ``(...)``. The Taylor
+    linearisation predicts the mean as F x from the one F it builds, so a nonlinear model
+    (scenario 011's coordinated turn) changes this protocol when it arrives.
+    """
 
     state_layout: StateLayout
 
@@ -288,31 +336,6 @@ class RadialConstantVelocity(_PolynomialMotion):
         q = _noise_intensity(sigma_acceleration_mps2, tau_s, process_noise, 1)
         names = (Coordinate("bistatic_range_m", "m"), Coordinate("bistatic_range_rate_mps", "m/s"))
         super().__init__(StateLayout(names, "radial"), [_axis_tables(1, process_noise, q)])
-
-
-class CoordinatedTurn:
-    """Reserved: scenario 011's coordinated turn (D26); every method raises until then.
-
-    The state is ``(x_m, xdot_mps, y_m, ydot_mps, turn_rate_radps)``. D26 adds the exact
-    discretisation and its Jacobian (the Taylor linearisation already predicts through
-    ``jacobian``), the series form below ``|ωT| = 1e-6``, and white noise on acceleration and
-    on the turn rate's derivative.
-    """
-
-    def __init__(
-        self, sigma_acceleration_mps2: float = 4.0, turn_rate_noise_density_rad2ps3: float = 1e-4
-    ) -> None:
-        self.sigma_acceleration_mps2 = sigma_acceleration_mps2
-        self.turn_rate_noise_density_rad2ps3 = turn_rate_noise_density_rad2ps3
-        names = ("x_m", "xdot_mps", "y_m", "ydot_mps", "turn_rate_radps")
-        units = ("m", "m/s", "m", "m/s", "rad/s")
-        self.state_layout = StateLayout(tuple(map(Coordinate, names, units)), "ENU")
-
-    def _not_yet(self, state: NDArray[np.float64], dt_s: ArrayLike) -> NoReturn:
-        msg = "CoordinatedTurn arrives with scenario 011 (D26)."
-        raise NotImplementedError(msg)
-
-    transition = jacobian = process_noise = _not_yet
 
 
 class MeasurementModel(Protocol):
@@ -619,6 +642,10 @@ def marginal(model: MeasurementModel, names: Sequence[str]) -> MarginalModel:
     """Return the marginal of ``model`` over the named components, such as range alone.
 
     A track that cannot yet trust a measured rate updates on its range through one
-    (``spec/tracker-001.md`` §8.3).
+    (``spec/tracker-001.md`` §5.4).
+
+    References
+    ----------
+    Särkkä [4], Appendix A.1 (the marginal of a joint Gaussian).
     """
     return MarginalModel(model, names)

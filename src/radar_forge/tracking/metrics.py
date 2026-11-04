@@ -3,12 +3,16 @@ r"""Scores of a tracker against the truth: filter consistency and accuracy.
 :func:`nees` is :math:`e^T P^{-1} e`, chi-square with n_state degrees of freedom for a
 consistent filter; the NIS, its truth-free twin, is ``Innovation.nis``.
 :func:`consistency_interval` bounds the average of N such draws [1]; :func:`rmse` is per
-coordinate. OSPA and GOSPA, single scores for a multi-target scene, land here with scenario 011.
+coordinate [2]. OSPA and GOSPA, single scores for a multi-target scene, land here with
+scenario 011.
 
 References
 ----------
 .. [1] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications to Tracking
        and Navigation*, Wiley, 2001.
+.. [2] X. R. Li and Z. Zhao, "Evaluation of estimation algorithms part I: incomprehensive
+       measures of performance," *IEEE Trans. Aerosp. Electron. Syst.*, vol. 42, no. 4,
+       pp. 1340-1358, 2006.
 """
 
 from __future__ import annotations
@@ -80,7 +84,12 @@ def rmse(
     axis: int | tuple[int, ...] = 0,
     state_layout: StateLayout | None = None,
 ) -> NDArray[np.float64]:
-    """Return the root-mean-square error of each coordinate, averaged over ``axis``."""
+    """Return the root-mean-square error of each coordinate, averaged over ``axis``.
+
+    References
+    ----------
+    Li and Zhao [2] (the RMSE as a measure of estimation performance).
+    """
     error = _error(mean, truth, state_layout)
     result: NDArray[np.float64] = np.sqrt(np.mean(error**2, axis=axis))
     return result

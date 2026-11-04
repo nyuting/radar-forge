@@ -1,8 +1,8 @@
 """Tests for radar_forge.tracking.filters: the bank and the one Gaussian filter over it.
 
 Ground truth is analytic wherever there is one: the Kalman update written out by hand, the
-UKF equal to the KF on linear models (``spec/tracker-001.md`` §4.4-§4.5), the batched
-innovation equal to a per-pair loop (§12), and the steady state of the Riccati recursion.
+UKF equal to the KF on linear models (``spec/tracker-001.md`` §3), the batched
+innovation equal to a per-pair loop (§7), and the steady state of the Riccati recursion.
 NEES and NIS are checked against chi-square intervals over Monte Carlo runs, which here are
 the rows of one bank.
 """
@@ -79,8 +79,24 @@ def test_append_rejects_rows_that_are_not_a_valid_state(
     mean: Any, covariance: Any, ids: Any
 ) -> None:
     empty = TrackBank.empty(RadialConstantVelocity().state_layout)
-    with pytest.raises(ValueError, match=r"symmetric|semidefinite|finite|shape"):
+    with pytest.raises(ValueError, match=r"symmetric|definite|finite|shape"):
         empty.append(mean, covariance, 0.0, ids, [0] * len(ids))
+
+
+def test_append_rejects_a_zero_variance_and_names_its_row() -> None:
+    """Semidefinite is not enough: the UKF factorises every row, so the boundary refuses it."""
+    empty = TrackBank.empty(RadialConstantVelocity().state_layout)
+    covariance = np.stack([np.eye(2), np.diag([1.0, 0.0]), np.eye(2)])
+    with pytest.raises(ValueError, match=r"positive definite; the matrices at rows \[1\]"):
+        empty.append(np.zeros((3, 2)), covariance, 0.0, [1, 2, 3], [0, 0, 0])
+
+
+@pytest.mark.parametrize("status", [[4], [-1], [7]])
+def test_append_rejects_a_status_that_is_not_a_track_status(status: list[int]) -> None:
+    """A stray int8 would never confirm or delete, so it is refused at the boundary."""
+    empty = TrackBank.empty(RadialConstantVelocity().state_layout)
+    with pytest.raises(ValueError, match="TrackStatus"):
+        empty.append([[1.0, 2.0]], [np.eye(2)], 0.0, [1], status)
 
 
 def test_compact_keeps_the_chosen_rows_in_order() -> None:
@@ -140,6 +156,15 @@ def test_impossible_sigma_point_settings_are_refused_at_construction(
         UnscentedTransform(**settings)
 
 
+@pytest.mark.parametrize("n_state", [2, 6])
+def test_sigma_points_refuse_a_spread_that_puts_every_point_on_the_mean(n_state: int) -> None:
+    """kappa = -n makes c = alpha² (n + kappa) zero: every sigma point would be the mean."""
+    layout = CartesianMotion("xyz"[: n_state // 2]).state_layout
+    bank = _bank(layout, np.zeros((1, n_state)), np.eye(n_state))
+    with pytest.raises(ValueError, match="kappa must be positive"):
+        UnscentedTransform(kappa=-float(n_state)).sigma_points(bank)
+
+
 def test_the_weights_are_computed_once_per_size() -> None:
     assert UnscentedTransform().weights(5)[0] is UnscentedTransform().weights(5)[0]
 
@@ -166,7 +191,7 @@ def test_the_weighted_sigma_points_reproduce_each_rows_mean_and_covariance(
     )
 
 
-# Drift guards: on linear models the UKF is the KF (spec/tracker-001.md §4.5).
+# Drift guards: on linear models the UKF is the KF (spec/tracker-001.md §3).
 
 # rtol 1e-10, and an atol of 1e-10 times each entry's own scale from the prior: the entries
 # mix m² and (m/s)², so one absolute tolerance cannot suit them all.
@@ -202,7 +227,7 @@ def _outer(sigma: NDArray[np.float64]) -> NDArray[np.float64]:
 def test_the_unscented_moments_are_the_kalman_moments_on_linear_models(
     alpha: float, beta: float, kappa: float
 ) -> None:
-    """§4.4 steps 1-4: x⁻, P⁻, z, P_xz and S agree, whatever the accepted weights."""
+    """Spec §3: x⁻, P⁻, z, P_xz and S agree, whatever the accepted weights."""
     motion, bank = CartesianMotion(), _guard_bank()
     model = LinearMeasurement(motion.state_layout, ("x_m", "y_m", "z_m"))
     unscented, taylor, steps_s = (
@@ -235,7 +260,7 @@ def test_the_unscented_moments_are_the_kalman_moments_on_linear_models(
 
 
 def test_the_ukf_and_the_kf_agree_over_200_steps(rng: np.random.Generator) -> None:
-    """§4.4 step 5: the same measurements through both filters, judged on the current spread."""
+    """Spec §3: the same measurements through both filters, judged on the current spread."""
     motion = CartesianMotion()
     model = LinearMeasurement(motion.state_layout, ("x_m", "y_m", "z_m"))
     noise = np.diag([50.0**2] * 3)
@@ -263,7 +288,7 @@ SECOND_ORDER_SCALES = np.geomspace(1 / 8, 1, 7)
 
 
 def test_the_ekf_and_the_ukf_differ_at_second_order_on_the_spherical_model() -> None:
-    """§4.5: scale the prior covariance by s²; the gap in the updated mean shrinks as s².
+    """Spec §3: scale the prior covariance by s²; the gap in the updated mean shrinks as s².
 
     The UKF's predicted measurement is h(x) + ½ tr(∇²h P) to leading order (Särkkä 2013,
     ch. 5); the EKF's is h(x). A wrong Jacobian leaves a first-order gap, slope about 1. The
@@ -327,7 +352,7 @@ def test_an_innovation_across_due_north_takes_the_short_way(linearisation: Linea
 def test_the_batched_innovation_equals_a_per_pair_loop(
     linearisation: Linearisation, rng: np.random.Generator
 ) -> None:
-    """§12: every (track, measurement) pair scored at once equals each pair scored alone."""
+    """Spec §7: every (track, measurement) pair scored at once equals each pair alone."""
     layout = CartesianMotion().state_layout
     model = RangeAzimuthElevationRangeRate(layout, [100.0, 50.0, 10.0])
     means = rng.uniform(-100.0, 100.0, (5, 6))
@@ -483,12 +508,3 @@ def test_the_dwna_rate_variance_floors_above_the_bootstrap_threshold() -> None:
     # rtol 1e-9: the recursion contracts about 0.66 a scan, from 7.5e-6 at scan 30 to 2e-11.
     np.testing.assert_allclose(bank.covariance[0, 1, 1], steady[1, 1], rtol=1e-9)
     assert np.sqrt(steady[1, 1]) / 2 > BOOTSTRAP_THRESHOLD_MPS
-
-
-def test_association_weights_are_reserved_for_scenario_011() -> None:
-    motion = RadialConstantVelocity()
-    model = LinearMeasurement(motion.state_layout, ("bistatic_range_m",))
-    bank = _bank(motion.state_layout, [[1.0, 0.0]], np.eye(2))
-    innovation = innovate(bank, model, TaylorLinearisation(), [[1.0]], [[1.0]])
-    with pytest.raises(NotImplementedError, match="011"):
-        update(bank, innovation, [0], weights=np.ones((1, 2)))

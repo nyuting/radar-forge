@@ -19,7 +19,6 @@ from radar_forge.tracking.models import (
     BistaticRangeRateModel,
     CartesianMotion,
     Coordinate,
-    CoordinatedTurn,
     LinearMeasurement,
     MarginalModel,
     RadialConstantVelocity,
@@ -192,10 +191,16 @@ def test_a_batched_step_equals_one_state_at_a_time(rng: np.random.Generator) -> 
     np.testing.assert_array_equal(motion.process_noise(states, steps_s), noise)
 
 
-def test_a_linear_transition_is_its_jacobian_times_the_state(rng: np.random.Generator) -> None:
-    motion = CartesianMotion("xy", 2)
-    state = rng.normal(0.0, 10.0, 6)
-    np.testing.assert_allclose(motion.transition(state, 1.3), motion.jacobian(state, 1.3) @ state)
+@pytest.mark.parametrize("motion", [CartesianMotion("xy", 2), RadialConstantVelocity()])
+def test_every_motion_model_is_linear_as_the_taylor_prediction_assumes(
+    motion: Any, rng: np.random.Generator
+) -> None:
+    """transition(x) is jacobian(x) @ x, so predicting the mean as F x needs one F."""
+    state = rng.normal(0.0, 10.0, motion.state_layout.dimension)
+    # rtol 1e-14: the same matrix applied two ways.
+    np.testing.assert_allclose(
+        motion.transition(state, 1.3), motion.jacobian(state, 1.3) @ state, rtol=1e-14
+    )
 
 
 @pytest.mark.parametrize(
@@ -215,15 +220,6 @@ def test_a_linear_transition_is_its_jacobian_times_the_state(rng: np.random.Gene
 def test_impossible_motion_settings_are_rejected(settings: dict[str, Any]) -> None:
     with pytest.raises(ValueError, match=r"axes|process_noise|sigma"):
         CartesianMotion(**settings)
-
-
-def test_the_coordinated_turn_is_reserved_with_the_d26_state() -> None:
-    """Scenario 011 D26 fills it in; until then it says so rather than guess."""
-    motion = CoordinatedTurn()
-    assert motion.state_layout.names[-1] == "turn_rate_radps"
-    for method in (motion.transition, motion.jacobian, motion.process_noise):
-        with pytest.raises(NotImplementedError, match="scenario 011"):
-            method(np.zeros(5), 1.0)
 
 
 LAYOUT_3D = CartesianMotion().state_layout

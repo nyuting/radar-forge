@@ -3,7 +3,7 @@ r"""The scan loop over a bank of tracks: its lifecycle rules, initiators and :cl
 :meth:`Tracker.process` takes one :class:`Scan` and runs, over every track and measurement at
 once: predict; drop rows past ``max_coast_time_s``; innovate and gate through each model the
 selector offers, a pair keeping the first it passes; assign, confirmed tracks first (the
-default) or in one ``"joint"`` solve, which scenario 003 measured better (tracker-001 §7.3);
+default) or in one ``"joint"`` solve, which scenario 003 measured better (tracker-001 §5.1);
 update, once per model offered; count hits and misses as integer arithmetic, confirming by
 M-of-N [1] and, on the miss that opens re-acquisition, resetting ``reacquire_reset``; start a
 row from each unclaimed measurement (in two-stage assignment, none inside a confirmed gate);
@@ -20,6 +20,8 @@ References
 .. [3] S. Bordonaro, P. Willett and Y. Bar-Shalom, "Decorrelated unbiased converted
        measurement Kalman filter," *IEEE Trans. Aerosp. Electron. Syst.*, vol. 50, no. 2,
        pp. 1431-1444, 2014, as restated by W. Wang et al., arXiv:1412.5524, §III-B.
+.. [4] S. S. Blackman and R. Popoli, *Design and Analysis of Modern Tracking Systems*,
+       Artech House, 1999.
 """
 
 from __future__ import annotations
@@ -45,7 +47,6 @@ from radar_forge.tracking.filters import (
     Linearisation,
     TrackBank,
     TrackStatus,
-    _check_covariances,
     innovate,
     predict,
     update,
@@ -56,6 +57,7 @@ from radar_forge.tracking.models import (
     MeasurementModel,
     MotionModel,
     RangeAzimuthElevationRangeRate,
+    check_covariances,
 )
 
 __all__ = [
@@ -82,9 +84,9 @@ Rows = tuple[NDArray[np.float64], NDArray[np.float64]]
 class LifecyclePolicy:
     """When a track is confirmed (M hits in its first N scans) or deleted.
 
-    ``n_reacquire_scans`` extra misses are allowed a confirmed track only. ``reacquire_reset``
-    names coordinates whose variances return to the prior, and cross-covariances to zero, on
-    the miss that opens re-acquisition (tracker-001 §8.3).
+    ``n_reacquire_misses`` extra misses in a row are allowed a confirmed track only.
+    ``reacquire_reset`` names coordinates whose variances return to the prior, and
+    cross-covariances to zero, on the miss that opens re-acquisition (tracker-001 §5.4).
 
     References
     ----------
@@ -94,7 +96,7 @@ class LifecyclePolicy:
     n_confirm_hits: int = 3
     n_confirm_scans: int = 5
     n_delete_misses: int = 5
-    n_reacquire_scans: int = 0
+    n_reacquire_misses: int = 0
     max_coast_time_s: float = 30.0
     reacquire_reset: tuple[str, ...] = ()
 
@@ -102,10 +104,10 @@ class LifecyclePolicy:
         """Reject a policy that could not work."""
         counts = (self.n_confirm_hits, self.n_confirm_scans, self.n_delete_misses)
         # A bool is an int in Python, so the exact type is tested.
-        if any(type(n) is not int for n in (*counts, self.n_reacquire_scans)) or not (
+        if any(type(n) is not int for n in (*counts, self.n_reacquire_misses)) or not (
             1 <= self.n_confirm_hits <= self.n_confirm_scans
             and self.n_delete_misses >= 1
-            and self.n_reacquire_scans >= 0
+            and self.n_reacquire_misses >= 0
         ):
             msg = f"need int counts, 1 <= M <= N, n_delete_misses >= 1; got {counts}."
             raise ValueError(msg)
@@ -122,7 +124,12 @@ class Scan:
     """Everything one sensor measured at one time: z ``(n_meas, m)`` and R, checked and frozen.
 
     ``noise_covariance`` may be one ``(m, m)`` for every measurement; it is stored as the
-    ``(n_meas, m, m)`` stack. ``(0, m)`` measurements is a scan that saw nothing.
+    ``(n_meas, m, m)`` stack, each positive definite. ``(0, m)`` measurements is a scan that
+    saw nothing.
+
+    References
+    ----------
+    Bar-Shalom [2], §4.3.1 (z = h(x) + w, w zero-mean with covariance R).
     """
 
     time_s: float
@@ -142,8 +149,9 @@ class Scan:
             raise ValueError(msg)
         noise = np.asarray(self.noise_covariance, dtype=np.float64)
         if noise.shape == (size, size):
-            noise = np.zeros((n_meas, size, size)) + noise
-        noise = _check_covariances(noise, (n_meas, size, size), "noise_covariance")
+            shared = check_covariances(noise, (size, size), "noise_covariance")
+            noise = np.zeros((n_meas, size, size)) + shared
+        noise = check_covariances(noise, (n_meas, size, size), "noise_covariance")
         measurements.setflags(write=False)
         noise.setflags(write=False)
         object.__setattr__(self, "time_s", float(self.time_s))
@@ -177,7 +185,7 @@ class _PriorInitiator:
             raise ValueError(msg)
         self.prior_mean = mean
         shape = (len(mean), len(mean))
-        self.prior_covariance = _check_covariances(prior_covariance, shape, "prior_covariance")
+        self.prior_covariance = check_covariances(prior_covariance, shape, "prior_covariance")
 
     def _seed(
         self, rows: Sequence[int], values: NDArray[np.float64], blocks: NDArray[np.float64]
@@ -350,7 +358,7 @@ class DebiasedSphericalInitiator(_PriorInitiator):
 
 
 class ModelSelector(Protocol):
-    """The models each track may use a scan through, best first (tracker-001 §8.3).
+    """The models each track may use a scan through, best first (tracker-001 §5.4).
 
     Called once per scan; each model offered is the scan's own or a registered marginal of it.
     Scenario 003's offers range and rate to tracks that can unfold, then range alone to all.
@@ -398,6 +406,10 @@ class Tracker:
         λ per model ID: required for every model by the likelihood ratio, refused otherwise.
     model_selector : ModelSelector or None, optional
         None offers the scan's own model to every track.
+
+    References
+    ----------
+    Bar-Shalom and Li [1], §2.6.1, and Blackman and Popoli [4] (M-of-N and assignment).
     """
 
     def __init__(
@@ -581,7 +593,7 @@ class Tracker:
         status[hit & (status == TrackStatus.COASTING)] = TrackStatus.CONFIRMED
         status[live & ~hit & (status == TrackStatus.CONFIRMED)] = TrackStatus.COASTING
         status = _m_of_n(status, n_hits, n_scans, policy)
-        extra = np.where(np.isin(status, _CONFIRMED), policy.n_reacquire_scans, 0)
+        extra = np.where(np.isin(status, _CONFIRMED), policy.n_reacquire_misses, 0)
         status[~live | (n_misses >= policy.n_delete_misses + extra)] = TrackStatus.DELETED
         # The miss that opens re-acquisition, and only it: a later reset would undo what the
         # coast has learnt.
