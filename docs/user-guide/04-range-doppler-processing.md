@@ -172,7 +172,7 @@ Doppler bin of the coarser burst (B's bins are 0.717 m/s apart).
 
 ## Try it in a scenario
 
-Use [scenario 001](../scenarios/scenario-001-xband.md), S1:
+Use [scenario 001](../../scenarios/scenario_001_fmcw_low_prf.toml), S1:
 
 ```bash
 uv run python scripts/run_scenario.py scenarios/scenario_001_fmcw_low_prf.toml --out out/s1 --frames 10 --no-iq --no-movie

@@ -377,7 +377,7 @@ This scenario claims:
 ```
 scenarios/scenario_007_interference_{sidelobe,mainlobe_edge}.toml
 spec/scenario-007-interference.md
-docs/scenarios/scenario-007-interference.md
+a row in the Scenarios table of docs/README.md
 src/radar_forge/core/interference.py
 src/radar_forge/array/adaptive.py
 src/radar_forge/core/radar_equation.py   (one_way_received_power_w only)

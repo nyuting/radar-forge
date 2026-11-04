@@ -433,7 +433,7 @@ Exactly the extension point of `tracker-001.md` §9, now specified:
   augmented at zero mean and a stated standard deviation (3 °/s for `turn_rate_radps`).
 - `innovation_statistics` returns the mode-mixed likelihood, so GNN, JPDA, MHT and gating work
   unchanged, and the cost of §7.2 is its negative log.
-- Mode probabilities are an exposed intermediate quantity (`starter.md` §1.1) and go to
+- Mode probabilities are an exposed intermediate quantity (the bar in `CLAUDE.md`) and go to
   `tracks.csv`.
 
 The modes may be KF, EKF or UKF. The test of A2 runs a one-mode IMM over each.

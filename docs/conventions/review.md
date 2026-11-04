@@ -9,7 +9,7 @@ How to review a PR here and write it up, for people and AI agents alike. Claude 
 file as `/pr-review`. The same lists serve an audit of existing code (§5) and a refactor (§6).
 
 Readers are interns and students, so a review teaches as well as gates. It holds a PR to both
-halves of [`spec/starter.md` §1.1](../../spec/starter.md#11-the-bar): a current method with
+halves of the bar in [`CLAUDE.md`](../../CLAUDE.md) (its opening paragraph): a current method with
 correct, cited maths, in code a newcomer can follow. **Every claim is run, not argued**: a root
 cause, a bug, a passing test, a number. Anything unrun goes under "discuss", marked unverified.
 
@@ -26,8 +26,7 @@ cause, a bug, a passing test, a number. Anything unrun goes under "discuss", mar
 5. **Domain pass**: is the maths right and the method current? Check each equation against its
    cited source; name any specific gap from current practice. Rerun any results the PR states.
 6. **Engineering pass**, reported apart: can a student follow it? Count files per call,
-   protocol hops, registries; grep for duplication against `main`. Read the new modules in
-   `tools/generate_reading_view.py`'s output.
+   protocol hops, registries; grep for duplication against `main`.
 7. **Tests**: a test for each behaviour the domain pass cares about; flag tests that cannot fail
    or that lock in what the review asks to change.
 8. **Measure what you will assert.** Count with `git grep` and quote the regex; check it returns

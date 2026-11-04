@@ -2,7 +2,7 @@
 
 `radar-forge` is a radar workbench for research and education: current methods with correct,
 cited maths, in plain code that shows its intermediate quantities, read by practitioners, interns
-and students. Neither half is traded for the other ([`spec/starter.md` §1.1](spec/starter.md#11-the-bar)).
+and students. Neither half is traded for the other.
 
 ## Non-negotiables (and what enforces each)
 
@@ -12,7 +12,7 @@ and students. Neither half is traded for the other ([`spec/starter.md` §1.1](sp
 - `make check` green before you say you are done; `--no-verify` is not a fix — CI runs the same.
 - SI units with the unit in the name (`range_m`, `gain_tx_dbi`, never `gain_tx`) — R5.
 - Physical constants only from `radar_forge.core.constants`; never `3e8` — R4, mypy `Final`.
-- NumPy docstrings, doctests that run — ruff `D`, R3, `tests/test_docstrings.py`. `References` and shapes `(n_pulses, n_samples)` are review items.
+- Lean NumPy docstrings: one summary line; a citation with equation number; Parameters/Returns only where a unit, shape or convention is not in the name; no Raises or Examples unless the example is the test — ruff `D`, R3, `tests/test_docstrings.py`.
 - Complete annotations, `ArrayLike` in, `NDArray` out — `mypy --strict`, ruff `ANN`, `tests/test_public_api.py`.
 - Every module defines `__all__` — `tests/test_public_api.py`. `msg = "…"` then `raise`, no `assert` — ruff `EM`, `S101`.
 - Broadcast, don't tile, unless `# broadcast-exempt: <reason>` — R6. No banners, `# Inputs:` or control chars — R8, R9.

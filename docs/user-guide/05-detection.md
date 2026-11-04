@@ -174,7 +174,7 @@ that noise map's own false alarms, one cell each.
 
 ## Try it in a scenario
 
-[Scenario 003](../scenarios/scenario-003-tracking.md) runs this CFAR on every frame of
+[Scenario 003](../../scenarios/scenario_003_tracking.toml) runs this CFAR on every frame of
 scenario 001's S1 radar and tracks what it finds. Run it:
 
 ```bash

@@ -285,7 +285,7 @@ test.
    columns `|x|²x` to the basis [4]_. The projection, the test and the function are the same; only
    the basis grows.
 
-**Intermediate quantities exposed** (starter.md §1.1 item 6): the weights per batch or block,
+**Intermediate quantities exposed** (the bar in `CLAUDE.md`): the weights per batch or block,
 shape `(n_cancellation_batches, n_basis)`; the Gram matrix condition number; CA; the predicted CA
 bound; the floor rise; the notch response `ρ(f)`; and the residual stream itself.
 
@@ -341,7 +341,7 @@ returned, never applied silently**, which is the same rule scenario 007 states a
 weights. A Python loop runs over cancellation batches and filter blocks. Each is an independent
 solve, so the loop is the algorithm and not an unvectorised one. The code comment says so.
 
-Per `structure.md` D2, this adds the cancellation half of `core/clutter.py` alongside no clutter
+Per D2 below, this adds the cancellation half of `core/clutter.py` alongside no clutter
 model yet. Scenario 008 adds the Ward patch model, which is one clutter model. The promotion
 trigger, more than two clutter models plus the cancellation algorithms, is not reached by
 005 + 008.
@@ -525,3 +525,12 @@ brackets.
        Systems*, 52(3), pp. 1309-1326, 2016. doi:10.1109/TAES.2016.150477. The sliding
        estimation window, the batched fit's notch and its parasitic Doppler structure (equation
        numbers to confirm at implementation).
+
+## Decisions inherited
+
+From the retired structure spec.
+
+- **D2.** A `core/` module becomes a subpackage once it carries more than about one module of
+  responsibility, and not before; the subpackage re-exports every public name so import paths never
+  change. `core/clutter.py` is promoted when it holds more than two clutter models plus the
+  cancellation algorithms.

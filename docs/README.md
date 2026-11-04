@@ -13,7 +13,7 @@ equations with worked values, an example to run, and a scenario to try it in.
 5. [Detection](user-guide/05-detection.md)
 6. [Tracking](user-guide/06-tracking.md)
 
-The [scenario companions](#scenario-companions) below are where you try each page out.
+The [scenarios](#scenarios) below are where you try each page out.
 
 ## Conventions
 
@@ -27,12 +27,6 @@ The rules, and the check that enforces each, are summarised in [CLAUDE.md](../CL
   against the spec (Q1–Q8) and refactoring (F1–F9).
 - [**commits.md**](conventions/commits.md) — Conventional Commits, branches, squash-merged PRs.
 
-## Audits
-
-- [**pipelines-audit.md**](audits/pipelines-audit.md), [**tests-audit.md**](audits/tests-audit.md):
-  the open items left from the audits of the pipelines and the tests, made by the method in
-  [review.md §5](conventions/review.md#5-auditing-existing-code). Each file names the commit that holds its full report.
-
 ## Getting started
 
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — setup, the development loop, what each hook does.
@@ -44,51 +38,25 @@ The rules, and the check that enforces each, are summarised in [CLAUDE.md](../CL
 
 ## Design
 
-- [`spec/starter.md`](../spec/starter.md) — project charter and ecosystem survey.
-- [`spec/structure.md`](../spec/structure.md) — file-level module design.
-- [`spec/scenario-001-xband.md`](../spec/scenario-001-xband.md) — the first
-  vertical slice: trajectory → IQ → range-Doppler map, in three ambiguity variants.
-- [`spec/scenario-002-bistatic.md`](../spec/scenario-002-bistatic.md) — the same
-  path over a two-site geometry: the Raleigh-Durham transmitter received at the Duke Receiver,
-  in an X-band and an S-band variant.
-- [`spec/scenario-003-tracking.md`](../spec/scenario-003-tracking.md) — CFAR
-  detection, data association and Kalman tracking stacked on scenario 001's S1 variant, in two
-  waveform variants. §14 records the things building it changed.
-- [`spec/scenario-004-keystone.md`](../spec/scenario-004-keystone.md) — Fast sounding rocket: keystone, polynomial-phase motion compensation, datachip and fine estimation.
-  *Specified, not implemented.*
-- [`spec/scenario-005-leakage-cancellation.md`](../spec/scenario-005-leakage-cancellation.md) — Transmitter leakage and near-range clutter in a continuous-wave radar.
-  *Specified, not implemented.*
-- [`spec/scenario-006-parallel-approach-doa.md`](../spec/scenario-006-parallel-approach-doa.md) — Two aircraft on closely spaced parallel approaches in one range-Doppler cell: spatial super-resolution (MUSIC, ESPRIT, IAA).
-  *Specified, not implemented.*
-- [`spec/scenario-007-interference.md`](../spec/scenario-007-interference.md) — Strong RF interference against a weak target: SLC, MVDR, LCMV, mainlobe suppression.
-  *Specified, not implemented.*
-- [`spec/scenario-008-stap.md`](../spec/scenario-008-stap.md) — Airborne clutter ridge: space-time adaptive processing with RASPNet and MCARM radar parameters.
-  *Specified, not implemented.*
-- [`spec/scenario-009-receiver-chain.md`](../spec/scenario-009-receiver-chain.md) — Receiver chain: front end, DDC and polyphase filtering, hardware impairments, pilot-tone calibration.
-  *Specified, not implemented.*
-- [`spec/scenario-010-self-calibration.md`](../spec/scenario-010-self-calibration.md) — Array perturbations: self-calibration, self-localisation and robust beamforming.
-  *Specified, not implemented.*
-- [`spec/scenario-011-terminal-area-tracking.md`](../spec/scenario-011-terminal-area-tracking.md) — Dense terminal-area traffic: crossings, clutter, manoeuvres and closely spaced aircraft (IMM, JPDA, MHT, PMBM).
-  *Specified, not implemented.*
-- [`spec/tracker-001.md`](../spec/tracker-001.md) — tracking architecture: one tracker loop
-  with interchangeable KF, EKF and UKF filters, and how `core/tracking/` meets the pipelines.
 
-## Scenario companions
+- [`spec/data-001-formats.md`](../spec/data-001-formats.md) — the files a run writes.
+- [`spec/tracker-001.md`](../spec/tracker-001.md) — the tracking architecture.
 
-Visual, orienting walk-throughs for running a scenario for the first time — the geometry, the
-pipeline, the pictures and the knobs. They are **not normative**; the `spec/` documents above are.
+## Scenarios
 
-- [**scenario 001 — X-band**](scenarios/scenario-001-xband.md) — one site, three waveforms, and
-  why the three sample rates differ.
-- [**scenario 002 — bistatic**](scenarios/scenario-002-bistatic.md) — two sites, the bistatic
-  angle, and what stayed identical in the code.
-- [**scenario 003 — tracking**](scenarios/scenario-003-tracking.md) — the detection pipeline, the
-  track lifecycle, and three things that look like bugs and are not.
-- [**scenario 004 — keystone**](scenarios/scenario-004-keystone.md) — fast sounding rocket: keystone, polynomial-phase motion compensation, datachip and fine estimation. Not runnable yet.
-- [**scenario 005 — leakage cancellation**](scenarios/scenario-005-leakage-cancellation.md) — a continuous-wave radar hears its own transmitter; least-squares cancellation removes the leakage and near-range clutter before range-Doppler processing. Not runnable yet.
-- [**scenario 006 — parallel-approach doa**](scenarios/scenario-006-parallel-approach-doa.md) — two aircraft on closely spaced parallel approaches in one range-Doppler cell: spatial super-resolution (MUSIC, ESPRIT, IAA). Not runnable yet.
-- [**scenario 007 — strong interferers**](scenarios/scenario-007-interference.md) — strong RF interference against a weak target: SLC, MVDR, LCMV, mainlobe suppression. Not runnable yet.
-- [**scenario 008 — stap**](scenarios/scenario-008-stap.md) — airborne clutter ridge: space-time adaptive processing with RASPNet and MCARM radar parameters. Not runnable yet.
-- [**scenario 009 — receiver chain**](scenarios/scenario-009-receiver-chain.md) — receiver chain: front end, DDC and polyphase filtering, hardware impairments, pilot-tone calibration. Not runnable yet.
-- [**scenario 010 — self calibration**](scenarios/scenario-010-self-calibration.md) — array perturbations: self-calibration, self-localisation and robust beamforming. Not runnable yet.
-- [**scenario 011 — terminal-area tracking**](scenarios/scenario-011-terminal-area-tracking.md) — dense civil traffic around Raleigh-Durham: a holding stack, crossings, turns, birds and rain clutter; IMM, JPDA, MHT and PMBM compared. Not runnable yet.
+Each scenario has a specification in `spec/` and, once it runs, a TOML file in `scenarios/`.
+Run one with `uv run python scripts/run_scenario.py scenarios/<file>.toml --out out/<name>`.
+
+| Scenario | TOML | Status |
+| :--- | :--- | :--- |
+| [001, X-band](../spec/scenario-001-xband.md): trajectory to IQ to range-Doppler map, three ambiguity variants | `scenario_001_fmcw_low_prf.toml`, `scenario_001_fmcw_dual_prf.toml`, `scenario_001_pulsed_medium_prf.toml` | Runs |
+| [002, bistatic](../spec/scenario-002-bistatic.md): the Raleigh-Durham transmitter received at the Duke receiver | `scenario_002_bistatic_xband.toml`, `scenario_002_bistatic_sband.toml` | Runs |
+| [003, tracking](../spec/scenario-003-tracking.md): CFAR, association and tracking on 001 | `scenario_003_tracking.toml`, `scenario_003_tracking_dual_prf.toml`, `scenario_003_ukf_*.toml` | Runs |
+| [004, keystone](../spec/scenario-004-keystone.md): fast sounding rocket | none | Specified, not built |
+| [005, leakage cancellation](../spec/scenario-005-leakage-cancellation.md): continuous-wave leakage | none | Specified, not built |
+| [006, parallel-approach DoA](../spec/scenario-006-parallel-approach-doa.md): two aircraft in one cell | none | Specified, not built |
+| [007, interference](../spec/scenario-007-interference.md): strong interferers against a weak target | none | Specified, not built |
+| [008, STAP](../spec/scenario-008-stap.md): airborne clutter ridge | none | Specified, not built |
+| [009, receiver chain](../spec/scenario-009-receiver-chain.md): front end, DDC, impairments | none | Specified, not built |
+| [010, self-calibration](../spec/scenario-010-self-calibration.md): array perturbations | none | Specified, not built |
+| [011, terminal-area tracking](../spec/scenario-011-terminal-area-tracking.md): crossings, turns, clutter; IMM, JPDA, MHT, PMBM | none | Specified, not built |

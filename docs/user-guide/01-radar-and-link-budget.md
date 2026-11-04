@@ -207,7 +207,7 @@ the $c\lambda/8$ limit, and page 4 shows how the pair escapes it.
 
 ## Try it in a scenario
 
-The companion is [scenario 001](../scenarios/scenario-001-xband.md). Run S1:
+The scenario file is [scenario 001](../../scenarios/scenario_001_fmcw_low_prf.toml). Run S1:
 
 ```bash
 uv run python scripts/run_scenario.py scenarios/scenario_001_fmcw_low_prf.toml --out out/s1 --frames 10

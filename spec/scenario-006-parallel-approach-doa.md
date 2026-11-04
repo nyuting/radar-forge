@@ -380,7 +380,7 @@ propagation phase by both generators. Zeros reproduce today's cubes bit for bit.
   Free functions: `sample_covariance`, `spatial_smoothing`, `forward_backward`,
   `crb_deterministic`, `resolution_snr_db`, `monopulse_ratio`, `is_resolved`.
 
-Every estimator exposes its intermediate quantities (`starter.md` §1.1 item 6): the covariance
+Every estimator exposes its intermediate quantities (the bar in `CLAUDE.md`): the covariance
 eigenvalues, which show the rank deficiency directly, the pseudo-spectrum, and the √CRB at the
 estimate. The IAA grid covers the whole visible region `u ∈ [−1, 1)`. A sector grid makes
 `Σ p_k a_k a_kᴴ` ill-conditioned (condition number ~10¹⁷ in the prototype), and IAA then

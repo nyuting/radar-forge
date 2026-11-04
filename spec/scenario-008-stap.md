@@ -488,7 +488,7 @@ This scenario claims:
 ```
 scenarios/scenario_008_stap_{raspnet_static,sidelooking_ridge,forward_looking,raspnet_data,
                              mcarm_sidelooking}.toml
-spec/scenario-008-stap.md, docs/scenarios/scenario-008-stap.md
+spec/scenario-008-stap.md, a row in the Scenarios table of docs/README.md
 src/radar_forge/array/stap.py                      (new)
 src/radar_forge/core/clutter.py                    (Ward model half only; 005 owns the leakage cancellers)
 src/radar_forge/pipelines/raspnet.py               (new)
