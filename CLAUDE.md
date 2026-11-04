@@ -6,13 +6,13 @@ and students. Neither half is traded for the other ([`spec/starter.md` §1.1](sp
 
 ## Non-negotiables (and what enforces each)
 
-- Python ≥ 3.11, src layout; library code only in `src/radar_forge/` — ruff `UP`, R2.
+- Python ≥ 3.11, src layout; only Python under `src/radar_forge/` — ruff `UP`, R2.
 - All configuration in `pyproject.toml`; no `setup.py`, `setup.cfg`, `tox.ini`, `requirements*.txt` — R1.
 - Everything through `uv` (`uv run pytest`), never `pip install` — the hooks call `uv run`.
 - `make check` green before you say you are done; `--no-verify` is not a fix — CI runs the same.
 - SI units with the unit in the name (`range_m`, `gain_tx_dbi`, never `gain_tx`) — R5.
 - Physical constants only from `radar_forge.core.constants`; never `3e8` — R4, mypy `Final`.
-- NumPy docstrings with `References` and array shapes `(n_pulses, n_samples)` — ruff `D`, R3, `tests/test_docstrings.py`.
+- NumPy docstrings, doctests that run — ruff `D`, R3, `tests/test_docstrings.py`. `References` and shapes `(n_pulses, n_samples)` are review items.
 - Complete annotations, `ArrayLike` in, `NDArray` out — `mypy --strict`, ruff `ANN`, `tests/test_public_api.py`.
 - Every module defines `__all__` — `tests/test_public_api.py`. `msg = "…"` then `raise`, no `assert` — ruff `EM`, `S101`.
 - Broadcast, don't tile, unless `# broadcast-exempt: <reason>` — R6. No banners, `# Inputs:` or control chars — R8, R9.

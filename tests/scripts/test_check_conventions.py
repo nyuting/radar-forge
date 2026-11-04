@@ -70,6 +70,7 @@ def test_hashes_inside_a_string_are_not_flagged() -> None:
     assert _r8_lines(source) == []
 
 
+@pytest.mark.slow  # over a second: parses every tracked file
 def test_every_tracked_python_file_passes_r8() -> None:
     problems = [
         problem

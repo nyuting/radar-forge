@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Enforce the conventions that ruff and mypy cannot express.
 
-Pure standard library on purpose: this runs from a git hook, possibly before
-``uv sync`` has happened, and from CI.
+Pure standard library on purpose: the hooks and CI call it through ``uv run``,
+but it must also run under any Python with no environment at all.
 
 Rules
 -----
@@ -74,9 +74,7 @@ class Problem(NamedTuple):
         )
 
 
-# --------------------------------------------------------------------------- #
-# R1 — configuration lives in TOML
-# --------------------------------------------------------------------------- #
+# --- R1 — configuration lives in TOML ---
 
 BANNED_CONFIG = {
     "setup.py": "declare the build in pyproject.toml [build-system] / [project]",
@@ -92,15 +90,11 @@ BANNED_CONFIG = {
     "requirements-dev.txt": "dev deps go in [project.optional-dependencies].dev",
 }
 
-# --------------------------------------------------------------------------- #
-# R2 — the import package is Python
-# --------------------------------------------------------------------------- #
+# --- R2 — the import package is Python ---
 
 ALLOWED_PACKAGE_SUFFIXES = {".py", ".pyi", ".typed", ".json", ".toml", ".csv"}
 
-# --------------------------------------------------------------------------- #
-# R4 — constants are defined once
-# --------------------------------------------------------------------------- #
+# --- R4 — constants are defined once ---
 
 # Literal values that must only ever appear in core/constants.py, paired with
 # the canonical name to import instead. Written as pairs rather than a dict
@@ -138,9 +132,7 @@ def canonical_constant_names() -> set[str]:
     return set()
 
 
-# --------------------------------------------------------------------------- #
-# R5 — unit suffixes
-# --------------------------------------------------------------------------- #
+# --- R5 — unit suffixes ---
 
 # Bare physical-quantity names, mapped to the suffixes that would make them
 # unambiguous. The point is that `gain` does not say linear-or-dB and `range`
@@ -197,9 +189,7 @@ UNIT_SUFFIXES = (
 # Names that look bare but are dimensionless, a count, or an index.
 UNIT_EXEMPT = {"n", "i", "j", "k", "idx", "axis", "out", "dtype", "rng", "seed", "self", "cls"}
 
-# --------------------------------------------------------------------------- #
-# R6 — broadcasting
-# --------------------------------------------------------------------------- #
+# --- R6 — broadcasting ---
 
 BROADCAST_EXEMPT = re.compile(r"#\s*broadcast-exempt:\s*\S")
 TILE_FUNCS = {"tile", "repeat", "broadcast_to"}
@@ -456,9 +446,7 @@ def check_markdown_anchors(rel: Path) -> list[Problem]:
     return problems
 
 
-# --------------------------------------------------------------------------- #
-# R8 — comment style
-# --------------------------------------------------------------------------- #
+# --- R8 — comment style ---
 
 # Ten or more leading hashes: a decorative banner. The section header used in
 # this file ("# ---- #") starts "# " and so never matches.
@@ -510,9 +498,7 @@ def check_comment_style(rel: Path, lines: list[str]) -> list[Problem]:
     return problems
 
 
-# --------------------------------------------------------------------------- #
-# R9 — no control characters
-# --------------------------------------------------------------------------- #
+# --- R9 — no control characters ---
 
 # C0 controls and DEL, except tab, line feed and carriage return: a CRLF working
 # copy is the editor's business, and git normalises it on commit.
@@ -544,9 +530,7 @@ def check_control_characters(rel: Path, text: str) -> list[Problem]:
     return problems
 
 
-# --------------------------------------------------------------------------- #
-# R10 — module length
-# --------------------------------------------------------------------------- #
+# --- R10 — module length ---
 
 MODULE_WARN_LINES = 500
 MODULE_MAX_LINES = 800
@@ -573,33 +557,54 @@ def check_module_length(rel: Path, n_lines: int) -> list[Problem]:
     """R10: a long module is a prompt to split it; a very long one must be split."""
     if rel.suffix != ".py" or rel.parts[0] not in LENGTH_SCOPE or n_lines <= MODULE_WARN_LINES:
         return []
-    over_max = n_lines > MODULE_MAX_LINES and rel not in LONG_MODULE_GRANDFATHER
-    limit = MODULE_MAX_LINES if over_max else MODULE_WARN_LINES
+    grandfathered = n_lines > MODULE_MAX_LINES and rel in LONG_MODULE_GRANDFATHER
+    over_max = n_lines > MODULE_MAX_LINES and not grandfathered
+    limit = MODULE_WARN_LINES if n_lines <= MODULE_MAX_LINES else MODULE_MAX_LINES
+    note = " (grandfathered: split it before it grows)" if grandfathered else ""
     return [
         Problem(
             rel,
             0,
             "R10 length",
-            f"{n_lines} lines, over the {limit}-line limit.",
+            f"{n_lines} lines, over the {limit}-line limit{note}.",
             "split it along the concepts it holds: one coherent concept per module.",
             blocking=over_max,
         )
     ]
 
 
-# --------------------------------------------------------------------------- #
-# R11 — the hot path does no I/O, logging or timing
-# --------------------------------------------------------------------------- #
+# --- R11 — the hot path does no I/O, logging or timing ---
 
 HOT_PATH = PKG / "core"
 # Modules under core/ that broke R11 when it was added. None did.
 HOT_PATH_GRANDFATHER: frozenset[Path] = frozenset()
 HOT_PATH_BUILTINS = {"print", "open"}
 HOT_PATH_CLOCKS = {"time", "time_ns", "perf_counter", "perf_counter_ns", "monotonic"}
-HOT_PATH_WRITES = {"write_text", "write_bytes"}
+HOT_PATH_WRITES = {
+    "write_text",
+    "write_bytes",
+    "write",
+    "open",
+    "save",
+    "savetxt",
+    "savez",
+    "savez_compressed",
+    "tofile",
+}
 
 
-def hot_path_offence(node: ast.AST) -> str | None:
+def module_aliases(tree: ast.AST, module: str) -> set[str]:
+    """Return every local name bound to *module* by ``import module [as name]``."""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == module:
+                    names.add(alias.asname or alias.name)
+    return names
+
+
+def hot_path_offence(node: ast.AST, time_names: set[str]) -> str | None:
     """Name what *node* does that the hot path may not, or return None."""
     if isinstance(node, ast.Import):
         if any(alias.name.split(".")[0] == "logging" for alias in node.names):
@@ -623,7 +628,7 @@ def hot_path_offence(node: ast.AST) -> str | None:
         isinstance(func, ast.Attribute)
         and func.attr in HOT_PATH_CLOCKS
         and isinstance(func.value, ast.Name)
-        and func.value.id == "time"
+        and func.value.id in time_names
     ):
         return f"calls time.{func.attr}()"
     return None
@@ -634,8 +639,9 @@ def check_hot_path(tree: ast.AST, rel: Path) -> list[Problem]:
     if rel.parts[: len(HOT_PATH.parts)] != HOT_PATH.parts or rel in HOT_PATH_GRANDFATHER:
         return []
     problems: list[Problem] = []
+    time_names = module_aliases(tree, "time") | {"time"}
     for node in ast.walk(tree):
-        offence = hot_path_offence(node)
+        offence = hot_path_offence(node, time_names)
         if offence is None:
             continue
         problems.append(
@@ -651,9 +657,7 @@ def check_hot_path(tree: ast.AST, rel: Path) -> list[Problem]:
     return problems
 
 
-# --------------------------------------------------------------------------- #
-# R12 — floating-point warnings are not silenced without a reason
-# --------------------------------------------------------------------------- #
+# --- R12 — floating-point warnings are not silenced without a reason ---
 
 ERRSTATE_EXEMPT = re.compile(r"#\s*errstate-exempt:\s*\S")
 ERRSTATE_FUNCS = {"errstate", "seterr"}
@@ -672,14 +676,26 @@ def check_errstate(tree: ast.AST, rel: Path, lines: list[str]) -> list[Problem]:
     """R12: silencing a floating-point warning hides the next bug along with it."""
     if rel in ERRSTATE_GRANDFATHER:
         return []
+    numpy_names = module_aliases(tree, "numpy") | {"np", "numpy"}
+    bare_names = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "numpy"
+        for alias in node.names
+        if alias.name in ERRSTATE_FUNCS
+    }
     problems: list[Problem] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        if not (isinstance(func, ast.Attribute) and func.attr in ERRSTATE_FUNCS):
-            continue
-        if not (isinstance(func.value, ast.Name) and func.value.id in {"np", "numpy"}):
+        if isinstance(func, ast.Attribute) and func.attr in ERRSTATE_FUNCS:
+            if not (isinstance(func.value, ast.Name) and func.value.id in numpy_names):
+                continue
+            called = func.attr
+        elif isinstance(func, ast.Name) and func.id in bare_names:
+            called = func.id
+        else:
             continue
         if is_justified(node.lineno, lines, ERRSTATE_EXEMPT):
             continue
@@ -688,7 +704,7 @@ def check_errstate(tree: ast.AST, rel: Path, lines: list[str]) -> list[Problem]:
                 rel,
                 node.lineno,
                 "R12 errstate",
-                f"np.{func.attr}() silences a floating-point warning with no stated reason.",
+                f"np.{called}() silences a floating-point warning with no stated reason.",
                 "rearrange the maths, mask the case, or raise ValueError. If the NaN or inf "
                 "is the documented answer, scope the narrowest category to one expression "
                 "and add  # errstate-exempt: <reason>",
