@@ -221,6 +221,10 @@ def line_of_sight_paths(
     gain_rx_linear: ArrayLike | None = None,
 ) -> PropagationPaths:
     """Build one direct path per target; the gains default to the boresight gains."""
+    rcs_arr = np.asarray(rcs_m2, dtype=np.float64)
+    if not np.all(rcs_arr >= 0.0):
+        msg = "rcs_m2 must be non-negative; 0.0 is a target that returns nothing."
+        raise ValueError(msg)
     if gain_tx_linear is None:
         gain_tx_linear = 10.0 ** (radar.transmitter.gain_tx_dbi / 10.0)
     if gain_rx_linear is None:
@@ -230,7 +234,7 @@ def line_of_sight_paths(
         gain_tx_linear=gain_tx_linear,
         gain_rx_linear=gain_rx_linear,
         wavelength_m=radar.wavelength_m,
-        rcs_m2=rcs_m2,
+        rcs_m2=rcs_arr,
         range_tx_m=geometry.range_tx_m,
         range_rx_m=geometry.range_rx_m,
     )
@@ -294,6 +298,9 @@ def swerling_rcs_m2(
     :math:`k = 2` (exponential) for 1 and 2 and :math:`k = 4` for 3 and 4. Odd
     cases are redrawn per scan, even per pulse: the caller asks for ``(n_scans,)``
     and holds it, or for ``(n_scans, n_pulses)`` (Swerling [3]; Skolnik [4] §2.8).
+    ``mean_rcs_m2`` broadcasts against ``shape`` by NumPy's rules, trailing axes
+    first, so a per-target mean is ``(n_targets, 1)`` against ``(n_targets,
+    n_pulses)``; a ``(n_targets,)`` mean would pair with the pulse axis instead.
     """
     if case != 0 and case not in _SWERLING_DEGREES_OF_FREEDOM:
         msg = f"case must be a Swerling case 0, 1, 2, 3 or 4; got {case!r}."

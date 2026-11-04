@@ -26,7 +26,7 @@ from scipy.signal import fftconvolve
 
 from radar_forge.core.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.propagation import PropagationPaths, propagation_delay_s, propagation_phase_rad
-from radar_forge.radar import Radar
+from radar_forge.radar import Radar, Transmitter
 
 __all__ = [
     "ambiguity_function",
@@ -162,32 +162,7 @@ def fmcw_deramp_baseband(
     range bin within one chirp (Charvat [2] ch. 3; Richards [1] §4.6.5).
     """
     _check_dwell(radar, n_pulses, "fmcw")
-    _warn_if_stop_and_hop_is_strained(paths, radar)
-    transmitter = radar.transmitter
-
-    bistatic_range_m = paths.bistatic_range_at_m(_slow_time_s(n_pulses, radar), radar.wavelength_m)
-    delay_s = propagation_delay_s(bistatic_range_m)
-    # The residual phase is referred to the sweep start, the frequency sent at t_n = 0.
-    sweep_start_wavelength_m = SPEED_OF_LIGHT_MPS / (
-        transmitter.carrier_frequency_hz + transmitter.bandwidth_hz / 2.0
-    )
-    residual_phase_rad = propagation_phase_rad(bistatic_range_m, sweep_start_wavelength_m)
-    magnitude = np.abs(paths.amplitude_linear)
-    fast_time_s = _fast_time_s(radar)
-
-    def chunk_signal(chunk: slice) -> NDArray[np.complex128]:
-        beat_phase_rad = (
-            2.0 * np.pi * transmitter.sweep_rate_hzps * delay_s[:, chunk, None] * fast_time_s
-        )
-        signal: NDArray[np.complex128] = magnitude[None, chunk, None] * np.exp(
-            1j * (residual_phase_rad[:, chunk, None] + beat_phase_rad)
-        )
-        return signal
-
-    cube = _sum_over_paths(
-        chunk_signal, paths.n_paths, (n_pulses, radar.n_samples_per_pri), max_bytes
-    )
-    return _add_noise(cube, radar, rng)
+    return _synthesise(paths, radar, n_pulses, _deramp_kernel, rng, max_bytes)
 
 
 def pulsed_baseband(
@@ -202,37 +177,89 @@ def pulsed_baseband(
 
     Each path is ``lfm_chirp(B, T, f_s)`` at its delay folded modulo the PRI (how
     range folds) with the carrier phase of the true delay (which keeps Doppler
-    right). No eclipsing. Chunking and ``rng`` as :func:`fmcw_deramp_baseband`.
+    right). An echo that runs past the end of its PRI goes on at the start of the
+    next row, because the receiver keeps listening; the last row's overrun is
+    lost. No eclipsing. Chunking, ``rng`` and the warning as :func:`fmcw_deramp_baseband`.
     """
     _check_dwell(radar, n_pulses, "pulsed")
-    transmitter = radar.transmitter
+    return _synthesise(paths, radar, n_pulses, _pulse_kernel, rng, max_bytes)
 
+
+def _synthesise(
+    paths: PropagationPaths,
+    radar: Radar,
+    n_pulses: int,
+    kernel: Callable[[NDArray[np.float64], NDArray[np.float64], Radar], NDArray[np.complex128]],
+    rng: np.random.Generator | None,
+    max_bytes: int,
+) -> NDArray[np.complex128]:
+    """Sum ``|a_p|`` times each path's unit-amplitude ``kernel`` echo over paths, then add noise."""
+    _warn_if_stop_and_hop_is_strained(paths, radar)
     bistatic_range_m = paths.bistatic_range_at_m(_slow_time_s(n_pulses, radar), radar.wavelength_m)
-    folded_delay_s = np.mod(
-        propagation_delay_s(bistatic_range_m), transmitter.pulse_repetition_interval_s
-    )
-    residual_phase_rad = propagation_phase_rad(bistatic_range_m, radar.wavelength_m)
     magnitude = np.abs(paths.amplitude_linear)
     fast_time_s = _fast_time_s(radar)
 
     def chunk_signal(chunk: slice) -> NDArray[np.complex128]:
-        elapsed_s = fast_time_s - folded_delay_s[:, chunk, None]
-        within_pulse = (elapsed_s >= 0.0) & (elapsed_s < transmitter.chirp_duration_s)
-        # The phase of lfm_chirp(B, T, f_s), the centred up sweep, at the elapsed time.
-        envelope_phase_rad = (
-            np.pi * elapsed_s * (transmitter.sweep_rate_hzps * elapsed_s - transmitter.bandwidth_hz)
-        )
-        signal: NDArray[np.complex128] = (
-            magnitude[None, chunk, None]
-            * within_pulse
-            * np.exp(1j * (envelope_phase_rad + residual_phase_rad[:, chunk, None]))
-        )
+        signal = kernel(bistatic_range_m[:, chunk], fast_time_s, radar)
+        signal *= magnitude[None, chunk, None]
         return signal
 
     cube = _sum_over_paths(
         chunk_signal, paths.n_paths, (n_pulses, radar.n_samples_per_pri), max_bytes
     )
     return _add_noise(cube, radar, rng)
+
+
+def _deramp_kernel(
+    bistatic_range_m: NDArray[np.float64], fast_time_s: NDArray[np.float64], radar: Radar
+) -> NDArray[np.complex128]:
+    """Return each route's deramped echo, ``(n_pulses, n_paths, n_samples)``: residual and beat."""
+    transmitter = radar.transmitter
+    delay_s = propagation_delay_s(bistatic_range_m)
+    # The residual phase is referred to the sweep start, the frequency sent at t_n = 0.
+    sweep_start_wavelength_m = SPEED_OF_LIGHT_MPS / (
+        transmitter.carrier_frequency_hz + transmitter.bandwidth_hz / 2.0
+    )
+    residual_phase_rad = propagation_phase_rad(bistatic_range_m, sweep_start_wavelength_m)
+    beat_phase_rad = 2.0 * np.pi * transmitter.sweep_rate_hzps * delay_s[..., None] * fast_time_s
+    echo: NDArray[np.complex128] = np.exp(1j * (residual_phase_rad[..., None] + beat_phase_rad))
+    return echo
+
+
+def _pulse_kernel(
+    bistatic_range_m: NDArray[np.float64], fast_time_s: NDArray[np.float64], radar: Radar
+) -> NDArray[np.complex128]:
+    """Return each route's pulse echo, ``(n_pulses, n_paths, n_samples)``, plus the last overrun."""
+    transmitter = radar.transmitter
+    pri_s = transmitter.pulse_repetition_interval_s
+    folded_delay_s = np.mod(propagation_delay_s(bistatic_range_m), pri_s)
+    residual_phase_rad = propagation_phase_rad(bistatic_range_m, radar.wavelength_m)
+    echo = _pulse_echo(fast_time_s - folded_delay_s[..., None], residual_phase_rad, transmitter)
+    # Row m also hears the end of row m - 1's echo. Row 0 has none: a zero delay puts
+    # its predecessor a whole PRI back, at least one pulse length out of reach.
+    previous_delay_s = np.concatenate([np.zeros_like(folded_delay_s[:1]), folded_delay_s[:-1]])
+    previous_phase_rad = np.concatenate([residual_phase_rad[:1], residual_phase_rad[:-1]])
+    echo += _pulse_echo(
+        fast_time_s + pri_s - previous_delay_s[..., None], previous_phase_rad, transmitter
+    )
+    return echo
+
+
+def _pulse_echo(
+    elapsed_s: NDArray[np.float64],
+    residual_phase_rad: NDArray[np.float64],
+    transmitter: Transmitter,
+) -> NDArray[np.complex128]:
+    """Return the pulse ``elapsed_s`` into itself, zero outside, with each route's carrier phase."""
+    within_pulse = (elapsed_s >= 0.0) & (elapsed_s < transmitter.chirp_duration_s)
+    # The phase of lfm_chirp(B, T, f_s), the centred up sweep, at the elapsed time.
+    envelope_phase_rad = (
+        np.pi * elapsed_s * (transmitter.sweep_rate_hzps * elapsed_s - transmitter.bandwidth_hz)
+    )
+    echo: NDArray[np.complex128] = within_pulse * np.exp(
+        1j * (envelope_phase_rad + residual_phase_rad[..., None])
+    )
+    return echo
 
 
 def ambiguity_function(
@@ -270,6 +297,16 @@ def ambiguity_function(
     if sample_rate_hz <= 0.0:
         msg = f"sample_rate_hz must be strictly positive; got {sample_rate_hz!r}."
         raise ValueError(msg)
+    if prf_hz is not None and dopplers_hz is not None:
+        msg = "give prf_hz or dopplers_hz, not both: prf_hz only sets the default Doppler grid."
+        raise ValueError(msg)
+    if prf_hz is not None and not prf_hz > 0.0:
+        msg = f"prf_hz must be strictly positive; got {prf_hz!r}."
+        raise ValueError(msg)
+    energy = np.sqrt(np.sum(np.abs(signal) ** 2) * np.sum(np.abs(matched) ** 2))
+    if energy == 0.0:
+        msg = "waveform and reference must carry energy: the response is normalised by it."
+        raise ValueError(msg)
 
     if dopplers_hz is None:
         span_hz = sample_rate_hz if prf_hz is None else prf_hz
@@ -287,7 +324,6 @@ def ambiguity_function(
     sample_index = np.arange(signal.size)
     shifted = signal * np.exp(2j * np.pi * doppler_arr[:, None] * sample_index / sample_rate_hz)
     correlation = fftconvolve(shifted, np.conj(matched[::-1])[None, :], mode="full", axes=-1)
-    energy = np.sqrt(np.sum(np.abs(signal) ** 2) * np.sum(np.abs(matched) ** 2))
     column = lags - first_lag
     inside = (column >= 0) & (column < correlation.shape[-1])
     magnitude = np.where(
@@ -319,8 +355,12 @@ def _sum_over_paths(
     # A loop over chunks bounds memory; the chunk count depends only on the shapes.
     for start in range(0, n_paths, paths_per_chunk):
         chunk = chunk_signal(slice(start, start + paths_per_chunk))
-        # Prepending the running sum adds paths in one order however they are chunked.
-        cube = np.concatenate([cube[:, None, :], chunk], axis=1).sum(axis=1)
+        # Floating-point addition is not associative, so the order is the result:
+        # adding one path at a time, in index order, in place, is the order of an
+        # unchunked sum over the path axis, so the cube is bit-identical however it
+        # is chunked, and nothing is allocated beyond the chunk.
+        for path in range(chunk.shape[1]):
+            cube += chunk[:, path]
     return cube
 
 

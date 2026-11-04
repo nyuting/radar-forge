@@ -301,6 +301,22 @@ class TestAmbiguityFunction:
         with pytest.raises(ValueError, match="strictly positive"):
             ambiguity_function(np.ones(4), 0.0)
 
+    def test_rejects_an_inconsistent_doppler_request(self) -> None:
+        """prf_hz only shapes the default grid, so with an explicit grid it would be ignored."""
+        with pytest.raises(ValueError, match="not both"):
+            ambiguity_function(np.ones(8), 1.0, prf_hz=0.1, dopplers_hz=[0.0])
+        with pytest.raises(ValueError, match="prf_hz must be strictly positive"):
+            ambiguity_function(np.ones(8), 1.0, prf_hz=0.0)
+
+    @pytest.mark.parametrize("silent", ["waveform", "reference"])
+    def test_rejects_a_signal_with_no_energy(self, silent: str) -> None:
+        """The response is normalised by sqrt(Es Er): zero energy would be NaN everywhere."""
+        signals = {"waveform": np.ones(8), "reference": np.ones(8), silent: np.zeros(8)}
+        with pytest.raises(ValueError, match="carry energy"):
+            ambiguity_function(
+                signals["waveform"], 1.0, reference=signals["reference"], dopplers_hz=[0.0]
+            )
+
 
 class TestFmcwDerampBaseband:
     def test_a_closing_target_on_bin_centres_lands_in_exactly_those_bins(self) -> None:
@@ -416,6 +432,49 @@ class TestPulsedBaseband:
             pulsed_baseband(paths, S1_RADAR, 4, rng=None)
         with pytest.raises(ValueError, match="at least one"):
             pulsed_baseband(paths, S2_RADAR, 0, rng=None)
+
+    def test_an_echo_overrunning_its_pri_finishes_at_the_start_of_the_next_row(self) -> None:
+        """Catches a truncated echo: 5.25 us before a 1 ms PRI ends, a 10 us pulse overruns.
+
+        The receiver keeps listening, so 10 of the 20 samples open the next row.
+        The rows, laid end to end, compress to the same peak as the echo placed
+        mid-PRI with the same quarter-sample offset (the offset keeps every edge
+        off the sample grid). The last row's overrun is lost.
+        """
+        radar = Radar(
+            Transmitter(9.8e9, 1.0e6, 1.0e3, 30.0, 10.0e-6, 1.0e3, waveform="pulsed"),
+            Receiver(2.0e6, 30.0, 3.0),
+            DUKE,
+        )
+        reference = lfm_chirp(1.0e6, 10.0e-6, 2.0e6)
+
+        def peak(delay_s: float, n_rows: int) -> tuple[np.ndarray, float]:
+            """The cube, and its compressed peak per unit path amplitude (ranges differ)."""
+            geometry = TargetGeometry.monostatic(delay_s * SPEED_OF_LIGHT_MPS / 2.0, 0.0)
+            paths = line_of_sight_paths(radar, geometry, 10.0)
+            cube = pulsed_baseband(paths, radar, 3, rng=None)
+            stream = cube[:n_rows].reshape(1, -1)  # the receiver's continuous record
+            compressed_peak = np.abs(_compress(stream, reference)).max()
+            return cube, float(compressed_peak / np.abs(paths.amplitude_linear[0]))
+
+        cube, straddling = peak(1.0e-3 - 5.25e-6, n_rows=2)
+        _, mid_pri = peak(0.5e-3 - 0.25e-6, n_rows=1)
+        occupied = np.abs(cube) > 0.0
+        np.testing.assert_array_equal(occupied.sum(axis=1), [10, 20, 20])
+        assert occupied[0, -10:].all() and occupied[1, :10].all()
+        # The same twenty samples, differing only in a constant carrier phase.
+        np.testing.assert_allclose(straddling, mid_pri, rtol=1e-9)
+
+    def test_warns_when_stop_and_hop_is_strained(self) -> None:
+        """A 50 ms pulse lets a 500 m/s target cross a quarter of a 75 m bin within it."""
+        long_pulse = Radar(
+            Transmitter(9.8e9, 2.0e6, 1.0e3, 30.0, 50.0e-3, 10.0, waveform="pulsed"),
+            Receiver(2.0e6, 30.0, 3.0),
+            DUKE,
+        )
+        paths = line_of_sight_paths(long_pulse, TargetGeometry.monostatic(10_000.0, -500.0), 10.0)
+        with pytest.warns(UserWarning, match="range bin during one chirp"):
+            pulsed_baseband(paths, long_pulse, 1, rng=None)
 
 
 # A 40 MHz carrier with 8 MHz of sweep: 20 % fractional bandwidth, so a Doppler

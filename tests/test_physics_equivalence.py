@@ -26,6 +26,13 @@ Two things the old pipeline does are reproduced on purpose:
   old code measured them. One origin for both agrees to two ulp, which is
   asserted separately, but the carrier phase ``2 pi R_b / lambda`` turns one ulp
   of 2e4 m into 1e-9 rad, more than any 1e-12 cube tolerance allows.
+
+One thing differs on purpose. A pulsed echo that runs past the end of its PRI
+is truncated by the old generator and finishes at the start of the next row in
+the new one. S2 is the only case that straddles: its target folds to 37.2-37.5 us
+of a 40 us PRI, so 18 or 19 of the 25 pulse samples overrun into each of rows
+1-255. Those samples are compared on their own: there the new cube adds the
+wrapped echo, of the path's amplitude, to the noise the old cube held.
 """
 
 from __future__ import annotations
@@ -42,7 +49,7 @@ from radar_forge.core.radar import BistaticRadar
 from radar_forge.core.radar import Radar as OldRadar
 from radar_forge.pipelines.scenarios import Scenario, iterate_frames, load_scenario
 from radar_forge.pipelines.trajectories import load_flight_csv, resample
-from radar_forge.propagation import line_of_sight_paths
+from radar_forge.propagation import PropagationPaths, line_of_sight_paths, propagation_delay_s
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter, geodetic_to_enu_m
 from radar_forge.signal import fmcw_deramp_baseband, pulsed_baseband
 
@@ -123,6 +130,21 @@ def _new_geometry(scenario: Scenario, radar: Radar) -> tuple[TargetGeometry, int
     return replace(per_site, bistatic_range_rate_mps=finite_difference), first_frame, one_origin
 
 
+def _overrun_mask(radar: Radar, paths: PropagationPaths, n_pulses: int) -> NDArray[np.bool_]:
+    """Samples where row m - 1's pulse echo, overrunning its PRI, lands in row m."""
+    transmitter = radar.transmitter
+    pri_s = transmitter.pulse_repetition_interval_s
+    slow_time_s = np.arange(n_pulses, dtype=np.float64) * pri_s
+    bistatic_range_m = paths.bistatic_range_at_m(slow_time_s, radar.wavelength_m)
+    folded_delay_s = np.mod(propagation_delay_s(bistatic_range_m), pri_s)
+    fast_time_s = np.arange(radar.n_samples_per_pri, dtype=np.float64) / (
+        radar.receiver.sample_rate_hz
+    )
+    elapsed_s = fast_time_s + pri_s - folded_delay_s[:-1, :, None]
+    overrun = ((elapsed_s >= 0.0) & (elapsed_s < transmitter.chirp_duration_s)).any(axis=1)
+    return np.concatenate([np.zeros((1, overrun.shape[1]), dtype=bool), overrun])
+
+
 def _at(geometry: TargetGeometry, index: int) -> TargetGeometry:
     """One frame of a track's geometry, as a one-target geometry."""
     return TargetGeometry(
@@ -188,14 +210,27 @@ def test_new_physics_reproduces_the_old_frames(toml_name: str) -> None:
                 pulsed_baseband if radar.transmitter.waveform == "pulsed" else fmcw_deramp_baseband
             )
             cube = generate(paths, radar, n_pulses, rng=rng)
+            old_cube = old.iq[burst]
+            if radar.transmitter.waveform == "pulsed":
+                overrun = _overrun_mask(radar, paths, n_pulses)
+                per_row = overrun.sum(axis=1)
+                assert per_row[0] == 0 and np.all(per_row[1:] > 0), per_row.tolist()
+                # (wrapped echo + noise) - noise: the echo, to the rounding of the noise.
+                np.testing.assert_allclose(
+                    np.abs(cube - old_cube)[overrun],
+                    np.abs(paths.amplitude_linear[0]),
+                    rtol=1e-9,
+                    err_msg="S2 overrun: new = old + the wrapped echo of the path's amplitude",
+                )
+                cube, old_cube = cube[~overrun], old_cube[~overrun]
             if scenario.is_bistatic:
                 np.testing.assert_array_equal(
-                    cube, old.iq[burst], err_msg="bistatic cube: bit-identical"
+                    cube, old_cube, err_msg="bistatic cube: bit-identical"
                 )
             else:
                 np.testing.assert_allclose(
                     cube,
-                    old.iq[burst],
+                    old_cube,
                     rtol=1e-12,
                     atol=0.0,
                     err_msg="monostatic cube: rtol 1e-12, not bit-identical, because the power "

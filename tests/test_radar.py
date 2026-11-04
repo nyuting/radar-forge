@@ -249,6 +249,25 @@ class TestGeometry:
         )
         np.testing.assert_allclose(geometry.bistatic_range_rate_mps, [100.0, -100.0], rtol=1e-12)
 
+    @pytest.mark.parametrize("site_index", [0, 1], ids=["on-transmitter", "on-receiver"])
+    def test_a_target_standing_on_a_site_is_rejected(self, site_index: int) -> None:
+        """Catches a zero range dividing through to silent NaN angles and rate.
+
+        Warnings are errors in this suite, so this also proves the check comes
+        before any arc sine of 0/0.
+        """
+        on_site_m = S1_PAIR.sites_enu_m()[site_index]
+        targets_m = np.stack([on_site_m, on_site_m + np.array([0.0, 5_000.0, 1_000.0])])
+        with pytest.raises(ValueError, match=r"range > 0"):
+            S1_PAIR.geometry(targets_m, np.zeros(3))
+
+    def test_a_hand_built_geometry_must_agree_on_the_number_of_targets(self) -> None:
+        good = TargetGeometry.monostatic([1.0e4, 2.0e4], 0.0)
+        with pytest.raises(ValueError, match=r"bistatic_range_rate_mps must have shape \(2,\)"):
+            TargetGeometry(**{**vars(good), "bistatic_range_rate_mps": np.zeros(3)})
+        with pytest.raises(ValueError, match=r"aoa_rad must have shape \(2, 2\)"):
+            TargetGeometry(**{**vars(good), "aoa_rad": np.zeros(2)})
+
     def test_a_target_on_the_baseline_is_forward_scatter(self) -> None:
         """beta = pi and R_b = L: the clipped cosine keeps the arc cosine off NaN.
 
@@ -263,7 +282,7 @@ class TestGeometry:
         np.testing.assert_allclose(geometry.bistatic_angle_rad, np.pi, atol=1e-6)
         np.testing.assert_allclose(geometry.bistatic_range_m, S1_PAIR.baseline_m, rtol=1e-12)
 
-    def test_the_isoceles_right_triangle_has_a_right_bistatic_angle(self) -> None:
+    def test_the_isosceles_right_triangle_has_a_right_bistatic_angle(self) -> None:
         """R_T = R_R = L / sqrt(2) puts the target at the corner of half a square: beta = pi / 2."""
         tx_enu_m, rx_enu_m = S1_PAIR.sites_enu_m()
         baseline_vector_m = rx_enu_m - tx_enu_m

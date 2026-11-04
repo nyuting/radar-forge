@@ -177,6 +177,15 @@ class TargetGeometry:
     aod_rad: NDArray[np.float64]
     aoa_rad: NDArray[np.float64]
 
+    def __post_init__(self) -> None:
+        """Reject fields that disagree on the number of targets."""
+        n_targets = np.size(self.range_tx_m)
+        for name, value in vars(self).items():
+            expected = (n_targets, 2) if name in ("aod_rad", "aoa_rad") else (n_targets,)
+            if np.shape(value) != expected:
+                msg = f"{name} must have shape {expected}, as range_tx_m; got {np.shape(value)}."
+                raise ValueError(msg)
+
     @classmethod
     def monostatic(
         cls,
@@ -319,8 +328,13 @@ class Radar:
         position_m = np.atleast_2d(np.asarray(position_enu_m, dtype=np.float64))
         velocity_mps = np.asarray(velocity_enu_mps, dtype=np.float64)
         tx_enu_m, rx_enu_m = self.sites_enu_m(origin_site)
-        range_tx_m, unit_tx, aod_rad = _look(position_m - tx_enu_m, self.tx_site, origin_site)
-        range_rx_m, unit_rx, aoa_rad = _look(position_m - rx_enu_m, self._receive_site, origin_site)
+        offset_tx_m, offset_rx_m = position_m - tx_enu_m, position_m - rx_enu_m
+        range_tx_m, range_rx_m = _slant_range_m(offset_tx_m), _slant_range_m(offset_rx_m)
+        if not (np.all(range_tx_m > 0.0) and np.all(range_rx_m > 0.0)):
+            msg = "every target must be off both sites: a direction from a site needs range > 0."
+            raise ValueError(msg)
+        unit_tx, aod_rad = _look(offset_tx_m, range_tx_m, self.tx_site, origin_site)
+        unit_rx, aoa_rad = _look(offset_rx_m, range_rx_m, self._receive_site, origin_site)
         baseline_m = np.sqrt(np.sum((rx_enu_m - tx_enu_m) ** 2))
         cosine = (range_tx_m**2 + range_rx_m**2 - baseline_m**2) / (2.0 * range_tx_m * range_rx_m)
         return TargetGeometry(
@@ -335,16 +349,24 @@ class Radar:
         )
 
 
+def _slant_range_m(offset_enu_m: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Return the length of each ENU vector, as ``enu_to_range_azimuth_elevation_rad`` does."""
+    result: NDArray[np.float64] = np.sqrt(
+        offset_enu_m[..., 0] ** 2 + offset_enu_m[..., 1] ** 2 + offset_enu_m[..., 2] ** 2
+    )
+    return result
+
+
 def _look(
-    offset_enu_m: NDArray[np.float64], site: Site, origin: Site
-) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    """Return range, unit vector and (azimuth, elevation) in ``site``'s own frame."""
-    range_m, azimuth_rad, elevation_rad = enu_to_range_azimuth_elevation_rad(offset_enu_m)
+    offset_enu_m: NDArray[np.float64], range_m: NDArray[np.float64], site: Site, origin: Site
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Return the unit vector, and (azimuth, elevation) in ``site``'s own frame."""
+    site_axes_m = offset_enu_m
     if site != origin:
         site_axes_m = offset_enu_m @ (_enu_axes_in_ecef(origin) @ _enu_axes_in_ecef(site).T)
-        _, azimuth_rad, elevation_rad = enu_to_range_azimuth_elevation_rad(site_axes_m)
+    _, azimuth_rad, elevation_rad = enu_to_range_azimuth_elevation_rad(site_axes_m)
     unit_vector = offset_enu_m / range_m[..., None]
-    return range_m, unit_vector, np.stack([azimuth_rad, elevation_rad], axis=-1)
+    return unit_vector, np.stack([azimuth_rad, elevation_rad], axis=-1)
 
 
 def _enu_axes_in_ecef(site: Site) -> NDArray[np.float64]:

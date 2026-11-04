@@ -294,6 +294,12 @@ class TestLineOfSightPaths:
         )
         np.testing.assert_array_equal(paths.n_bounces, [1, 1, 1])
 
+    def test_rejects_a_negative_cross_section(self) -> None:
+        """A negative sigma is a negative power, whose square root is NaN throughout the cube."""
+        geometry = TargetGeometry.monostatic([10_000.0, 12_000.0], 0.0)
+        with pytest.raises(ValueError, match="rcs_m2 must be non-negative"):
+            line_of_sight_paths(S1_RADAR, geometry, [10.0, -1.0])
+
     def test_a_bistatic_path_uses_the_whole_route_with_no_factor_of_two(self) -> None:
         paths = line_of_sight_paths(S1_PAIR, _bistatic_geometry(12.0e3, 15.0e3, 160.0), 10.0)
         np.testing.assert_allclose(paths.delay_s, 27.0e3 / SPEED_OF_LIGHT_MPS, rtol=1e-15)
@@ -378,12 +384,19 @@ class TestSwerling:
         chi_square_4 = swerling_rcs_m2(MEAN_RCS_M2, 3, (N_DRAWS,), rng=rng)
         np.testing.assert_allclose(np.var(exponential) / np.var(chi_square_4), 2.0, rtol=0.05)
 
-    def test_the_mean_broadcasts_against_the_shape(self) -> None:
-        """One mean per target, drawn per pulse: (n_targets, n_pulses)."""
-        draws = swerling_rcs_m2(
-            np.array([[1.0], [100.0]]), 2, (2, 50_000), rng=np.random.default_rng(3)
-        )
-        np.testing.assert_allclose(draws.mean(axis=1), [1.0, 100.0], rtol=0.03)
+    def test_a_per_target_mean_is_a_column_against_targets_by_pulses(self) -> None:
+        """Two targets, three pulses: an (n_targets, 1) mean scales each target's own row.
+
+        The same seed draws the same chi-square variates, so each row must be its
+        target's mean times the unit-mean draws; a mean paired with the pulse
+        axis instead would scale columns.
+        """
+        mean_rcs_m2 = np.array([[1.0], [100.0]])
+        draws = swerling_rcs_m2(mean_rcs_m2, 2, (2, 3), rng=np.random.default_rng(3))
+        unit = swerling_rcs_m2(1.0, 2, (2, 3), rng=np.random.default_rng(3))
+        assert draws.shape == (2, 3)
+        # One multiply and one divide in a different order.
+        np.testing.assert_allclose(draws, mean_rcs_m2 * unit, rtol=1e-15)
 
     def test_rejects_an_unknown_case(self) -> None:
         with pytest.raises(ValueError, match="Swerling case"):
