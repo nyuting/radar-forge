@@ -23,7 +23,7 @@ lint:  ## Check formatting and lint (no writes)
 	uv run ruff format --check .
 	uv run ruff check .
 
-type:  ## Type-check src/, scripts/ and tools/
+type:  ## Type-check src/ and scripts/
 	uv run mypy
 
 test:  ## Run the full test suite
