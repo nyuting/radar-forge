@@ -12,8 +12,12 @@ from typing import Any
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
-from radar_forge.tracking.association import GlobalNearestNeighbour
+from radar_forge.tracking.association import (
+    GlobalNearestNeighbour,
+    JointProbabilisticDataAssociation,
+)
 from radar_forge.tracking.filters import (
     Linearisation,
     TaylorLinearisation,
@@ -34,7 +38,7 @@ from radar_forge.tracking.models import (
     RangeAzimuthElevationRangeRate,
     marginal,
 )
-from radar_forge.tracking.tracker import LifecyclePolicy, Scan, Tracker
+from radar_forge.tracking.tracker import ExistencePolicy, LifecyclePolicy, Scan, Tracker
 
 TENTATIVE, CONFIRMED = TrackStatus.TENTATIVE, TrackStatus.CONFIRMED
 COASTING, DELETED = TrackStatus.COASTING, TrackStatus.DELETED
@@ -685,3 +689,81 @@ def test_an_invalid_prior_is_refused_at_construction() -> None:
         DirectStateInitiator([0.0, np.nan], np.eye(2))
     with pytest.raises(ValueError, match="prior_covariance"):
         DirectStateInitiator([0.0, 0.0], -np.eye(2))
+
+
+# --- scenario 011: coverage, existence, covariance deletion, birth inhibition ---
+
+
+def _left_half(bank: TrackBank, scan: Scan) -> NDArray[np.bool_]:
+    """A coverage that sees only the tracks at negative x."""
+    return np.asarray(bank.mean[:, 0] < 0.0, dtype=bool)
+
+
+def test_a_track_the_scan_cannot_see_keeps_its_row_time_and_counts() -> None:
+    """A track outside the coverage is neither predicted nor counted; a covered one is."""
+    tracker = _one_axis(LifecyclePolicy(1, 1), coverage=_left_half)
+    tracker.process(_scan(0.0, [-500.0, 500.0]))
+    before = tracker.bank
+    after = tracker.process(_scan(1.0, [-480.0]))
+    right, left = np.flatnonzero(before.mean[:, 0] > 0)[0], np.flatnonzero(before.mean[:, 0] < 0)[0]
+    np.testing.assert_array_equal(after.mean[right], before.mean[right])
+    assert after.time_s[right] == 0.0 and after.n_scans[right] == before.n_scans[right]
+    assert after.time_s[left] == 1.0 and after.n_hits[left] == 2
+
+
+def test_an_existence_policy_confirms_a_steady_target_and_deletes_a_one_off() -> None:
+    """JIPDA: a target seen every scan climbs past 0.95; a plot seen once falls under 0.05."""
+    motion = CartesianMotion("x", sigma_acceleration_mps2=1.0, acceleration_correlation_time_s=0.5)
+    tracker = Tracker(
+        {"x": LinearMeasurement(motion.state_layout, ("x_m",))},
+        motion,
+        TaylorLinearisation(),
+        0.99,
+        JointProbabilisticDataAssociation(0.9, 0.99),
+        DirectStateInitiator([0.0, 0.0], np.diag([1.0, 30.0**2])),
+        existence=ExistencePolicy(),
+    )
+    clutter = [1e-3]
+    tracker.process(Scan(0.0, [[0.0], [5000.0]], [[1.0]], "x", clutter * 2))
+    # Ten scans of the one target, and the one-off plot never again.
+    for t in range(1, 11):
+        bank = tracker.process(Scan(float(t), [[20.0 * t]], [[1.0]], "x", clutter))
+    assert bank.n_tracks == 1 and bank.status[0] == TrackStatus.CONFIRMED
+    assert bank.existence[0] > 0.95
+
+
+def test_the_existence_policy_needs_an_associator_that_weights() -> None:
+    tracker = _one_axis(LifecyclePolicy(1, 1), existence=ExistencePolicy())
+    with pytest.raises(ValueError, match="existence"):
+        tracker.process(Scan(0.0, [[0.0]], [[1.0]], "x", [1e-3]))
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [{"delete": 0.5, "initial": 0.2}, {"confirm": 0.01}, {"p_survival": 0.0}],
+)
+def test_an_existence_policy_that_could_not_work_is_rejected(settings: dict[str, Any]) -> None:
+    with pytest.raises(ValueError, match="delete"):
+        ExistencePolicy(**settings)
+
+
+def test_a_confirmed_track_whose_position_sigma_passes_the_limit_is_deleted() -> None:
+    """Covariance deletion (tracker-001 §5.4): a coasting track's sigma grows past 150 m.
+
+    Born with a 100 m/s velocity spread, its position sigma is 100 m a second later and about
+    200 m the next, well before the ten misses its policy allows.
+    """
+    tracker = _one_axis(LifecyclePolicy(1, 1, 10, max_position_sigma_m=150.0))
+    tracker.process(_scan(0.0, [0.0]))
+    statuses = []
+    # Coast until the row is reported deleted.
+    for t in range(1, 10):
+        statuses += tracker.process(_scan(float(t), [])).status.tolist()
+    assert statuses == [TrackStatus.COASTING, TrackStatus.DELETED]
+
+
+def test_no_track_starts_where_the_clutter_is_denser_than_the_birth_limit() -> None:
+    """Births only from the measurement whose clutter intensity is at most the limit."""
+    tracker = _one_axis(LifecyclePolicy(1, 1), max_birth_clutter_intensity=0.01)
+    bank = tracker.process(Scan(0.0, [[0.0], [100.0], [200.0]], [[1.0]], "x", [0.001, 0.02, 0.01]))
+    np.testing.assert_array_equal(bank.measurement_index, [0, 2])
