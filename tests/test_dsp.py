@@ -19,6 +19,7 @@ from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.dsp import (
     WINDOW_NAMES,
     apply_window,
+    batched_correlation,
     coherent_gain_linear,
     doppler_bin_centers_mps,
     doppler_fft,
@@ -655,3 +656,46 @@ class TestUnfold:
     def test_unfold_range_rejects_a_negative_bound(self) -> None:
         with pytest.raises(ValueError, match="max_range_m"):
             unfold_range_dual_prf(0.0, 0.0, SPAN_A_M, SPAN_B_M, max_range_m=-1.0, tolerance_m=50.0)
+
+
+# --- Scenario 005: batched correlation of a continuous stream ---
+
+
+def _constant_modulus_code(n_samples: int, rng: np.random.Generator) -> np.ndarray:
+    """A code of unit magnitude, so a batch's energy is exactly its length."""
+    return np.exp(2j * np.pi * rng.random(n_samples))
+
+
+def test_batched_correlation_reads_a_path_at_its_lag_in_every_batch(rng):
+    """A path a x[(n - m) mod N] gives exactly a at lag m in every batch, the last ones wrapped."""
+    code = _constant_modulus_code(8 * 32, rng)
+    stream = (0.5 - 0.25j) * np.roll(code, 37)
+    correlation = batched_correlation(stream, code, 64, 32)
+    assert correlation.shape == (8, 64)
+    # A sum of 32 unit products divided by 32: rtol 1e-12.
+    np.testing.assert_allclose(correlation[:, 37], 0.5 - 0.25j, rtol=1e-12)
+
+
+def test_batched_correlation_is_the_direct_sum_however_it_is_chunked(rng):
+    """y_b[m] = (1/L) sum_n s[bL + n + m] x*[bL + n], by FFT, in chunks or whole."""
+    code = _constant_modulus_code(6 * 20, rng)
+    stream = rng.standard_normal(120) + 1j * rng.standard_normal(120)
+    direct = (
+        np.array(
+            [
+                [
+                    np.sum(
+                        np.roll(stream, -(b * 20 + m))[:20] * np.conj(code[b * 20 : b * 20 + 20])
+                    )
+                    for m in range(30)
+                ]
+                for b in range(6)
+            ]
+        )
+        / 20
+    )
+    # FFT round-off on 20-term sums: 1e-12 of their size.
+    np.testing.assert_allclose(batched_correlation(stream, code, 30, 20), direct, atol=1e-12)
+    np.testing.assert_allclose(
+        batched_correlation(stream, code, 30, 20, max_bytes=1), direct, atol=1e-12
+    )

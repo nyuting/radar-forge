@@ -6,18 +6,25 @@ generators turn a :class:`~radar_forge.propagation.PropagationPaths` into a
 ``(n_pulses, n_samples)`` cube, monostatic and bistatic alike, under
 stop-and-hop: range as a beat frequency (:func:`fmcw_deramp_baseband`) or as a
 delay folded modulo the PRI (:func:`pulsed_baseband`). A closing target
-advances in slow-time phase.
+advances in slow-time phase. A continuous noise radar has no cube:
+:func:`stream_baseband` returns its received stream beside the code it sent.
 
 References
 ----------
 .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed., McGraw-Hill, 2014.
 .. [2] G. L. Charvat, *Small and Short-Range Radar Systems*, CRC Press, 2014.
+.. [3] K. Kulpa, *Signal Processing in Noise Waveform Radar*, Artech House, 2013.
+.. [4] L. Anttila, D. Korpi, V. Syrjälä and M. Valkama, "Cancellation of power amplifier
+       induced nonlinear self-interference in full-duplex transceivers," *Proc. Asilomar
+       Conf. Signals, Systems and Computers*, pp. 1193-1198, 2013 (arXiv:1401.3129).
 """
 
 from __future__ import annotations
 
+import math
 import warnings
 from collections.abc import Callable
+from dataclasses import fields
 from typing import Literal
 
 import numpy as np
@@ -32,10 +39,13 @@ __all__ = [
     "ambiguity_function",
     "beat_frequency_hz",
     "bistatic_range_from_beat_frequency_m",
+    "cubic_amplifier",
     "fmcw_deramp_baseband",
     "lfm_chirp",
+    "noise_waveform",
     "pulsed_baseband",
     "range_resolution_m",
+    "stream_baseband",
     "sweep_rate_hzps",
     "thermal_noise",
 ]
@@ -44,6 +54,12 @@ __all__ = [
 _STOP_AND_HOP_BIN_FRACTION = 0.25
 
 _BYTES_PER_COMPLEX = 16
+
+# A delay within this of a whole sample is applied as a shift: the remainder moves the band
+# edge by under 2 pi 1e-9 rad, below float64's resolution of a 40 dB leakage path's phase.
+_WHOLE_SAMPLE = 1e-9
+# Relative amplitude at which a moving path's delay series stops: -200 dB of the path.
+_DELAY_TOLERANCE = 1e-10
 
 
 def range_resolution_m(bandwidth_hz: ArrayLike) -> NDArray[np.float64]:
@@ -329,6 +345,129 @@ def ambiguity_function(
         inside, np.abs(correlation[:, np.clip(column, 0, correlation.shape[-1] - 1)]) / energy, 0.0
     )
     return magnitude, lags / sample_rate_hz, doppler_arr
+
+
+def noise_waveform(n_samples: int, *, rng: np.random.Generator) -> NDArray[np.complex128]:
+    r"""Draw a noise code: circular complex white Gaussian samples of unit power (Kulpa [3] ch. 3).
+
+    White across the sampled band, so its correlation sidelobes form a flat floor
+    :math:`10\log_{10} N` dB below the peak of :math:`N` samples, at every lag and Doppler.
+    """
+    return thermal_noise((n_samples,), 1.0, rng=rng)
+
+
+def cubic_amplifier(samples: ArrayLike, a3: float) -> NDArray[np.complex128]:
+    r"""Return :math:`f(x) = (x + a_3|x|^2 x)/\sqrt{1 + 4a_3 + 6a_3^2}`, an odd-order amplifier.
+
+    The first two terms of the parallel-Hammerstein model (Anttila [4] eq. (1)), memoryless.
+    For a unit-power complex Gaussian :math:`x`, :math:`E|x|^4 = 2` and :math:`E|x|^6 = 6`, so
+    :math:`E|x + a_3|x|^2x|^2 = 1 + 4a_3 + 6a_3^2`, which is positive for every real
+    :math:`a_3`: the output keeps unit power. :math:`a_3 < 0` compresses the peaks.
+    """
+    x = np.asarray(samples, dtype=np.complex128)
+    scale = math.sqrt(1.0 + 4.0 * a3 + 6.0 * a3**2)
+    result: NDArray[np.complex128] = (x + a3 * np.abs(x) ** 2 * x) / scale
+    return result
+
+
+def stream_baseband(
+    paths: PropagationPaths,
+    radar: Radar,
+    n_pulses: int,
+    *,
+    rng: np.random.Generator | None,
+    reference: ArrayLike | None = None,
+    amplifier: Callable[[NDArray[np.complex128]], NDArray[np.complex128]] | None = None,
+) -> tuple[NDArray[np.complex128], NDArray[np.complex128]]:
+    r"""Synthesise one CPI of a continuous noise radar: ``(surveillance, reference)`` streams.
+
+    Both are ``(n_pulses * n_samples_per_chirp,)``. The reference is the digital code
+    :math:`x`, drawn from ``rng`` unless given; every path carries the radiated
+    :math:`f(x)` (``amplifier``, default none) delayed and scaled, then ``rng`` adds noise
+    (``None``: noiseless). The stream is one period of a code repeated every CPI, so a
+    delay is circular and a tap or a lag never reads past the record; an echo wraps only
+    past :math:`c N/f_s` of route, 30 700 km for 005's CPI. Each path's envelope delay is
+    held over a batch, stop-and-hop: the fastest 005 path, 110.6 m/s, moves
+    :math:`1.5\times10^{-4}` of a sample in one. Its carrier phase follows
+    :meth:`~radar_forge.propagation.PropagationPaths.bistatic_range_at_m` at every sample,
+    so each batch sees its Doppler as a ramp and correlation pays the batch loss
+    :math:`\mathrm{sinc}^2(f_D T_B)`. A fractional delay is a phase ramp on the code's
+    spectrum, exact for a periodic band-limited code; its change over the CPI is a Taylor
+    series in derivatives of the code, truncated past ``_DELAY_TOLERANCE`` of the path's
+    amplitude (Kulpa [3] ch. 3; Richards [1] §2.6.2).
+    """
+    _check_dwell(radar, n_pulses, "noise")
+    n_samples = n_pulses * radar.n_samples_per_chirp
+    if reference is None:
+        if rng is None:
+            msg = "a noise stream needs rng to draw its code, or the code as reference."
+            raise ValueError(msg)
+        reference = noise_waveform(n_samples, rng=rng)
+    code = np.asarray(reference, dtype=np.complex128)
+    if code.shape != (n_samples,):
+        msg = f"reference must have shape ({n_samples},), n_pulses batches; got {code.shape}."
+        raise ValueError(msg)
+    _warn_if_stop_and_hop_is_strained(paths, radar)
+    radiated = code if amplifier is None else amplifier(code)
+    spectrum = np.fft.fft(radiated)
+    cycles_per_sample = np.fft.fftfreq(n_samples).astype(np.float64)
+    sample_rate_hz, wavelength_m = radar.receiver.sample_rate_hz, radar.wavelength_m
+    batch_delay = (
+        paths.bistatic_range_at_m(_slow_time_s(n_pulses, radar), wavelength_m)
+        * sample_rate_hz
+        / SPEED_OF_LIGHT_MPS
+    )
+    magnitude = np.abs(paths.amplitude_linear)
+    start_phase_rad = propagation_phase_rad(paths.bistatic_range_m, wavelength_m)
+    moving = (paths.doppler_hz != 0.0) | (paths.doppler_rate_hzps != 0.0)
+    time_s = np.arange(n_samples, dtype=np.float64) / sample_rate_hz
+    stream = np.zeros(n_samples, dtype=np.complex128)
+    # One path at a time: each is a few full-length FFTs, and memory stays at a few streams.
+    for p in range(paths.n_paths):
+        echo = _delayed(spectrum, cycles_per_sample, radiated, batch_delay[:, p])
+        echo *= magnitude[p] * np.exp(1j * start_phase_rad[p])
+        if moving[p]:
+            path = PropagationPaths(
+                **{f.name: getattr(paths, f.name)[p : p + 1] for f in fields(paths)}
+            )
+            range_change_m = (
+                path.bistatic_range_at_m(time_s, wavelength_m)[:, 0] - path.bistatic_range_m
+            )
+            echo *= np.exp(1j * propagation_phase_rad(range_change_m, wavelength_m))
+        stream += echo
+    if rng is not None:
+        stream += thermal_noise(stream.shape, radar.receiver.noise_power_per_sample_w, rng=rng)
+    return stream, code
+
+
+def _delayed(
+    spectrum: NDArray[np.complex128],
+    cycles_per_sample: NDArray[np.float64],
+    samples: NDArray[np.complex128],
+    delay_samples: NDArray[np.float64],
+) -> NDArray[np.complex128]:
+    """Return the periodic code delayed by ``delay_samples``, one delay per batch, ``(N,)``."""
+    n_batches = delay_samples.size
+    middle = (float(delay_samples.max()) + float(delay_samples.min())) / 2.0
+    offset = delay_samples - middle
+    whole = round(middle)
+    if not offset.any() and abs(middle - whole) < _WHOLE_SAMPLE:
+        return np.roll(samples, whole)
+    reach = math.pi * float(np.max(np.abs(offset)))
+    # The Taylor remainder of exp(-j 2 pi k offset), |2 pi k| <= pi, past order n_terms - 1.
+    n_terms = 1
+    while reach**n_terms / math.factorial(n_terms) * math.exp(reach) > _DELAY_TOLERANCE:
+        n_terms += 1
+    derivative = -2j * np.pi * cycles_per_sample
+    term = spectrum * np.exp(derivative * middle)
+    result = np.fft.ifft(term).reshape(n_batches, -1)
+    # A loop over Taylor terms: a handful, each one inverse FFT of the previous term's spectrum
+    # times the derivative.
+    for order in range(1, n_terms):
+        term *= derivative
+        weight = offset[:, None] ** order / math.factorial(order)
+        result += weight * np.fft.ifft(term).reshape(n_batches, -1)
+    return result.reshape(-1)
 
 
 def _check_dwell(radar: Radar, n_pulses: int, waveform: str) -> None:

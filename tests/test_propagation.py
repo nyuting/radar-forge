@@ -19,12 +19,14 @@ from radar_forge.propagation import (
     bistatic_range_rate_from_doppler_mps,
     dbsm_to_m2,
     doppler_shift_hz,
+    leakage_paths,
     line_of_sight_paths,
     m2_to_dbsm,
     path_amplitude_linear,
     propagation_delay_s,
     propagation_phase_rad,
     received_power_w,
+    static_clutter_paths,
     swerling_rcs_m2,
 )
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter
@@ -401,3 +403,47 @@ class TestSwerling:
     def test_rejects_an_unknown_case(self) -> None:
         with pytest.raises(ValueError, match="Swerling case"):
             swerling_rcs_m2(MEAN_RCS_M2, 5, (3,), rng=np.random.default_rng(1))
+
+
+# --- Scenario 005: leakage and near clutter specified at the ADC ---
+
+
+def _noise_radar() -> Radar:
+    transmitter = Transmitter(9.8e9, 8.0e6, 1.0, 30.0, 50.0e-6, 20.0e3, waveform="noise")
+    return Radar(transmitter, Receiver(8.0e6, 30.0, 3.0), Site(36.0025, -78.941, 60.0))
+
+
+def test_leakage_sits_on_whole_lags_at_its_per_sample_level():
+    """Lag m is a delay of m samples; INR is over k T0 F f_s, the noise in one sample."""
+    radar = _noise_radar()
+    paths = leakage_paths(radar, [0, 1, 2], [40.0, 30.0, 20.0])
+    np.testing.assert_allclose(paths.delay_s * 8.0e6, [0.0, 1.0, 2.0], atol=1e-12)
+    power_over_noise = np.abs(paths.amplitude_linear) ** 2 / radar.receiver.noise_power_per_sample_w
+    # A dB-to-linear round trip: rtol 1e-12.
+    np.testing.assert_allclose(power_over_noise, [1e4, 1e3, 1e2], rtol=1e-12)
+    assert np.all(paths.doppler_hz == 0.0)
+    assert np.all(paths.n_bounces == 1)
+
+
+def test_moving_clutter_keeps_its_doppler_and_its_route():
+    """A scatterer swaying at 2 Hz is a path at its bistatic route with that Doppler."""
+    radar = _noise_radar()
+    paths = static_clutter_paths(
+        radar, [599.584916, 1498.96229], [30.0, 24.0], doppler_hz=[2.0, 0.0]
+    )
+    np.testing.assert_allclose(paths.bistatic_range_m, [599.584916, 1498.96229], rtol=1e-15)
+    np.testing.assert_array_equal(paths.doppler_hz, [2.0, 0.0])
+    with pytest.raises(ValueError, match="non-negative"):
+        static_clutter_paths(radar, [-1.0], [10.0])
+
+
+def test_concatenated_paths_keep_every_field_in_order():
+    """Joining leakage and clutter gives one path set, the first set's paths first."""
+    radar = _noise_radar()
+    leakage = leakage_paths(radar, [0, 1], [40.0, 30.0])
+    clutter = static_clutter_paths(radar, [599.584916], [30.0], doppler_hz=2.0)
+    joined = PropagationPaths.concatenate(leakage, clutter)
+    assert joined.n_paths == 3
+    np.testing.assert_array_equal(joined.delay_s, np.r_[leakage.delay_s, clutter.delay_s])
+    np.testing.assert_array_equal(joined.doppler_hz, [0.0, 0.0, 2.0])
+    np.testing.assert_array_equal(joined.aoa_rad.shape, (3, 2))

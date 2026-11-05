@@ -22,6 +22,7 @@ References
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Literal
 
@@ -53,13 +54,17 @@ __all__ = [
 # First eccentricity squared, e^2 = f(2 - f), derived rather than stored.
 _ECCENTRICITY_SQUARED = WGS84_FLATTENING * (2.0 - WGS84_FLATTENING)
 
-WaveformKind = Literal["fmcw", "pulsed"]
-"""Which waveform family a transmitter emits: deramped FMCW or a pulse train."""
+WaveformKind = Literal["fmcw", "pulsed", "noise"]
+"""Which waveform family a transmitter emits: deramped FMCW, a pulse train or a noise code."""
 
 
 @dataclass(frozen=True)
 class Transmitter:
-    """A radar transmitter; when pulsed, its power is peak power and its chirp is the pulse."""
+    """A radar transmitter; when pulsed, its power is peak power and its chirp is the pulse.
+
+    A continuous noise code has no chirp: ``chirp_duration_s`` is its correlation batch, the
+    slow-time interval, and ``prf_hz`` the batch rate, so the duty cycle is one.
+    """
 
     carrier_frequency_hz: float
     bandwidth_hz: float
@@ -76,8 +81,8 @@ class Transmitter:
             if getattr(self, name) <= 0.0:
                 msg = f"{name} must be strictly positive; got {getattr(self, name)!r}."
                 raise ValueError(msg)
-        if self.waveform not in ("fmcw", "pulsed"):
-            msg = f"waveform must be 'fmcw' or 'pulsed'; got {self.waveform!r}."
+        if self.waveform not in ("fmcw", "pulsed", "noise"):
+            msg = f"waveform must be 'noise', 'fmcw' or 'pulsed'; got {self.waveform!r}."
             raise ValueError(msg)
         if self.duty_cycle_linear > 1.0:
             msg = f"chirp_duration_s * prf_hz = {self.duty_cycle_linear:.4f} exceeds 1.0."
@@ -233,12 +238,16 @@ class Radar:
     rx_site: Site | None = None
 
     def __post_init__(self) -> None:
-        """Reject a pulsed receiver sampling below the bandwidth (FMCW may: it deramps)."""
-        if (
-            self.transmitter.waveform == "pulsed"
-            and self.receiver.sample_rate_hz < self.transmitter.bandwidth_hz
-        ):
+        """Reject a pulsed receiver sampling below the bandwidth (FMCW may: it deramps).
+
+        A noise code is white across the sampled band, so its bandwidth is the sample rate.
+        """
+        waveform, sample_rate_hz = self.transmitter.waveform, self.receiver.sample_rate_hz
+        if waveform == "pulsed" and sample_rate_hz < self.transmitter.bandwidth_hz:
             msg = "a pulsed receiver's sample_rate_hz is below bandwidth_hz; the pulse would alias."
+            raise ValueError(msg)
+        if waveform == "noise" and sample_rate_hz != self.transmitter.bandwidth_hz:
+            msg = "a noise code fills the sampled band: bandwidth_hz must equal sample_rate_hz."
             raise ValueError(msg)
 
     @property
@@ -272,8 +281,13 @@ class Radar:
         Pulsed, the map holds ``round(PRI f_s)`` samples, equal whenever the PRI is a whole number
         of samples (every config is). FMCW, it mirrors :func:`~radar_forge.dsp.range_bin_centers_m`
         and can exceed the chirp (S3: :math:`2T_c` at :math:`f_s = 2B`), though a sawtooth deramp
-        caps the physical reach at :math:`T_c` (Charvat [6]_, ch. 3).
+        caps the physical reach at :math:`T_c` (Charvat [6]_, ch. 3). A noise code folds nothing,
+        so it is infinite: batched correlation reads each lag whole, past its own batch, and the
+        map is a window of lags, :math:`c\,m/f_s` for ``m < n_range_lags``
+        (:func:`~radar_forge.pipeline.map_axes`), which an echo beyond it misses.
         """
+        if self.transmitter.waveform == "noise":
+            return math.inf
         if self.transmitter.waveform == "pulsed":
             return self.transmitter.pulse_repetition_interval_s
         return self.receiver.sample_rate_hz / self.transmitter.sweep_rate_hzps
@@ -295,7 +309,7 @@ class Radar:
 
     @property
     def n_samples_per_chirp(self) -> int:
-        """Fast-time samples spanning one chirp or pulse."""
+        """Fast-time samples spanning one chirp or pulse; a noise code's correlation batch."""
         return round(self.transmitter.chirp_duration_s * self.receiver.sample_rate_hz)
 
     @property

@@ -7,6 +7,8 @@ the exact equatorial and cardinal cases for the WGS-84 transforms.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
@@ -446,3 +448,29 @@ class TestSphericalCoordinates:
         )
         recovered_m = range_azimuth_elevation_to_enu_m(*enu_to_range_azimuth_elevation_rad(enu_m))
         np.testing.assert_allclose(recovered_m, enu_m, rtol=1e-12, atol=1e-12)
+
+
+# --- Scenario 005: a continuous noise code ---
+
+NOISE_TRANSMITTER = Transmitter(9.8e9, 8.0e6, 1.0, 30.0, 50.0e-6, 20.0e3, waveform="noise")
+DUKE = Site(36.0025, -78.941, 60.0)
+
+
+def test_a_noise_codes_batch_is_its_pulse_at_duty_one():
+    """The correlation batch stands in for the pulse: PRF is the batch rate, 400 samples a batch."""
+    radar = Radar(NOISE_TRANSMITTER, Receiver(8.0e6, 30.0, 3.0), DUKE)
+    assert NOISE_TRANSMITTER.duty_cycle_linear == 1.0
+    assert radar.n_samples_per_chirp == radar.n_samples_per_pri == 400
+
+
+def test_a_noise_code_fills_the_sampled_band():
+    """A white code over f_s has bandwidth f_s; any other bandwidth labels a band not sent."""
+    with pytest.raises(ValueError, match="fills the sampled band"):
+        Radar(NOISE_TRANSMITTER, Receiver(16.0e6, 30.0, 3.0), DUKE)
+
+
+def test_a_noise_code_folds_no_delay():
+    """Batched correlation reads each lag whole: no delay period, so no range folds."""
+    radar = Radar(NOISE_TRANSMITTER, Receiver(8.0e6, 30.0, 3.0), DUKE)
+    assert math.isinf(radar.unambiguous_delay_s)
+    assert math.isinf(radar.unambiguous_bistatic_range_m)

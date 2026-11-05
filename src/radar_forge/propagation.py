@@ -5,7 +5,8 @@ Every propagation model produces a :class:`PropagationPaths` for
 whole route, transmitter to receiver; its delay :math:`R_b/c`, phase
 :math:`-2\pi R_b/\lambda` and Doppler :math:`-\dot R_b/\lambda` follow from its
 length :math:`R_b = R_T + R_R` and rate, positive receding. Free space only.
-Per-frame inputs are not validated: zero cross-section gives zero power.
+Per-frame inputs are not validated: zero cross-section gives zero power. Leakage and near
+clutter are specified as levels at the ADC rather than derived from a cross-section.
 
 References
 ----------
@@ -14,11 +15,14 @@ References
 .. [3] P. Swerling, "Probability of detection for fluctuating targets," *IRE
        Transactions on Information Theory*, vol. IT-6, no. 2, pp. 269-308, 1960.
 .. [4] M. I. Skolnik, *Introduction to Radar Systems*, 3rd ed., McGraw-Hill, 2001.
+.. [5] A. Sabharwal, P. Schniter, D. Guo, D. W. Bliss, S. Rangarajan and R. Wichman, "In-band
+       full-duplex wireless: challenges and opportunities," *IEEE J. Sel. Areas Commun.*,
+       vol. 32, no. 9, pp. 1637-1652, 2014 (arXiv:1311.0456).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -32,12 +36,14 @@ __all__ = [
     "bistatic_range_rate_from_doppler_mps",
     "dbsm_to_m2",
     "doppler_shift_hz",
+    "leakage_paths",
     "line_of_sight_paths",
     "m2_to_dbsm",
     "path_amplitude_linear",
     "propagation_delay_s",
     "propagation_phase_rad",
     "received_power_w",
+    "static_clutter_paths",
     "swerling_rcs_m2",
 ]
 
@@ -85,6 +91,15 @@ class PropagationPaths:
             raise ValueError(msg)
         # Store one value per path, so every per-path field indexes alike.
         object.__setattr__(self, "doppler_rate_hzps", np.zeros(n_paths) + self.doppler_rate_hzps)
+
+    @classmethod
+    def concatenate(cls, *path_sets: PropagationPaths) -> PropagationPaths:
+        """Join path sets into one, their paths in the order given."""
+        if not path_sets:
+            msg = "concatenate needs at least one PropagationPaths."
+            raise ValueError(msg)
+        columns = {f.name: [getattr(p, f.name) for p in path_sets] for f in fields(cls)}
+        return cls(**{name: np.concatenate(values) for name, values in columns.items()})
 
     @property
     def n_paths(self) -> int:
@@ -246,6 +261,54 @@ def line_of_sight_paths(
         aoa_rad=geometry.aoa_rad,
         aod_rad=geometry.aod_rad,
         n_bounces=np.ones(geometry.bistatic_range_m.shape[0], dtype=np.int_),
+    )
+
+
+def leakage_paths(radar: Radar, lags: ArrayLike, inr_db: ArrayLike) -> PropagationPaths:
+    r"""Build the transmitter's leakage into the receiver, one path per whole-sample lag.
+
+    Leakage is specified at the ADC, not derived (Sabharwal [5] §IV-B to IV-D): what antenna
+    isolation and an analog canceller leave. Lag :math:`m` is the route :math:`c\,m/f_s`, at
+    zero Doppler; ``inr_db`` is each path's power over the noise in one sample,
+    :attr:`~radar_forge.radar.Receiver.noise_power_per_sample_w`, not over the matched band.
+    """
+    lags_arr = np.atleast_1d(np.asarray(lags, dtype=np.float64))
+    range_m = SPEED_OF_LIGHT_MPS * lags_arr / radar.receiver.sample_rate_hz
+    return _specified_paths(radar, range_m, inr_db, 0.0)
+
+
+def static_clutter_paths(
+    radar: Radar, bistatic_range_m: ArrayLike, cnr_db: ArrayLike, *, doppler_hz: ArrayLike = 0.0
+) -> PropagationPaths:
+    """Build near clutter as fixed scatterers, one path per route, at a set Doppler (default 0).
+
+    ``cnr_db`` is a per-sample ratio, as :func:`leakage_paths`: a level at the ADC, not a
+    cross-section. A Doppler stands for a slowly moving scatterer, a tree or a mast in wind.
+    """
+    return _specified_paths(radar, bistatic_range_m, cnr_db, doppler_hz)
+
+
+def _specified_paths(
+    radar: Radar, bistatic_range_m: ArrayLike, ratio_db: ArrayLike, doppler_hz: ArrayLike
+) -> PropagationPaths:
+    """Return paths at given routes and per-sample power ratios over noise, one bounce each."""
+    range_m, ratio, doppler = np.broadcast_arrays(
+        np.atleast_1d(np.asarray(bistatic_range_m, dtype=np.float64)),
+        np.asarray(ratio_db, dtype=np.float64),
+        np.asarray(doppler_hz, dtype=np.float64),
+    )
+    if not np.all(range_m >= 0.0):
+        msg = "a leakage or clutter route must be non-negative."
+        raise ValueError(msg)
+    power_w = radar.receiver.noise_power_per_sample_w * 10.0 ** (ratio / 10.0)
+    phase_rad = propagation_phase_rad(range_m, radar.wavelength_m)
+    return PropagationPaths(
+        delay_s=propagation_delay_s(range_m),
+        doppler_hz=doppler.astype(np.float64),
+        amplitude_linear=path_amplitude_linear(power_w, phase_rad),
+        aoa_rad=np.zeros((range_m.size, 2)),
+        aod_rad=np.zeros((range_m.size, 2)),
+        n_bounces=np.ones(range_m.size, dtype=np.int_),
     )
 
 
