@@ -6,18 +6,17 @@ and students. Neither half is traded for the other.
 
 ## Non-negotiables (and what enforces each)
 
-- Python ≥ 3.11, src layout; only Python under `src/radar_forge/` — ruff `UP`, R2.
-- All configuration in `pyproject.toml`; no `setup.py`, `setup.cfg`, `tox.ini`, `requirements*.txt` — R1.
-- Everything through `uv` (`uv run pytest`), never `pip install` — the hooks call `uv run`.
 - `make check` green before you say you are done; `--no-verify` is not a fix — CI runs the same.
+  The R-rules are listed once, in the `scripts/check_conventions.py` docstring; each failure
+  prints its fix, so rules a hook teaches on first contact are not repeated here.
+- Python ≥ 3.11, src layout, all configuration in `pyproject.toml`, everything through `uv`
+  (`uv run pytest`), never `pip install` — R1, R2, the hooks.
 - SI units with the unit in the name (`range_m`, `gain_tx_dbi`, never `gain_tx`) — R5.
 - Physical constants only from `radar_forge.constants`; never `3e8` — R4, mypy `Final`.
-- Lean NumPy docstrings: one summary line; a citation with equation number; Parameters/Returns only where a unit, shape or convention is not in the name; no Raises or Examples unless the example is the test — ruff `D`, R3, `tests/test_conventions.py`.
-- Complete annotations, `ArrayLike` in, `NDArray` out — `mypy --strict`, ruff `ANN`, `tests/test_conventions.py`.
-- Every module defines `__all__` — `tests/test_conventions.py`. `msg = "…"` then `raise`, no `assert` — ruff `EM`, `S101`.
-- Broadcast, don't tile, unless `# broadcast-exempt: <reason>` — R6. No banners, `# Inputs:` or control chars — R8, R9.
-- Modules warn past 500 lines, fail past 800 — R10. Only `scenario`, `pipeline`, `evaluate`, `plots` do I/O, logging or timing — R11.
-- No `np.errstate`/`np.seterr` in `src/` without `# errstate-exempt: <reason>` — R12.
+- Lean NumPy docstrings: one summary line; a citation with equation number; Parameters/Returns only where a unit, shape or convention is not in the name; no Raises or Examples unless the example is the test — ruff `D`, `tests/test_conventions.py`.
+- Complete annotations, `ArrayLike` in, `NDArray` out; every module defines `__all__`; `msg = "…"` then `raise`, no `assert` — `mypy --strict`, ruff `ANN EM S101`, `tests/test_conventions.py`.
+- Broadcast, don't tile — R6. Only `scenario`, `pipeline`, `evaluate`, `plots` do I/O, logging or timing — R11. Modules warn
+  past 500 lines, fail past 800 — R10.
 - No generated arrays committed; golden data only in `tests/data/golden/` — pre-commit hook.
 - Conventional Commits, `feat(dsp): add Taylor taper`; PRs squash-merge — commit-msg hook, CI.
 

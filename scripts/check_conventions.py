@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Enforce the conventions that ruff and mypy cannot express.
 
+This docstring is the canonical list of rules; ``docs/conventions/style.md`` and
+``CLAUDE.md`` point here rather than restating them.
+
 Pure standard library on purpose: the hooks and CI call it through ``uv run``,
 but it must also run under any Python with no environment at all.
 
@@ -8,13 +11,13 @@ Rules
 -----
 R1  Configuration lives in TOML (``pyproject.toml`` only).
 R2  The import package is Python under ``src/radar_forge/``.
-R3  Every library module has a module docstring.
+R3  Retired: ruff D100 checks module docstrings. Numbers are never reused.
 R4  Physical constants are defined once, in ``constants.py``. No other file
     may bind those names, and their literal values may not appear elsewhere.
 R5  Physical quantities carry a unit suffix; bare names like ``range`` or
     ``power`` are rejected.
 R6  ``np.tile``/``np.repeat`` used to fake broadcasting must carry a one-line
-    justification.
+    justification. ``np.broadcast_to`` returns a view, so it is not flagged.
 R7  Every in-file Markdown anchor (``](#section)``) resolves to a real heading
     in that same file, so a summary table's jump links cannot rot.
 R8  Python comments carry no hash banners and no ``Inputs:``/``Outputs:``
@@ -193,7 +196,7 @@ UNIT_EXEMPT = {"n", "i", "j", "k", "idx", "axis", "out", "dtype", "rng", "seed",
 # --- R6 — broadcasting ---
 
 BROADCAST_EXEMPT = re.compile(r"#\s*broadcast-exempt:\s*\S")
-TILE_FUNCS = {"tile", "repeat", "broadcast_to"}
+TILE_FUNCS = {"tile", "repeat"}
 
 
 def has_unit_suffix(name: str) -> bool:
@@ -726,17 +729,6 @@ def check_file(rel: Path, canonical: set[str]) -> list[Problem]:
         tree = ast.parse(source, filename=str(rel))
     except SyntaxError as exc:  # ruff reports these far better than we can
         return [*problems, Problem(rel, exc.lineno or 0, "syntax", str(exc.msg), "fix the syntax")]
-
-    if ast.get_docstring(tree) is None:
-        problems.append(
-            Problem(
-                rel,
-                1,
-                "R3 docstring",
-                "module has no docstring.",
-                "say what the module models and cite the reference it implements.",
-            )
-        )
 
     lines = source.splitlines()
     problems += check_units(tree, rel)

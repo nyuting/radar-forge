@@ -2,37 +2,17 @@
 
 Copy the shape of [`src/radar_forge/propagation.py`](../../src/radar_forge/propagation.py) (the
 radar equation is its `received_power_w`); it follows every rule here. The tools enforce most of
-them, and `make fmt` fixes much of what they catch. This page lists what each tool enforces in
-one line, then the judgement calls a tool cannot make, which are what review checks.
+them, and `make fmt` fixes much of what they catch. This page says where the enforced rules
+are listed, then gives the judgement calls a tool cannot make, which are what review checks.
 
 ## What the tools enforce
 
-| Rule | Enforced by |
-| :--- | :--- |
-| Formatting, line length 100, import order, naming case, Python ≥ 3.11 syntax | `ruff format`; ruff `E W I N UP` |
-| NumPy docstring on every public module, class and function | ruff `D` (numpy convention); R3 for module docstrings |
-| Docstring examples run and print what they claim; every public name documented | `tests/test_conventions.py` |
-| Complete annotations | `mypy --strict` over `src` and `scripts`; ruff `ANN` |
-| Every module defines `__all__`; no duplicate or private exports; `ArrayLike` in, float64 out | `tests/test_conventions.py` |
-| `msg = "..."` on its own line, then `raise`; no `assert` for validation | ruff `EM`, `S101` (tests exempt) |
-| No legacy `np.random.*` global functions | ruff `NPY002` |
-| `# TODO(author): what` with an issue link | ruff `TD` |
-| Configuration only in `pyproject.toml` | R1 |
-| Only Python (and package data) under `src/radar_forge/` | R2 |
-| Physical constants defined once, in `constants.py`; no literal `3e8`, `1.38e-23` … | R4, and `typing.Final` checked by mypy |
-| A unit suffix on every physical-quantity parameter (`gain_tx` is as bare as `gain`) | R5 |
-| `np.tile`/`np.repeat`/`np.broadcast_to` carry `# broadcast-exempt: <reason>` | R6 |
-| In-file Markdown links `](#anchor)` resolve | R7 |
-| No `##########` banners, no `# Inputs:`/`# Outputs:` comments | R8 |
-| No control characters in `.py`/`.md` (a BEL written for `\alpha`) | R9 |
-| Modules warn past 500 lines, fail past 800 (a grandfathered set only warns) | R10 |
-| Library modules, bar `scenario`, `pipeline`, `evaluate` and `plots`, do no `print`, `open`, `Path.write_*`, `logging` or `time` clocks | R11 |
-| `np.errstate`/`np.seterr` in `src/` carry `# errstate-exempt: <reason>` | R12 |
-| A floating-point warning in a test is an error | pytest `filterwarnings = ["error", …]` |
-
-R-numbers are the rules in [`scripts/check_conventions.py`](../../scripts/check_conventions.py),
-run at commit, push and in CI. When a judgement call below turns out to be checkable, add it
-there or to a test rather than writing more prose.
+`make check` runs ruff (the `select` list in `pyproject.toml` names each rule family and why),
+`mypy --strict`, [`scripts/check_conventions.py`](../../scripts/check_conventions.py) and
+pytest. The checker's module docstring is the one list of the R-rules, and each failure prints
+the rule, the fix and where it is documented. `tests/test_conventions.py` checks `__all__`,
+`ArrayLike` in and `NDArray` out, and that every doctest runs. When a judgement call below turns
+out to be checkable, add it there or to a test rather than writing more prose.
 
 ## 0. The audience rule
 
@@ -136,7 +116,7 @@ and raises `ImportError` naming the extra to install.
 
 - **Vectorise.** A Python loop that must stay (a sequential filter, a tracker update) carries a
   comment saying why.
-- **Broadcast** so scalar arguments also accept arrays with no extra code (R6 for the escapes).
+- **Broadcast** so scalar arguments also accept arrays with no extra code (R6 for `np.tile` and `np.repeat`).
 - Pass `dtype=np.float64`/`np.complex128` explicitly at construction; use `np.asarray` on input.
 - Randomness takes an `rng: np.random.Generator` or a `seed` from the caller.
 - **A floating-point warning is a finding.** If the NaN or inf is the documented answer, mask it
@@ -161,7 +141,7 @@ and raises `ImportError` naming the extra to install.
 ## 9. Imports and modules
 
 Absolute imports only. One coherent concept per module; R10 warns at 500 lines and fails at 800.
-The module docstring (R3) says what the module models and cites its reference.
+The module docstring (ruff D100) says what the module models and cites its reference.
 
 ## 10. Comments
 

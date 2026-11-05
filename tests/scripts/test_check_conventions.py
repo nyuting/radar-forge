@@ -1,4 +1,4 @@
-"""Tests for scripts/check_conventions.py: R7 slugs, R8 comments, R9 control, R10-R12."""
+"""Tests for scripts/check_conventions.py: at least one per live rule, R1, R2 and R4-R12."""
 
 from __future__ import annotations
 
@@ -26,6 +26,99 @@ def _load_script() -> ModuleType:
 
 
 checker = _load_script()
+LIBRARY_FILE = Path("src/radar_forge/x.py")
+
+
+def _rules(problems: list) -> list[str]:
+    return [problem.rule for problem in problems]
+
+
+@pytest.mark.parametrize("name", ["setup.py", "requirements.txt", "tox.ini"])
+def test_a_root_config_file_outside_pyproject_is_flagged(name: str) -> None:
+    """Catches R1 letting a tool's own config file split the configuration."""
+    assert _rules(checker.check_path_rules(Path(name))) == ["R1 toml"]
+
+
+def test_a_nested_file_with_a_config_name_is_not_flagged() -> None:
+    """Catches R1 rejecting a fixture that only shares a name with a config file."""
+    assert checker.check_path_rules(Path("tests/data/setup.py")) == []
+
+
+@pytest.mark.parametrize("name", ["plot.png", "model.pkl", "demo.ipynb"])
+def test_a_non_python_file_in_the_package_is_flagged(name: str) -> None:
+    """Catches R2 letting an image, pickle or notebook into the import package."""
+    assert _rules(checker.check_path_rules(Path("src/radar_forge") / name)) == ["R2 layout"]
+
+
+def test_package_data_is_not_flagged() -> None:
+    """Catches R2 rejecting ``py.typed``, which marks the package as typed."""
+    assert checker.check_path_rules(Path("src/radar_forge/py.typed")) == []
+
+
+CANONICAL_CONSTANTS = {"SPEED_OF_LIGHT_MPS", "BOLTZMANN_JPK"}
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["delay_s = 2 * range_m / 3e8", "SPEED_OF_LIGHT_MPS = 299_792_458.0", "k = 1.38e-23"],
+)
+def test_a_constant_literal_or_rebinding_is_flagged(line: str) -> None:
+    """Catches R4 missing an approximate c, a second definition, or a rounded Boltzmann."""
+    problems = checker.check_constants(ast.parse(line), LIBRARY_FILE, CANONICAL_CONSTANTS)
+    # A rebinding to the exact value is two findings: the name and the literal.
+    assert set(_rules(problems)) == {"R4 constants"}
+
+
+def test_the_constants_module_may_define_constants() -> None:
+    """Catches R4 rejecting the one module the constants belong in."""
+    tree = ast.parse("SPEED_OF_LIGHT_MPS = 299_792_458.0")
+    assert checker.check_constants(tree, checker.CONSTANTS_MODULE, CANONICAL_CONSTANTS) == []
+
+
+def _r5_rules(parameter: str) -> list[str]:
+    tree = ast.parse(f"def f({parameter}: float) -> float:\n    return {parameter}\n")
+    return _rules(checker.check_units(tree, LIBRARY_FILE))
+
+
+@pytest.mark.parametrize("parameter", ["range", "gain_tx", "snr"])
+def test_a_parameter_with_no_unit_is_flagged(parameter: str) -> None:
+    """Catches R5 passing a qualified bare name such as ``gain_tx`` (linear or dB?)."""
+    assert _r5_rules(parameter) == ["R5 units"]
+
+
+@pytest.mark.parametrize("parameter", ["range_m", "gain_tx_dbi", "snr_linear", "n_pulses"])
+def test_a_parameter_with_a_unit_or_a_count_is_not_flagged(parameter: str) -> None:
+    """Catches R5 rejecting a suffixed quantity or an ``n_`` count."""
+    assert _r5_rules(parameter) == []
+
+
+def _r6_rules(source: str) -> list[str]:
+    return _rules(checker.check_broadcast(ast.parse(source), LIBRARY_FILE, source.splitlines()))
+
+
+@pytest.mark.parametrize("call", ["np.tile(a, 3)", "np.repeat(a, 3, axis=0)"])
+def test_tile_and_repeat_are_flagged(call: str) -> None:
+    """Catches R6 letting a materialised copy stand in for broadcasting."""
+    assert _r6_rules(f"b = {call}\n") == ["R6 broadcast"]
+
+
+def test_broadcast_to_is_not_flagged() -> None:
+    """Catches R6 flagging ``np.broadcast_to``, which returns a view: the fix, not the fault."""
+    assert _r6_rules("b = np.broadcast_to(a, (4, 3))\n") == []
+
+
+def test_a_broadcast_exempt_comment_satisfies_r6() -> None:
+    source = "# broadcast-exempt: a scatter needs one marker per point\nb = np.repeat(a, 3)\n"
+    assert _r6_rules(source) == []
+
+
+def test_a_dead_in_file_anchor_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Catches R7 passing a jump link whose heading was renamed, or checking a quoted example."""
+    text = "# Title\n\nSee [ok](#title) and [gone](#old-heading).\n\n```\n[x](#quoted)\n```\n"
+    (tmp_path / "doc.md").write_text(text, encoding="utf-8")
+    monkeypatch.setattr(checker, "REPO", tmp_path)
+    problems = checker.check_markdown_anchors(Path("doc.md"))
+    assert [(problem.rule, problem.line) for problem in problems] == [("R7 anchor", 3)]
 
 
 def _r8_lines(source: str) -> list[int]:

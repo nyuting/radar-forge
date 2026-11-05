@@ -395,7 +395,6 @@ class LinearMeasurement:
     def jacobian(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
         """Return H for each state as one read-only view, ``(..., n_meas, n_state)``."""
         shape = (*np.shape(state)[:-1], *self.measurement_matrix.shape)
-        # broadcast-exempt: H is the same for every state, so one view serves them all.
         return np.broadcast_to(self.measurement_matrix, shape)
 
 
