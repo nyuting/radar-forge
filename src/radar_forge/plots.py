@@ -319,16 +319,14 @@ def render_cancellation(
             cmap="viridis",
             vmin=0.0,
             vmax=dynamic_range_db,
-            interpolation="antialiased",
+            interpolation="nearest",
         )
-        axes.plot(
-            np.asarray(truth_range_m) * km,
-            np.asarray(truth_rate_mps) * show.scale,
-            "x",
-            color="red",
-            ms=10,
-            label="truth",
-        )
+        truth = zip(np.atleast_1d(truth_range_m), np.atleast_1d(truth_rate_mps), strict=True)
+        # A crosshair per target, which leaves its own cell in view.
+        for range_value_m, rate_value_mps in truth:
+            style = {"color": "white", "linestyle": "--", "linewidth": 0.8}
+            axes.axvline(range_value_m * km, label="truth", **style)
+            axes.axhline(rate_value_mps * show.scale, **style)
         axes.set_title(f"{label} cancellation")
         axes.set_xlabel(show.range_label)
         axes.set_xlim(extent[0], extent[1])

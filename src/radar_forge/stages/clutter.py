@@ -39,8 +39,10 @@ __all__ = ["leakage"]
 # The floor window: Doppler and lag offsets from the target's cell, each side (216 cells).
 _FLOOR_DOPPLER_BINS = np.array([2, 3, 4])
 _FLOOR_LAG_BINS = np.arange(3, 21)
-# Doppler rows drawn either side of zero Doppler and the target in cancellation.png.
-_FIGURE_MARGIN_BINS = 32
+# cancellation.png zooms on the target: Doppler rows and lags drawn either side of its cell.
+_FIGURE_ROWS, _FIGURE_LAGS = 32, 64
+# Its colour scale over the clean floor: the uncancelled floor, 41 dB, near the top.
+_FIGURE_RANGE_DB = 45.0
 
 _KEYS = (
     "cancellation_depth_db",
@@ -195,20 +197,21 @@ def _draw(
     floor_w: float,
     truth: TargetGeometry,
 ) -> None:
-    """Draw frame 0 before and after cancellation, the rows from zero Doppler to the target."""
+    """Draw frame 0 about the target before and after cancellation: buried, then clear."""
     product = maps["clean"]
-    n_rate = product.rd_map.shape[0]
-    low = max(0, min(cell[0], n_rate // 2) - _FIGURE_MARGIN_BINS)
-    high = min(n_rate, max(cell[0], n_rate // 2) + _FIGURE_MARGIN_BINS + 1)
+    n_rate, n_lags = product.rd_map.shape
+    rows = slice(max(0, cell[0] - _FIGURE_ROWS), min(n_rate, cell[0] + _FIGURE_ROWS + 1))
+    lags = slice(max(0, cell[1] - _FIGURE_LAGS), min(n_lags, cell[1] + _FIGURE_LAGS + 1))
     figure = plots.render_cancellation(
-        maps["uncancelled"].rd_map[low:high],
-        maps["cancelled"].rd_map[low:high],
-        product.range_axis_m,
-        product.rate_axis_mps[low:high],
+        maps["uncancelled"].rd_map[rows, lags],
+        maps["cancelled"].rd_map[rows, lags],
+        product.range_axis_m[lags],
+        product.rate_axis_mps[rows],
         ctx.scenario.radar,
         floor_w=floor_w,
         truth_range_m=truth.bistatic_range_m,
         truth_rate_mps=truth.bistatic_range_rate_mps,
         title=f"{ctx.scenario.name}, frame 0",
+        dynamic_range_db=_FIGURE_RANGE_DB,
     )
     plots.save_figure(figure, ctx.out_dir / "cancellation.png")
