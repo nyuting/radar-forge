@@ -190,6 +190,22 @@ def test_a_dual_prf_pair_unfolds_a_rate_neither_burst_resolves(rng):
     assert abs(plots.unfolded_range_m[accepted[0]] - 30_000.0) < abs(products[0].range_bin_m)
 
 
+@pytest.mark.parametrize("path", sorted((REPO / "config").glob("*.toml")), ids=lambda p: p.stem)
+def test_the_radars_unambiguous_limits_are_the_maps_periods(path: Path) -> None:
+    """Each burst's unambiguous range and rate are the spans its map wraps at, both waveforms."""
+    scenario = load_scenario(path)
+    for radar, n_pulses in zip(scenario.radars, scenario.n_pulses, strict=True):
+        range_m, rate_mps = map_axes(radar, n_pulses)
+        np.testing.assert_allclose(
+            range_m.size * (range_m[1] - range_m[0]), radar.unambiguous_bistatic_range_m, rtol=1e-12
+        )
+        np.testing.assert_allclose(
+            rate_mps.size * abs(rate_mps[1] - rate_mps[0]),
+            radar.unambiguous_bistatic_range_rate_mps,
+            rtol=1e-12,
+        )
+
+
 def test_an_unknown_key_or_a_wrong_type_is_refused(tmp_path):
     """A misspelled key or a quoted number stops the load rather than being ignored."""
     text = (REPO / "config" / "scenario_003_tracking.toml").read_text(encoding="utf-8")

@@ -129,16 +129,16 @@ class TestRadarLimits:
         """c/2B at 2 MHz is 74.95 m, per spec §2."""
         np.testing.assert_allclose(S1_RADAR.range_resolution_m, 74.948, rtol=1e-4)
 
-    def test_s1_unambiguous_bistatic_range_is_c_fs_over_two_alpha(self) -> None:
-        """FMCW folds where the beat alpha * R_b / c reaches fs / 2: 74.95 km of R_b.
+    def test_s1_unambiguous_bistatic_range_is_c_fs_over_alpha(self) -> None:
+        """FMCW folds where the beat alpha * R_b / c reaches fs: 149.9 km of R_b.
 
-        Half of it is the monostatic 37.47 km of spec §3.4, which covers the
+        That is the map's span; half is the 74.95 km slant that covers the
         track's 18.4 km.
         """
-        expected_m = SPEED_OF_LIGHT_MPS * (1.0e6 / 2.0) / 2.0e9
+        expected_m = SPEED_OF_LIGHT_MPS * 1.0e6 / 2.0e9
         np.testing.assert_allclose(S1_RADAR.unambiguous_bistatic_range_m, expected_m, rtol=1e-12)
         np.testing.assert_allclose(
-            S1_RADAR.unambiguous_bistatic_range_m / 2.0, 37_474.06, rtol=1e-6
+            S1_RADAR.unambiguous_bistatic_range_m / 2.0, 74_948.11, rtol=1e-6
         )
 
     def test_s2_unambiguous_bistatic_range_is_c_over_prf(self) -> None:

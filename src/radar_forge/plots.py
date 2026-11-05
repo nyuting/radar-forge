@@ -188,7 +188,7 @@ def render_range_doppler(
     truth_mps = np.asarray(truth_rate_mps, dtype=np.float64)
     axes.plot(truth_m * km, truth_mps * show.scale, "x", color="red", ms=10, label="truth")
     folded_m = np.mod(truth_m, range_m.size * range_bin_m)
-    folded_mps = fold_velocity_mps(truth_mps, rate_mps.size * rate_bin_mps / 2.0)
+    folded_mps = fold_velocity_mps(truth_mps, rate_mps.size * rate_bin_mps)
     for range_value_m, rate_value_mps in zip(folded_m, folded_mps, strict=True):
         # A crosshair per target, so the peak it predicts can be read off either axis.
         axes.axvline(range_value_m * km, color="white", linestyle="--", linewidth=0.8)

@@ -220,7 +220,7 @@ product = range_doppler_product(frame.cubes[0], scenario.radar)
 plots = frame_plots([product], scenario.detection)
 
 range_m, rate_mps = frame.truth.bistatic_range_m[0], frame.truth.bistatic_range_rate_mps[0]
-folded_mps = fold_velocity_mps(rate_mps, product.rate_period_mps / 2)
+folded_mps = fold_velocity_mps(rate_mps, product.rate_period_mps)
 bins = f"{product.range_bin_m:.3f} m, {product.rate_bin_mps:.6f} m/s"
 print(f"map {product.rd_map.shape}: bins {bins}")
 print(f"truth: {range_m:.1f} m, {rate_mps:.3f} m/s, folded to {folded_mps:.3f} m/s")

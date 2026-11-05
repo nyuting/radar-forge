@@ -166,7 +166,7 @@ class RangeDopplerProduct:
     def rate_at_index_mps(self, index: ArrayLike) -> NDArray[np.float64]:
         """Return the folded rate at fractional Doppler indices, in ``(-v_ua, +v_ua]``."""
         rate_mps = self.rate_axis_mps[0] + np.asarray(index) * self.rate_bin_mps
-        return fold_velocity_mps(rate_mps, self.rate_period_mps / 2.0)
+        return fold_velocity_mps(rate_mps, self.rate_period_mps)
 
     def index_of(
         self, bistatic_range_m: ArrayLike, rate_mps: ArrayLike
@@ -311,8 +311,8 @@ def _pair(
     rate_mps, _ = unfold_doppler_dual_prf(
         first.folded_rate_mps[i],
         second.folded_rate_mps[j],
-        a.rate_period_mps / 2.0,
-        b.rate_period_mps / 2.0,
+        a.rate_period_mps,
+        b.rate_period_mps,
         max_velocity_mps=max_rate_mps,
         tolerance_mps=2.0 * max(abs(a.rate_bin_mps), abs(b.rate_bin_mps)),
     )

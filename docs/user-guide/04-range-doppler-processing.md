@@ -46,7 +46,7 @@ undo that.
 | Pulse compression gain | — | $B T_c$ | `dsp.matched_filter` | — (S1 is FMCW; S2's pulse has $B T_c = 20$, 13.0 dB) |
 | Range bins | $N_s$ | $N_s = f_s / \mathrm{PRF}$ | `Radar.n_samples_per_pri` | 1000 |
 | Range bin spacing | $\Delta R_b$ | $\Delta R_b = \frac{c f_s T_c}{B N_s}$ | `dsp.range_bin_centers_m`, `RangeDopplerProduct.range_bin_m` | 149.8962 m (74.9481 m slant) |
-| Range at bin $N_s/2$ | — | $\frac{c f_s T_c}{2B}$ | `Radar.unambiguous_bistatic_range_m` | 74 948.1 m (the map spans twice this) |
+| Range span | $R_{\mathrm{span}}$ | $\frac{c f_s T_c}{B}$ | `RangeDopplerProduct.range_period_m`, `Radar.unambiguous_bistatic_range_m` | 149 896.2 m (74 948.1 m slant) |
 | Doppler bins | $N$ | one per chirp | `Scenario.n_pulses` | 256 |
 | Rate resolution | $\Delta v$ | $\Delta v = \frac{\lambda}{N T_{\mathrm{PRI}}}$ | `dsp.doppler_bin_centers_mps`, `RangeDopplerProduct.rate_bin_mps` | 0.119496 m/s (0.059748 m/s radial) |
 | Unambiguous rate | $v_{ua}$ | $v_{ua} = \lambda\,\mathrm{PRF}/2$; the map spans $(-v_{ua}, +v_{ua}]$ | `RangeDopplerProduct.rate_period_mps` $/2$ | 15.2955 m/s (7.6478 m/s radial) |
@@ -130,8 +130,9 @@ $$L = -10\log_{10}\frac{\left(\sum_n w[n]\right)^2}{N\sum_n w[n]^2}.$$
    chirps: $x[m+1] - x[m]$, or $x[m+2] - 2x[m+1] + x[m]$ for three. `axis` has no default.
    Stationary echoes cancel. The slow-time axis gets `n_pulses - 1` shorter, and targets at
    multiples of the blind rate $\lambda\,\mathrm{PRF}$ cancel too.
-7. **Fold and unfold.** `dsp.fold_velocity_mps(rate_mps, v_ua)` predicts where a target of true
-   rate `rate_mps` appears: in $(-v_{ua}, +v_{ua}]$, closed at the top as the map is. Range folds
+7. **Fold and unfold.** `dsp.fold_velocity_mps(rate_mps, span_mps)` predicts where a target of
+   true rate `rate_mps` appears: in $(-\mathrm{span}/2, +\mathrm{span}/2]$, closed at the top as
+   the map is. Range folds
    with `dsp.fold_into_period(range_m, span_m, lower=0.0)`. `unfold_doppler_dual_prf` and
    `unfold_range_dual_prf` take one reading from each of two bursts and try every candidate
    $a + kP_a$ inside the bounds you give, keeping the one that best matches the second reading.
@@ -155,7 +156,6 @@ s1 = load_scenario("config/scenario_001_fmcw_low_prf.toml")
 frame = next(frames(s1, n_frames=1))
 product = range_doppler_product(frame.cubes[0], s1.radar)  # FMCW: range FFT, then Doppler FFT
 range_m, rate_mps = product.range_axis_m, product.rate_axis_mps
-v_ua = product.rate_period_mps / 2.0
 gain_db = 10 * np.log10(product.rd_map.size)
 show = plots.display_axes(s1.radar)
 print(f"map {product.rd_map.shape}, gain of the two FFTs {gain_db:.2f} dB")
@@ -165,7 +165,7 @@ print(f"shown as {show.range_name} and {show.rate_name}, times {show.scale}")
 
 truth_m = frame.truth.bistatic_range_m[0]
 truth_mps = frame.truth.bistatic_range_rate_mps[0]
-folded_mps = dsp.fold_velocity_mps(truth_mps, v_ua)
+folded_mps = dsp.fold_velocity_mps(truth_mps, product.rate_period_mps)
 print(f"truth {truth_m:.1f} m, {truth_mps:+.4f} m/s, folded {folded_mps:+.4f} m/s")
 rate_bin, range_bin = np.unravel_index(np.abs(product.rd_map).argmax(), product.rd_map.shape)
 print(f"peak ({rate_bin}, {range_bin}): {range_m[range_bin]:.1f} m, {rate_mps[rate_bin]:+.4f} m/s")
@@ -175,13 +175,13 @@ for name, level in (("rectangular", None), ("hann", None), ("taylor", -60.0)):
     print(f"{name:<11} gain {gain:.3f}  loss {loss:.2f} dB")
 
 a, b = load_scenario("config/scenario_001_fmcw_dual_prf.toml").radars
-v_a = a.unambiguous_bistatic_range_rate_mps / 2.0  # the property is the whole span
-v_b = b.unambiguous_bistatic_range_rate_mps / 2.0
-read_a, read_b = dsp.fold_velocity_mps(160.0, v_a), dsp.fold_velocity_mps(160.0, v_b)
+span_a = a.unambiguous_bistatic_range_rate_mps
+span_b = b.unambiguous_bistatic_range_rate_mps
+read_a, read_b = dsp.fold_velocity_mps(160.0, span_a), dsp.fold_velocity_mps(160.0, span_b)
 true_mps, _ = dsp.unfold_doppler_dual_prf(
-    read_a, read_b, v_a, v_b, max_velocity_mps=458.0, tolerance_mps=0.7
+    read_a, read_b, span_a, span_b, max_velocity_mps=458.0, tolerance_mps=0.7
 )
-print(f"S3 v_ua {v_a:.4f} / {v_b:.4f} m/s; +160 m/s reads {read_a:+.4f} / {read_b:+.4f}")
+print(f"S3 spans {span_a:.4f} / {span_b:.4f} m/s; +160 m/s reads {read_a:+.4f} / {read_b:+.4f}")
 print(f"unfolds to {true_mps:+.4f} m/s")
 ```
 
@@ -197,7 +197,7 @@ peak (170, 234): 35075.7 m, -5.0188 m/s
 rectangular gain 1.000  loss -0.00 dB
 hann        gain 0.498  loss 1.78 dB
 taylor      gain 0.470  loss 1.89 dB
-S3 v_ua 76.4777 / 91.7732 m/s; +160 m/s reads +7.0447 / -23.5464
+S3 spans 152.9553 / 183.5464 m/s; +160 m/s reads +7.0447 / -23.5464
 unfolds to +160.0000 m/s
 ```
 
@@ -254,12 +254,7 @@ folds.
 
 **`Radar.unambiguous_bistatic_range_rate_mps` is twice $v_{ua}$.** It is the span the rate axis
 covers before it repeats, $\lambda\,\mathrm{PRF}$. `fold_velocity_mps` and the unfolding
-functions take the half-interval, so halve it, as the example does.
-
-**The S1 map runs to 149.9 km, but `Radar.unambiguous_bistatic_range_m` says 74.9 km.** The
-samples are complex, so the range FFT tells apart beat frequencies over all of $[0, f_s)$, not
-$[0, f_s/2)$. The property takes the real-sampling limit, which is bin $N_s/2$. Neither is a real
-radar's limit, $c T_c$ of route for a sawtooth sweep ([page 3](03-waveforms-and-signals.md)).
+functions take the same span, as the example does.
 
 **The rectangular window costs "−0.00 dB", and raw windows have a coherent gain below 1.** The
 first is negative zero, $-10\log_{10} 1$. The second is SciPy's scaling: its shapes peak at 1,

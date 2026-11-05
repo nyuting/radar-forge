@@ -223,7 +223,7 @@ class Radar:
     >>> tx = Transmitter(9.8e9, 2.0e6, 100.0, 30.0, 1.0e-3, 1.0e3)
     >>> radar = Radar(tx, Receiver(1.0e6, 30.0, 3.0), Site(36.0025, -78.941, 60.0))
     >>> radar.is_monostatic, radar.baseline_m, round(radar.unambiguous_bistatic_range_m, 1)
-    (True, 0.0, 74948.1)
+    (True, 0.0, 149896.2)
     """
 
     transmitter: Transmitter
@@ -266,14 +266,14 @@ class Radar:
 
     @property
     def unambiguous_delay_s(self) -> float:
-        r"""Longest unfolded delay: one PRI; FMCW :math:`f_s/2\alpha` (Charvat [6] ch. 3)."""
+        r"""Longest unfolded delay, the map's range span: one PRI; FMCW :math:`f_s/\alpha` [6]_."""
         if self.transmitter.waveform == "pulsed":
             return self.transmitter.pulse_repetition_interval_s
-        return (self.receiver.sample_rate_hz / 2.0) / self.transmitter.sweep_rate_hzps
+        return self.receiver.sample_rate_hz / self.transmitter.sweep_rate_hzps
 
     @property
     def unambiguous_bistatic_range_m(self) -> float:
-        r"""Longest unfolded bistatic range, :math:`c\,\tau_{ua}`, m; half of it monostatic."""
+        r"""Span of the map's range axis, :math:`c\,\tau_{ua}`, m; half of it monostatic."""
         return SPEED_OF_LIGHT_MPS * self.unambiguous_delay_s
 
     @property
