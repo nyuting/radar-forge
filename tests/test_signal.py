@@ -24,6 +24,7 @@ from radar_forge.signal import (
     fmcw_deramp_baseband,
     lfm_chirp,
     pulsed_baseband,
+    range_gate_first_sample,
     range_resolution_m,
     sweep_rate_hzps,
     thermal_noise,
@@ -614,3 +615,29 @@ class TestThermalNoise:
         lower_w, upper_w = _power_interval_w(radar.receiver.noise_power_per_sample_w, clean.size)
         assert lower_w < float(np.mean(np.abs(noisy - clean) ** 2)) < upper_w
         assert not lower_w < radar.noise_power_matched_w < upper_w
+
+
+class TestRangeGate:
+    """The pulsed receiver records a window of each PRI: a gated cube is columns of the whole."""
+
+    def test_a_gated_cube_is_those_columns_of_the_whole_one(self) -> None:
+        """Bit for bit, with a closing echo that runs into the next row: one sample grid."""
+        geometry = TargetGeometry.monostatic(5_400.0, -60.0)
+        paths = line_of_sight_paths(S2_RADAR, geometry, 10.0)
+        whole = pulsed_baseband(paths, S2_RADAR, 8, rng=None)
+        gate_m = 36 * SPEED_OF_LIGHT_MPS / S2_RADAR.receiver.sample_rate_hz
+        gated = pulsed_baseband(
+            paths, S2_RADAR, 8, rng=None, range_gate_start_m=gate_m, n_gate_samples=50
+        )
+        assert range_gate_first_sample(gate_m, S2_RADAR.receiver.sample_rate_hz) == 36
+        np.testing.assert_array_equal(gated, whole[:, 36:86])
+
+    def test_the_gate_opens_on_the_nearest_sample(self) -> None:
+        bin_m = SPEED_OF_LIGHT_MPS / 600.0e6
+        assert range_gate_first_sample(4800.0, 600.0e6) == 9607
+        assert range_gate_first_sample(9606.6 * bin_m, 600.0e6) == 9607
+
+    def test_a_gate_past_the_repetition_interval_is_refused(self) -> None:
+        paths = line_of_sight_paths(S2_RADAR, TargetGeometry.monostatic(4_000.0, 0.0), 10.0)
+        with pytest.raises(ValueError, match="within"):
+            pulsed_baseband(paths, S2_RADAR, 2, rng=None, n_gate_samples=101)

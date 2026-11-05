@@ -20,6 +20,7 @@ from radar_forge.dsp import (
     WINDOW_NAMES,
     apply_window,
     coherent_gain_linear,
+    delay_bin_centers_m,
     doppler_bin_centers_mps,
     doppler_fft,
     fold_into_period,
@@ -655,3 +656,19 @@ class TestUnfold:
     def test_unfold_range_rejects_a_negative_bound(self) -> None:
         with pytest.raises(ValueError, match="max_range_m"):
             unfold_range_dual_prf(0.0, 0.0, SPAN_A_M, SPAN_B_M, max_range_m=-1.0, tolerance_m=50.0)
+
+
+class TestDelayBins:
+    def test_without_a_gate_a_bin_is_one_sample_of_delay_from_zero(self) -> None:
+        """Bit for bit the pipeline's former inline axis, c n / f_s."""
+        np.testing.assert_array_equal(
+            delay_bin_centers_m(100, 2.5e6),
+            SPEED_OF_LIGHT_MPS * np.arange(100, dtype=np.float64) / 2.5e6,
+        )
+
+    def test_a_gated_axis_starts_on_the_sample_the_gate_opens_on(self) -> None:
+        """4800 m opens on sample 9607 at 600 MHz: 4800.18 m, not 4800, so the axis is on grid."""
+        axis_m = delay_bin_centers_m(3, 600.0e6, range_gate_start_m=4800.0)
+        np.testing.assert_allclose(
+            axis_m, SPEED_OF_LIGHT_MPS * (9607 + np.arange(3)) / 600.0e6, rtol=1e-15
+        )
