@@ -1,12 +1,12 @@
 r"""The ``multitarget`` stage: many targets through the plot model and a configured tracker.
 
-A plot-level scenario (``[sensor]``) is played rotation by rotation (:func:`~radar_forge.
-pipeline.scans`) into :class:`~radar_forge.pipeline.PlotTracker`. Each rotation's confirmed
-tracks are scored against the aircraft in coverage by GOSPA [1], each truth taken at its
-track's own time; over the run the stage measures swaps at every crossing the arcs hold, the
-IMM's latency to its turn mode after each turn onset, the position NEES, the measured Pd and
-false-plot rate against the plot model's, and the JPDA cluster sizes, then trajectory GOSPA
-[2]. An IQ scenario (scenario 011's V5) gives the plot model's rates and merging from
+A plot-level scenario (``[sensor]``) is played rotation by rotation
+(:func:`~radar_forge.tracking.scans.scans`) into :class:`~radar_forge.tracking.scans.PlotTracker`.
+Each rotation's confirmed tracks are scored against the aircraft in coverage by GOSPA [1], each
+truth at its track's own time; over the run the stage measures swaps at every crossing the arcs
+hold, the IMM's latency to its turn mode after each turn onset, the position NEES, the measured
+Pd and false-plot rate against the plot model's, and the JPDA cluster sizes, then trajectory
+GOSPA [2]. An IQ scenario (scenario 011's V5) gives the plot model's rates and merging from
 ``ctx.plots`` instead. Writes ``plots.csv``, ``tracks.csv``, ``gospa.csv`` and ``scene.png``.
 
 References
@@ -31,10 +31,10 @@ from numpy.typing import NDArray
 from scipy.stats import chi2
 
 from radar_forge import evaluate, plots
-from radar_forge.pipeline import PlotScan, PlotTracker, scans
 from radar_forge.scenario import Scenario
 from radar_forge.tracking.filters import TrackBank, TrackStatus
 from radar_forge.tracking.metrics import gospa, nees, trajectory_gospa
+from radar_forge.tracking.scans import PlotScan, PlotTracker, scans
 
 __all__ = ["merged_counts", "multitarget", "pair_windows"]
 

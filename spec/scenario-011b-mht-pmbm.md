@@ -13,7 +13,7 @@ Everything 011b shares is 011a's code, used by reference, not copied:
 
 | Shared | Where |
 | :--- | :--- |
-| Sensor, plots, merge model, plot timing and sector batching | `[sensor]`; `tracking/scene.py` (`resolve`, `detect`, `measure`); `pipeline.scans`, `pipeline.PlotTracker` |
+| Sensor, plots, merge model, plot timing and sector batching | `[sensor]`; `tracking/scene.py` (`resolve`, `detect`, `measure`); `tracking/scans.py` (`scans`, `PlotTracker`) |
 | Clutter: intensity per (m rad), `n_gate` against the 4.612 m rad reference gate, local windows, the clutter map | `[clutter_plots]`; `ClutterComponent`, `poisson_clutter_plots`, `ClutterMap` |
 | Traffic and its closed-form arcs | `config/scenario_011_terminal_dense.toml`; `tracking.scene.Arc` |
 | Motion models, IMM, measurement model, gate probability 0.99 | `[tracking]`; `tracking/models.py`, `tracking/imm.py` |

@@ -4,7 +4,7 @@
 the one Gaussian filter (KF, EKF, UKF) over it; ``imm`` the interacting multiple model;
 ``association`` gating, assignment and JPDA; ``initiation`` the initiators; ``tracker`` the scan
 loop and lifecycle; ``metrics`` NEES, RMSE and GOSPA; ``scene`` a plot-level scene and the plots
-a surveillance radar makes of it.
+a surveillance radar makes of it; ``scans`` that scene played rotation by rotation into a tracker.
 """
 
 from radar_forge.tracking import (
@@ -14,6 +14,7 @@ from radar_forge.tracking import (
     initiation,
     metrics,
     models,
+    scans,
     scene,
     tracker,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "initiation",
     "metrics",
     "models",
+    "scans",
     "scene",
     "tracker",
 ]
