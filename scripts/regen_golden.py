@@ -54,7 +54,7 @@ def main() -> int:
         for path in sorted((REPO / "config").glob("*.toml"))
     ]
     with GOLDEN.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["scenario", *FINGERPRINT])
+        writer = csv.DictWriter(handle, ["scenario", *FINGERPRINT], lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
     print(f"wrote {len(rows)} fingerprints to {GOLDEN.relative_to(REPO)}")
