@@ -298,7 +298,8 @@ def cluster_detections(
 ) -> list[Detection]:
     """Return one :class:`Detection` per connected group of crossings, strongest peak first.
 
-    Touching targets are one cluster: there is no non-maximum suppression.
+    Touching targets are one cluster: there is no non-maximum suppression. A tied peak is the
+    first tied cell in C order.
 
     Parameters
     ----------
@@ -327,15 +328,31 @@ def cluster_detections(
     labels, n_groups = label_connected_cells(flags, connectivity=connectivity, wrap_axes=wrap_axes)
     if n_groups == 0:
         return []
-    index = np.arange(1, n_groups + 1)
-    total_w = ndimage.sum_labels(values_w, labels, index)
-    n_cells = np.bincount(labels.ravel(), minlength=n_groups + 1)[1:]
-    peaks = np.array(ndimage.maximum_position(values_w, labels, index), dtype=np.intp)
-    # errstate-exempt: a cluster with no power has no weighted centroid, and nan says so.
-    with np.errstate(invalid="ignore"):
-        centroids = np.array(ndimage.center_of_mass(values_w, labels, index), dtype=np.float64)
-    for axis in {_axis(axis, flags.ndim) for axis in wrap_axes}:
-        centroids[:, axis] = _circular_centroid(values_w, labels, peaks[:, axis], axis, total_w)
+    # Only the labelled cells, in C order: a frame's map has 10^5 cells, its clusters a few.
+    cells = np.flatnonzero(labels)
+    label_of = labels.ravel()[cells] - 1
+    value_w = values_w.ravel()[cells]
+    n_cells = np.bincount(label_of, minlength=n_groups)
+    total_w = np.bincount(label_of, weights=value_w, minlength=n_groups)
+    # Each group's strongest cell; a tie goes to the first in C order.
+    order = np.lexsort((cells, -value_w, label_of))
+    first = np.searchsorted(label_of[order], np.arange(n_groups))
+    peaks = np.stack(np.unravel_index(cells[order[first]], flags.shape), axis=1)
+    wrapped = {_axis(axis, flags.ndim) for axis in wrap_axes}
+    centroids = np.empty((n_groups, flags.ndim))
+    # One pass per axis, of which there are one or two.
+    for axis, coord in enumerate(np.unravel_index(cells, flags.shape)):
+        n = flags.shape[axis]
+        # A circular axis measures from the peak the short way round; a cluster spans under half.
+        offset = (coord - peaks[label_of, axis] + n // 2) % n - n // 2 if axis in wrapped else coord
+        moment_w = np.bincount(label_of, weights=value_w * offset, minlength=n_groups)
+        # A cluster with no power has no weighted centroid: nan.
+        mean = np.divide(moment_w, total_w, out=np.full(n_groups, np.nan), where=total_w > 0.0)
+        if axis in wrapped:
+            mean = (peaks[:, axis] + mean) % n
+            # A tiny negative offset can round up to exactly n.
+            mean = np.where(mean >= n, 0.0, mean)
+        centroids[:, axis] = mean
     found = [
         Detection(
             peak_index=tuple(int(i) for i in peak),
@@ -573,27 +590,3 @@ def _power(power_w: ArrayLike, *, min_ndim: int) -> NDArray[np.float64]:
         msg = "power_w must be finite and non-negative: pass |x| ** 2, not an amplitude or dB."
         raise ValueError(msg)
     return values_w
-
-
-def _circular_centroid(
-    values_w: NDArray[np.float64],
-    labels: NDArray[np.int_],
-    peaks: NDArray[np.intp],
-    axis: int,
-    total_w: NDArray[np.float64],
-) -> NDArray[np.float64]:
-    """Return each label's power-weighted centroid along a circular ``axis``, in ``[0, n)``.
-
-    Offsets from the peak are taken the short way round, so a cluster must span under half.
-    """
-    n = values_w.shape[axis]
-    index = np.arange(n).reshape([-1 if a == axis else 1 for a in range(values_w.ndim)])
-    peak_of_cell = np.concatenate([[0], peaks])[labels]
-    offset = (index - peak_of_cell + n // 2) % n - n // 2
-    moment_w = ndimage.sum_labels(values_w * offset, labels, np.arange(1, peaks.size + 1))
-    # A cluster with no power has no weighted centroid: nan, as center_of_mass gives.
-    no_power = np.full(peaks.size, np.nan)
-    mean_offset = np.divide(moment_w, total_w, out=no_power, where=total_w > 0.0)
-    centroid = (peaks + mean_offset) % n
-    # A tiny negative offset can round up to exactly n.
-    return np.where(centroid >= n, 0.0, centroid)

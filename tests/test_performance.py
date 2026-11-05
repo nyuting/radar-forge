@@ -7,12 +7,15 @@ its map and their working copies, but nothing that grows with the frame count or
 
 from __future__ import annotations
 
+import time
 import tracemalloc
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from radar_forge import evaluate
+from radar_forge.detection import cluster_detections
 from radar_forge.pipeline import frame_plots, frames, range_doppler_product
 from radar_forge.scenario import load_scenario
 
@@ -59,3 +62,19 @@ def test_each_stage_of_three_frames_runs_within_its_budget(tmp_path):
     over = {k: t for k, t in report.wall_time_s.items() if t > STAGE_BUDGET_S[k]}
     assert set(report.wall_time_s) == set(STAGE_BUDGET_S)
     assert not over, f"stages over budget (s): {over}"
+
+
+@pytest.mark.benchmark
+def test_clustering_a_frame_sized_map_runs_within_its_budget(rng):
+    """One clustering of a (256, 1000) map with ten peaks, both axes wrapped, inside 0.05 s.
+
+    The whole-map ndimage summaries took 0.23 s here; the labelled cells alone take about 5 ms.
+    """
+    power_w = rng.exponential(size=(256, 1000))
+    power_w[25 * np.arange(10) + 3, 97 * np.arange(10) + 5] = 1.0e4
+    mask = power_w > 30.0
+    start_s = time.perf_counter()
+    found = cluster_detections(mask, power_w, wrap_axes=(0, 1))
+    elapsed_s = time.perf_counter() - start_s
+    assert len(found) == 10
+    assert elapsed_s < 0.05, f"clustering took {elapsed_s:.3f} s"
