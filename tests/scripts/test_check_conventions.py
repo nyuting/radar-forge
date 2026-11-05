@@ -33,7 +33,9 @@ def _rules(problems: list) -> list[str]:
     return [problem.rule for problem in problems]
 
 
-@pytest.mark.parametrize("name", ["setup.py", "requirements.txt", "tox.ini"])
+@pytest.mark.parametrize(
+    "name", ["setup.py", "tox.ini", "requirements.txt", "requirements-test.txt"]
+)
 def test_a_root_config_file_outside_pyproject_is_flagged(name: str) -> None:
     """Catches R1 letting a tool's own config file split the configuration."""
     assert _rules(checker.check_path_rules(Path(name))) == ["R1 toml"]
@@ -59,14 +61,18 @@ CANONICAL_CONSTANTS = {"SPEED_OF_LIGHT_MPS", "BOLTZMANN_JPK"}
 
 
 @pytest.mark.parametrize(
-    "line",
-    ["delay_s = 2 * range_m / 3e8", "SPEED_OF_LIGHT_MPS = 299_792_458.0", "k = 1.38e-23"],
+    ("line", "n_findings"),
+    [
+        ("delay_s = 2 * range_m / 3e8", 1),
+        # A rebinding to the exact value is two findings: the name and the literal.
+        ("SPEED_OF_LIGHT_MPS = 299_792_458.0", 2),
+        ("k = 1.38e-23", 1),
+    ],
 )
-def test_a_constant_literal_or_rebinding_is_flagged(line: str) -> None:
+def test_a_constant_literal_or_rebinding_is_flagged(line: str, n_findings: int) -> None:
     """Catches R4 missing an approximate c, a second definition, or a rounded Boltzmann."""
     problems = checker.check_constants(ast.parse(line), LIBRARY_FILE, CANONICAL_CONSTANTS)
-    # A rebinding to the exact value is two findings: the name and the literal.
-    assert set(_rules(problems)) == {"R4 constants"}
+    assert _rules(problems) == ["R4 constants"] * n_findings
 
 
 def test_the_constants_module_may_define_constants() -> None:
@@ -107,8 +113,12 @@ def test_broadcast_to_is_not_flagged() -> None:
     assert _r6_rules("b = np.broadcast_to(a, (4, 3))\n") == []
 
 
-def test_a_broadcast_exempt_comment_satisfies_r6() -> None:
-    source = "# broadcast-exempt: a scatter needs one marker per point\nb = np.repeat(a, 3)\n"
+@pytest.mark.parametrize("on_line_above", [True, False])
+def test_a_broadcast_exempt_comment_satisfies_r6(on_line_above: bool) -> None:
+    """Catches R6 ignoring a justification, whether above the call or on its line."""
+    reason = "# broadcast-exempt: a scatter needs one marker per point"
+    call = "b = np.repeat(a, 3)"
+    source = f"{reason}\n{call}\n" if on_line_above else f"{call}  {reason}\n"
     assert _r6_rules(source) == []
 
 
@@ -122,7 +132,7 @@ def test_a_dead_in_file_anchor_is_flagged(tmp_path: Path, monkeypatch: pytest.Mo
 
 
 def _r8_lines(source: str) -> list[int]:
-    problems = checker.check_comment_style(Path("src/radar_forge/x.py"), source.splitlines())
+    problems = checker.check_comment_style(LIBRARY_FILE, source.splitlines())
     assert all(problem.rule == "R8 comments" for problem in problems)
     return [problem.line for problem in problems]
 
@@ -177,7 +187,7 @@ def test_every_tracked_python_file_passes_r8() -> None:
 
 
 def _r9_lines(text: str) -> list[int]:
-    problems = checker.check_control_characters(Path("src/radar_forge/x.py"), text)
+    problems = checker.check_control_characters(LIBRARY_FILE, text)
     assert all(problem.rule == "R9 control" for problem in problems)
     return [problem.line for problem in problems]
 

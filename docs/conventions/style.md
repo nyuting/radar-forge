@@ -7,12 +7,13 @@ are listed, then gives the judgement calls a tool cannot make, which are what re
 
 ## What the tools enforce
 
-`make check` runs ruff (the `select` list in `pyproject.toml` names each rule family and why),
+`make check` runs ruff (the `select` list in `pyproject.toml` names each rule family),
 `mypy --strict`, [`scripts/check_conventions.py`](../../scripts/check_conventions.py) and
 pytest. The checker's module docstring is the one list of the R-rules, and each failure prints
-the rule, the fix and where it is documented. `tests/test_conventions.py` checks `__all__`,
-`ArrayLike` in and `NDArray` out, and that every doctest runs. When a judgement call below turns
-out to be checkable, add it there or to a test rather than writing more prose.
+the rule, the fix and that docstring. `tests/test_conventions.py` checks `__all__`, `ArrayLike`
+in and `NDArray` out, and that every doctest runs. pytest's `filterwarnings = ["error", …]` turns
+a floating-point warning in a test into a failure (§7). When a judgement call below turns out to
+be checkable, add it there or to a test rather than writing more prose.
 
 ## 0. The audience rule
 
