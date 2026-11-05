@@ -9,12 +9,12 @@ and every warning is an error.
 `tests/` mirrors `src/radar_forge/`: one test module per library module at the top level
 (`test_radar.py`, `test_propagation.py`, `test_signal.py`, `test_dsp.py`, `test_detection.py`,
 `test_constants.py`), `tests/tracking/` for the tracking package, and `tests/scripts/` for
-`scripts/`. The modules that run a scenario (`scenario`, `pipeline`, `evaluate`, `plots`) are
-tested end to end by `test_pipeline.py`, `test_scenarios.py` (each shipped scenario against its
+`scripts/`. The modules that run a scenario (`scenario`, `pipeline`, `evaluate`, `stages`, `plots`)
+are tested end to end by `test_pipeline.py`, `test_scenarios.py` (each shipped scenario against its
 `[verify]` table) and `tests/scripts/test_run_scenario.py`. Package-wide checks are in
-`test_conventions.py`, budgets in `test_performance.py`, golden data in `tests/data/golden/`. A
-test name states the property: `test_inverse_fourth_power_scaling`, not `test_received_power_2`.
-Fixtures live in the `conftest.py` of the directory that uses them.
+`test_conventions.py`, budgets in `test_performance.py`, golden data in `tests/data/golden/`. A test
+name states the property: `test_inverse_fourth_power_scaling`, not `test_received_power_2`. Fixtures
+live in the `conftest.py` of the directory that uses them.
 
 ## 2. Float comparison
 

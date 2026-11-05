@@ -30,6 +30,7 @@ from radar_forge.pipeline import (
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter
 from radar_forge.scenario import Target, load_scenario, truth_geometry
 from radar_forge.signal import thermal_noise
+from radar_forge.stages import core
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -314,6 +315,15 @@ def test_a_contradictory_or_unknown_tracking_choice_is_refused_at_load(
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
     with pytest.raises(ValueError, match=match):
         load_scenario(path)
+
+
+def test_a_second_stage_of_the_same_name_is_refused():
+    """Catches a later stage module silently replacing a core stage and its [verify] keys."""
+    keys = evaluate.VERIFY_KEYS["geometry"]
+    with pytest.raises(ValueError, match="'geometry' is already registered"):
+        evaluate.stage("geometry", "detection_fraction")(lambda ctx: ctx)
+    assert evaluate.STAGES["geometry"] is core.geometry
+    assert evaluate.VERIFY_KEYS["geometry"] == keys
 
 
 def test_an_unknown_verify_key_is_refused_before_any_stage(one_frame_scenario, tmp_path):
