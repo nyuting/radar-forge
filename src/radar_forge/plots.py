@@ -322,17 +322,18 @@ def render_cancellation(
             interpolation="nearest",
         )
         truth = zip(np.atleast_1d(truth_range_m), np.atleast_1d(truth_rate_mps), strict=True)
-        # A crosshair per target, which leaves its own cell in view.
-        for range_value_m, rate_value_mps in truth:
+        # A crosshair per target, which leaves its own cell in view; one legend entry for all.
+        for k, (range_value_m, rate_value_mps) in enumerate(truth):
             style = {"color": "white", "linestyle": "--", "linewidth": 0.8}
-            axes.axvline(range_value_m * km, label="truth", **style)
+            axes.axvline(range_value_m * km, label="truth" if k == 0 else "_truth", **style)
             axes.axhline(rate_value_mps * show.scale, **style)
         axes.set_title(f"{label} cancellation")
         axes.set_xlabel(show.range_label)
         axes.set_xlim(extent[0], extent[1])
         axes.set_ylim(extent[2], extent[3])
     panels[0].set_ylabel(show.rate_label)
-    panels[1].legend(loc="upper right", fontsize="small", framealpha=0.85)
+    if np.size(truth_range_m):
+        panels[1].legend(loc="upper right", fontsize="small", framealpha=0.85)
     figure.colorbar(image, ax=panels, label="Power over the clean noise floor (dB)")
     if title is not None:
         figure.suptitle(title)

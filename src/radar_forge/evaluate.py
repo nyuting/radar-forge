@@ -30,7 +30,8 @@ from typing import Any
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from radar_forge.pipeline import Plots, map_axes
+from radar_forge.clutter import CancellationResult
+from radar_forge.pipeline import Frame, Plots, RangeDopplerProduct, map_axes
 from radar_forge.propagation import received_power_w
 from radar_forge.radar import Radar, TargetGeometry
 from radar_forge.scenario import Scenario, truth_geometry
@@ -43,6 +44,7 @@ __all__ = [
     "Context",
     "Report",
     "VerificationError",
+    "cached_frames",
     "run",
     "spans",
     "stage",
@@ -111,6 +113,10 @@ class Context:
     truth: list[TargetGeometry] = field(default_factory=list)
     plots: list[Plots] = field(default_factory=list)
     banks: list[tuple[TrackBank, NDArray[np.intp]]] = field(default_factory=list)
+    stages: tuple[str, ...] = ()
+    cancelled: list[tuple[Frame, CancellationResult, RangeDopplerProduct]] = field(
+        default_factory=list
+    )
 
     def record(self, name: str, value: float) -> float:
         """Print a measured scalar, keep it in the report, and return it."""
@@ -190,6 +196,17 @@ def spans(scenario: Scenario, burst: int) -> tuple[float, float, float]:
     return range_axis_m.size * range_bin_m, rate_span_mps, range_bin_m
 
 
+def cached_frames(ctx: Context) -> int:
+    """Return how many noise frames ``rd`` keeps, cancelled, for ``leakage``: its acceptance frames.
+
+    Each holds a stream, its code, the residual and the map, about 72 MB at 005's size; none is
+    kept unless ``leakage`` runs.
+    """
+    if "leakage" not in ctx.stages:
+        return 0
+    return min(ctx.n_frames, int(ctx.scenario.verify.get("acceptance_frames", ctx.n_frames)))
+
+
 def truth(ctx: Context) -> list[TargetGeometry]:
     """Return every frame's truth, from the geometry stage or computed now."""
     if not ctx.truth:
@@ -220,7 +237,7 @@ def run(
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     count = scenario.n_frames if n_frames is None else min(n_frames, scenario.n_frames)
-    ctx = Context(scenario, out, count, save_iq, Report(scenario.name), render)
+    ctx = Context(scenario, out, count, save_iq, Report(scenario.name), render, stages=tuple(names))
     print(f"{scenario.name}: {count} frame(s), {len(scenario.radars)} burst(s) -> {out}")
     for name, function in STAGES.items():
         if name in names:

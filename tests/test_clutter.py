@@ -19,6 +19,7 @@ import pytest
 
 from radar_forge import clutter, evaluate
 from radar_forge.clutter import (
+    cancel,
     cancellation_depth_db,
     delay_basis_gram,
     distortion_fraction_linear,
@@ -32,9 +33,12 @@ from radar_forge.clutter import (
     parallel_hammerstein_basis,
     wiener_smi,
 )
-from radar_forge.pipeline import cancel, frames, range_doppler_product
+from radar_forge.constants import SPEED_OF_LIGHT_MPS
+from radar_forge.pipeline import RangeDopplerProduct, frames, range_doppler_product
+from radar_forge.radar import TargetGeometry
 from radar_forge.scenario import load_scenario
 from radar_forge.signal import cubic_amplifier, noise_waveform
+from radar_forge.stages.clutter import _truth_cell
 
 REPO = Path(__file__).resolve().parents[1]
 SAMPLE_RATE_HZ = 8.0e6
@@ -410,3 +414,27 @@ def test_sliding_removes_the_batched_fits_parasitic_lines():
     far = (slice(None), slice(300, 800))
     assert np.mean(maps["sliding"][far]) <= np.mean(maps["batched"][far])
     assert clutter.cancellation_depth_db(stream, stream) == 0.0
+
+
+def test_cancellation_depth_is_infinite_for_a_silent_residual_and_refused_without_input():
+    """A residual of zero power is complete cancellation; a silent stream has none to measure."""
+    stream = np.ones(4, dtype=complex)
+    assert cancellation_depth_db(stream, np.zeros(4)) == math.inf
+    np.testing.assert_allclose(cancellation_depth_db(stream, 0.1 * stream), 20.0, rtol=1e-12)
+    with pytest.raises(ValueError, match="zero power"):
+        cancellation_depth_db(np.zeros(4), np.zeros(4))
+
+
+def test_a_target_past_the_lag_window_has_no_truth_cell():
+    """Off the window, or within half a lag of its end, the target has no cell (no IndexError)."""
+    lags = SPEED_OF_LIGHT_MPS * np.arange(8) / SAMPLE_RATE_HZ
+    rates = np.linspace(4.0, -4.0, 6, endpoint=False)
+    product = RangeDopplerProduct(np.zeros((6, 8), dtype=complex), lags, rates, range_wraps=False)
+    lag_m = SPEED_OF_LIGHT_MPS / SAMPLE_RATE_HZ
+
+    def cell(range_lags: float):
+        return _truth_cell(product, TargetGeometry.monostatic(range_lags * lag_m / 2.0, 0.0))
+
+    assert cell(3.2) == (3, 3)
+    assert cell(7.6) is None  # rounds to lag 8, one past the window
+    assert cell(9.0) is None

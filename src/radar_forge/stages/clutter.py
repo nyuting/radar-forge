@@ -1,17 +1,18 @@
 r"""The ``leakage`` stage: scenario 005's cancellation of a noise radar's leakage and near clutter.
 
-Each frame's stream is cancelled as ``[cancellation]`` says and set beside two maps of the same
-frame: the stream uncancelled, and the clean stream, its leakage and clutter paths taken out
-(the same code, noise and target). The stage prints and checks the cancellation
-:math:`\mathrm{CA}` against its ceiling, the floor rise and the SINR loss against the clean
-map, and the CFAR detections of the first target with and without cancellation; it writes
-``leakage.csv`` and ``cancellation.png`` (frame 0). ``[verify]`` keys, each checked per frame:
+Each frame's cancelled stream is set beside two maps of the same frame: uncancelled, and clean,
+its leakage and clutter paths taken out (same code, noise and target). After ``rd`` the frames
+and their cancellations are that stage's, kept on the context; alone, the stage makes its own.
+It checks :math:`\mathrm{CA}` beside its ceiling, the floor rise and SINR loss against the clean
+map, and the first target's CFAR detections with and without cancellation; it writes
+``leakage.csv`` and ``cancellation.png`` (frame 0). ``[verify]``, checked per frame:
 ``cancellation_depth_db`` with ``cancellation_tolerance_db``, ``floor_rise_db`` with
 ``floor_rise_tolerance_db``, ``sinr_loss_db`` with ``sinr_loss_tolerance_db``,
-``detections_per_frame`` and ``uncancelled_detections_per_frame``; ``acceptance_frames`` limits
-the stage to the window's first frames, the ones its tolerances were derived for. The floor is
-the mean power of the 216 cells 2 to 4 Doppler bins and 3 to 20 lags from the target's cell, off
-its own row and column, where a white code's sinc range response and Doppler straddle bias it.
+``detections_per_frame``, ``uncancelled_detections_per_frame``; ``acceptance_frames`` keeps the
+window's first frames, those the tolerances were derived for. The floor is the mean power of the
+216 cells 2 to 4 Doppler bins and 3 to 20 lags from the target's cell, off its row and column,
+where a white code's sinc range response and Doppler straddle bias it. A target off the lag
+window has no cell: its floor and SINR are ``nan``, which fails their checks.
 
 References
 ----------
@@ -23,6 +24,8 @@ References
 from __future__ import annotations
 
 import functools
+import math
+from collections.abc import Iterator
 from typing import Any
 
 import numpy as np
@@ -31,6 +34,7 @@ from numpy.typing import NDArray
 from radar_forge import clutter, evaluate, pipeline, plots
 from radar_forge.dsp import fold_into_period
 from radar_forge.pipeline import RangeDopplerProduct
+from radar_forge.propagation import disturbance_paths
 from radar_forge.radar import TargetGeometry
 from radar_forge.scenario import Scenario
 from radar_forge.signal import cubic_amplifier, stream_baseband
@@ -66,39 +70,41 @@ def leakage(ctx: evaluate.Context) -> evaluate.Context:
     if radar.transmitter.waveform != "noise":
         msg = "the leakage stage needs a noise burst: a stream beside the code it sent."
         raise ValueError(msg)
-    disturbance = pipeline.disturbance_paths(scenario, radar)
+    disturbance = disturbance_paths(radar, scenario.leakage, scenario.clutter)
     distortion = scenario.transmitter_distortion
     amplifier = None if distortion is None else functools.partial(cubic_amplifier, a3=distortion.a3)
     noise_w = radar.receiver.noise_power_per_sample_w
     n_basis, n_fit = _fit_size(scenario, n_pulses * radar.n_samples_per_chirp)
     n_frames = min(ctx.n_frames, int(verify.get("acceptance_frames", ctx.n_frames)))
     rows: list[dict[str, Any]] = []
-    # Frames in order: each is synthesised, cancelled and measured before the next.
-    for frame in pipeline.frames(scenario, n_frames=n_frames):
+    # Frames in order: each is measured before the next is taken.
+    for frame, result, cancelled in _cancelled_frames(ctx, n_frames):
         stream, code = frame.cubes[0].reshape(-1), frame.references[0].reshape(-1)
         echo, _ = stream_baseband(
             disturbance, radar, n_pulses, rng=None, reference=code, amplifier=amplifier
         )
-        result = pipeline.cancel(code, stream, scenario.cancellation)
         maps = {
             name: pipeline.range_doppler_product(
                 samples.reshape(n_pulses, -1), radar, reference=code, n_range_lags=n_range_lags
             )
-            for name, samples in (
-                ("uncancelled", stream),
-                ("cancelled", result.residual),
-                ("clean", stream - echo),
-            )
+            for name, samples in (("uncancelled", stream), ("clean", stream - echo))
         }
+        maps["cancelled"] = cancelled
         cell = _truth_cell(maps["clean"], frame.truth)
         floor_w = {name: _floor_w(product.rd_map, cell) for name, product in maps.items()}
         sinr_db = {
-            name: evaluate.to_db(np.abs(product.rd_map[cell]) ** 2 / floor_w[name])
+            name: math.nan
+            if cell is None
+            else evaluate.to_db(np.abs(product.rd_map[cell]) ** 2 / floor_w[name])
             for name, product in maps.items()
         }
+        # rd has detected on the cancelled map already: its plots are reused when it ran.
+        cancelled_plots = ctx.plots[frame.index] if len(ctx.plots) > frame.index else None
         found = {
-            name: _target_detections(maps[name], scenario, frame.truth)
-            for name in ("cancelled", "uncancelled")
+            "cancelled": _target_detections(
+                maps["cancelled"], scenario, frame.truth, cancelled_plots
+            ),
+            "uncancelled": _target_detections(maps["uncancelled"], scenario, frame.truth),
         }
         row: dict[str, Any] = {"frame": frame.index, "time_s": frame.time_s}
         # The ceiling on the frame's own disturbance: paths on one route add in phase.
@@ -124,10 +130,24 @@ def leakage(ctx: evaluate.Context) -> evaluate.Context:
                 ctx.record(f"{name}[{frame.index}]", value)
         _check(ctx, verify, row)
         rows.append(row)
-        if frame.index == 0 and ctx.render:
+        if frame.index == 0 and ctx.render and cell is not None:
             _draw(ctx, maps, cell, floor_w["clean"], frame.truth)
     evaluate.write_csv(ctx.out_dir / "leakage.csv", rows)
     return ctx
+
+
+def _cancelled_frames(
+    ctx: evaluate.Context, n_frames: int
+) -> Iterator[tuple[pipeline.Frame, clutter.CancellationResult, RangeDopplerProduct]]:
+    """Yield the first frames, their cancellations and maps: rd's, kept on the context, or new."""
+    if len(ctx.cancelled) >= n_frames:
+        yield from ctx.cancelled[:n_frames]
+        return
+    # One frame at a time: synthesised, cancelled, mapped as rd maps it, handed out.
+    for frame in pipeline.frames(ctx.scenario, n_frames=n_frames):
+        code, stream = frame.references[0], frame.cubes[0]
+        result = clutter.cancel(code, stream, ctx.scenario.cancellation)
+        yield frame, result, pipeline.frame_products(frame, ctx.scenario, cancellation=result)[0]
 
 
 def _fit_size(scenario: Scenario, n_samples: int) -> tuple[int, int]:
@@ -158,17 +178,24 @@ def _check(ctx: evaluate.Context, verify: dict[str, Any], row: dict[str, Any]) -
             ctx.check("leakage", column, row[column], verify[key], verify[key])
 
 
-def _truth_cell(product: RangeDopplerProduct, truth: TargetGeometry) -> tuple[int, int]:
-    """Return the first target's nearest map cell, ``(Doppler row, lag)``."""
+def _truth_cell(product: RangeDopplerProduct, truth: TargetGeometry) -> tuple[int, int] | None:
+    """Return the first target's nearest map cell, ``(Doppler row, lag)``; ``None`` off the map.
+
+    Within half a lag of the window's end the nearest lag would be past it: off the map too.
+    """
     range_index, rate_index = product.index_of(
         truth.bistatic_range_m[0], truth.bistatic_range_rate_mps[0]
     )
-    n_rate = product.rd_map.shape[0]
+    n_rate, n_lags = product.rd_map.shape
+    if not np.isfinite(range_index) or np.rint(range_index) >= n_lags:
+        return None
     return int(np.rint(rate_index)) % n_rate, int(np.rint(range_index))
 
 
-def _floor_w(rd_map: NDArray[np.complex128], cell: tuple[int, int]) -> float:
+def _floor_w(rd_map: NDArray[np.complex128], cell: tuple[int, int] | None) -> float:
     """Return the mean power of the floor window about ``cell``: Doppler wraps, lags do not."""
+    if cell is None:
+        return math.nan
     n_rate, n_lags = rd_map.shape
     doppler = np.concatenate([-_FLOOR_DOPPLER_BINS, _FLOOR_DOPPLER_BINS])
     lags = np.concatenate([-_FLOOR_LAG_BINS, _FLOOR_LAG_BINS])
@@ -179,10 +206,17 @@ def _floor_w(rd_map: NDArray[np.complex128], cell: tuple[int, int]) -> float:
 
 
 def _target_detections(
-    product: RangeDopplerProduct, scenario: Scenario, truth: TargetGeometry
+    product: RangeDopplerProduct,
+    scenario: Scenario,
+    truth: TargetGeometry,
+    found: pipeline.Plots | None = None,
 ) -> int:
-    """Return how many CFAR clusters lie within one bin of the first target on both axes."""
-    found = pipeline.frame_plots([product], scenario.detection)
+    """Return how many CFAR clusters lie within one bin of the first target on both axes.
+
+    ``found`` is the map's plots when another stage has made them; else CFAR runs here.
+    """
+    if found is None:
+        found = pipeline.frame_plots([product], scenario.detection)
     if not found.detections:
         return 0
     range_index, rate_index = product.index_of(

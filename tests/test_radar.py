@@ -474,3 +474,10 @@ def test_a_noise_code_folds_no_delay():
     radar = Radar(NOISE_TRANSMITTER, Receiver(8.0e6, 30.0, 3.0), DUKE)
     assert math.isinf(radar.unambiguous_delay_s)
     assert math.isinf(radar.unambiguous_bistatic_range_m)
+
+
+def test_a_noise_codes_batch_must_fill_its_pri():
+    """A continuous code has no gap: a batch shorter than the PRI would drop samples unseen."""
+    gapped = Transmitter(9.8e9, 8.0e6, 1.0, 30.0, 50.0e-6, 10.0e3, waveform="noise")
+    with pytest.raises(ValueError, match="fills its PRI"):
+        Radar(gapped, Receiver(8.0e6, 30.0, 3.0), DUKE)

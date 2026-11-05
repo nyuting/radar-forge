@@ -23,6 +23,7 @@ import numpy as np
 from scipy.stats import chi2
 
 from radar_forge import evaluate, plots
+from radar_forge.clutter import cancel
 from radar_forge.detection import cfar_detect
 from radar_forge.dsp import fold_into_period
 from radar_forge.pipeline import (
@@ -169,9 +170,9 @@ def _hits(
     rate_offset = fold_into_period(
         cells[None, :, 0] - rate_index[:, None], n_rate, lower=-n_rate / 2
     )
-    range_offset = fold_into_period(
-        cells[None, :, 1] - range_index[:, None], n_range, lower=-n_range / 2
-    )
+    range_offset = cells[None, :, 1] - range_index[:, None]
+    if product.range_wraps:
+        range_offset = fold_into_period(range_offset, n_range, lower=-n_range / 2)
     near_rate, near_range = np.abs(rate_offset) <= bins, np.abs(range_offset) <= bins
     return list(np.any(near_rate & near_range, axis=1))
 
@@ -182,7 +183,15 @@ def rd(ctx: evaluate.Context) -> evaluate.Context:
     scenario, verify = ctx.scenario, evaluate.thresholds(ctx, "rd")
     bins, hits = float(verify.get("truth_within_bins", 1.0)), []
     for frame in frames(scenario, n_frames=ctx.n_frames):
-        products = frame_products(frame, scenario)
+        # A noise frame is cancelled once, here; the map and the leakage stage both use it.
+        cancellation = (
+            cancel(frame.references[0], frame.cubes[0], scenario.cancellation)
+            if frame.references
+            else None
+        )
+        products = frame_products(frame, scenario, cancellation=cancellation)
+        if cancellation is not None and frame.index < evaluate.cached_frames(ctx):
+            ctx.cancelled.append((frame, cancellation, products[0]))
         found = frame_plots(products, scenario.detection)
         ctx.plots.append(found)
         for k, product in enumerate(products):
@@ -255,17 +264,16 @@ def detect(ctx: evaluate.Context) -> evaluate.Context:
     range_span_m, rate_span_mps, range_bin_m = evaluate.spans(scenario, 0)
     within_m = float(verify.get("truth_within_bins", 1.0)) * range_bin_m
     errors_mps, show, rows = [], plots.display_axes(scenario.radar), []
+    # A noise burst's lags are a window: a gap in range is not taken the short way round.
+    wraps = math.isfinite(scenario.radar.unambiguous_bistatic_range_m)
     # A frame's plots against its targets: a handful of each.
     for index, (found, frame) in enumerate(zip(ctx.plots, truth, strict=True)):
         accepted = found.accepted
         for k, rate_mps in enumerate(frame.bistatic_range_rate_mps):
-            gap_m = np.abs(
-                fold_into_period(
-                    found.bistatic_range_m[accepted] - frame.bistatic_range_m[k],
-                    range_span_m,
-                    lower=-range_span_m / 2.0,
-                )
-            )
+            gap_m = found.bistatic_range_m[accepted] - frame.bistatic_range_m[k]
+            if wraps:
+                gap_m = fold_into_period(gap_m, range_span_m, lower=-range_span_m / 2.0)
+            gap_m = np.abs(gap_m)
             if np.any(gap_m <= within_m):
                 plot = accepted[np.argmin(gap_m)]
                 unfolded_mps = found.bistatic_range_rate_mps[plot]

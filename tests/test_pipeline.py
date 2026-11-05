@@ -17,7 +17,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from radar_forge import evaluate
+from radar_forge import evaluate, plots
+from radar_forge import pipeline as pipeline_module
+from radar_forge.clutter import cancel
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.pipeline import (
     Plots,
@@ -437,3 +439,117 @@ def test_each_noise_frame_carries_its_code_beside_the_stream():
     assert frame.cubes[0].shape == frame.references[0].shape == (2048, 400)
     product = frame_products(frame, scenario)[0]
     assert product.rd_map.shape == (2048, 1024)
+
+
+def _short_noise_scenario():
+    """P1 cut to 64 batches and 64 lags: the same chain, 25 600 samples a frame."""
+    scenario = load_scenario(NOISE_CONFIG)
+    return dataclasses.replace(scenario, n_pulses=(64,), n_range_lags=(64,))
+
+
+def test_a_noise_maps_lags_do_not_wrap():
+    """A route past the lag window has no index; inside it, the unwrapped lag."""
+    scenario = _short_noise_scenario()
+    frame = next(frames(scenario, n_frames=1))
+    product = frame_products(frame, scenario)[0]
+    lag_m = SPEED_OF_LIGHT_MPS / 8.0e6
+    range_index, _ = product.index_of([10.5 * lag_m, 64.2 * lag_m, 130.0 * lag_m], 0.0)
+    np.testing.assert_allclose(range_index[0], 10.5, rtol=1e-12)
+    assert np.isnan(range_index[1:]).all()
+    assert not product.range_wraps
+
+
+def test_the_cancellers_notch_holds_the_maps_noise_level_not_round_off():
+    """Zero Doppler below lag K is exactly emptied by the fit; frame_products floors it to the
+    map's noise power, so CFAR finds no round-off there.
+    """
+    scenario = _short_noise_scenario()
+    frame = next(frames(scenario, n_frames=1))
+    code, stream = frame.references[0], frame.cubes[0]
+    residual = cancel(code, stream, scenario.cancellation).residual.reshape(stream.shape)
+    raw = range_doppler_product(residual, scenario.radar, reference=code, n_range_lags=64).rd_map
+    noise_w = np.median(np.abs(raw) ** 2) / np.log(2.0)
+    # The projection's null: round-off, far under the noise.
+    assert np.max(np.abs(raw[32, :64]) ** 2) < 1e-20 * noise_w
+    product = frame_products(frame, scenario)[0]
+    np.testing.assert_allclose(np.abs(product.rd_map[32, :64]) ** 2, noise_w, rtol=1e-12)
+    found = frame_plots([product], scenario.detection)
+    rows = np.array([d.centroid_index[0] for d in found.detections])
+    assert not np.any(np.abs(rows - 32) < 0.5)
+
+
+def test_cancellation_settings_refuse_a_loaded_wiener_fit():
+    """Wiener-SMI solves the sample statistics as they are: a loading would be dropped."""
+    with pytest.raises(ValueError, match="unloaded"):
+        CancellationSettings("wiener", 192, diagonal_loading=0.01)
+
+
+@pytest.mark.parametrize(
+    ("table", "message"),
+    [
+        ('method = "least_squares"\nn_taps = 192\nn_samples_per_batch = 3000\n', "divide"),
+        (
+            'method = "least_squares"\nn_taps = 192\nn_samples_per_batch = 400\n'
+            "n_samples_extension = 200\n",
+            "whole batches",
+        ),
+        ('method = "least_squares"\nn_taps = 500\nn_samples_per_batch = 400\n', "basis"),
+    ],
+    ids=["batch", "extension", "window"],
+)
+def test_a_cancellation_that_cannot_tile_the_cpi_fails_at_load(tmp_path, table, message):
+    """A batch that does not divide the CPI, a ragged extension or a window short of the basis."""
+    text = NOISE_CONFIG.read_text(encoding="utf-8")
+    head, tail = text.split("[cancellation]\n")
+    tail = tail.split("\n\n", 1)[1]
+    path = tmp_path / "bad_cancellation.toml"
+    path.write_text(head + "[cancellation]\n" + table + "\n" + tail, encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        load_scenario(path)
+
+
+def test_the_cancellation_figure_labels_truth_once_and_draws_without_it():
+    """One legend entry for two targets; no truth, no legend (an empty legend warns)."""
+    radar = load_scenario(NOISE_CONFIG).radar
+    rd_map = np.ones((8, 16), dtype=complex)
+    range_m = SPEED_OF_LIGHT_MPS * np.arange(16) / 8.0e6
+    rate_mps = np.linspace(10.0, -10.0, 8, endpoint=False)
+    figure = plots.render_cancellation(
+        rd_map,
+        rd_map,
+        range_m,
+        rate_mps,
+        radar,
+        floor_w=1.0,
+        truth_range_m=[400.0, 500.0],
+        truth_rate_mps=[0.0, 2.0],
+    )
+    labels = [t.get_text() for t in figure.axes[1].get_legend().get_texts()]
+    assert labels == ["truth"]
+    bare = plots.render_cancellation(rd_map, rd_map, range_m, rate_mps, radar, floor_w=1.0)
+    assert bare.axes[1].get_legend() is None
+    pyplot = pytest.importorskip("matplotlib.pyplot")
+    pyplot.close(figure)
+    pyplot.close(bare)
+
+
+# Slow: one frame of P1 through rd and leakage, about five seconds.
+@pytest.mark.slow
+def test_the_leakage_stage_reuses_rds_frames(tmp_path, monkeypatch):
+    """After rd, leakage measures rd's frames and cancellations; alone, it makes its own."""
+    calls = []
+    original = pipeline_module.frames
+
+    def counted(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline_module, "frames", counted)
+    scenario = load_scenario(NOISE_CONFIG)
+    together = evaluate.run(scenario, ["rd", "leakage"], n_frames=1, out_dir=tmp_path, render=False)
+    assert calls == []
+    alone = evaluate.run(scenario, ["leakage"], n_frames=1, out_dir=tmp_path, render=False)
+    assert calls == [1]
+    # The same seed, the same frame: the same numbers either way.
+    for key in ("cancellation_depth_db[0]", "floor_rise_db[0]", "sinr_loss_db[0]"):
+        assert together.values[key] == alone.values[key]

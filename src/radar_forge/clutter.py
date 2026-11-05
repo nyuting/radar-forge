@@ -36,11 +36,15 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.linalg import cho_factor, cho_solve, lapack
 from scipy.signal import fftconvolve
+
+if TYPE_CHECKING:
+    from radar_forge.scenario import CancellationSettings
 
 # Lag sums run over units of at most this many taps' length: an FFT a few K long, not the CPI.
 _UNIT_TAPS = 16
@@ -49,11 +53,13 @@ _MAX_BYTES = 16 * 2**20
 
 __all__ = [
     "CancellationResult",
+    "cancel",
     "cancellation_depth_db",
     "delay_basis_gram",
     "distortion_fraction_linear",
     "doppler_notch_response_linear",
     "expected_cancellation_depth_db",
+    "fill_notch",
     "least_squares_cancel",
     "ls_cancel",
     "ls_cancel_batched",
@@ -294,10 +300,58 @@ def wiener_smi(reference: ArrayLike, surveillance: ArrayLike, n_taps: int) -> Ca
     return CancellationResult(residual, weights[None, :], np.array([condition]))
 
 
+def cancel(
+    reference: ArrayLike, surveillance: ArrayLike, settings: CancellationSettings | None
+) -> CancellationResult:
+    """Run a ``[cancellation]`` table's canceller on one stream; none (or no table) passes it.
+
+    The one entry point :mod:`radar_forge.pipeline` calls: ``least_squares`` is
+    :func:`least_squares_cancel`, ``wiener`` is :func:`wiener_smi`.
+    """
+    stream = np.asarray(surveillance, dtype=np.complex128).reshape(-1)
+    if settings is None or settings.method == "none":
+        return CancellationResult(stream, np.zeros((0, 0), dtype=np.complex128), np.zeros(0))
+    code = np.asarray(reference, dtype=np.complex128).reshape(-1)
+    if settings.method == "wiener":
+        return wiener_smi(code, stream, settings.n_taps)
+    return least_squares_cancel(
+        code,
+        stream,
+        settings.n_taps,
+        n_samples_per_batch=settings.n_samples_per_batch,
+        n_samples_extension=settings.n_samples_extension,
+        odd_orders=settings.odd_orders,
+        diagonal_loading=settings.diagonal_loading,
+    )
+
+
+def fill_notch(rd_map: ArrayLike, n_taps: int) -> NDArray[np.complex128]:
+    r"""Return a cancelled map with its notch, zero Doppler below lag K, at the map's noise level.
+
+    A projection empties those cells exactly (:math:`X^H y = 0` summed over the CPI), so CFAR
+    there would weigh round-off against round-off and its crossings would depend on the
+    platform. They are set to the map's median power over ln 2, an exponential cell's mean,
+    which neither crosses a threshold nor pulls down a neighbour's. Rows are Doppler, shifted.
+    """
+    filled = np.array(rd_map, dtype=np.complex128)
+    noise_w = float(np.median(np.abs(filled) ** 2)) / math.log(2.0)
+    filled[filled.shape[0] // 2, :n_taps] = math.sqrt(noise_w)
+    return filled
+
+
 def cancellation_depth_db(surveillance: ArrayLike, residual: ArrayLike) -> float:
-    r"""Return the cancellation :math:`\mathrm{CA} = \sum|s|^2 / \sum|y|^2` in dB."""
+    r"""Return the cancellation :math:`\mathrm{CA} = \sum|s|^2 / \sum|y|^2` in dB.
+
+    A residual of zero power is cancelled completely: ``inf``. A stream of zero power has nothing
+    to cancel, and is refused.
+    """
     power_in = float(np.sum(np.abs(np.asarray(surveillance)) ** 2))
     power_out = float(np.sum(np.abs(np.asarray(residual)) ** 2))
+    if power_in == 0.0:
+        msg = "the surveillance stream has zero power: there is no cancellation to measure."
+        raise ValueError(msg)
+    if power_out == 0.0:
+        return math.inf
     return 10.0 * math.log10(power_in / power_out)
 
 

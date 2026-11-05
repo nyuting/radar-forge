@@ -22,7 +22,9 @@ References
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field, fields
+from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -30,11 +32,15 @@ from numpy.typing import ArrayLike, NDArray
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.radar import Radar, TargetGeometry
 
+if TYPE_CHECKING:
+    from radar_forge.scenario import ClutterSettings, LeakageSettings
+
 __all__ = [
     "PointTarget",
     "PropagationPaths",
     "bistatic_range_rate_from_doppler_mps",
     "dbsm_to_m2",
+    "disturbance_paths",
     "doppler_shift_hz",
     "leakage_paths",
     "line_of_sight_paths",
@@ -286,6 +292,22 @@ def static_clutter_paths(
     cross-section. A Doppler stands for a slowly moving scatterer, a tree or a mast in wind.
     """
     return _specified_paths(radar, bistatic_range_m, cnr_db, doppler_hz)
+
+
+def disturbance_paths(
+    radar: Radar, leakage: LeakageSettings | None, clutter: Sequence[ClutterSettings]
+) -> PropagationPaths:
+    """Join a scenario's ``[leakage]`` and ``[[clutter]]`` into one path set, leakage first."""
+    lags, inr_db = (leakage.lags, leakage.inr_db) if leakage is not None else ((), ())
+    return PropagationPaths.concatenate(
+        leakage_paths(radar, lags, inr_db),
+        static_clutter_paths(
+            radar,
+            [c.range_m for c in clutter],
+            [c.relative_power_db for c in clutter],
+            doppler_hz=[c.doppler_hz for c in clutter],
+        ),
+    )
 
 
 def _specified_paths(

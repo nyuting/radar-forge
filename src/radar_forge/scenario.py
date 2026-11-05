@@ -199,9 +199,35 @@ class CancellationSettings:
         if min(counts) < 0 or (self.n_samples_extension and not self.n_samples_per_batch):
             msg = "[cancellation] needs n_taps >= 1, and an extension only around a batch."
             raise ValueError(msg)
-        batched = self.n_samples_per_batch or self.odd_orders != (1,)
-        if self.method == "wiener" and batched:
-            msg = '[cancellation] method = "wiener" fits the whole CPI with the linear basis.'
+        if not self.diagonal_loading >= 0.0:
+            msg = "[cancellation] diagonal_loading is a fraction of the mean diagonal, >= 0."
+            raise ValueError(msg)
+        orders = self.odd_orders
+        if not orders or len(set(orders)) < len(orders) or any(p < 1 or p % 2 == 0 for p in orders):
+            msg = (
+                f"[cancellation] odd_orders must be distinct odd orders, such as [1, 3]; {orders}."
+            )
+            raise ValueError(msg)
+        tuned = self.n_samples_per_batch or orders != (1,) or self.diagonal_loading
+        if self.method == "wiener" and tuned:
+            msg = '[cancellation] "wiener" fits the CPI on the linear basis, unloaded.'
+            raise ValueError(msg)
+
+    def check_fits(self, n_samples: int) -> None:
+        """Refuse blocks that do not tile a CPI of ``n_samples``, or a window short of the basis."""
+        if self.method == "none":
+            return
+        block = self.n_samples_per_batch or n_samples
+        if n_samples % block or self.n_samples_extension % block:
+            msg = (
+                f"[cancellation] n_samples_per_batch must divide the CPI's {n_samples} samples, "
+                "and n_samples_extension be whole batches."
+            )
+            raise ValueError(msg)
+        n_blocks, reach = n_samples // block, self.n_samples_extension // block
+        smallest = min(n_blocks, reach + 1) * block
+        if smallest < self.n_taps * len(self.odd_orders):
+            msg = f"[cancellation] a {smallest}-sample window holds fewer samples than its basis."
             raise ValueError(msg)
 
 
@@ -267,6 +293,8 @@ class Scenario:
         if not any(noise) and any(tables):
             msg = f"tables {sorted(_NOISE_TABLES)} describe a noise burst; this scenario has none."
             raise ValueError(msg)
+        if self.cancellation is not None:
+            self.cancellation.check_fits(span[0])
 
     @property
     def radar(self) -> Radar:

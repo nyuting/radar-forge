@@ -240,7 +240,8 @@ class Radar:
     def __post_init__(self) -> None:
         """Reject a pulsed receiver sampling below the bandwidth (FMCW may: it deramps).
 
-        A noise code is white across the sampled band, so its bandwidth is the sample rate.
+        A noise code is white across the sampled band, so its bandwidth is the sample rate, and
+        continuous, so its batch is its PRI.
         """
         waveform, sample_rate_hz = self.transmitter.waveform, self.receiver.sample_rate_hz
         if waveform == "pulsed" and sample_rate_hz < self.transmitter.bandwidth_hz:
@@ -248,6 +249,12 @@ class Radar:
             raise ValueError(msg)
         if waveform == "noise" and sample_rate_hz != self.transmitter.bandwidth_hz:
             msg = "a noise code fills the sampled band: bandwidth_hz must equal sample_rate_hz."
+            raise ValueError(msg)
+        if waveform == "noise" and self.n_samples_per_pri != self.n_samples_per_chirp:
+            msg = (
+                "a noise code is continuous: its correlation batch fills its PRI, "
+                "chirp_duration_s * prf_hz = 1."
+            )
             raise ValueError(msg)
 
     @property
