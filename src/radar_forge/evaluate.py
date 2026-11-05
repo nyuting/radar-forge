@@ -13,6 +13,12 @@ stage not listed does not run, a threshold not given is not checked, and :func:`
 :class:`VerificationError` naming every failure. CSVs show a monostatic radar's range and rate
 halved (:func:`~radar_forge.plots.display_axes`); everything else is bistatic. The helpers
 below are what a stage module shares.
+
+:mod:`radar_forge.stages.migration` holds ``keystone`` (scenario 004): ``walk_bins`` with
+``walk_tolerance_bins``, ``residual_walk_max_bins``, ``uncompensated_loss_db``,
+``keystone_only_loss_db`` and ``dechirp_only_loss_db`` with ``loss_tolerance_db`` (the
+keystone's own ``keystone_only_loss_tolerance_db``), ``compensated_loss_min_db``,
+``fold_factor``, ``acceleration_tolerance_mps2`` and ``rate_error_max_crb``.
 """
 
 from __future__ import annotations

@@ -31,6 +31,7 @@ __all__ = [
     "display_axes",
     "magnitude_db",
     "render_range_doppler",
+    "render_range_slow_time",
     "render_range_time_history",
     "save_figure",
 ]
@@ -198,6 +199,46 @@ def render_range_doppler(
     axes.legend(loc="upper right", fontsize="small", framealpha=0.85)
     if title is not None:
         axes.set_title(title)
+    return figure
+
+
+def render_range_slow_time(
+    panels: Sequence[tuple[str, ArrayLike]],
+    range_axis_m: ArrayLike,
+    radar: Radar,
+    *,
+    title: str | None = None,
+    dynamic_range_db: float = 40.0,
+) -> Any:
+    """Draw compressed pulses ``(n_pulses, n_range_bins)`` side by side, range against pulse.
+
+    Each panel is ``(label, data_rfst)``, in dB relative to its own peak: a walking echo is a
+    slanted line, a corrected one a vertical line (Richards [1] §4.6).
+    """
+    plt = _pyplot()
+    show = display_axes(radar)
+    range_m = np.asarray(range_axis_m, dtype=np.float64) * show.scale
+    figure, axes = plt.subplots(1, len(panels), sharey=True, figsize=(4.0 * len(panels), 5.0))
+    axes = np.atleast_1d(axes)
+    # One panel per stage of the correction: two or three.
+    for ax, (label, data) in zip(axes, panels, strict=True):
+        values = np.asarray(data)
+        image = ax.imshow(
+            magnitude_db(values, floor_db=-dynamic_range_db),
+            aspect="auto",
+            origin="lower",
+            extent=(range_m[0], range_m[-1], 0, values.shape[0]),
+            cmap="viridis",
+            vmin=-dynamic_range_db,
+            vmax=0.0,
+            interpolation="nearest",
+        )
+        ax.set_title(label)
+        ax.set_xlabel(show.range_label.replace("(km)", "(m)"))
+    axes[0].set_ylabel("Pulse")
+    figure.colorbar(image, ax=axes.tolist(), label="Magnitude relative to peak (dB)")
+    if title is not None:
+        figure.suptitle(title)
     return figure
 
 

@@ -1,0 +1,90 @@
+# Scenario 004 K3 -- a sounding rocket after burnout, closing at 1100 m/s radial: its Doppler
+# folds once. Seen by a wideband X-band tracking radar downrange of the pad. The three
+# variants share every block but [[target]], [migration] and [verify]. Every range and rate
+# on the map is bistatic, positive receding: twice the slant range and radial velocity. Slow
+# time starts at pulse 0, the frame's truth time and the keystone's reference.
+
+[scenario]
+name = "scenario-004-keystone-k3"
+description = "K3: walk and Doppler ambiguity. At -2200 m/s bistatic the Doppler is 1.438 PRFs: the keystone needs fold factor 1, found by searching -3 to 3, and the unfolded rate is reported."
+seed = 20261106
+
+[[target]]
+name = "sounding-rocket"
+rcs_dbsm = -10.0                         # 0.1 m^2, Swerling 0
+position_enu_m = [0.0, 2500.0, 0.0]      # due north, 2500 m slant: 5000 m bistatic
+velocity_enu_mps = [0.0, -1100.0, 0.0]   # -2200 m/s bistatic: folds to -670.45 m/s
+
+[frames]
+start_time_s = 0.0
+duration_s = 0.075   # three frames: by the third the target is 110 m bistatic in from 5000 m
+frame_rate_hz = 40.0 # one 20.48 ms dwell every 25 ms
+
+[site.tx]
+# A tracking radar downrange of a sounding-rocket pad; no [site.rx]: monostatic.
+latitude_deg = 37.85
+longitude_deg = -75.47
+altitude_m = 10.0
+
+# As K1: 0.5 us, 500 MHz LFM; f_s 600 MHz (0.49965 m bistatic bins); PRI 20 us, 1024 pulses.
+[[burst]]
+waveform = "pulsed"
+carrier_frequency_hz = 9.8e9
+bandwidth_hz = 500.0e6
+transmit_power_w = 100.0
+gain_tx_dbi = 25.0
+chirp_duration_s = 0.5e-6
+prf_hz = 50.0e3
+sample_rate_hz = 600.0e6
+n_pulses = 1024
+# Bistatic gate start: sample 9607, 4800.18 m; 1024 samples. The target sits at bin 399.9.
+range_gate_start_m = 4800.0
+n_gate_samples = 1024
+
+[receiver]
+gain_rx_dbi = 25.0
+noise_figure_db = 3.0
+
+[detection]
+pfa = 1.0e-6
+n_train = 16
+n_guard = 4
+variant = "ca"
+merge_range_bins = 1.0
+max_bistatic_range_rate_mps = 2400.0  # above half the span: the map's rate is read folded
+
+# The Doppler at the band edges, 1.4383 x (1 -+ B / 2 f0) = 1.4016 ... 1.4750 PRFs, stays in
+# fold 1, whose edge 1.5 PRFs the band's top reaches at -2237.26 m/s bistatic.
+[migration]
+method = "keystone"
+keystone = "czt"
+fold_factor_max = 3
+
+[verify]
+stages = ["geometry", "iq", "rd", "detect", "keystone"]
+expected_snr_db = 28.886
+snr_tolerance_db = 0.01
+# -2200 m/s lies outside the +-764.78 m/s span: the truth is never inside the map unfolded.
+truth_in_map_fraction = [0.0, 0.0]
+noise_tolerance_db = 0.03
+peak_tolerance_db = 0.01
+truth_within_bins = 1.0
+detection_fraction = 1.0
+# The folded rate, -670.45 m/s, within one bin.
+rate_tolerance_mps = 1.49370
+# A1: 2200 m/s x 20.48 ms / 0.49965 m = 90.174 bins, +-1 bin.
+walk_bins = 90.174
+walk_tolerance_bins = 1.0
+# A2: with fold factor 1 the keystoned peak track stays within half a bin.
+residual_walk_max_bins = 0.5
+# A3: uncorrected, the model gives -34.67 dB (-36.78 for a flat band); +-1.0 dB.
+uncompensated_loss_db = -34.67
+loss_tolerance_db = 1.0
+# A6: the wrong fold factor 0 keystones the alias, leaving 62.7 of the 90.2 bins of walk:
+# -31.21 dB (model), +-1.0 dB, 3.5 dB better than no keystone, 31 dB short of fold factor 1.
+keystone_only_loss_db = -31.21
+fold_factor = 1
+compensated_loss_min_db = -0.3
+# A19: the fine rate, unfolded by the searched fold factor, within three of its bounds of
+# -2200 m/s, not at the folded -670.45 m/s.
+rate_error_max_crb = 3.0
