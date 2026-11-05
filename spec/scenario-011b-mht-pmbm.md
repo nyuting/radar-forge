@@ -25,8 +25,8 @@ Everything 011b shares is 011a's code, used by reference, not copied:
 ### 2.1 V3 `cst_sweep`: the separation sweep
 
 Pairs placed **in radar coordinates**, as 006 §4.3 did: the same velocity, offset by a stated
-`d` along a stated direction (range or azimuth) in the normalised (range, azimuth) plane of 011
-§2.1, at 20 km, so `d` holds for the run. The sweep is `d ∈ {0.25, 0.5, 1, 2, 4}` by
+`d` along a stated direction (range or azimuth) in the normalised (range, azimuth) plane of
+`tracking.scene.resolve`, at 20 km, so `d` holds for the run. The sweep is `d ∈ {0.25, 0.5, 1, 2, 4}` by
 `n_gate ∈ {0.1, 1, 3}` expected clutter plots per gate, each in both orientations, in a local
 window of clutter (011a's V2 windows: 19, 189 and 568 plots a scan in a box of 872.7 m rad, or
 the 2.5 km disc's 985.6 m rad). Trackers: GNN, JPDA, JPDA\*, Set-JPDA, JIPDA, MHT, PMBM, each
@@ -84,8 +84,8 @@ GNN, JPDA, JPDA\*, Set-JPDA, JIPDA, MHT, PMBM; V4's are IMM with GNN, JIPDA and 
 | :--- | :--- | :--- | :--- | :--- |
 | A4 | **MHT reduces to GNN.** `n_scan = 1`, `k_best = 1`: MHT's assignments and states equal GNN's with the finite non-assignment cost, on the V2 30° crossings | identical assignments; states `rtol = 1e-10` | Murty's first solution is the assignment | unit |
 | A10 | **PMBM reduces to the KF.** One target, Pd = 1, no clutter, no birth after scan 0 | `rtol = 1e-9` | The single-Bernoulli case | unit |
-| A15 | **GNN swaps; MHT does not.** V2, 10° across-range crossing, 200 trials: swap rate GNN ≥ 0.2; MHT ≤ 0.05; JPDA's reported, not bounded | as stated, the bounds checked against a prototype first | §2.2 of 011: sixteen unresolved scans | V2, `slow` |
-| A16 (MHT) | **MHT resolves where JPDA coalesces.** V3, `d` = 1 across range, `n_gate` = 1: P(resolved) for MHT ≥ P(resolved) for JPDA | as stated | 011 §1 item 2 | V3, `slow` |
+| A15 | **GNN swaps; MHT does not.** V2, 10° across-range crossing, 200 trials: swap rate GNN ≥ 0.2; MHT ≤ 0.05; JPDA's reported, not bounded | as stated, the bounds checked against a prototype first | A 10° pair closing across the beam spends sixteen scans inside one resolution cell | V2, `slow` |
+| A16 (MHT) | **MHT resolves where JPDA coalesces.** V3, `d` = 1 across range, `n_gate` = 1: P(resolved) for MHT ≥ P(resolved) for JPDA | as stated | JPDA coalesces where hypotheses are deferred | V3, `slow` |
 | A17 | **The reference line.** V3, every point: PMBM's P(resolved) ≥ every other tracker's, less 0.05 | as stated | [14]: the others approximate PMBM's posterior; a tracker beating it materially is a bug in one of them | V3, `slow` |
 | A19 | **Causal output.** For MHT, the `tracks.csv` row at scan k equals the tracker's state at scan k, recorded live | identical | D29 | V4 |
 

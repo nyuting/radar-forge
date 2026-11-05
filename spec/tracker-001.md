@@ -218,7 +218,7 @@ the measurement's own model.
 
 ## 6. Multi-target extensions
 
-Built with [scenario 011](scenario-011-terminal-area-tracking.md); none changes the loop.
+Built with scenario 011a (`config/scenario_011_*.toml`); none changes the loop.
 
 - **IMM** (Blom and Bar-Shalom 1988), `tracking/imm.py`: an IMM bank carries each mode's
   estimate and probability as columns; mixing is in the union layout of the modes, a coordinate a
