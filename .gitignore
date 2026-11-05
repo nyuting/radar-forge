@@ -24,5 +24,6 @@ build/
 .vscode/
 .idea/
 
-# Scenario run output (scripts/run_scenario.py --out out/...)
+# Scenario run output (scripts/run_scenario.py writes runs/<name> by default)
 out/
+runs/
