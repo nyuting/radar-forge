@@ -53,3 +53,37 @@ n_pulses = 256
 # The receive chain at the Duke Receiver, sited by [site.rx] above.
 gain_rx_dbi = 30.0
 noise_figure_db = 3.0
+
+# Cell-averaging CFAR along range, which wraps, as scenario 003 runs it. At
+# pfa = 1e-5, S1's map of 256 x 1000 cells holds about 2.6 false alarms a frame.
+[detection]
+pfa = 1e-5
+n_train = 16
+n_guard = 4
+variant = "ca"
+merge_range_bins = 1.0
+max_bistatic_range_rate_mps = 400.0   # 200 m/s radial
+
+# What the stepper checks (radar_forge.evaluate). Every number is re-derived for
+# bistatic range and rate, positive receding: twice the slant values.
+[verify]
+stages = ["geometry", "iq", "rd", "detect"]
+# Fraction of frames whose true range and rate lie inside the map, unfolded.
+# B1 folds the rate at +-15.3 m/s, about 8.6 times over the window.
+truth_in_map_fraction = [0.0, 0.25]
+# P_r T N / (k T0 F) on an exact bin at frame 0's ranges (R_T = 14,800.6 m, R_R = 7,523.6 m), from the
+# radar equation by hand: P_r = -134.198 dBW.
+expected_snr_db = 60.86
+snr_tolerance_db = 0.01
+# Five standard errors of a mean over 256,000 complex samples, 5 x 4.343 / sqrt(N) dB.
+noise_tolerance_db = 0.05
+# A noiseless echo has |a|^2 = P_r in every sample it fills.
+peak_tolerance_db = 0.01
+# Scenario 002 A2 and A3: a detection within one bin of the range and wrapped rate, every frame.
+truth_within_bins = 1.0
+detection_fraction = 1.0
+# Noise-only maps hold 30 expected false alarms; the Poisson 99.9 % interval,
+# about 14 to 50, lies within a factor of two.
+pfa_tolerance_factor = 2.0
+# Scenario 002 A3: the rate a plot is read with, against the wrapped truth: within one bin, 30.591 / 256 m/s.
+rate_tolerance_mps = 0.119496

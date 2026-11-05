@@ -80,3 +80,38 @@ n_delete_misses = 5
 n_reacquire_misses = 0
 # The UKF unfolds by dual PRF or not at all.
 rate_unfolding = "none"
+
+# What the stepper checks (radar_forge.evaluate). Every number is re-derived for
+# bistatic range and rate, positive receding: twice the slant values.
+[verify]
+stages = ["geometry", "iq", "rd", "detect", "track"]
+# Fraction of frames whose true range and rate lie inside the map, unfolded.
+# S1 folds the rate at +-15.3 m/s: 20 of 120 frames lie inside.
+truth_in_map_fraction = [0.0, 0.25]
+# P_r T N / (k T0 F) on an exact bin at frame 0's ranges (R = 17,560.7 m), from the
+# radar equation by hand: P_r = -143.046 dBW.
+expected_snr_db = 52.01
+snr_tolerance_db = 0.01
+# Five standard errors of a mean over 256,000 complex samples, 5 x 4.343 / sqrt(N) dB.
+noise_tolerance_db = 0.05
+# A noiseless echo has |a|^2 = P_r in every sample it fills.
+peak_tolerance_db = 0.01
+# Scenario 001 A1 and A2: a detection within one bin of the truth, its rate wrapped, every frame.
+truth_within_bins = 1.0
+detection_fraction = 1.0
+# Noise-only maps hold 30 expected false alarms; the Poisson 99.9 % interval,
+# about 14 to 50, lies within a factor of two.
+pfa_tolerance_factor = 2.0
+# The rate a plot is read with, against the wrapped truth: within one bin, 30.591 / 256 m/s.
+rate_tolerance_mps = 0.119496
+# Scenario 003 criterion 2: range RMSE under one bin, 149.896 m (measured 15.1 m). A
+# range-only track infers its rate (section 14.11): this pins the 12.0 m/s measured
+# (6.01 m/s radial, as before) with 10 % margin.
+range_rmse_max_m = 149.896
+range_rate_rmse_max_mps = 13.2
+# Fraction of confirmed frames with NEES inside chi2(2)'s 95 % interval. A filter
+# whose noise is a bin over sqrt(12) is pessimistic at these SNRs, so its NEES
+# falls below the interval, as scenario 003 found of the NIS. Measured 0.89.
+nees_fraction_min = 0.85
+# 3-of-5 confirms on the third hit, two scans after birth (scenario 003 section 14.11).
+confirmation_latency_max_scans = 2
