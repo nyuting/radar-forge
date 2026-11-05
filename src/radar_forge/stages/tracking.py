@@ -500,5 +500,5 @@ def _iq_statistics(ctx: evaluate.Context) -> evaluate.Context:
     if "false_alarm_rate_max" in verify and expected >= _MIN_FALSE_PLOTS:
         ctx.check("multitarget", "false_plot_ratio", ratio, 0.0, verify["false_alarm_rate_max"])
     elif "false_alarm_rate_max" in verify:
-        print("  false_alarm_ratio: too few expected false alarms in this run to check")
+        print("  false_plot_ratio: too few expected false alarms in this run to check")
     return ctx

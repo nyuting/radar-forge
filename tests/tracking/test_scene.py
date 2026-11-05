@@ -289,9 +289,11 @@ def test_the_iq_chain_merges_close_pairs_as_the_gaussian_resolution_model(tmp_pa
 
     A pair gives one detection when it merges and is seen, or is resolved and one member is
     missed: P_u (1 - (1 - p)^2) + (1 - P_u) 2 p (1 - p), P_u = exp(-(dr / alpha_r)^2 / 2) and p
-    the measured Pd; at 6 bins only the second term is left. alpha_r is fitted by maximum
-    likelihood to the four binomial counts; each measured fraction must lie in its 99 %
-    Clopper-Pearson interval about the fitted model's value.
+    the Pd the plot model is given for V5, 0.99 (A13). At 6 bins only the second term is left:
+    there the chain's one detection is a member masked by its partner in the CFAR's training
+    cells, a miss the plot model draws at random. alpha_r is fitted by maximum likelihood to the
+    four binomial counts; each measured fraction must lie in its 99 % Clopper-Pearson interval
+    about the fitted model's value.
     """
     from scipy.optimize import minimize_scalar
 
@@ -310,7 +312,7 @@ def test_the_iq_chain_merges_close_pairs_as_the_gaussian_resolution_model(tmp_pa
     n_frames, merged = 120, np.round(fraction * 120).astype(int)
     assert separation_m.size == 4
 
-    pd = report.values["measured_pd"]
+    pd = 0.99
 
     def one_detection(alpha_m: float) -> np.ndarray:
         unresolved = np.exp(-((separation_m / alpha_m) ** 2) / 2)
