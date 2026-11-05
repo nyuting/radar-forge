@@ -55,7 +55,7 @@ acceptance numbers in a `[verify]` table and its spec is deleted. Run one with
 | 002, bistatic: the Raleigh-Durham transmitter received at the Duke receiver | `scenario_002_bistatic_xband.toml`, `scenario_002_bistatic_sband.toml` | Runs; checked by `[verify]` |
 | 003, tracking: CFAR, association and tracking on 001 | `scenario_003_tracking.toml`, `scenario_003_tracking_dual_prf.toml`, `scenario_003_ukf_*.toml` | Runs; checked by `[verify]` |
 | [004, keystone](../spec/scenario-004-keystone.md): fast sounding rocket | none | Specified, not built |
-| [005, leakage cancellation](../spec/scenario-005-leakage-cancellation.md): continuous-wave leakage | none | Specified, not built |
+| 005, leakage cancellation: a noise radar cancels its own leakage and near clutter | `scenario_005_static_leakage.toml`, `scenario_005_varying_clutter.toml`, `scenario_005_distorted_transmitter.toml` | Runs; checked by `[verify]` |
 | [006, parallel-approach DoA](../spec/scenario-006-parallel-approach-doa.md): two aircraft in one cell | none | Specified, not built |
 | [007, interference](../spec/scenario-007-interference.md): strong interferers against a weak target | none | Specified, not built |
 | [008, STAP](../spec/scenario-008-stap.md): airborne clutter ridge | none | Specified, not built |

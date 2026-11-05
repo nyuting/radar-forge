@@ -61,6 +61,9 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 | noise N0 = kT0F, per sample, in band | `Receiver.noise_density_w_per_hz`, `.noise_power_per_sample_w`, `Radar.noise_power_matched_w` (radar.py) |
 | SNR, single pulse and integrated | `received_power_w / Radar.noise_power_matched_w`; times B T N on the map (stages/core.py geometry stage) |
 | thermal noise; synthesis; LFM chirp; ambiguity | `thermal_noise`; `fmcw_deramp_baseband`, `pulsed_baseband`; `lfm_chirp`; `ambiguity_function` (signal.py) |
+| noise code, amplifier; continuous stream | `noise_waveform`, `cubic_amplifier`; `stream_baseband` -> (surveillance, reference) (signal.py) |
+| leakage, near clutter; batched correlation | `leakage_paths`, `static_clutter_paths` (propagation.py); `batched_correlation` (dsp.py) |
+| LS / Wiener-SMI cancellation; CA bound, notch | `least_squares_cancel`, `wiener_smi`, `delay_basis_gram`; `expected_cancellation_depth_db`, `doppler_notch_response_linear` (clutter.py) |
 | windows, coherent gain, processing loss | `window`, `apply_window`, `coherent_gain_linear`, `processing_loss_db` (dsp.py) |
 | matched filter, range/Doppler FFT, map | `matched_filter`, `range_fft`, `doppler_fft`, `range_doppler_map` (dsp.py); `range_doppler_product` (pipeline.py) |
 | bin axes, Doppler resolution; MTI | `range_bin_centers_m`, `doppler_bin_centers_mps` (its spacing λ/(N T)); `mti_filter` (dsp.py) |
