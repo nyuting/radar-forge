@@ -280,8 +280,8 @@ Ten times the $P_{fa}$ gives about six times the detections and five times the t
 in ten frames: every plot no track takes starts one. Both ten-frame runs pass every check, and
 neither confirms a false track. The threshold drops only 1.13 dB (11.417 to 10.283 dB), yet
 over the full window nine false tracks are confirmed where there were none. The target's own
-track gets worse too: its range RMSE rises from 23.6 to 38.5 m, and its `nees_fraction` falls
-from 0.53 to 0.18, so that check fails. That is why scenario 003 treats `pfa` as its main
+track gets worse too: its range RMSE rises from 23.8 to 25.6 m, and its `nees_fraction` falls
+from 0.37 to 0.29, so that check fails. That is why scenario 003 treats `pfa` as its main
 difficulty knob. The target itself is detected in every frame either way: it sits far above
 both thresholds.
 

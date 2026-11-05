@@ -51,7 +51,7 @@ from radar_forge.signal import thermal_noise
 from radar_forge.tracking.filters import TrackBank, TrackStatus
 from radar_forge.tracking.metrics import nees
 
-__all__ = ["STAGES", "Check", "Context", "Report", "VerificationError", "run"]
+__all__ = ["STAGES", "VERIFY_KEYS", "Check", "Context", "Report", "VerificationError", "run"]
 
 # The false alarms the rd stage's noise-only maps are expected to hold: a Poisson count whose
 # 99.9 % interval, about 14 to 50, lies within a factor of two of it.
@@ -135,16 +135,23 @@ class Context:
 Stage = Callable[[Context], Context]
 STAGES: dict[str, Stage] = {}
 """The registered stages, by name, in the order :func:`run` runs them."""
+VERIFY_KEYS: dict[str, tuple[str, ...]] = {}
+"""The ``[verify]`` keys each stage reads; a stage sees only these, and no other key loads."""
 
 
-def _stage(name: str) -> Callable[[Stage], Stage]:
-    """Register a stage under ``name``."""
+def _stage(name: str, *keys: str) -> Callable[[Stage], Stage]:
+    """Register a stage under ``name``, with the ``[verify]`` keys it reads."""
 
     def register(function: Stage) -> Stage:
-        STAGES[name] = function
+        STAGES[name], VERIFY_KEYS[name] = function, keys
         return function
 
     return register
+
+
+def _thresholds(ctx: Context, stage: str) -> dict[str, Any]:
+    """Return the ``[verify]`` thresholds a stage registered, and only those."""
+    return {k: v for k, v in ctx.scenario.verify.items() if k in VERIFY_KEYS[stage]}
 
 
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -196,13 +203,13 @@ def _truth(ctx: Context) -> list[TargetGeometry]:
     return ctx.truth
 
 
-@_stage("geometry")
+@_stage("geometry", "truth_in_map_fraction", "expected_snr_db", "snr_tolerance_db")
 def _geometry(ctx: Context) -> Context:
     """Truth for every frame; link budget, baseline and unambiguous limits; truth.csv."""
     scenario, radar, verify, truth = (
         ctx.scenario,
         ctx.scenario.radar,
-        ctx.scenario.verify,
+        _thresholds(ctx, "geometry"),
         _truth(ctx),
     )
     rcs_m2 = [target.rcs_m2 for target in scenario.targets]
@@ -258,10 +265,10 @@ def _geometry(ctx: Context) -> Context:
     return ctx
 
 
-@_stage("iq")
+@_stage("iq", "noise_tolerance_db", "peak_tolerance_db")
 def _iq(ctx: Context) -> Context:
     """Noise per sample of a target-free cube, and frame 0's noiseless peak, every burst."""
-    scenario, verify, first = ctx.scenario, ctx.scenario.verify, _truth(ctx)[0]
+    scenario, verify, first = ctx.scenario, _thresholds(ctx, "iq"), _truth(ctx)[0]
     rcs_m2 = np.array([target.rcs_m2 for target in scenario.targets])
     noise_errors_db, peak_errors_db = [], []
     for k, (radar, n_pulses) in enumerate(zip(scenario.radars, scenario.n_pulses, strict=True)):
@@ -310,10 +317,10 @@ def _hits(
     return list(np.any(near_rate & near_range, axis=1))
 
 
-@_stage("rd")
+@_stage("rd", "truth_within_bins", "detection_fraction", "pfa_tolerance_factor")
 def _rd(ctx: Context) -> Context:
     """Map, CFAR and cluster every frame; detections near truth; Pfa on noise; rd PNGs."""
-    scenario, verify = ctx.scenario, ctx.scenario.verify
+    scenario, verify = ctx.scenario, _thresholds(ctx, "rd")
     bins, hits = float(verify.get("truth_within_bins", 1.0)), []
     for frame in frames(scenario, n_frames=ctx.n_frames):
         products = [
@@ -381,10 +388,10 @@ def _false_alarm_ratio(scenario: Scenario, burst: int) -> float:
     return float(np.mean(detected) / settings.pfa)
 
 
-@_stage("detect")
+@_stage("detect", "truth_within_bins", "rate_tolerance_mps")
 def _detect(ctx: Context) -> Context:
     """Rate of the plot nearest each target against its truth; plot counts; detections.csv."""
-    scenario, verify, truth = ctx.scenario, ctx.scenario.verify, _truth(ctx)
+    scenario, verify, truth = ctx.scenario, _thresholds(ctx, "detect"), _truth(ctx)
     if len(ctx.plots) != ctx.n_frames:
         msg = "the detect stage needs the rd stage's plots; run rd first."
         raise ValueError(msg)
@@ -427,10 +434,16 @@ def _detect(ctx: Context) -> Context:
     return ctx
 
 
-@_stage("track")
+@_stage(
+    "track",
+    "range_rmse_max_m",
+    "range_rate_rmse_max_mps",
+    "nees_fraction_min",
+    "confirmation_latency_max_scans",
+)
 def _track(ctx: Context) -> Context:
     """Track every frame; score each target's primary track; tracks, metrics and track.png."""
-    scenario, verify, settings = ctx.scenario, ctx.scenario.verify, ctx.scenario.tracking
+    scenario, verify, settings = ctx.scenario, _thresholds(ctx, "track"), ctx.scenario.tracking
     if len(ctx.plots) != ctx.n_frames or settings is None:
         msg = "the track stage needs a [tracking] table and the rd stage's plots."
         raise ValueError(msg)
@@ -600,16 +613,16 @@ def run(
     save_iq: bool = False,
     render: bool = True,
 ) -> Report:
-    """Run the named stages in order (default ``[verify].stages``, else all) and check them.
+    """Run the stages (default ``[verify].stages``); raise VerificationError naming each failure.
 
-    Raises
-    ------
-    VerificationError
-        If any check fails, after every stage has run.
+    Before any stage runs, a ``[verify]`` key no stage registered raises, so a misspelt
+    threshold is never skipped in silence.
     """
     names = list(scenario.verify.get("stages", STAGES) if stages is None else stages)
-    if set(names) - set(STAGES):
-        msg = f"unknown stage(s) {sorted(set(names) - set(STAGES))}; known: {list(STAGES)}."
+    known = {"stages"}.union(*VERIFY_KEYS.values())
+    unknown = sorted(set(names) - set(STAGES)) + sorted(set(scenario.verify) - known)
+    if unknown:
+        msg = f"[verify] names unknown stage(s) or key(s) {unknown}; known: {sorted(known)}."
         raise ValueError(msg)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)

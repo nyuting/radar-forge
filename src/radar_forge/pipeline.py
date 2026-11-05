@@ -376,7 +376,7 @@ class ScanTracker:
             scenario.detection.max_bistatic_range_rate_mps,
             len(scenario.radars) == 2,
         )
-        track_aided = {"track_aided": True, "none": False}[settings.rate_unfolding] and not dual
+        track_aided = {"track_aided": True, "none": False}[settings.rate_unfolding]
         self.measures_rate = dual or track_aided or self.fold_span_mps / 2.0 > max_rate_mps
         names = ("bistatic_range_m", "bistatic_range_rate_mps")[: 1 + self.measures_rate]
         motion = RadialConstantVelocity(
@@ -407,7 +407,8 @@ class ScanTracker:
             raise ValueError(msg)
         # Tracks unfold once they hold this many ranges; None without track-aided unfolding.
         self.n_unfold_scans = int(enough[0]) if track_aided else None
-        self.history: dict[int, list[float]] = {}
+        # Each track's (scan time, unwrapped range) pairs, from its birth on.
+        self.history: dict[int, list[tuple[float, float]]] = {}
         n_lives = settings.n_delete_misses + settings.n_reacquire_misses
         self.tracker = Tracker(
             models,
@@ -467,8 +468,8 @@ class ScanTracker:
         histories = [self.history[int(bank.track_id[row])] for row in ready]
         longest = int(np.argmax([len(history) for history in histories]))
         unfolded_mps = self._fold(folded_mps, float(bank.mean[ready[longest], 1]))
-        recent_m = histories[longest][-self.n_slope_scans :]
-        time_s = np.arange(len(recent_m)) * self.scan_interval_s
+        # Fit on the scans' own times: a coasted scan leaves a gap, not a shorter step.
+        time_s, recent_m = np.array(histories[longest][-self.n_slope_scans :]).T
         slope_mps = float(np.polyfit(time_s, recent_m, 1)[0])
         disagree = np.abs(unfolded_mps - slope_mps) > self.fold_span_mps / 2.0
         result: NDArray[np.float64] = np.where(
@@ -476,21 +477,23 @@ class ScanTracker:
         )
         return result
 
-    def _record(self, bank: TrackBank, ranges_m: NDArray[np.float64]) -> None:
-        """Extend each updated track's range history, unwrapped across the range period."""
+    def _record(self, bank: TrackBank, ranges_m: NDArray[np.float64], time_s: float) -> None:
+        """Add each track that took a measurement, born or updated, to its range history.
+
+        Ranges are unwrapped across the range period and kept with their scan time.
+        """
         alive = bank.status != TrackStatus.DELETED
         living = set(bank.track_id[alive].tolist())
         self.history = {t: h for t, h in self.history.items() if t in living}
         period_m = self.range_period_m
-        # One append per updated track: a handful a scan, each to its own list.
-        for row in np.flatnonzero(alive & np.isfinite(bank.nis)):
+        # One append per measured track: a handful a scan, each to its own list.
+        for row in np.flatnonzero(alive & (bank.measurement_index >= 0)):
             history = self.history.setdefault(int(bank.track_id[row]), [])
             range_m = float(ranges_m[bank.measurement_index[row]])
             if history:
-                range_m = (
-                    history[-1] + (range_m - history[-1] + period_m / 2) % period_m - period_m / 2
-                )
-            history.append(range_m)
+                last_m = history[-1][1]
+                range_m = last_m + (range_m - last_m + period_m / 2) % period_m - period_m / 2
+            history.append((time_s, range_m))
 
     def scan(self, plots: Plots, time_s: float) -> tuple[TrackBank, NDArray[np.intp]]:
         """Track a frame's accepted plots; return the bank and the plot behind each measurement."""
@@ -501,5 +504,5 @@ class ScanTracker:
         measurements = np.column_stack([plots.bistatic_range_m[accepted], rate_mps])
         measurements = measurements[:, : self.noise_covariance.shape[0]]
         bank = self.tracker.process(Scan(time_s, measurements, self.noise_covariance, _MEASURED))
-        self._record(bank, measurements[:, 0])
+        self._record(bank, measurements[:, 0], time_s)
         return bank, accepted

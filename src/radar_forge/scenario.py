@@ -22,7 +22,7 @@ import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args, get_origin, get_type_hints
 
 import numpy as np
 from numpy.typing import NDArray
@@ -117,6 +117,15 @@ class TrackingSettings:
     unfold_sigma_gate: float = 6.0
     n_slope_scans: int = 5
 
+    def __post_init__(self) -> None:
+        """Refuse track-aided unfolding behind a seed that takes the folded rate."""
+        if self.rate_unfolding == "track_aided" and self.initiator != "range_only":
+            msg = (
+                '[tracking] rate_unfolding = "track_aided" needs initiator = "range_only": a '
+                f"{self.initiator!r} seed takes the folded rate, at a bin of variance."
+            )
+            raise ValueError(msg)
+
 
 @dataclass(frozen=True)
 class Scenario:
@@ -144,6 +153,18 @@ class Scenario:
         if not (self.targets and self.duration_s > 0.0 and self.frame_rate_hz > 0.0):
             msg = "need a [[target]], and duration_s and frame_rate_hz strictly positive."
             raise ValueError(msg)
+        if self.n_frames < 1:
+            msg = (
+                f"[frames] duration_s = {self.duration_s} at frame_rate_hz = "
+                f"{self.frame_rate_hz} holds no frame; it needs at least one."
+            )
+            raise ValueError(msg)
+        if bursts == 2 and self.tracking and self.tracking.rate_unfolding != "none":
+            msg = (
+                '[tracking] rate_unfolding must be "none" with two bursts: the dual-PRF '
+                "pair unfolds the rate itself, so a track has nothing to unfold."
+            )
+            raise ValueError(msg)
 
     @property
     def radar(self) -> Radar:
@@ -157,7 +178,7 @@ class Scenario:
 
     @property
     def frame_times_s(self) -> NDArray[np.float64]:
-        """Frame times, s since the trajectories' first fix, ``(n_frames,)``."""
+        """Frame times, s, on the trajectory files' own ``time_s`` base, ``(n_frames,)``."""
         result: NDArray[np.float64] = (
             self.start_time_s + np.arange(self.n_frames, dtype=np.float64) / self.frame_rate_hz
         )
@@ -174,10 +195,15 @@ def _keys(table: Mapping[str, Any], allowed: set[str], name: str) -> dict[str, A
 
 
 def _settings(kind: Any, table: Mapping[str, Any], name: str) -> Any:
-    """Build a settings dataclass, refusing an unknown key or a value of the wrong TOML type."""
+    """Build a settings dataclass, refusing an unknown key, a wrong TOML type or choice."""
     defaults = {f.name: f.default for f in fields(kind)}
+    hints = get_type_hints(kind)
     values = _keys(table, set(defaults), name)
     for key, value in values.items():
+        choices = get_args(hints[key]) if get_origin(hints[key]) is Literal else ()
+        if choices and value not in choices:
+            msg = f"[{name}] {key} must be one of {list(choices)}; got {value!r}."
+            raise ValueError(msg)
         default: Any = defaults[key]
         given: Any = tuple(value) if isinstance(default, tuple) else value
         # A bool is an int in Python, so the exact type is compared; a float takes an int.
@@ -256,7 +282,11 @@ def load_scenario(path: Path | str) -> Scenario:
 
 
 def _read_trajectory(path: Path, altitude_m: float) -> tuple[NDArray[np.float64], ...]:
-    """Read a ``time_s, latitude_deg, longitude_deg[, altitude_m]`` CSV (data-001 §6.3)."""
+    """Read a ``time_s, latitude_deg, longitude_deg[, altitude_m]`` CSV (data-001 §6.3).
+
+    ``time_s`` is kept as written, not rebased to the first fix, so every target's file and
+    the frame times share one time base.
+    """
     with path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     if len(rows) < 2 or not {"time_s", "latitude_deg", "longitude_deg"} <= set(rows[0]):
@@ -270,7 +300,7 @@ def _read_trajectory(path: Path, altitude_m: float) -> tuple[NDArray[np.float64]
     if not np.all(np.diff(time_s) > 0.0):
         msg = f"{path}: time_s must be strictly increasing."
         raise ValueError(msg)
-    return time_s - time_s[0], latitude_deg, longitude_deg, np.array(altitudes_m)
+    return time_s, latitude_deg, longitude_deg, np.array(altitudes_m)
 
 
 def _motion(target: Target, scenario: Scenario) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
@@ -294,6 +324,12 @@ def _motion(target: Target, scenario: Scenario) -> tuple[NDArray[np.float64], ND
         msg = f"the window [{times_s[0]}, {times_s[-1]}] s leaves {target.name!r}'s track."
         raise ValueError(msg)
     grid_s = grid_s[inside]
+    if grid_s.size < 2:
+        msg = (
+            f"the one-frame window at {times_s[0]} s has no frame of {target.name!r}'s "
+            "track either side to difference for a velocity; widen it or move it inside."
+        )
+        raise ValueError(msg)
     origin = scenario.radar.rx_site or scenario.radar.tx_site
     latitude_deg, longitude_deg, altitude_m = (np.interp(grid_s, fix_time_s, c) for c in geodetic)
     position_m = geodetic_to_enu_m(

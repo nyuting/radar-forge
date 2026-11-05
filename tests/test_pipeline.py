@@ -19,9 +19,16 @@ import pytest
 
 from radar_forge import evaluate
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
-from radar_forge.pipeline import frame_plots, map_axes, range_doppler_product, synthesise
+from radar_forge.pipeline import (
+    Plots,
+    ScanTracker,
+    frame_plots,
+    map_axes,
+    range_doppler_product,
+    synthesise,
+)
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter
-from radar_forge.scenario import load_scenario
+from radar_forge.scenario import Target, load_scenario, truth_geometry
 from radar_forge.signal import thermal_noise
 
 REPO = Path(__file__).resolve().parents[1]
@@ -207,3 +214,133 @@ def test_a_failed_check_names_every_failure(one_frame_scenario, tmp_path):
     assert len(caught.value.report.failures) == 2
     assert all(c.name in str(caught.value) for c in caught.value.report.failures)
     assert math.isfinite(caught.value.report.values["predicted_snr_db"])
+
+
+# Review fixes: each a behaviour the tracker policy or the loader got wrong.
+
+
+def _one_plot(range_m: float, folded_rate_mps: float) -> Plots:
+    """One accepted plot of burst 0, read as the map shows it."""
+    return Plots(
+        (),
+        np.array([0]),
+        np.array([range_m]),
+        np.array([folded_rate_mps]),
+        np.array([np.nan]),
+        np.array([43.3]),
+        np.array([0.0345]),
+        ("accepted",),
+        np.array([-1]),
+        np.array([np.nan]),
+    )
+
+
+def test_the_fold_monitor_fits_the_slope_on_the_scans_own_times():
+    """Regression: a coast squeezed the slope's time axis, so a four-scan gap read 80 m/s for 50.
+
+    The prediction sits one fold high; the slope over the real times (50 m/s) disagrees by a
+    whole span and refolds the plot to the truth. On scan indices the slope agreed with the
+    wrong prediction and the wrong fold stood.
+    """
+    tracker = ScanTracker(load_scenario(REPO / "config" / "scenario_003_tracking.toml"))
+    span_mps, rate_mps = tracker.fold_span_mps, 50.0
+    ids = tracker.tracker.seed([[20_600.0, rate_mps + span_mps]], np.diag([100.0, 1.0])[None], 12.0)
+    times_s = [*range(9), 12.0]
+    tracker.history[int(ids[0])] = [(float(t), 20_000.0 + rate_mps * t) for t in times_s]
+    folded_mps = rate_mps - span_mps * round(rate_mps / span_mps)
+    # abs 1e-9: whole spans added to a folded reading, a few float64 operations.
+    np.testing.assert_allclose(tracker.unfold(np.array([folded_mps])), [rate_mps], atol=1e-9)
+
+
+def test_a_track_birth_starts_its_range_history():
+    """Regression: a birth has no NIS, so its range was dropped and unfolding came a scan late."""
+    tracker = ScanTracker(load_scenario(REPO / "config" / "scenario_003_tracking.toml"))
+    bank, _ = tracker.scan(_one_plot(20_000.0, 1.0), 0.0)
+    assert tracker.history == {int(bank.track_id[0]): [(0.0, 20_000.0)]}
+
+
+@pytest.mark.parametrize(
+    ("file", "old", "new", "match"),
+    [
+        ("scenario_003_tracking", 'initiator = "range_only"', 'initiator = "direct"', "initiator"),
+        (
+            "scenario_003_tracking",
+            'rate_unfolding = "track_aided"',
+            'rate_unfolding = "oracle"',
+            "one of",
+        ),
+        ("scenario_003_tracking", 'linearisation = "taylor"', 'linearisation = "ukf"', "one of"),
+        (
+            "scenario_003_tracking_dual_prf",
+            'rate_unfolding = "none"',
+            'rate_unfolding = "track_aided"',
+            "two bursts",
+        ),
+    ],
+    ids=[
+        "track-aided-direct-seed",
+        "unknown-unfolding",
+        "unknown-linearisation",
+        "track-aided-dual-prf",
+    ],
+)
+def test_a_contradictory_or_unknown_tracking_choice_is_refused_at_load(
+    tmp_path, file, old, new, match
+):
+    """A setting that would be dropped, or die minutes later as a KeyError, stops the load."""
+    text = (REPO / "config" / f"{file}.toml").read_text(encoding="utf-8")
+    if "two bursts" in match:
+        # A range-only seed, so only the two bursts can be what is refused.
+        text = text.replace('initiator = "direct"', 'initiator = "range_only"')
+    assert old in text
+    path = tmp_path / "changed.toml"
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+    with pytest.raises(ValueError, match=match):
+        load_scenario(path)
+
+
+def test_an_unknown_verify_key_is_refused_before_any_stage(one_frame_scenario, tmp_path):
+    """A misspelt threshold raises, naming it, instead of being skipped in silence."""
+    verify = {"stages": ["geometry"], "nees_fraction_mn": 0.5}
+    scenario = dataclasses.replace(one_frame_scenario, verify=verify)
+    with pytest.raises(ValueError, match="nees_fraction_mn"):
+        evaluate.run(scenario, out_dir=tmp_path / "run")
+    assert not (tmp_path / "run" / "truth.csv").exists()
+
+
+def test_a_window_with_no_frame_is_refused(one_frame_scenario):
+    """0.4 s at 1 Hz rounds to no frame: refused at construction, not deep in the geometry."""
+    with pytest.raises(ValueError, match="no frame"):
+        dataclasses.replace(one_frame_scenario, duration_s=0.4)
+
+
+def _trajectory(path: Path, times_s: list[float]) -> Path:
+    """Write a track north-bound at 1e-4 degrees a second, absolute in time."""
+    rows = [f"{t},{36.01 + 1e-4 * t},-78.9" for t in times_s]
+    path.write_text("\n".join(["time_s,latitude_deg,longitude_deg", *rows, ""]))
+    return path
+
+
+def test_a_one_frame_window_with_no_fix_either_side_is_refused(one_frame_scenario, tmp_path):
+    """One frame, its track ending half a frame later: no velocity, refused by name."""
+    target = Target("short", 0.0, _trajectory(tmp_path / "short.csv", [0.0, 0.5]), 1000.0)
+    scenario = dataclasses.replace(one_frame_scenario, targets=(target,))
+    with pytest.raises(ValueError, match="one-frame window"):
+        truth_geometry(scenario)
+
+
+def test_trajectory_files_share_one_time_base(one_frame_scenario, tmp_path):
+    """Regression: each file was rebased to its own first fix, so these two played 10 s apart.
+
+    Both files follow one law in absolute time, from first fixes 10 s apart; at 12 s they are
+    the same point, so their routes are equal.
+    """
+    early = Target("early", 0.0, _trajectory(tmp_path / "a.csv", [0.0, 10.0, 20.0]), 1000.0)
+    late = Target("late", 0.0, _trajectory(tmp_path / "b.csv", [10.0, 20.0, 30.0]), 1000.0)
+    scenario = dataclasses.replace(one_frame_scenario, targets=(early, late), start_time_s=12.0)
+    truth = truth_geometry(scenario)[0]
+    # rtol 1e-12: one interpolation each, between different fixes of the same straight line.
+    np.testing.assert_allclose(truth.bistatic_range_m[1], truth.bistatic_range_m[0], rtol=1e-12)
+    np.testing.assert_allclose(
+        truth.bistatic_range_rate_mps[1], truth.bistatic_range_rate_mps[0], rtol=1e-9
+    )

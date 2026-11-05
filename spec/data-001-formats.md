@@ -64,7 +64,7 @@ measured values are printed, and returned by `evaluate.run` as a `Report`; they 
 
 | Topic | Convention |
 | :--- | :--- |
-| **Time** | `time_s` is seconds since the trajectory's first fix, float64, monotonic within a file. Trajectories carry `time_s` only, so there is no absolute epoch and no `time_utc` |
+| **Time** | `time_s` is seconds on the trajectory files' own time base, float64, monotonic within a file: every target's file and the frame times share it, and a file is never rebased to its first fix. There is no absolute epoch and no `time_utc` |
 | **Frame** | `frame` is a zero-based integer, one revisit (a *scan* to the tracker). With `time_s` it is the join key across files. A *burst* is one coherent processing interval inside a frame |
 | **Frames of reference** | Geodetic WGS-84 → ECEF → local ENU tangent plane, per `radar_forge/radar.py`. The ENU origin is the receiver site, which is the radar's when monostatic |
 | **Angles** | `azimuth_deg` is a compass bearing from true north, increasing clockwise; `elevation_deg` is up from the local horizontal. Radians inside the library, degrees in files |
@@ -99,7 +99,8 @@ scenario file may contain.
 
 A CSV, one row per fix, read by `radar_forge/scenario.py`: `time_s` (s), `latitude_deg` and
 `longitude_deg` (WGS-84), and optionally `altitude_m` (above the ellipsoid; otherwise the
-`[[target]]`'s `altitude_m` holds for every fix). Times must increase strictly.
+`[[target]]`'s `altitude_m` holds for every fix). Times must increase strictly, and are read
+as written: two targets' files on one clock play in step, and `[frames].start_time_s` is on it too.
 
 ### 6.4 `truth.csv`
 
