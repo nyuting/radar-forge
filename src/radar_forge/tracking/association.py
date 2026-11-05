@@ -1,12 +1,13 @@
 r"""Gating and assignment: which measurement belongs to which track, for a whole scan at once.
 
-A pair passes the gate when its NIS is at most :math:`\chi^2_m(P_G)`, which a consistent
-filter's true measurement passes a fraction :math:`P_G` of the time [1] [2]. Each gated pair is
-costed by NIS, or by the negative log-likelihood ratio against a clutter density λ, which
-compares pairs scored at different dimensions [4]. Global nearest neighbour solves the scan's
-assignment with ``scipy.optimize.linear_sum_assignment`` [3]; greedy nearest neighbour takes
-the cheapest pair first. Every function takes ``(n_tracks, n_meas)`` arrays. JPDA association
-weights and Murty's ``murty_k_best`` are later additions here, with scenario 011 (D28, D29).
+A pair passes the gate when its normalised innovation squared (NIS) :math:`\nu^T S^{-1} \nu` is
+at most :math:`\chi^2_m(P_G)`, which a consistent filter's true measurement passes a fraction
+:math:`P_G` of the time [1] [2]. Each gated pair is costed by NIS, or by the negative
+log-likelihood ratio against a clutter density λ, which compares pairs scored at different
+dimensions [4]. Global nearest neighbour solves the scan's assignment with
+``scipy.optimize.linear_sum_assignment`` [3]; greedy nearest neighbour takes the cheapest pair
+first. Every function takes ``(n_tracks, n_meas)`` arrays. JPDA association weights and Murty's
+``murty_k_best`` are later additions here, with scenario 011 (D28, D29).
 
 References
 ----------

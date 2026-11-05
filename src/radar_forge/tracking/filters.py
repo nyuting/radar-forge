@@ -392,8 +392,8 @@ class Innovation:
 
     ``innovation`` :math:`\nu` is ``(n_tracks, n_meas, m)``, short way round;
     ``innovation_covariance`` S ``(n_tracks, n_meas, m, m)``, since each measurement has its
-    own R; ``nis`` and ``log_likelihood`` ``(n_tracks, n_meas)``; ``measurement_noise`` R
-    ``(n_meas, m, m)``.
+    own R; ``nis``, the normalised innovation squared :math:`\nu^T S^{-1} \nu`, and
+    ``log_likelihood`` ``(n_tracks, n_meas)``; ``measurement_noise`` R ``(n_meas, m, m)``.
 
     References
     ----------
