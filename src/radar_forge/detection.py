@@ -119,7 +119,7 @@ def cfar_probability_of_false_alarm(
     r"""Return the closed-form :math:`P_{fa}` of a CFAR detector for :math:`M = 2N` cells.
 
     With :math:`\beta = \alpha / N`, CA is :math:`(1 + \alpha/M)^{-M}`, OS is
-    :math:`\Gamma(M+1)\Gamma(M-k+1+\alpha) / \Gamma(M-k+1)\Gamma(M+1+\alpha)`, and SO and GO are
+    :math:`\prod_{i=0}^{k-1} (M-i)/(M-i+\alpha)` (Rohling's gamma ratio), and SO and GO are
     :math:`2(1+\beta)^{-N} I_x(N, N)` with :math:`x = (1+\beta)/(2+\beta)` and
     :math:`1/(2+\beta)`: the negative-binomial series of [5]_ summed as a regularised
     incomplete beta function, so GO is no longer a difference of near-equal terms.
@@ -465,9 +465,10 @@ def _pfa(
     if variant == "ca":
         return np.asarray((1.0 + alpha / n_reference) ** -n_reference, dtype=np.float64)
     if variant == "os":
-        upper, lower = n_reference + 1.0, n_reference - rank + 1.0
-        log_pfa = special.gammaln(upper) - special.gammaln(lower)
-        log_pfa = log_pfa + special.gammaln(lower + alpha) - special.gammaln(upper + alpha)
+        # The product form of Rohling's gamma ratio: summing k short logs keeps the digits
+        # that differencing four large gammaln values loses when alpha is large.
+        cells = np.arange(n_reference, n_reference - rank, -1, dtype=np.float64)
+        log_pfa = -np.log1p(np.asarray(alpha, dtype=np.float64)[..., None] / cells).sum(axis=-1)
         return np.asarray(np.exp(log_pfa), dtype=np.float64)
     n_half = n_reference // 2
     beta = alpha / n_half

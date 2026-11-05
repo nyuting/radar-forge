@@ -175,12 +175,14 @@ def test_threshold_factor_round_trips_through_pfa(variant, pfa, n_train):
 @given(pfa=st.lists(st.floats(min_value=1e-8, max_value=0.2), min_size=2, max_size=2, unique=True))
 @settings(deadline=None, max_examples=25)
 def test_threshold_is_monotone_in_pfa(variant, pfa):
-    """A lower design rate never lowers the threshold, in any cell, edge or interior."""
+    """A lower design rate never lowers the threshold in any cell, to the solver's resolution."""
     power_w = np.random.default_rng(7).exponential(1.0, size=(6, 40))
     low, high = sorted(pfa)
     _, strict_w = cfar_detect_2d(power_w, low, variant=variant, **RING)
     _, loose_w = cfar_detect_2d(power_w, high, variant=variant, **RING)
-    assert np.all(strict_w >= loose_w)
+    # GO, SO and OS invert the rate by Brent's method with xtol 1e-14 in log alpha, so two
+    # rates closer than that give factors that differ only in round-off, in either order.
+    assert np.all(strict_w >= loose_w * (1.0 - 1e-13))
 
 
 def test_threshold_factor_decreases_with_window_size():
