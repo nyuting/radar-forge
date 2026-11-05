@@ -97,7 +97,8 @@ rate_unfolding = "none"
 [verify]
 stages = ["geometry", "iq", "rd", "detect", "track"]
 # Fraction of frames whose true range and rate lie inside the map, unfolded.
-# S3's pair resolves the rate to +-459 m/s and range to 60 km: always inside.
+# S3's pair resolves the rate within its +-400 m/s search bound, and its maps
+# span 120 and 100 km of range: always inside.
 truth_in_map_fraction = [1.0, 1.0]
 # P_r T N / (k T0 F) on an exact bin at frame 0's ranges (R = 17,560.7 m, burst A), from the
 # radar equation by hand: P_r = -143.046 dBW.
@@ -119,9 +120,9 @@ rate_tolerance_mps = 1.19496
 # under 4 m/s. Measured 5.1 m and 0.13 m/s.
 range_rmse_max_m = 149.896
 range_rate_rmse_max_mps = 4.0
-# Fraction of confirmed frames with NEES inside chi2(2)'s 95 % interval. A filter
-# whose noise is a bin over sqrt(12) is pessimistic at these SNRs, so its NEES
-# falls below the interval, as scenario 003 found of the NIS. Measured 0.86.
+# Fraction of confirmed frames with NEES inside chi2(2)'s 95 % interval: 0.86
+# measured (102 of 118). The rest fall below it: a bin over sqrt(12) of noise
+# is pessimistic at these SNRs, as scenario 003 found of the NIS.
 nees_fraction_min = 0.8
 # 3-of-5 confirms on the third hit, two scans after birth (scenario 003 section 14.11).
 confirmation_latency_max_scans = 2

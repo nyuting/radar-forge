@@ -6,8 +6,8 @@
 
 Scenario 003 tracks one aircraft against thermal false alarms, with GNN. Its §13.3 records why that
 is enough there and nowhere else: with one target, gates never overlap, assignment is trivially
-optimal and a track swap is impossible. `spec/tracker-001.md` leaves IMM (§9) and JPDA (§7.4) as
-extension points "until the first manoeuvring / multi-target scenario", and scenario 003 §13.4
+optimal and a track swap is impossible. `spec/tracker-001.md` §6 leaves IMM and JPDA as
+extension points until the first manoeuvring, multi-target scenario, and scenario 003 §13.4
 names "a multi-target, high-clutter scenario" as the trigger for random-finite-set tracking. This
 document is that scenario.
 
@@ -34,8 +34,9 @@ Three teaching points, each a test in §6:
    in expected plots per gate. Each tracker gets a resolution curve, and PMBM, the
    random-finite-set tracker, is the reference line (D30).
 
-It also fires two promotions that earlier specs left waiting. `Track.existence_probability`
-gets its first decision, JIPDA's confirm and delete (`tracker-001.md` §8.2). And the plot level
+It also fires two promotions that earlier specs left waiting. A per-track existence probability
+(a `TrackBank` column) gets its first decision, JIPDA's confirm and delete (`tracker-001.md`
+§5.4). And the plot level
 of simulation, which 003 §13.3 said a multi-target scenario would need before it could measure
 the right things, gets a spec (D25).
 
@@ -55,12 +56,12 @@ the right things, gets a spec (D25).
 | GNN; Crouse [17] | One-to-one assignment by `linear_sum_assignment` | Scenario 003's associator, unchanged; the baseline every row below is compared with | existing code | Baseline |
 | PDA [1]; JPDA [2] | Each track updated with a weighted mixture of the measurements in its gate | `JointProbabilisticDataAssociation`; shown coalescing on the holding stack | paper, written from equations | Baseline |
 | JPDA\* [3]; Set-JPDA [4] | JPDA with the coalescing hypotheses pruned (JPDA\*), or with the posterior approximated over unlabelled sets (Set-JPDA) | `coalescence="none" \| "jpda_star" \| "set"`; the fix, and its cost in track identity | paper, written from equations | Current |
-| JIPDA [5] | JPDA with a track-existence probability propagated and used for confirm and delete | `existence_probability` on `Track`; the lifecycle rule it drives | paper, written from equations | **Current** (single-scan) |
+| JIPDA [5] | JPDA with a track-existence probability propagated and used for confirm and delete | `existence_probability` on each `TrackBank` row; the lifecycle rule it drives | paper, written from equations | **Current** (single-scan) |
 | IMM [6]; IMM-JPDA [3]; manoeuvre models [7] | A bank of motion models mixed by Markov mode probability | `IMM` as an `Estimator` of `Estimator`s; `CoordinatedTurn` with the turn rate in the state | paper, written from equations | **Current** (manoeuvring) |
 | Track-oriented MHT [8], [9], [10]; ranked assignment [11], [12] | Deferred association: hypothesis trees, N-scan pruning, k-best global hypotheses | `TrackOrientedMHT`, `TrackTree`, `murty_k_best` | paper, written from equations | **Current** (multi-scan) |
 | PMBM [13]; marginal MB view of MHT and JIPDA [14]; GLMB [15] | Random-finite-set conjugate prior over sets of targets | `PmbmTracker`, beside `Tracker`, as the reference score | paper, written from equations | Comparison |
 | Finite resolution [18], [19], [20] | Two targets inside one resolution cell give one merged plot | The merged-plot model of the plot simulator (D25) | paper, written from equations | Ground truth |
-| GOSPA [21]; trajectory GOSPA [22]; OSPA [23] | Multi-target distance with localisation, missed and false terms; a trajectory version that charges track switches | `gospa`, `trajectory_gospa` in `core/tracking/metrics.py` | paper, written from equations | Metric |
+| GOSPA [21]; trajectory GOSPA [22]; OSPA [23] | Multi-target distance with localisation, missed and false terms; a trajectory version that charges track switches | `gospa`, `trajectory_gospa` in `tracking/metrics.py` | paper, written from equations | Metric |
 
 ---
 
@@ -71,8 +72,8 @@ rotation (12.5 rpm), a 1.4° azimuth beam and a 115.75 m range cell (1/16 nautic
 the parameters of the class (Skolnik [24], the air-traffic-control radar chapter), not of a
 particular installation. It reports **plots**, once per rotation per resolved echo: horizontal
 range and azimuth, with no range rate (§3.1). Raleigh-Durham's airport reference point is
-19.601 km from the site at bearing 135.0° (computed from the 002 coordinates through
-`core/geodesy.py`).
+19.601 km from the site at bearing 135.0° (computed from the 002 coordinates through the
+geodesy in `radar.py`).
 
 ```
    N (km)
@@ -255,15 +256,16 @@ exists everywhere, and a target outside coverage is not a missed target (§3.6, 
 
 ### 3.4 Trackers and their settings
 
-Every tracker uses the same measurement model (spherical 2-D, `tracker-001.md` §6.1, the
-marginal over `(range_m, azimuth_rad)`), the same gate probability 0.99, and the same plots.
+Every tracker uses the same measurement model (spherical 2-D, `tracker-001.md` §4, the
+marginal of `RangeAzimuthElevationRangeRate` over `(range_m, azimuth_rad)`), the same gate
+probability 0.99, and the same plots.
 
-**Motion models and IMM.** State names follow `core/tracking/motion.py`: `x_m, xdot_mps, y_m,
-ydot_mps`, plus `turn_rate_radps` for the coordinated turn.
+**Motion models and IMM.** State names follow `CartesianMotion` in `tracking/models.py`: `x_m,
+xdot_mps, y_m, ydot_mps`, plus `turn_rate_radps` for the coordinated turn.
 
 | Mode | Model | Noise |
 | :--- | :--- | :--- |
-| M1 quiet | CV, continuous white acceleration (`tracker-001.md` TD5) | `acceleration_noise_density_m2ps3 = 0.5` |
+| M1 quiet | CV, continuous white acceleration (`"cwna"`, `tracker-001.md` §4) | `acceleration_noise_density_m2ps3 = 0.5` |
 | M2 turn | Coordinated turn, turn rate in the state [7] | 0.5 on each position axis; `turn_rate_noise_density_rad2ps3 = 1.6e-5` (σ_Δω = 0.5 °/s per 4.8 s scan) |
 | M3 agile | CV | `acceleration_noise_density_m2ps3 = 20.0` |
 
@@ -279,13 +281,13 @@ equally between the other two modes. The generator `Λ` has `Λ_ii = −1/τ_i` 
 ```
 
 On mixing into M1 or M3, which lack `turn_rate_radps`, the coordinate is added at zero mean and
-standard deviation 3 °/s, and dropped on return (`tracker-001.md` §9).
+standard deviation 3 °/s, and dropped on return (`tracker-001.md` §6).
 
 **Associators.**
 
 | Name | Setting |
 | :--- | :--- |
-| GNN | Scenario 003's, with the finite non-assignment cost of `tracker-001.md` §7.2 |
+| GNN | Scenario 003's, with a finite `GlobalNearestNeighbour.non_assignment_cost` (`tracker-001.md` §5.1) |
 | JPDA | Exact enumeration of feasible events per cluster; `max_events_per_cluster = 100_000`, above which it raises, naming the cluster's size |
 | JPDA\*, Set-JPDA | `coalescence = "jpda_star"` [3], `"set"` [4] |
 | JIPDA | JPDA with existence; `p_survival = 0.995` per scan; confirm at `existence ≥ 0.95`, delete at `existence < 0.05` |
@@ -313,13 +315,13 @@ own rule.
 | Trackers | CV-quiet, CV-agile, CT, IMM; each with GNN | GNN, JPDA, JPDA\*, Set-JPDA, JIPDA, MHT, PMBM; CV-quiet | Same as V2 | IMM with GNN, JIPDA, MHT; PMBM | None: plot statistics only |
 | Trials | 200 per target and revisit | 200 per angle and orientation | 100 per point, 40 scans | 20 seeds, 125 scans | 120 frames |
 | Purpose | IMM's benefit, and that it grows with T | Swaps, sharing, coalescence | Resolution curves | Everything at once; GOSPA decomposition | The plot model is honest |
-| Level | Plot | Plot | Plot | Plot | **IQ** → RD → CFAR → `Plot` |
+| Level | Plot | Plot | Plot | Plot | **IQ** → RD → CFAR → `Plots` |
 | Marker | `slow`; one point in the suite | `slow` | `slow`; curves in a notebook, two points in the suite | `slow`; one seed in the suite | `slow` |
 
-**V5 is the check on the plot model.** It runs scenario 001's S3 dual-PRF chain (range bin
-74.948 m; velocity bins 0.5975 and 0.7170 m/s for bursts A and B; unambiguous after
-`unfold_doppler_dual_prf`), the one waveform where Doppler does not fold, through 003's detection
-path. It places pairs whose range separation is swept across the merge region. It measures three
+**V5 is the check on the plot model.** It runs scenario 001's S3 dual-PRF chain (slant range bin
+74.948 m; radial velocity bins 0.5975 and 0.7170 m/s for bursts A and B; the map's bistatic bins
+are twice these; unambiguous after `unfold_doppler_dual_prf`), the one waveform where Doppler
+does not fold, through 003's detection path (`pipeline.frame_plots`). It places pairs whose range separation is swept across the merge region. It measures three
 things: Pd, the false-alarm rate over the valid CFAR cells, and the fraction of frames in which a
 pair gives one detection. It then fits the range resolution parameter α_r of [18] to that
 fraction. The plot model passes if the measured Pd and false-alarm rate lie inside the plot
@@ -329,7 +331,7 @@ range-Doppler half of the plot model and says so.
 
 ### 3.6 Mathematical contracts
 
-`tracker-001.md` §4–§7 hold unchanged. Added:
+`tracker-001.md` §3–§5 hold unchanged. Added:
 
 | Contract | Statement |
 | :--- | :--- |
@@ -340,7 +342,7 @@ range-Doppler half of the plot model and says so.
 | IMM output | Mean and covariance of the mixture in the union layout, mode probabilities alongside |
 | Gate volume | `V = π γ sqrt(\|S\|)` in (m·rad) for the 2-D measurement; `n_gate = λ V` |
 | JPDA weights [2] | For cluster events θ: `P(θ) ∝ Π_{j assoc} (P_D N(z_j; ẑ_t, S_t) / λ(z_j)) Π_{t unassoc} (1 − P_D P_G)`; `β_tj = Σ_{θ ∋ (t,j)} P(θ)`, `β_t0 = 1 − Σ_j β_tj` |
-| JPDA update | `x̂ = x̂⁻ + K ν̄`, `ν̄ = Σ_j β_tj ν_j`; `P = β_t0 P⁻ + (1 − β_t0) P^c + K (Σ_j β_tj ν_j ν_jᵀ − ν̄ ν̄ᵀ) Kᵀ` (the spread-of-innovations term), applied through the correction core (`tracker-001.md` §4.2, §7.4) |
+| JPDA update | `x̂ = x̂⁻ + K ν̄`, `ν̄ = Σ_j β_tj ν_j`; `P = β_t0 P⁻ + (1 − β_t0) P^c + K (Σ_j β_tj ν_j ν_jᵀ − ν̄ ν̄ᵀ) Kᵀ` (the spread-of-innovations term), applied through the correction core (`tracker-001.md` §3, §6) |
 | JIPDA existence [5] | `P(E⁻) = p_s P(E)`; posterior existence from the event probabilities with the track's `1 − P_D P_G P(E⁻)` miss term |
 | Clutter intensity | `λ(z)` per measurement in plots per (m·rad), shape `(n_measurements,)`: the oracle of §3.2 or the clutter map of §3.4 |
 | MHT track score [10] | `L_k = L_{k−1} + ln(P_D / λ(z)) − ½ ν ᵀ S⁻¹ ν − ½ ln \|2π S\|` on a hit, `+ ln(1 − P_D P_G)` on a miss |
@@ -359,8 +361,8 @@ As `spec/data-001-formats.md`, with:
 | :--- | :--- |
 | `truth.csv` | One row per target per scan: `target_id` (A1…B11), `kind` (`aircraft`, `bird`), ENU position and velocity, `range_m`, `azimuth_deg`, `range_rate_mps`, `in_coverage` |
 | `plots.csv` | **New.** One row per plot: `scan`, `time_s`, `plot_id`, `range_m`, `azimuth_deg`, `source` (`target`, `merged`, `clutter`, `discrete`), `source_ids` (semicolon-separated truth IDs, empty for clutter). The tracker never reads `source` or `source_ids` |
-| `tracks.csv` | As data-001 §5, per tracker (`tracker` column); adds `existence_probability` (JIPDA), `score` (MHT), and `mode_probability_{quiet,turn,agile}` (IMM) |
-| `metrics.csv` | **New.** Per scan per tracker: GOSPA and its three components; per run: trajectory GOSPA, switch count, track count, confirmed false tracks |
+| `tracks.csv` | As data-001 §6.6, per tracker (`tracker` column); adds `existence_probability` (JIPDA), `score` (MHT), and `mode_probability_{quiet,turn,agile}` (IMM) |
+| `metrics.csv` | **Widened** from data-001 §6.9. Per scan per tracker: GOSPA and its three components; per run: trajectory GOSPA, switch count, track count, confirmed false tracks |
 | `metadata.json` | New `plot_model` block: `pd`, `mti_notch_mps`, `pd_notch`, `alpha_range_m`, `alpha_azimuth_rad`, clutter components with their intensities |
 
 `tracks.csv` is causal: the row at scan k is what the tracker reported at scan k, including MHT,
@@ -385,24 +387,26 @@ turn's radius and acceleration are numbers an intern can check (`v/ω`, `v ω`).
 *Rejected:* random-walk truth (no manoeuvre has a cause); recorded tracks (one aircraft in
 `data/flight_coordinates.csv`, no ground truth for turn onsets).
 
-### 4.2 D25 — The plot-level simulator: mechanism in core, scene in pipelines
+### 4.2 D25 — The plot-level simulator: mechanism in the library, scene in a pipeline module
 
 1. **Why plots.** Scenario 003 §13.3 warns that a multi-target scenario built on its detector,
    which cannot resolve two targets in Doppler and whose link budget never misses, "would be
    measuring the wrong things". At plot level Pd, resolution and clutter are each one stated
    parameter, swept independently, with exact truth for every plot. V5 shows the parameters are
    honest against the IQ chain.
-2. **Mechanism in core.**
-   - `core/plots.py` (new): `detect` (Pd with the MTI notch), `resolve` (the merged-plot model of
-     §3.6, union-find over pairs), `measure` (noise of `R`).
-   - `core/clutter.py` (widened; 005 and 008 own its other contents): `ClutterComponent` (region,
+2. **Mechanism in the library.**
+   - `plot_model.py` (new; `plots.py` is now the figures module): `detect` (Pd with the MTI
+     notch), `resolve` (the merged-plot model of §3.6, union-find over pairs), `measure` (noise
+     of `R`).
+   - `clutter.py` (widened; 005 and 008 own its other contents): `ClutterComponent` (region,
      intensity), `poisson_clutter_plots`, `FixedDiscretes`. Clutter is generated in (range,
      azimuth) at intensity per (m·rad).
-3. **Scene in pipelines.** `pipelines/terminal_area.py` holds the traffic of §3.3, the clutter
-   layout of §3.2, the scan loop and the batching. `tracker-001.md` TD9 is the rule.
+3. **Scene in a pipeline module.** `terminal_area.py` holds the traffic of §3.3, the clutter
+   layout of §3.2, the scan loop and the batching. `tracker-001.md` §8's split of mechanism
+   from policy is the rule.
 4. **Plot time and batching.** A rotating radar sees each azimuth at a different time. Each plot
    carries the time the beam centre crossed it, `t = t_scan + az / ω_rot`. `Tracker` takes
-   batches that share one time (`tracker-001.md` §16), so the pipeline cuts each rotation into
+   `Scan`s, each at one time (`tracker-001.md` §7), so the pipeline cuts each rotation into
    16 sectors of 22.5° (0.3 s) and stamps each sector's batch at its centre time.
    - **Error.** The stamp is at most 0.15 s off; at 230 m/s, the fastest aircraft here, that is
      34.5 m, about 1.0 σ_r. For every other aircraft it is under 16.5 m, or 0.5 σ_r.
@@ -414,16 +418,16 @@ turn's radius and acceleration are numbers an intern can check (`v/ω`, `v ω`).
 
 ### 4.3 D26 — `CoordinatedTurn`, with the turn rate in the state
 
-`core/tracking/motion.py` gains `CoordinatedTurn(MotionModel)`: state
+`tracking/models.py` gains `CoordinatedTurn(MotionModel)`: state
 `(x_m, xdot_mps, y_m, ydot_mps, turn_rate_radps)`. It has the exact discretisation of §3.6, its
 analytic Jacobian for the EKF, and the series form below `|ωT| = 1e-6`. Its process noise is
-continuous white acceleration on position (TD5) plus a white turn-rate derivative
+continuous white acceleration on position (`"cwna"`, `tracker-001.md` §4) plus a white turn-rate derivative
 (`turn_rate_noise_density_rad2ps3`). A known-turn-rate variant is not added: with the rate in the
 state, the UKF and EKF estimate it, and a fixed-rate bank is the IMM of a lesser model.
 
 ### 4.4 D27 — `IMM` is an `Estimator` of `Estimator`s
 
-Exactly the extension point of `tracker-001.md` §9, now specified:
+Exactly the extension point of `tracker-001.md` §6, now specified:
 
 - `IMM(modes: Mapping[str, Estimator], transition_generator_per_s: NDArray, …)` satisfies
   `Estimator`. `Tracker` sees one estimator per track. Nothing outside `IMM` changes.
@@ -431,21 +435,24 @@ Exactly the extension point of `tracker-001.md` §9, now specified:
   matrix is rejected, because sector batching (D25) makes intervals unequal.
 - Mixing and output are in the **union layout**, by name. A mode lacking a coordinate is
   augmented at zero mean and a stated standard deviation (3 °/s for `turn_rate_radps`).
-- `innovation_statistics` returns the mode-mixed likelihood, so GNN, JPDA, MHT and gating work
-  unchanged, and the cost of §7.2 is its negative log.
+- `innovate` returns the mode-mixed likelihood (`Innovation.log_likelihood`), so GNN, JPDA, MHT
+  and gating work unchanged, and the cost of `tracker-001.md` §5.1 is its negative log.
 - Mode probabilities are an exposed intermediate quantity (the bar in `CLAUDE.md`) and go to
   `tracks.csv`.
 
-The modes may be KF, EKF or UKF. The test of A2 runs a one-mode IMM over each.
+The modes may be KF, EKF or UKF. The test of A2 runs a one-mode IMM over each. `Estimator` and
+`predict_to` are `tracker-001.md`'s names (§2, §3); today's `tracking/` has no such protocol, its
+one filter being `predict`, `innovate` and `update` over a `TrackBank` in `tracking/filters.py`.
 
 ### 4.5 D28 — JPDA, JPDA\*, Set-JPDA and JIPDA
 
-1. **Interface.** `tracker-001.md` §7.4's extension point, without changing `Tracker`'s loop.
+1. **Interface.** `tracker-001.md` §6's extension point, without changing `Tracker`'s loop.
    - `JointProbabilisticDataAssociation.associate(costs, *, detection_probability,
      clutter_intensity)` takes the (n_tracks, n_measurements) negative-log-likelihood cost
-     matrix (§7.2) and `λ(z)`, shape `(n_measurements,)`.
+     matrix (`tracker-001.md` §5.1) and `λ(z)`, shape `(n_measurements,)`.
    - It fills `AssociationResult.weights`, shape `(n_tracks, n_measurements + 1)`, with the last
-     column for "no measurement".
+     column for "no measurement". (`AssociationResult` is `tracker-001.md`'s name; today an
+     `Associator.assign` returns only the assignment's index arrays.)
    - The correction core applies the combined innovation and the spread term (§3.6). `Estimator`
      gains no method.
 2. **Clusters, then exact events.** Tracks are clustered by shared gated measurements (connected
@@ -457,16 +464,16 @@ The modes may be KF, EKF or UKF. The test of A2 runs a one-mode IMM over each.
    per assignment pattern that does not swap identities [3]; `"set"` is Set-JPDA [4], which
    relabels the posterior mixture to minimise its spread at the cost of track identity inside
    the cluster. V3 shows all three.
-4. **Existence.** JIPDA [5] propagates `existence_probability` on each `Track`
-   (`tracker-001.md` §8.2 keeps it out until a decision uses it; this is that decision). A new
+4. **Existence.** JIPDA [5] propagates `existence_probability` on each `TrackBank` row
+   (`tracker-001.md` §5.4 lists it; this is the decision that brings it in). A new
    `ExistencePolicy(confirm, delete)` in `LifecyclePolicy` replaces M-of-N for JIPDA only. It
    is selected by name, and M-of-N stays the default.
-5. **Clutter intensity.** `core/tracking/clutter_map.py` (new): `ClutterMap`, the forgetting
+5. **Clutter intensity.** `tracking/clutter_map.py` (new): `ClutterMap`, the forgetting
    average of §3.4, with the oracle as a second implementation of the same small protocol.
 
 ### 4.6 D29 — Track-oriented MHT inside the one tracker loop
 
-MHT defers association, and `Tracker` (TD1) decides once per scan. Two designs were weighed:
+MHT defers association, and `Tracker` (`tracker-001.md` §5) decides once per scan. Two designs were weighed:
 
 - *A second tracker loop, as PMBM has.* Rejected: MHT keeps the predict–gate–associate–update
   shape scan by scan, and its track trees are a richer estimator, not a different loop.
@@ -479,7 +486,7 @@ MHT defers association, and `Tracker` (TD1) decides once per scan. Two designs w
     `linear_sum_assignment`. It then tells each tree to branch on the surviving hypotheses and
     prunes by N-scan [9].
   - New trees start from unused measurements, scored from zero, so for MHT the M-of-N initiator
-    is replaced by score confirmation. The selector of `tracker-001.md` §8.3 picks it.
+    is replaced by score confirmation. The selector of `tracker-001.md` §5.4 picks it.
 
 What this costs, recorded rather than hidden:
 
@@ -487,16 +494,16 @@ What this costs, recorded rather than hidden:
   and `tracks.csv` is not rewritten (§3.7).
 - A tree's memory grows as leaves × scans until N-scan pruning bounds it at `k_best` per
   cluster per scan, times `n_scan`. The leaf count is a reported intermediate.
-- `murty_k_best` lives in `core/tracking/association.py` beside GNN, so the k = 1 case is
+- `murty_k_best` lives in `tracking/association.py` beside GNN, so the k = 1 case is
   provably GNN (A4).
 
 ### 4.7 D30 — PMBM is a comparison tracker beside `Tracker`, not inside it
 
-`tracker-001.md` §7.5's argument stands: PMBM's association hypotheses, existence and birth are
+`tracker-001.md` §6's argument stands: PMBM's association hypotheses, existence and birth are
 part of the filter's density, so there is no separate associator, initiator or lifecycle to
-swap. It is therefore **a second tracker**, `PmbmTracker`, in `core/tracking/rfs/pmbm.py`:
+swap. It is therefore **a second tracker**, `PmbmTracker`, in `tracking/rfs/pmbm.py`:
 
-- It **shares** the motion models, measurement models, `innovation_stats`, `murty_k_best`, the
+- It **shares** the motion models, measurement models, `innovate`, `murty_k_best`, the
   clutter intensity and the metrics.
 - It **owns** its Poisson undetected component, Bernoulli tracks and global hypotheses [13].
 - It **reports** tracks in the same `tracks.csv` schema. Its "track" is a Bernoulli with
@@ -510,7 +517,7 @@ is a fair test of association; on V4 the comparison carries that caveat in its r
 `metrics.csv`. GLMB [15] is named, not built: it targets the same posterior with labels, and
 one RFS reference is enough to score against.
 
-`tracker-001.md` TD11 is amended from "PMBM out of scope" to this.
+`tracker-001.md`'s former TD11, "PMBM out of scope", is amended to this (now its §6 and §8).
 
 ### 4.8 Amendments to `spec/structure.md` and `spec/tracker-001.md`
 
@@ -518,11 +525,10 @@ one RFS reference is enough to score against.
 > authoritative. This section records what changed and why.
 
 1. **`structure.md` Part B tree.**
-   - New: `core/plots.py`, `core/tracking/imm.py`, `core/tracking/jpda.py`,
-     `core/tracking/mht.py`, `core/tracking/clutter_map.py`, `core/tracking/metrics.py`,
-     `core/tracking/rfs/pmbm.py`, `pipelines/terminal_area.py`.
-   - Widened: `core/clutter.py` (Poisson clutter plots, 011); `core/tracking/motion.py`
-     (`CoordinatedTurn`).
+   - New: `plot_model.py`, `tracking/imm.py`, `tracking/mht.py`, `tracking/clutter_map.py`,
+     `tracking/rfs/pmbm.py`, `terminal_area.py`.
+   - Widened: `clutter.py` (Poisson clutter plots, 011); `tracking/models.py`
+     (`CoordinatedTurn`); `tracking/association.py` (JPDA); `tracking/metrics.py` (GOSPA).
 2. **`structure.md` scenario table and B.1 rows**, citing [1]–[23].
 3. **`tracker-001.md`.**
    - §1.1: IMM and JPDA move from "extension points" to "specified by scenario 011".
@@ -533,74 +539,74 @@ one RFS reference is enough to score against.
    - §9 points to D26 and D27.
    - §16's "No IMM, coordinated turn, Singer model, JPDA or MHT" becomes "No Singer model;
      IMM, JPDA, MHT and PMBM per scenario 011".
-4. **`scenario-003-tracking.md` §13.3 and §13.4** gain a pointer to this spec as the multi-target
-   and RFS trigger they named.
+4. **`config/scenario_003_tracking.toml`** gains a comment pointing to this spec as the multi-target
+   and RFS trigger scenario 003 named.
 
 ### 4.9 Workstream boundary
 
 This scenario claims:
 
 ```
-scenarios/scenario_011_{manoeuvre,crossing,cst_sweep,terminal_dense,iq_check}.toml
+config/scenario_011_{manoeuvre,crossing,cst_sweep,terminal_dense,iq_check}.toml
 spec/scenario-011-terminal-area-tracking.md
-src/radar_forge/core/plots.py
-src/radar_forge/core/clutter.py               (Poisson clutter plots, fixed discretes only)
-src/radar_forge/core/tracking/motion.py       (CoordinatedTurn only)
-src/radar_forge/core/tracking/{imm,jpda,mht,clutter_map,metrics}.py
-src/radar_forge/core/tracking/association.py  (murty_k_best; AssociationResult.weights)
-src/radar_forge/core/tracking/lifecycle.py    (ExistencePolicy)
-src/radar_forge/core/tracking/rfs/{__init__,pmbm}.py
-src/radar_forge/pipelines/terminal_area.py
+src/radar_forge/plot_model.py
+src/radar_forge/clutter.py                    (Poisson clutter plots, fixed discretes only)
+src/radar_forge/tracking/models.py            (CoordinatedTurn only)
+src/radar_forge/tracking/{imm,mht,clutter_map}.py
+src/radar_forge/tracking/association.py       (JPDA; murty_k_best; AssociationResult.weights)
+src/radar_forge/tracking/metrics.py           (GOSPA, trajectory GOSPA)
+src/radar_forge/tracking/tracker.py           (ExistencePolicy)
+src/radar_forge/tracking/rfs/{__init__,pmbm}.py
+src/radar_forge/terminal_area.py
 notebooks/011_terminal_area_tracking.ipynb
 ```
 
-Consumed, never edited: `core/{geodesy,constants,detection,dsp}.py`, `core/tracking/{kalman,ukf,
-estimation,measurement_models,tracker}.py` beyond what `tracker-001.md` §13 already plans, and
-`pipelines/tracking.py`. `test_scenario_003.py` staying green is a precondition for every commit.
-`tracker-001.md` §13's migration to one `Tracker` must be finished first: this scenario runs on
-`Tracker`, never on `KalmanTracker`.
+Consumed, never edited: `radar.py` (geodesy), `constants.py`, `detection.py`, `dsp.py`,
+`tracking/filters.py` and `pipeline.py`. Scenario 003's `[verify]` tables staying green in
+`tests/test_scenarios.py` is a precondition for every commit. The migration to one `Tracker` is
+done: this scenario runs on `tracking.Tracker`, and `KalmanTracker` no longer exists.
 
 ---
 
 ## 5. Build Sequence
 
 ```
-  1. core/tracking/motion.py     CoordinatedTurn: exact F, Jacobian, series below |wT| = 1e-6
+  1. tracking/models.py          CoordinatedTurn: exact F, Jacobian, series below |wT| = 1e-6
              |
              v
-  2. core/tracking/imm.py        IMM over Estimators; expm(Lambda T); union layout by name
+  2. tracking/imm.py             IMM over Estimators; expm(Lambda T); union layout by name
              |
              v
-  3. core/plots.py, core/clutter.py   detect, resolve, measure; Poisson clutter, discretes
+  3. plot_model.py, clutter.py   detect, resolve, measure; Poisson clutter, discretes
              |
              v
-  4. pipelines/terminal_area.py  closed-form traffic (D24), sector batching (D25), V1-V4 scenes
+  4. terminal_area.py            closed-form traffic (D24), sector batching (D25), V1-V4 scenes
              |
              v
-  5. core/tracking/jpda.py, clutter_map.py   clusters, exact events, JPDA*/Set; JIPDA existence
+  5. tracking/association.py, clutter_map.py   clusters, exact events, JPDA*/Set; JIPDA existence
              |
              v
-  6. core/tracking/association.py, mht.py    murty_k_best; TrackTree; N-scan pruning
+  6. tracking/association.py, mht.py    murty_k_best; TrackTree; N-scan pruning
              |
              v
-  7. core/tracking/metrics.py    GOSPA, trajectory GOSPA, swaps, coalescence ratio
+  7. tracking/metrics.py         GOSPA, trajectory GOSPA, swaps, coalescence ratio
              |
              v
-  8. core/tracking/rfs/pmbm.py   PMBM beside Tracker, sharing models and metrics
+  8. tracking/rfs/pmbm.py        PMBM beside Tracker, sharing models and metrics
              |
              v
-  9. V5: 001 S3 chain with placed pairs; fit alpha_r; scenarios/*.toml; notebook
+  9. V5: 001 S3 chain with placed pairs; fit alpha_r; config/*.toml; notebook
 ```
 
 | Step | Module | Notes |
 | :--- | :--- | :--- |
-| 1 | `motion.py` *(widen)* | Lands with A1 and the Jacobian check of `tracker-001.md` AC6. |
+| 1 | `models.py` *(widen)* | Lands with A1 and the Jacobian check of `tracker-001.md` §7. |
 | 2 | `imm.py` *(new)* | Lands with A2 and A5 on V1 before any multi-target code. |
-| 3 | `plots.py` *(new)*, `clutter.py` *(widen)* | Lands with A6 and A7; no tracker needed. |
+| 3 | `plot_model.py` *(new)*, `clutter.py` *(widen)* | Lands with A6 and A7; no tracker needed. |
 | 4 | `terminal_area.py` *(new)* | The trajectories of §3.3 regenerate the §2.1 table (A8). |
-| 5 | `jpda.py`, `clutter_map.py` *(new)* | A3 (reductions to KF and PDA) before the scenario. |
+| 5 | `association.py` *(widen: JPDA)*, `clutter_map.py` *(new)* | A3 (reductions to KF and PDA) before the scenario. |
 | 6 | `association.py` *(widen)*, `mht.py` *(new)* | A4 (MHT k = 1, N = 1 is GNN) first. |
-| 7 | `metrics.py` *(new)* | A9 (GOSPA hand-computed cases) first. |
+| 7 | `metrics.py` *(widen)* | A9 (GOSPA hand-computed cases) first. |
 | 8 | `rfs/pmbm.py` *(new)* | A10 (one target, no clutter, Pd = 1: the KF). |
 | 9 | V5, TOMLs, notebook | V3's curves are the notebook's; the suite checks two points (A16). |
 
@@ -610,9 +616,9 @@ No new dependency: `scipy.linalg.expm` and `scipy.optimize.linear_sum_assignment
 
 ## 6. Acceptance Criteria
 
-Unit criteria live in `tests/core/tracking/test_{motion,imm,jpda,mht,metrics,pmbm}.py` and
-`tests/core/test_plots.py`; scenario criteria in `tests/pipelines/test_scenario_011.py`. Trials are
-seeded plot-level draws.
+Unit criteria live in `tests/tracking/test_{models,imm,association,mht,metrics,pmbm}.py` and
+`tests/test_plot_model.py`; scenario criteria in the `[verify]` tables of
+`config/scenario_011_*.toml`, run by `tests/test_scenarios.py`. Trials are seeded plot-level draws.
 
 | # | Criterion | Bound | Justification | Applies to |
 | :--- | :--- | :--- | :--- | :--- |
@@ -623,7 +629,7 @@ seeded plot-level draws.
 | A5 | **IMM is consistent and switches.** V1, A4's turn, 200 trials: time-averaged NEES of IMM inside its 95 % chi-square interval; M2's probability exceeds 0.5 within 3 scans of turn onset at T = 4.8 s in ≥ 90 % of trials | as stated | Three scans is 391 m of departure, 8 innovation σ (§1). The 90 % to confirm at implementation | V1, `slow` |
 | A6 | **Clutter rate.** Plot counts in each component of §3.2 inside the 99 % Poisson interval of the stated intensity × volume, over 125 scans | 99 % | Catches a per-m² versus per-m·rad error | unit |
 | A7 | **Merge model.** Over 10 000 seeded pairs at each `d` ∈ {0.5, 1, 2}, the merged fraction is within the 99.9 % Clopper–Pearson interval of `exp(−d²/2)` | 99.9 % | The model is what V3 sweeps | unit |
-| A8 | **Scene is the scene.** The §2.1 encounter table and the §3.1 notch fractions regenerate from `pipelines/terminal_area.py` | min `d` to 0.01; times to 0.1 s; fractions to 0.001 | The spec's numbers must be the code's | V4 |
+| A8 | **Scene is the scene.** The §2.1 encounter table and the §3.1 notch fractions regenerate from `terminal_area.py` | min `d` to 0.01; times to 0.1 s; fractions to 0.001 | The spec's numbers must be the code's | V4 |
 | A9 | **GOSPA by hand.** Three hand-computed cases (one missed, one false, one localisation error) | exact | Catches an α or c^p slip | unit |
 | A10 | **PMBM reduces to the KF.** One target, Pd = 1, no clutter, no birth after scan 0 | `rtol = 1e-9` | The single-Bernoulli case | unit |
 | A11 | **IMM's benefit grows with revisit.** V1, position RMSE through A4's turns: IMM < min(CV-quiet, CV-agile) at T = 4.8 s, and the ratio IMM / best-CV decreases from T = 1.2 to 4.8 | strict | The teaching point (§1 item 1) | V1, `slow` |

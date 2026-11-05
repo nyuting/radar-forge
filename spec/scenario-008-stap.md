@@ -53,7 +53,7 @@ Three reasons to make this the next multi-channel slice:
 | Guerci & Baranoski 2006 (DARPA KASSPER) [13]; Stoica, Li, Zhu & Guerci 2008 [14] | Knowledge-aided STAP: a prior covariance from terrain and platform data, blended with the sample covariance | `knowledge_aided_covariance` | paper, written from equations | current |
 | Sun, Meng, Wang & Wang 2011 [17]; Yardibi et al. 2010 (IAA) [18] | Sparse-recovery STAP: estimate the angle–Doppler clutter spectrum from a few snapshots, rebuild the covariance | `sparse_recovery_covariance`, using 006's IAA solver | paper, written from equations | current |
 | Borsari 1998 [19]; Himed, Zhang & Hajjari 2002 [20] | Doppler warping and angle–Doppler compensation for range-dependent clutter | `doppler_warp`, `angle_doppler_compensation` (R3) | paper, written from equations | current (compensation) |
-| Billingsley 2002 [21] | MIT LL land-clutter measurements; the exponential intrinsic-clutter-motion spectrum | the optional ICM taper in `core/clutter.py` | book, written from equations | current (clutter realism) |
+| Billingsley 2002 [21] | MIT LL land-clutter measurements; the exponential intrinsic-clutter-motion spectrum | the optional ICM taper in `clutter.py` | book, written from equations | current (clutter realism) |
 | Babu, Torres & Melvin 1996 [24]; Himed 1999 [25] | MCARM: Rome Laboratory's L-band multichannel airborne measurement programme, and the AFRL report that analyses STAP on its data | R5's radar parameters, as tabulated in RASPNet App. B Table 2 [1], which cites both | papers/report, written from the published parameters; no MCARM data used | reference radar (parameters only) |
 | **RASPNet** [1] (data on AFRL SDMS) | A benchmark **dataset**: 100 CONUS scenarios × 10 000 RFView clutter realisations, over 16 TB, CC BY 4.0 | The radar parameters (§3.1); the optional loader (D19); R4 | dataset CC BY 4.0; example code (`shyamven/RASPNet`) has no LICENSE file, so it is never vendored | benchmark data |
 | Venkatasubramanian et al. 2022, 2024 [22, 23] | The RASPNet authors' data-driven localisation after adaptive detection (regression CNN on NAMF heatmaps) | A learned comparison, behind the `ml` extra only | paper, written from equations | current (learned), optional |
@@ -110,13 +110,13 @@ the cell under test. That is R3.
 The chain, end to end:
 
 ```
-  scenarios/scenario_008_stap_*.toml              (R4: $RASPNET_DIR/CLUTTER/num{i}_.../real{j}.mat)
+  config/scenario_008_stap_*.toml                 (R4: $RASPNET_DIR/CLUTTER/num{i}_.../real{j}.mat)
               |                                                     |
               v                                                     v
-  core/clutter.py   ward_clutter_patches -> ward_clutter_covariance   pipelines/raspnet.py
+  clutter.py        ward_clutter_patches -> ward_clutter_covariance   raspnet.py
               |      (exposes per-patch theta_s, omega, CNR)          load_raspnet_clutter
               v                                                     |
-  core/clutter.py   synthesize_clutter (per range bin, CN(0, R_c))    |  (L, Lambda, G) -> cube
+  clutter.py        synthesize_clutter (per range bin, CN(0, R_c))    |  (L, Lambda, G) -> cube
               |  + thermal_noise + injected targets (array/ steering) |
               v                                                     v
         data_rfst  (n_pulses, n_range_bins, n_rx)  complex128   <-- the SAME array either way
@@ -131,7 +131,7 @@ The chain, end to end:
   array/adaptive.py apply_weights (007, D16) per Doppler bin -> data_stap_rv (n_doppler_bins, n_range_bins)
               |
               v
-  core/detection.py  cfar_detect_2d   (UNCHANGED)  ->  detections, SINR-loss curve, eigenspectrum
+  detection.py       cfar_detect_2d   (UNCHANGED)  ->  detections, SINR-loss curve, eigenspectrum
 ```
 
 ---
@@ -211,7 +211,7 @@ proportionally higher PRF reproduces every table, range ambiguity aside.
 | β | 0 | 1 and 1.3 | 1 | 0 (static, per [1]) | **0.92314**, from MCARM's own speed and PRF |
 | CNR per element per pulse | 20 dB | 40 dB | 40 dB | as recorded | 40 dB (chosen; Table 2 gives none) |
 | Cell under test | 20 km | 10 km slant (el −5.7392°) | 10 km | user's choice | the Table 2 aim point: 105.886 km slant, depression 1.663° |
-| Clutter source | `core/clutter.py` Ward model | Ward model | Ward model, per range ring | RFView, via `pipelines/raspnet.py` | Ward model |
+| Clutter source | `clutter.py` Ward model | Ward model | Ward model, per range ring | RFView, via `raspnet.py` | Ward model |
 | Tests | fast | fast; RMB/reduced-rank Monte Carlo `slow` | `slow` | **skipped unless `RASPNET_DIR` is set** | `slow` (NM = 2048) |
 
 **Why N = M = 16 for R2.** It matches RASPNet's channel count and the shared 16-element ground
@@ -315,7 +315,7 @@ because no public download location was verified.
 | :--- | :--- |
 | Cube | `data_rfst`, shape `(n_pulses, n_range_bins, n_rx)`, complex128 (style.md §3.1) |
 | Spatial steering | scenario-006 D13: `a_n = exp(+j2π p_n·u/λ)`; for 006's centred ULA `a_n = exp(+j2π θ_s (n − (n_rx−1)/2))`, `θ_s = (d/λ)·cos el·sin az`; unnormalised. The centring is a common phase and changes no SINR |
-| Temporal steering | `b_m = exp(+j2π ω m)`, `ω = f_d·T_r`, closing-positive `f_d` — the same sign as `core/signal.py`, where a closing target's carrier phase advances pulse to pulse |
+| Temporal steering | `b_m = exp(+j2π ω m)`, `ω = f_d·T_r`, `f_d = −Ṙ_b/λ` positive for a closing target (`propagation.doppler_shift_hz`) — the same sign as `signal.py`, where a closing target's carrier phase advances pulse to pulse |
 | Space-time snapshot (D17) | `x = data_rfst[:, g, :].reshape(-1)`, C order, index `m·n_rx + n`; steering `v = b(ω) ⊗ a(θ_s)`, length `n_rx·n_pulses` |
 | Clutter covariance | `R = σ²( Σ_k ξ_k v_k v_kᴴ + I )`, patches k on the iso-range ring; `ξ_k` the patch CNR from transmit gain, element pattern and constant-γ reflectivity [2] |
 | Ridge slope | `β = 2 v_p T_r / d`; side-looking `ω_k = β θ_s,k` |
@@ -367,7 +367,7 @@ and a perfectly invertible covariance, and the filter quietly nulls the wrong ri
   `e^{+j2π f_d T_r}` (§3.5). RASPNet's clutter is static, so the sign cannot show in R4's
   clutter; it shows on injected targets, which use radar-forge's convention throughout.
 
-### 4.2 D18 — STAP lives in `array/stap.py`; the Ward clutter model in `core/clutter.py`
+### 4.2 D18 — STAP lives in `array/stap.py`; the Ward clutter model in `clutter.py`
 
 `array/stap.py` holds the steering and snapshot helpers, training-set selection, covariance
 estimators (sample, KA, sparse-recovery), weight solvers (optimum, SMI, JDL, EFA, PC, MWF), the
@@ -382,7 +382,7 @@ MWF basis, KA prior and α). `sample_covariance`, `training_snapshots` and `appl
 007's and are reused, never duplicated; STAP adds only `space_time_snapshot` in front of them.
 No solver applies its weights.
 
-`core/clutter.py` gains the Ward discrete-patch model, the physics of the scene rather than a
+`clutter.py` gains the Ward discrete-patch model, the physics of the scene rather than a
 processing step:
 
 - `ward_clutter_patches(...)` → per-patch `azimuth_rad`, `spatial_frequency`, `doppler_normalized`,
@@ -399,7 +399,7 @@ beamforming.
 
 ### 4.3 D19 — RASPNet is optional; its data is never committed; its test skips without it
 
-- `pipelines/raspnet.py` exposes `load_raspnet_clutter(path, *, realization=None)` →
+- `raspnet.py` exposes `load_raspnet_clutter(path, *, realization=None)` →
   `data_rfst (n_pulses, n_range_bins, n_rx)` plus a `RaspnetScenario` record (index, latitude and
   longitude parsed from the `num{i}_lat{..}_lon{..}` folder name [1, App. E.1]).
 - **File format.** `real{j}.mat` holds `X_clut` of size `L × Λ × G` [1, App. E.1]. The authors'
@@ -415,7 +415,7 @@ beamforming.
   US addresses only. The scenario documents both and assumes neither.
 - **Never committed.** `RASPNET_DIR` points at the user's copy. `.gitignore` is unchanged
   because nothing is ever written inside the repo; the test reads only.
-- **Skipped when absent.** `tests/pipelines/test_scenario_008_raspnet.py` begins with
+- **Skipped when absent.** `tests/test_raspnet.py` begins with
   `pytest.skip` unless `RASPNET_DIR` is set and contains `CLUTTER/`. It carries a new
   `dataset` marker (registered in `pyproject.toml`), so `make check` stays green offline.
 - **Two training modes, labelled.** `training="range"` (operational: neighbouring bins of one
@@ -453,15 +453,15 @@ number, the SINR-loss curve, and for KA the prior and α.
 > **Applied.** These amendments are folded into `spec/structure.md`; it is the authoritative
 > tree and decision list. This section records what changed and why.
 
-1. **Part B tree.** Under `core/`: `clutter.py  # land/sea clutter; least-squares leakage
+1. **Part B tree.** At the top level: `clutter.py  # land/sea clutter; least-squares leakage
    cancellation (005); Ward clutter-patch model, ICM taper (008)`. Under `array/`: `stap.py  # space-time snapshot (D17),
    optimum/SMI/JDL/EFA/PC/MWF, KA and sparse-recovery covariance, DW/ADC, SINR loss, Brennan
-   rank`. Under `pipelines/`: `raspnet.py  # optional RASPNet loader (D19); reads, never writes`.
+   rank`. At the top level: `raspnet.py  # optional RASPNet loader (D19); reads, never writes`.
 2. **B.1 rows.** `array/stap.py` | Ward TR-1015; Brennan & Reed 1973; Reed–Mallett–Brennan 1974;
    Wang & Cai 1994 (JDL); DiPietro 1992 (EFA); Haimovich 1996 (PC); Goldstein–Reed–Scharf 1998
    (MWF); Guerci & Baranoski 2006, Stoica et al. 2008 (KA); Sun et al. 2011 (SR); Borsari 1998,
-   Himed et al. 2002 (DW, ADC). `core/clutter.py` (append) | Ward TR-1015 clutter-patch model;
-   Billingsley 2002 ICM. `pipelines/raspnet.py` | RASPNet dataset conventions (file layout and
+   Himed et al. 2002 (DW, ADC). `clutter.py` (append) | Ward TR-1015 clutter-patch model;
+   Billingsley 2002 ICM. `raspnet.py` | RASPNet dataset conventions (file layout and
    `X_clut` shape).
 3. **Decisions D17, D18, D19**, as §4.1–§4.3.
 4. **§A.7 RASPNet, replace the opening and the table** with: "RASPNet (Venkatasubramanian,
@@ -474,7 +474,7 @@ number, the SINR-loss curve, and for KA the prior and α.
    `CLUTTER/num{i}_lat_lon/real{j}.mat` holds `X_clut`, `L × Λ × G`; `EXAMPLES` and `CVNN` hold the
    processed localisation sets. The GitHub repository holds only example notebooks and has no
    LICENSE file." Keep the "what radar-forge borrows" paragraph, adding: "and, through
-   `pipelines/raspnet.py`, the clutter files themselves as an optional STAP test input (scenario
+   `raspnet.py`, the clutter files themselves as an optional STAP test input (scenario
    008 D19)." In §A.14, the RASPNet row becomes: `dataset CC BY 4.0; code none declared` |
    `no (data via SDMS)` | `no — dataset read at runtime, code never vendored`.
 5. **Slice table**: `Scenario 8 | scenario-008-stap.md | airborne clutter ridge → STAP (optimum,
@@ -486,22 +486,21 @@ number, the SINR-loss curve, and for KA the prior and α.
 This scenario claims:
 
 ```
-scenarios/scenario_008_stap_{raspnet_static,sidelooking_ridge,forward_looking,raspnet_data,
-                             mcarm_sidelooking}.toml
+config/scenario_008_stap_{raspnet_static,sidelooking_ridge,forward_looking,raspnet_data,
+                          mcarm_sidelooking}.toml   (acceptance in their [verify] tables)
 spec/scenario-008-stap.md, a row in the Scenarios table of docs/README.md
 src/radar_forge/array/stap.py                      (new)
-src/radar_forge/core/clutter.py                    (Ward model half only; 005 owns the leakage cancellers)
-src/radar_forge/pipelines/raspnet.py               (new)
-tests/array/test_stap.py, tests/core/test_clutter_ward.py
-tests/pipelines/test_scenario_008.py, tests/pipelines/test_scenario_008_raspnet.py
+src/radar_forge/clutter.py                         (Ward model half only; 005 owns the leakage cancellers)
+src/radar_forge/raspnet.py                         (new)
+tests/array/test_stap.py, tests/test_clutter_ward.py, tests/test_raspnet.py
 ```
 
-Consumed, never edited: `core/dsp.py` (`doppler_fft`, `doppler_bin_centers_mps`, `range_fft`),
-`core/windows.py` (`taper`, `coherent_gain_linear`), `core/detection.py` (`cfar_detect_2d`,
-`cluster_detections`), `core/signal.py` (`thermal_noise`), `core/constants.py`. Consumed from
+Consumed, never edited: `dsp.py` (`doppler_fft`, `doppler_bin_centers_mps`, `range_fft`,
+`window`, `coherent_gain_linear`), `detection.py` (`cfar_detect_2d`, `cluster_detections`),
+`signal.py` (`thermal_noise`), `constants.py`. Consumed from
 006: `array/geometry.py`, `array/beamforming.py` steering vectors; from 007: the D16 weight
 convention in `array/adaptive.py` (diagonal loading is reused from there, not reimplemented).
-`pipelines/scenarios.py` is widened (an `[platform]` table: `platform_speed_mps`,
+`scenario.py` is widened (an `[platform]` table: `platform_speed_mps`,
 `platform_altitude_m`, `array_orientation`), and its existing variants must not shift.
 
 ---
@@ -509,7 +508,7 @@ convention in `array/adaptive.py` (diagonal loading is reused from there, not re
 ## 5. Build Sequence
 
 ```
-  1. core/clutter.py     ward_clutter_patches -> ward_clutter_covariance -> synthesize_clutter
+  1. clutter.py          ward_clutter_patches -> ward_clutter_covariance -> synthesize_clutter
            |               (test: rank vs Brennan first; nothing else is meaningful before it)
            v
   2. array/stap.py       space_time_steering_vector, space_time_snapshot  (D17 identity test)
@@ -530,31 +529,31 @@ convention in `array/adaptive.py` (diagonal loading is reused from there, not re
   7. array/stap.py       doppler_warp, angle_doppler_compensation        (R3)
            |
            v
-  8. pipelines/scenarios.py  [platform] table; R1-R3 and R5 TOMLs; apply_weights -> CFAR
+  8. scenario.py, pipeline.py  [platform] table; R1-R3 and R5 TOMLs; apply_weights -> CFAR
            |
            v
-  9. pipelines/raspnet.py    loader, both MAT paths; R4 TOML; skip-if-absent test
+  9. raspnet.py          loader, both MAT paths; R4 TOML; skip-if-absent test
 ```
 
 | Step | Module | Notes |
 | :--- | :--- | :--- |
-| 1 | `core/clutter.py` *(edit)* | Ward model; constant-γ reflectivity; element pattern `cos²` front, −30 dB backlobe; transmit array factor of the full aperture. Per-patch intermediates exposed. |
+| 1 | `clutter.py` *(edit)* | Ward model; constant-γ reflectivity; element pattern `cos²` front, −30 dB backlobe; transmit array factor of the full aperture. Per-patch intermediates exposed. |
 | 2 | `array/stap.py` *(new)* | D17. Spatial steering delegated to `array/beamforming.py` (006 D13). |
 | 3 | `array/stap.py` | `sinr_loss_linear` takes weights, steering, covariance; returns linear. |
 | 4 | `array/stap.py` | Training via 007's `training_snapshots` (guard cells excluded), fed D17 snapshots. |
-| 5 | `array/stap.py` | JDL uses `core/dsp.py`'s Doppler conventions for its beam centres. |
+| 5 | `array/stap.py` | JDL uses `dsp.py`'s Doppler conventions for its beam centres. |
 | 6 | `array/stap.py` | SR reuses 006's IAA solver; KA takes the prior as an argument, never builds it silently. |
 | 7 | `array/stap.py` | The compensations return the transform `D_k`, so it can be inspected and inverted. |
-| 8 | `pipelines/scenarios.py` *(widen)* | `[platform]` absent → today's behaviour. |
-| 9 | `pipelines/raspnet.py` *(new)* | No write path. |
+| 8 | `scenario.py`, `pipeline.py` *(widen)* | `[platform]` absent → today's behaviour. |
+| 9 | `raspnet.py` *(new)* | No write path. |
 
 ---
 
 ## 6. Acceptance Criteria
 
-`tests/pipelines/test_scenario_008.py` (R1–R3, R5) and `tests/pipelines/test_scenario_008_raspnet.py`
-(R4). Unit tests for each function live in `tests/array/test_stap.py` and
-`tests/core/test_clutter_ward.py`. Clairvoyant quantities are deterministic linear algebra, so
+The `[verify]` tables of the R1–R3 and R5 TOMLs in `config/`, run by `tests/test_scenarios.py`,
+and `tests/test_raspnet.py` (R4). Unit tests for each function live in `tests/array/test_stap.py`
+and `tests/test_clutter_ward.py`. Clairvoyant quantities are deterministic linear algebra, so
 their bounds are tight; Monte Carlo bounds are set from the exact sampling distribution, never
 loosened.
 

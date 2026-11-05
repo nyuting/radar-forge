@@ -3,7 +3,7 @@
 ## User guide
 
 New to the library? Start with the [**user guide**](user-guide/README.md). It explains each stage
-of `radar_forge.core`, from geometry to tracks: what it does, a table of its quantities and
+of the radar chain, from geometry to tracks: what it does, a table of its quantities and
 equations with worked values, an example to run, and a scenario to try it in.
 
 1. [The radar and its link budget](user-guide/01-radar-and-link-budget.md)
@@ -31,9 +31,9 @@ The rules, and the check that enforces each, are summarised in [CLAUDE.md](../CL
 
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — setup, the development loop, what each hook does.
 - [CLAUDE.md](../CLAUDE.md) — the same conventions, condensed for AI agents.
-- [`src/radar_forge/core/radar_equation.py`](../src/radar_forge/core/radar_equation.py) — the
-  worked example that demonstrates every convention at once.
-- [`src/radar_forge/core/constants.py`](../src/radar_forge/core/constants.py) — every physical
+- [`src/radar_forge/propagation.py`](../src/radar_forge/propagation.py) — the style exemplar:
+  its `received_power_w` is the radar equation, and it shows every convention at once.
+- [`src/radar_forge/constants.py`](../src/radar_forge/constants.py) — every physical
   constant, defined once. Import from here; never redefine, never hardcode.
 
 ## Design
@@ -44,14 +44,16 @@ The rules, and the check that enforces each, are summarised in [CLAUDE.md](../CL
 
 ## Scenarios
 
-Each scenario has a specification in `spec/` and, once it runs, a TOML file in `scenarios/`.
-Run one with `uv run python scripts/run_scenario.py scenarios/<file>.toml --out out/<name>`.
+A scenario is specified in `spec/` until it is built; then its TOML in `config/` carries its
+acceptance numbers in a `[verify]` table and its spec is deleted. Run one with
+`uv run python scripts/run_scenario.py config/<file>.toml --frames 3`, which writes
+`runs/<file>/` and exits 1 if a check fails.
 
 | Scenario | TOML | Status |
 | :--- | :--- | :--- |
-| [001, X-band](../spec/scenario-001-xband.md): trajectory to IQ to range-Doppler map, three ambiguity variants | `scenario_001_fmcw_low_prf.toml`, `scenario_001_fmcw_dual_prf.toml`, `scenario_001_pulsed_medium_prf.toml` | Runs |
-| [002, bistatic](../spec/scenario-002-bistatic.md): the Raleigh-Durham transmitter received at the Duke receiver | `scenario_002_bistatic_xband.toml`, `scenario_002_bistatic_sband.toml` | Runs |
-| [003, tracking](../spec/scenario-003-tracking.md): CFAR, association and tracking on 001 | `scenario_003_tracking.toml`, `scenario_003_tracking_dual_prf.toml`, `scenario_003_ukf_*.toml` | Runs |
+| 001, X-band: trajectory to IQ to range-Doppler map, three ambiguity variants | `scenario_001_fmcw_low_prf.toml`, `scenario_001_fmcw_dual_prf.toml`, `scenario_001_pulsed_medium_prf.toml` | Runs; checked by `[verify]` |
+| 002, bistatic: the Raleigh-Durham transmitter received at the Duke receiver | `scenario_002_bistatic_xband.toml`, `scenario_002_bistatic_sband.toml` | Runs; checked by `[verify]` |
+| 003, tracking: CFAR, association and tracking on 001 | `scenario_003_tracking.toml`, `scenario_003_tracking_dual_prf.toml`, `scenario_003_ukf_*.toml` | Runs; checked by `[verify]` |
 | [004, keystone](../spec/scenario-004-keystone.md): fast sounding rocket | none | Specified, not built |
 | [005, leakage cancellation](../spec/scenario-005-leakage-cancellation.md): continuous-wave leakage | none | Specified, not built |
 | [006, parallel-approach DoA](../spec/scenario-006-parallel-approach-doa.md): two aircraft in one cell | none | Specified, not built |

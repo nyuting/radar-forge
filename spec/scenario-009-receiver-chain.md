@@ -4,7 +4,7 @@
 
 **Status: specified, not implemented.**
 
-Scenarios 001–003 synthesise complex baseband directly: `core/signal.py` writes the samples a
+Scenarios 001–003 synthesise complex baseband directly: `signal.py` writes the samples a
 perfect quadrature receiver would deliver, at the output rate, with the noise power `k·T0·F·fs`
 of an ideal brick-wall filter assumed rather than produced. That is the right idealisation for teaching range and Doppler. It
 hides everything that happens between the antenna port and the cube, though, and a multi-channel
@@ -25,7 +25,7 @@ This document specifies the **receive chain as a vertical slice**, on the 16-cha
    slice shows its Doppler skirt against the closed form, and what calibration can and cannot remove.
 
 The direct-baseband path is **not changed**. The front end is an optional stage selected by the
-presence of a `[front_end]` table, exactly as `[transmitter_site]` selects bistatic siting in
+presence of a `[front_end]` table, exactly as `[site.rx]` selects bistatic siting in
 scenario 002. Absent, every cube is bit-identical to today's (§6, A1).
 
 | Section | What it fixes |
@@ -64,7 +64,7 @@ scenario-006 D13. The slice adds what sits between each element and the cube:
          |
          v
   [ RF/IF analog ] -- group delay tau_n, complex gain g_n, per-pulse LO phase   (array/impairments.py)
-         |                                   ^ common LO phase noise phi(t)     (core/signal.py)
+         |                                   ^ common LO phase noise phi(t)     (signal.py)
          |                                   | pilot injected here, one source split to all channels
          +------------------- digital_if ---------------------+------- analog_iq -------+
          v                                                    |                         v
@@ -76,7 +76,7 @@ scenario-006 D13. The slice adds what sits between each element and the cube:
   NCO: x * sqrt(2) exp(-j 2 pi f_IF n / fs)  complex, 20 MHz  |                         |
          |                                                    |                         |
          v                                                    |                         |
-  lowpass + decimate by 8, polyphase  (core/frontend.py)      |                         |
+  lowpass + decimate by 8, polyphase  (frontend.py)           |                         |
          |   complex, 2.5 MHz                                 |                         |
          v                                                    |                         |
   drop 9-sample group delay, re-centre +B/2                   |                         |
@@ -85,7 +85,7 @@ scenario-006 D13. The slice adds what sits between each element and the cube:
   cube (n_pulses, n_samples, n_rx) = (256, 100, 16), complex, 2.5 MHz  -- identical layout to today
          |
          v
-  core/dsp.py  matched_filter -> range_doppler_map        <-- UNCHANGED
+  dsp.py  matched_filter -> doppler_fft (pipeline.range_doppler_product)   <-- UNCHANGED
   array/calibration.py  pilot -> ChannelCalibration       (parameters only, D21)
   array/beamforming.py  (scenario 006) consumes the calibration
 ```
@@ -114,7 +114,7 @@ IQ-imbalance model. Which path a variant uses is a TOML choice (§3.4).
 | Site, target track | Duke Receiver; `data/flight_coordinates.csv` | Scenario-001 §3.1, unchanged |
 | Array | 16-element ULA, `n_rx = 16`, spacing λ/2 = **15.296 mm** | Shared ground array, scenario-006 D13 |
 | Steering vector | `a_n = exp(+j·2π·(p_n·u)/λ)`, unnormalised, `y = wᴴx` | Scenario-006 D13 |
-| Beam taper | Taylor [11], 35 dB, n̄ = 6 (`core/windows.py` `taper("taylor", 16, sidelobe_db=35.0)`) | Ideal PSL **−34.73 dB**, HPBW **8.52°**, first null **11.99°** |
+| Beam taper | Taylor [11], 35 dB, n̄ = 6 (`dsp.py` `window("taylor", 16, sidelobe_level_db=-35.0)`) | Ideal PSL **−34.73 dB**, HPBW **8.52°**, first null **11.99°** |
 | `carrier_frequency_hz` | 9.8 GHz, λ = **30.591 mm** | Scenario-001 |
 | Waveform | Scenario-001 **S2**: LFM pulse, `bandwidth_hz` 2.0 MHz, `chirp_duration_s` 10 µs, `prf_hz` 25 kHz | Scenario-001 §2.1 |
 | Output `sample_rate_hz` | 2.5 MHz, 100 samples/PRI, `n_pulses` 256 | Scenario-001 S2 |
@@ -245,7 +245,8 @@ re-estimation on the drifted data gives a median of 48.71 dB.
 
 ### 3.5 Mathematical contracts
 
-Scenario-001 §3.5 holds unchanged for the cube, the RD map and the sign conventions.
+Scenario-001 §3.5 holds unchanged for the cube and the RD map; the sign convention is data-001 §5's
+(rate positive receding, Doppler = −rate/λ).
 
 | Contract | Statement |
 | :--- | :--- |
@@ -287,7 +288,7 @@ As scenario-001 §3.6, with a 16-channel cube, plus:
 
 ## 4. Core Decisions
 
-### 4.1 D20 — front-end chain order and sample-rate plumbing live in `core/frontend.py`
+### 4.1 D20 — front-end chain order and sample-rate plumbing live in `frontend.py`
 
 The chain order is fixed and is the order of §2's table: synthesise at the ADC rate → impairments
 (analog side) → up-convert → noise → interferers → ADC → NCO → polyphase lowpass-decimate →
@@ -302,13 +303,13 @@ Rates are derived, never repeated. `adc_sample_rate_hz` is computed from the bur
 
 The ideal receiver path is untouched:
 
-1. With no `[front_end]` table, `pipelines/scenarios.py` calls today's generators with today's
+1. With no `[front_end]` table, `pipeline.py` calls today's generators with today's
    arguments, so 001–003 are bit-identical by construction (A1).
 2. The front end calls the **same** `pulsed_baseband` with
    `dataclasses.replace(radar.receiver, sample_rate_hz=adc_sample_rate_hz)` and `rng=None`. It adds
    its own noise from a child generator (`rng.spawn(1)`), so the parent stream is never consumed
    differently. No second generator is written.
-3. The output has the cube's exact shape and rate, so `core/dsp.py` consumes it unchanged.
+3. The output has the cube's exact shape and rate, so `dsp.py` consumes it unchanged.
 
 Why digital IF is the default path, and what that teaches: an NCO is exact, so the
 negative-frequency copy of a real IF signal is suppressed by the stopband (≥ 84.8 dB) and there is
@@ -332,7 +333,7 @@ alone.
 `ChannelCalibration` and never calibrates silently. This is the same separation as 010's D23,
 and it is what lets A10 score a calibration by its pattern without touching the data.
 
-### 4.3 Phase noise lives in `core/signal.py`, as an argument
+### 4.3 Phase noise lives in `signal.py`, as an argument
 
 `lo_phase_noise_rad(n_samples_total, sample_rate_hz, offset_hz, ssb_dbc_per_hz, *, rng)` returns
 a sampled phase process. `pulsed_baseband` and `fmcw_deramp_baseband` gain an optional keyword
@@ -374,10 +375,10 @@ to the same two modules, and none is needed for the three teaching points.
 > **Applied.** These amendments are folded into `spec/structure.md`; it is the authoritative
 > tree and decision list. This section records what changed and why.
 
-1. **Part B tree:** add `core/frontend.py` (real-IF front end, NCO/DDC, polyphase decimation and
+1. **Part B tree:** add `frontend.py` (real-IF front end, NCO/DDC, polyphase decimation and
    channeliser) and `array/calibration.py`. Widen the `array/impairments.py` comment to name the
-   per-channel models, and the `core/signal.py` comment to "range-correlated LO phase noise".
-2. **B.1 rows** for `core/frontend.py`, `array/impairments.py` (per-channel) and
+   per-channel models, and the `signal.py` comment to "range-correlated LO phase noise".
+2. **B.1 rows** for `frontend.py`, `array/impairments.py` (per-channel) and
    `array/calibration.py` (pilot, IQ).
 3. **Decisions D20 and D21**, as §4.1–§4.2.
 
@@ -386,38 +387,37 @@ to the same two modules, and none is needed for the three teaching points.
 This scenario claims, and another workstream should not plan:
 
 ```
-scenarios/scenario_009_{frontend_ddc,channel_mismatch,iq_phase_noise}.toml
+config/scenario_009_{frontend_ddc,channel_mismatch,iq_phase_noise}.toml   (acceptance in [verify])
 spec/scenario-009-receiver-chain.md
-src/radar_forge/core/frontend.py                         (new)
+src/radar_forge/frontend.py                              (new)
 src/radar_forge/array/impairments.py                     (new; per-channel half)
 src/radar_forge/array/calibration.py                     (new; pilot and IQ half)
-src/radar_forge/core/signal.py        (lo_phase_noise_rad; optional lo_phase_rad keyword)
-src/radar_forge/pipelines/scenarios.py ([front_end], [impairments], [calibration] tables)
-tests/core/test_frontend.py, tests/array/test_impairments.py, tests/array/test_calibration.py
-tests/pipelines/test_scenario_009.py
+src/radar_forge/signal.py             (lo_phase_noise_rad; optional lo_phase_rad keyword)
+src/radar_forge/scenario.py, pipeline.py ([front_end], [impairments], [calibration] tables)
+tests/test_frontend.py, tests/array/test_impairments.py, tests/array/test_calibration.py
 ```
 
 **Mutual coupling and array-position errors belong to scenario 010**, together with the
 self-calibration estimators that need no injected reference, and the robust beamformers. This
 slice assumes an ideal manifold apart from the per-channel receive chain.
 
-`core/{dsp,windows,detection,ambiguity}.py` and `core/radar.py` are consumed, never edited. The
+`dsp.py`, `detection.py` and `radar.py` are consumed, never edited. The
 steering vector and `array/beamforming.py` are scenario 006's, and are consumed. Scenario-001's
-TOMLs and tests are read, never edited, and `test_scenario_001.py` staying green is a precondition
-for every commit.
+TOMLs and their `[verify]` tables are read, never edited, and `tests/test_scenarios.py` staying
+green on them is a precondition for every commit.
 
 ---
 
 ## 5. Build Sequence
 
 ```
-  1. core/frontend.py      design_decimation_filter -> taps, ripple, A_s, ENBW
+  1. frontend.py           design_decimation_filter -> taps, ripple, A_s, ENBW
              |             polyphase_decimate (upfirdn), channelise (M-path + IFFT)
              v
-  2. core/frontend.py      FrontEnd, receive(): up-convert, noise, interferer, NCO, decimate, crop
+  2. frontend.py           FrontEnd, receive(): up-convert, noise, interferer, NCO, decimate, crop
              |
              v
-  3. core/signal.py        lo_phase_noise_rad; optional lo_phase_rad in both generators
+  3. signal.py             lo_phase_noise_rad; optional lo_phase_rad in both generators
              |
              v
   4. array/impairments.py  ChannelResponse, IqImbalance, ChannelLoPhase: draw_*, apply_*
@@ -426,33 +426,33 @@ for every commit.
   5. array/calibration.py  pilot -> ChannelCalibration; IQ pilot and blind; CPE gate
              |
              v
-  6. pipelines/scenarios.py  [front_end] / [impairments] / [calibration] present -> wired in
+  6. scenario.py, pipeline.py  [front_end] / [impairments] / [calibration] present -> wired in
              |
              v
-  7. scenarios/scenario_009_*.toml, then tests: bypass identity (A1) first
+  7. config/scenario_009_*.toml, then tests: bypass identity (A1) first
 ```
 
 | Step | Module | Notes |
 | :--- | :--- | :--- |
-| 1 | `core/frontend.py` *(new)* | Pure functions on 1-D streams with a trailing channel axis. Test the polyphase identity and the filter numbers before anything else |
-| 2 | `core/frontend.py` *(new)* | Consumes `pulsed_baseband` and `thermal_noise` unchanged |
-| 3 | `core/signal.py` *(widen)* | Additive keyword, default `None`. No generator twin |
+| 1 | `frontend.py` *(new)* | Pure functions on 1-D streams with a trailing channel axis. Test the polyphase identity and the filter numbers before anything else |
+| 2 | `frontend.py` *(new)* | Consumes `pulsed_baseband` and `thermal_noise` unchanged |
+| 3 | `signal.py` *(widen)* | Additive keyword, default `None`. No generator twin |
 | 4 | `array/impairments.py` *(new)* | Per-channel only, per §4.5 |
 | 5 | `array/calibration.py` *(new)* | Returns parameters (D21) |
-| 6 | `pipelines/scenarios.py` *(edit)* | TOML order: `… [receiver_site] [receiver] [front_end] [impairments] [calibration]`, signal-path order as scenario-002 §3.5 |
+| 6 | `scenario.py`, `pipeline.py` *(edit)* | TOML order: `… [[burst]] [receiver] [front_end] [impairments] [calibration]`, signal-path order as scenario-002 §3.5 |
 | 7 | tests | A1 first: nothing else means anything until bypass is bit-identical |
 
-Consumed unchanged: `core/dsp.py` (`matched_filter`, `range_doppler_map`, `range_bin_centers_m`,
-`doppler_bin_centers_mps`), `core/windows.py` (`taper`), `core/waveforms.py` (`lfm_chirp`),
-`core/constants.py`. Consumed from scenario 006: the steering vector and `array/beamforming.py`.
+Consumed unchanged: `dsp.py` (`matched_filter`, `range_doppler_map`, `range_bin_centers_m`,
+`doppler_bin_centers_mps`, `window`), `signal.py`'s `lfm_chirp`, `constants.py`. Consumed from
+scenario 006: the steering vector and `array/beamforming.py`.
 
 ---
 
 ## 6. Acceptance Criteria
 
-Unit criteria in `tests/core/test_frontend.py`, `tests/array/test_impairments.py` and
-`tests/array/test_calibration.py`. Pipeline criteria in `tests/pipelines/test_scenario_009.py`,
-marked `slow`, on a 2-frame window.
+Unit criteria in `tests/test_frontend.py`, `tests/array/test_impairments.py` and
+`tests/array/test_calibration.py`. Pipeline criteria in the `[verify]` tables of the
+`config/scenario_009_*.toml` files, run by `tests/test_scenarios.py`, on a 2-frame window.
 
 | # | Criterion | Bound | Justification | Variant |
 | :--- | :--- | :--- | :--- | :--- |

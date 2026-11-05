@@ -10,10 +10,10 @@ after the colon unless a proper noun, no trailing period. Describe the change, n
 Types: `feat` (new capability), `fix` (bug or numerical correction), `docs`, `style`, `refactor`
 (no behaviour change), `perf` (state the speed-up), `test`, `build` (packaging, dependencies),
 `ci`, `chore` (tooling, hooks), `revert`. The scope is optional and mirrors the package
-(`core`, `pipelines`, `visualisation`, `deps`, `hooks`, …); the hook checks its shape only.
+(`dsp`, `tracking`, `pipeline`, `plots`, `deps`, `hooks`, …); the hook checks its shape only.
 
 ```
-fix(core): correct 1/R^4 term in the range equation
+fix(propagation): correct 1/R^4 term in the range equation
 perf(raytracing): batch ray casts, 8x faster on the highway scene
 ```
 

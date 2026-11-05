@@ -1,9 +1,9 @@
 # Coding style
 
-Copy the shape of [`src/radar_forge/core/radar_equation.py`](../../src/radar_forge/core/radar_equation.py);
-it follows every rule here. The tools enforce most of them, and `make fmt` fixes much of what
-they catch. This page lists what each tool enforces in one line, then the judgement calls a tool
-cannot make, which are what review checks.
+Copy the shape of [`src/radar_forge/propagation.py`](../../src/radar_forge/propagation.py) (the
+radar equation is its `received_power_w`); it follows every rule here. The tools enforce most of
+them, and `make fmt` fixes much of what they catch. This page lists what each tool enforces in
+one line, then the judgement calls a tool cannot make, which are what review checks.
 
 ## What the tools enforce
 
@@ -11,22 +11,22 @@ cannot make, which are what review checks.
 | :--- | :--- |
 | Formatting, line length 100, import order, naming case, Python ≥ 3.11 syntax | `ruff format`; ruff `E W I N UP` |
 | NumPy docstring on every public module, class and function | ruff `D` (numpy convention); R3 for module docstrings |
-| Docstring examples run and print what they claim; every public name documented | `tests/test_docstrings.py` |
-| Complete annotations | `mypy --strict` over `src`, `scripts`, `tools`; ruff `ANN` |
-| Every module defines `__all__`; no duplicate or private exports; `ArrayLike` in, float64 out | `tests/test_public_api.py` |
+| Docstring examples run and print what they claim; every public name documented | `tests/test_conventions.py` |
+| Complete annotations | `mypy --strict` over `src` and `scripts`; ruff `ANN` |
+| Every module defines `__all__`; no duplicate or private exports; `ArrayLike` in, float64 out | `tests/test_conventions.py` |
 | `msg = "..."` on its own line, then `raise`; no `assert` for validation | ruff `EM`, `S101` (tests exempt) |
 | No legacy `np.random.*` global functions | ruff `NPY002` |
 | `# TODO(author): what` with an issue link | ruff `TD` |
 | Configuration only in `pyproject.toml` | R1 |
 | Only Python (and package data) under `src/radar_forge/` | R2 |
-| Physical constants defined once, in `core/constants.py`; no literal `3e8`, `1.38e-23` … | R4, and `typing.Final` checked by mypy |
+| Physical constants defined once, in `constants.py`; no literal `3e8`, `1.38e-23` … | R4, and `typing.Final` checked by mypy |
 | A unit suffix on every physical-quantity parameter (`gain_tx` is as bare as `gain`) | R5 |
 | `np.tile`/`np.repeat`/`np.broadcast_to` carry `# broadcast-exempt: <reason>` | R6 |
 | In-file Markdown links `](#anchor)` resolve | R7 |
 | No `##########` banners, no `# Inputs:`/`# Outputs:` comments | R8 |
 | No control characters in `.py`/`.md` (a BEL written for `\alpha`) | R9 |
 | Modules warn past 500 lines, fail past 800 (a grandfathered set only warns) | R10 |
-| `core/` does no `print`, `open`, `Path.write_*`, `logging` or `time` clocks | R11 |
+| Library modules, bar `scenario`, `pipeline`, `evaluate` and `plots`, do no `print`, `open`, `Path.write_*`, `logging` or `time` clocks | R11 |
 | `np.errstate`/`np.seterr` in `src/` carry `# errstate-exempt: <reason>` | R12 |
 | A floating-point warning in a test is an error | pytest `filterwarnings = ["error", …]` |
 
@@ -102,7 +102,7 @@ before fitting a slope to it.
 
 Lean NumPy style: one summary line; a citation with equation number; Parameters and Returns only
 where a unit, shape or convention is not already in the name; no Raises or Examples unless the
-example is the test. Doctests that are present run (`tests/test_docstrings.py`).
+example is the test. Doctests that are present run (`tests/test_conventions.py`).
 
 - **Cite the source.** Physics or DSP carries a `References` entry naming the section or
   equation, e.g. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed., §2.2.1.
@@ -128,7 +128,7 @@ Accept `ArrayLike`, return `NDArray[np.float64]` (or `complex128`), never `NDArr
 ## 6. Public API
 
 The public API is what a package's `__init__.py` re-exports in `__all__`; every module also
-defines `__all__` (`tests/test_public_api.py`). Private helpers and wholly internal modules get a
+defines `__all__` (`tests/test_conventions.py`). Private helpers and wholly internal modules get a
 leading `_`. Keep `__init__.py` import-light: an optional backend is imported inside the function
 and raises `ImportError` naming the extra to install.
 

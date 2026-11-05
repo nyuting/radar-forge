@@ -47,7 +47,7 @@ If we have assigned you a specific task, do that one.
 - **Read before you write.** [`CLAUDE.md`](../CLAUDE.md) is a one-page summary of the project's
   rules:
   - SI units in every name (`transmit_power_w`, not `power`);
-  - physical constants from `radar_forge.core.constants`, never typed in;
+  - physical constants from `radar_forge.constants`, never typed in;
   - NumPy-style docstrings.
 
   [`CONTRIBUTING.md`](../CONTRIBUTING.md) says the same at more length. Follow these rules in

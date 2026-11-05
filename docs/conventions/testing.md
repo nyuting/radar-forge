@@ -6,12 +6,15 @@ and every warning is an error.
 
 ## 1. Layout
 
-`tests/` mirrors `src/radar_forge/` (`tests/core/`, `tests/core/tracking/`, `tests/pipelines/`,
-`tests/visualisation/`), plus `tests/scripts/` for `scripts/`,
-package-wide checks at the top level (`test_import.py`, `test_public_api.py`,
-`test_docstrings.py`), and `tests/data/golden/`. One test module per source module. A test name
-states the property: `test_inverse_fourth_power_scaling`, not `test_received_power_2`. Fixtures
-live in the `conftest.py` of the directory that uses them.
+`tests/` mirrors `src/radar_forge/`: one test module per library module at the top level
+(`test_radar.py`, `test_propagation.py`, `test_signal.py`, `test_dsp.py`, `test_detection.py`,
+`test_constants.py`), `tests/tracking/` for the tracking package, and `tests/scripts/` for
+`scripts/`. The modules that run a scenario (`scenario`, `pipeline`, `evaluate`, `plots`) are
+tested end to end by `test_pipeline.py`, `test_scenarios.py` (each shipped scenario against its
+`[verify]` table) and `tests/scripts/test_run_scenario.py`. Package-wide checks are in
+`test_conventions.py`, budgets in `test_performance.py`, golden data in `tests/data/golden/`. A
+test name states the property: `test_inverse_fourth_power_scaling`, not `test_received_power_2`.
+Fixtures live in the `conftest.py` of the directory that uses them.
 
 ## 2. Float comparison
 
@@ -49,9 +52,9 @@ sensible values.
 ## 6. Golden data
 
 Only where no analytic truth exists, only in `tests/data/golden/` (the pre-commit hook blocks
-binary arrays elsewhere), kilobytes not megabytes, with a `scripts/regen_golden_*.py` that
-recreates it from a seed. Regenerating it is a behaviour change with its own commit. Prefer
-derived statistics (peak position, detection count) over a raw array.
+binary arrays elsewhere), kilobytes not megabytes, with a script that recreates it from a seed
+(`scripts/regen_golden.py` writes `fingerprints.csv`). Regenerating it is a behaviour change with
+its own commit. Prefer derived statistics (peak position, detection count) over a raw array.
 
 ## 7. Markers
 
@@ -98,16 +101,17 @@ I and Q, in a χ² interval. Swerling cases by KS test against the right χ² de
 
 ### 10.3 Fast/slow-time DSP and the range-Doppler map
 
-A target on an exact bin lands in that range and Doppler bin, with f_d = 2v_r/λ and its sign.
-Window sidelobes and processing loss per Harris (1978). Compression gain B·T_p minus the window's
-loss. MTI nulls at k·PRF. The −3 dB width of an unweighted response is about 0.886·c/(2B);
-c/(2B) is the peak-to-first-null spacing. Code on a circular axis is tested a fraction of a bin
-inside the edge and across it, not only on a bin centre.
+A target on an exact bin lands in that range and Doppler bin, with f_d = −Ṙ_b/λ (Ṙ_b positive
+receding, 2ṙ monostatic) and its sign. Window sidelobes and processing loss per Harris (1978).
+Compression gain B·T_p minus the window's loss. MTI nulls at k·PRF. The −3 dB width of an
+unweighted response is about 0.886·c/(2B) in slant range; c/(2B) is the peak-to-first-null
+spacing (both double on the map's bistatic range axis). Code on a circular axis is tested a
+fraction of a bin inside the edge and across it, not only on a bin centre.
 
 ### 10.4 Detection
 
 Design Pfa inside the Clopper–Pearson interval of the measured rate
-(`assert_rate_consistent_with_design` in `tests/core/test_detection.py`); GO/SO/OS behaviour at
+(`assert_rate_consistent_with_design` in `tests/test_detection.py`); GO/SO/OS behaviour at
 a clutter edge; exact vertex recovery for centroid interpolation.
 
 ### 10.5 Measurements and coordinates

@@ -18,7 +18,7 @@ assignment rule this library uses. In machine learning it means *graph neural ne
 task is about whether the second can beat the first. Write both out in full in your report.
 
 Data association decides which measurement belongs to which track. The library's tracker does
-it in two steps (read the module docstring of `radar_forge.core.tracking.association`):
+it in two steps (read the module docstring of `radar_forge.tracking.association`):
 
 1. a chi-square gate rules out pairs that are too far apart;
 2. `GlobalNearestNeighbour` picks the set of pairs with the smallest total NIS, with each track
@@ -34,8 +34,8 @@ pairs using context that a per-pair NIS cannot see: the other tracks nearby, the
 measurements in the gate, and each track's recent history. The question is whether that context
 is worth anything, at the same false-track rate.
 
-The library has one target per scenario and no clutter. You will build a multi-target,
-false-alarm scenario in your own script. Leave `src/` alone.
+Every shipped scenario has one target, and the library has no clutter. You will build a
+multi-target, false-alarm scenario in your own script. Leave `src/` alone.
 
 ## Setup
 
@@ -50,20 +50,22 @@ false-alarm scenario in your own script. Leave `src/` alone.
 
   Say how you chose each parameter, and keep them in one place in your script.
 - Useful entry points:
-  - `radar_forge.core.tracking.tracker`:
-    - `build_tracker_enu` builds a tracker for x/y/z position measurements;
-    - `Tracker` takes a `gate` and an `associator` in its constructor;
-    - `Tracker.process` takes one `MeasurementBatch` per scan.
-  - `radar_forge.core.tracking.association`: `ChiSquareGate`, `GlobalNearestNeighbour`,
-    `NearestNeighbour`, and the `Associator` protocol. Any object with an
-    `associate(costs)` method can be passed to `Tracker`.
-  - `radar_forge.core.tracking.measurement_models`: `Measurement`, `MeasurementBatch`,
-    `CartesianPosition`.
-- **The protocol is narrow on purpose.** An `Associator` sees only the cost matrix, never the
-  tracks or the measurements. A network that needs more context than a cost matrix does not fit
-  through it. Decide how to handle that without changing `src/`. One way is to run your own scan
-  loop around the library's filters. If you conclude the protocol should change, say how in your
-  report. That is a finding, not a failure.
+  - `radar_forge.tracking.tracker`:
+    - `Tracker` takes its measurement models, a motion model, a linearisation, a
+      `gate_probability` and an `associator` in its constructor; for x/y/z position
+      measurements, build it from `CartesianMotion` and `LinearMeasurement` (the old
+      `build_tracker_enu` shortcut has no successor);
+    - `Tracker.process` takes one `Scan` per scan.
+  - `radar_forge.tracking.association`: `chi_square_gate_threshold`, `gate`,
+    `GlobalNearestNeighbour`, `GreedyNearestNeighbour`, and the `Associator` protocol. Any
+    object with an `assign(cost, in_gate)` method can be passed to `Tracker`.
+  - `radar_forge.tracking.models`: `CartesianMotion`, `LinearMeasurement` and the
+    `MeasurementModel` protocol.
+- **The protocol is narrow on purpose.** An `Associator` sees only the cost matrix and the gate,
+  never the tracks or the measurements. A network that needs more context than a cost matrix does
+  not fit through it. Decide how to handle that without changing `src/`. One way is to run your
+  own scan loop around the library's filters. If you conclude the protocol should change, say how
+  in your report. That is a finding, not a failure.
 
 ## The questions
 

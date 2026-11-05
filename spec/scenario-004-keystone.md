@@ -15,7 +15,7 @@ acceleration **smears the Doppler peak over 4 bins**. Plain range-Doppler proces
 
 The slice builds four things, in the order the signal meets them:
 
-1. **Migration correction** (`core/migration.py`, decision D10). The keystone transform removes
+1. **Migration correction** (`migration.py`, decision D10). The keystone transform removes
    linear range walk for every target at once, without knowing its velocity. A Doppler-rate
    matched filter in the range-frequency domain then removes the quadratic and cubic phase that
    acceleration and jerk leave behind. A fold-factor search handles Doppler-ambiguous targets.
@@ -23,7 +23,7 @@ The slice builds four things, in the order the signal meets them:
    *polynomial-phase* motion compensation: velocity, acceleration and jerk are the first three
    coefficients of the slow-time phase. (The other reading, the polyphase channeliser, belongs to
    scenario 009.)
-3. **The datachip** (`core/datachip.py`, decision D9). A small crop of the cube around a
+3. **The datachip** (`datachip.py`, decision D9). A small crop of the cube around a
    detection, carrying its offsets into the parent and the parent's bin-centre axes. Scenario 006
    consumes it for angle estimation on multi-channel chips.
 4. **Fine parameter estimation** on the chip. Sub-bin range and velocity come from interpolation
@@ -48,7 +48,7 @@ and does not touch the FMCW path.
 | Upstream | What it is | What radar-forge takes | Licence | Baseline or current |
 | :--- | :--- | :--- | :--- | :--- |
 | Moving-target detection (MTD): range-compress, then Doppler FFT per range bin [11] | The textbook pulse-Doppler chain; scenario 001 S2 | The uncompensated reference whose loss §6 predicts and asserts | textbook, written from equations | **Baseline** |
-| Perry, DiPietro & Fante 1999 [1] | Origin of the keystone transform: rescale slow time per range frequency so linear walk vanishes for all velocities at once | First-order keystone in `core/migration.py` | paper, written from equations | Current (for linear walk) |
+| Perry, DiPietro & Fante 1999 [1] | Origin of the keystone transform: rescale slow time per range frequency so linear walk vanishes for all velocities at once | First-order keystone in `migration.py` | paper, written from equations | Current (for linear walk) |
 | Zhu, Li & Zhu 2007 [2] | Keystone without interpolation, by a scaled transform | The keystone's time scaling as a chirp-z transform per range frequency; truncated-sinc interpolation kept as the baseline | paper, written from equations | Current (implementation) |
 | `scipy.signal.czt` | Chirp-z transform | The scaled DFT inside the keystone; already a core dependency | BSD-3-Clause | Dependency |
 | Xu, Yu, Peng & Xia, RFT I–III, 2011–2012 [3]–[5] | Radon–Fourier transform: a generalised Doppler filter bank that integrates along range-walk trajectories; blind-speed sidelobes; optimality | RFT as the test oracle for linear walk; its blind-speed-sidelobe analysis informs the fold-factor search | paper, written from equations | Oracle |
@@ -102,31 +102,31 @@ Walk is what the target does during a CPI. What it costs depends on the bin size
 The chain this slice builds. New stages are in capitals; everything else exists:
 
 ```
-  scenarios/scenario_004_keystone_k{1,2,3}.toml
-            |       [trajectory] kind = "polynomial"   [[burst]] range gate
+  config/scenario_004_keystone_k{1,2,3}.toml
+            |       [[target]] kind = "polynomial"   [[burst]] range gate
             v
-  pipelines/trajectories.py    polynomial radial history -> truth at CPI centre
+  scenario.py    polynomial radial history -> truth at CPI centre
             |
             v
-  core/propagation.py  line_of_sight_paths(+accel, +jerk) -> PropagationPaths (+2 defaulted fields)
+  propagation.py  line_of_sight_paths(+accel, +jerk) -> PropagationPaths (+1 defaulted field)
             |
             v
      pulsed_baseband(..., range gate)  + thermal_noise    -> data_ftst (n_pulses, n_gate)
             |
             v
-  core/dsp.py  matched_filter, trim group delay           -> data_rfst (n_pulses, n_range_bins)
+  dsp.py  matched_filter, trim group delay                -> data_rfst (n_pulses, n_range_bins)
             |
             +-------------------------------> doppler_fft -> MTD map (BASELINE, loses 26.5 dB)
             v
-  core/migration.py   RANGE SPECTRUM  (FFT along range, zero-padded, signed f)
+  migration.py   RANGE SPECTRUM  (FFT along range, zero-padded, signed f)
             |          KEYSTONE  t -> f0/(f0+f) tau       [fold factor F]
             |          DOPPLER-RATE MATCHED FILTER  (a, j)   search curve exposed
             |          back to data_rfst
             v
-  core/dsp.py  doppler_fft -> data_rv  -> core/detection.py cfar_detect_2d, cluster_detections
+  dsp.py  doppler_fft -> data_rv  -> detection.py cfar_detect_2d, cluster_detections
             |
             v
-  core/datachip.py   CROP -> DataChip (offsets, parent axes, processing metadata)
+  datachip.py   CROP -> DataChip (offsets, parent axes, processing metadata)
             |          FINE ESTIMATION: Aboutanios-Mulgrew (R, v), CPF (a, j), local GRFT (ML)
             v
      FineEstimate in PARENT coordinates, with its CRB      -> estimates.csv, products.h5
@@ -139,7 +139,7 @@ The chain this slice builds. New stages are in capitals; everything else exists:
 ### 3.1 Waveform: the same in all three variants
 
 All numbers below come from `derive.py` and `crb.py` in the scenario's scratch directory. They
-will be re-derived in tests from `core/radar.py` rather than read from this table.
+will be re-derived in tests from `radar.py` rather than read from this table.
 
 | Parameter | Value | Why |
 | :--- | :--- | :--- |
@@ -236,9 +236,9 @@ Three things to read from the table:
 
 | Contract | Statement |
 | :--- | :--- |
-| Range history | `R(t) = R0 − v t − a t²/2 − j t³/6`, closing positive, t = 0 at pulse `n_pulses // 2`. `R0`, `v`, `a`, `j` are reported **at the CPI centre** |
+| Range history | `R(t) = R0 − v t − a t²/2 − j t³/6`, `v`, `a`, `j` the closing speed and its derivatives (the library's bistatic rate is `−2v`), t = 0 at pulse `n_pulses // 2`. `R0`, `v`, `a`, `j` are reported **at the CPI centre** |
 | `data_ftst` | `(n_pulses, n_gate_samples[, n_rx])` complex128, from `pulsed_baseband` with a range gate. Sample 0 is delay `2·range_gate_start_m/c` |
-| `data_rfst` | `(n_pulses, n_range_bins[, n_rx])` complex128: `matched_filter` output with the reference's group delay `n_reference − 1` trimmed, as `pipelines/scenarios.py` does today. Range axis `range_gate_start_m + k·c/(2·fs)` |
+| `data_rfst` | `(n_pulses, n_range_bins[, n_rx])` complex128: `matched_filter` output with the reference's group delay `n_reference − 1` trimmed, as `pipeline.range_doppler_product` does today. Range axis `range_gate_start_m + k·c/(2·fs)` |
 | Range spectrum (internal to D10) | `FFT(data_rfst, n = n_range_fft, axis = 1)`, unshifted. Its frequency axis is the **signed** baseband `range_frequency_hz = fftfreq(n_range_fft, 1/fs)`, so the true RF frequency is `f0 + f`. `n_range_fft ≥ n_range_bins + max walk`, default the next power of two ≥ `2·n_range_bins` (2048 here) so walk cannot wrap |
 | Signal model in the range spectrum | `S(f, t) = A·\|P(f)\|²·exp(−j·4π·(f0 + f)·R(t)/c)`; the `f·v·t` term is the walk, the `f0·a·t²` term the spread |
 | Keystone | `S_K(f, τ) = S(f, t = f0/(f0 + f)·τ)`, evaluated as band-limited (DFT) interpolation in slow time, by a chirp-z transform per range frequency. Reference index `n_pulses // 2`. After it, the linear term is `exp(+j·4π·f0·v·τ/c)`, independent of f [1] |
@@ -248,7 +248,7 @@ Three things to read from the table:
 | Acceleration from phase | Slow-time phase `φ(t) = (4π f0/c)(v t + a t²/2 + j t³/6)`, so `a = (λ/2)·ḟ_d` and `j = (λ/2)·f̈_d` |
 | Velocity in parent coordinates | `v = velocity_bin_centers_mps` at the fractional Doppler index, plus `F·λ·PRF/2` |
 | CRB | Fisher information of the model above with complex white noise, parameters `(|A|, φ, R0, v, a[, j])`, `F = (2/σ²)·Re(JᴴJ)` [6], [10], [13]. Single-tone special case `var(ω̂) ≥ 6/(SNR·N(N²−1))` [13] |
-| Shapes | Every `core/migration.py` and `core/datachip.py` function accepts a trailing `n_rx` axis and acts on axes 0 and 1 only |
+| Shapes | Every `migration.py` and `datachip.py` function accepts a trailing `n_rx` axis and acts on axes 0 and 1 only |
 
 CRB at the nominal ρ = 28.89 dB, and at 20 dB (the lowest SNR at which §6 asserts efficiency):
 
@@ -281,7 +281,7 @@ As scenario 001 §3.6, written through `spec/data-001-formats.md`, with these ad
 ### 4.1 D9 — the `DataChip` contract
 
 A `DataChip` is a crop of a cube around one detection, carrying everything needed to refine
-that detection without the parent. It is a frozen dataclass in `core/datachip.py`:
+that detection without the parent. It is a frozen dataclass in `datachip.py`:
 
 ```python
 @dataclass(frozen=True)
@@ -294,8 +294,8 @@ class ChipProcessing:  # the parent's processing, as the chip needs it to refine
     n_range_fft: int  # the range spectrum length used by D10
     n_doppler_fft: int
     range_gate_start_m: float
-    fast_time_window: NDArray[np.float64] | None  # (n_range_bins,) as applied, or None
-    slow_time_window: NDArray[np.float64] | None  # (n_pulses,) as applied, or None
+    fast_time_weights: NDArray[np.float64] | None  # (n_range_bins,) as applied, or None
+    slow_time_weights: NDArray[np.float64] | None  # (n_pulses,) as applied, or None
     keystone_applied: bool
     fold_factor: int  # F used, 0 if none
     compensated_acceleration_mps2: float
@@ -339,9 +339,9 @@ every pulse, so acceleration is still observable), and `crop_range_doppler(data_
 estimation (006). A ±16-bin range chip keeps all but **0.034 dB** of a point target's energy at the
 worst sub-bin offset, against 0.139 dB for ±4 bins. That is why the default half-width is 16.
 
-### 4.2 D10 — migration correction lives in `core/migration.py` and operates on `data_rfst`
+### 4.2 D10 — migration correction lives in `migration.py` and operates on `data_rfst`
 
-Every public function in `core/migration.py` takes `data_rfst` and returns `data_rfst` of the same
+Every public function in `migration.py` takes `data_rfst` and returns `data_rfst` of the same
 shape. The range spectrum is an internal domain, entered and left inside the module. Three
 reasons:
 
@@ -362,21 +362,23 @@ The keystone's slow-time interpolation has one known artefact, and the spec reco
 than hiding it: band-limited (DFT) interpolation treats the CPI as periodic, so the **first and
 last pulse** ring (they are the only pulses that do; §6 A2 excludes them, by name).
 
-### 4.3 `PropagationPaths` gains two defaulted fields
+### 4.3 `PropagationPaths` carries two defaulted fields
 
 D1 has survived a bistatic geometry unchanged (scenario 002 §4.1). It does not survive
 acceleration unchanged, because a path's Doppler is a single number, so a path set can only
-describe constant velocity. Two fields are added, each **defaulting to zero**:
+describe constant velocity. `doppler_rate_hzps` already exists; `doppler_jerk_hzps2` is added.
+Each **defaults to zero**:
 
 | Field | Shape | Meaning |
 | :--- | :--- | :--- |
-| `doppler_rate_hzps` | `(n_paths,)` | `2·a/λ`, closing positive |
+| `doppler_rate_hzps` | `(n_paths,)` | `−R̈_b/λ = 2·a/λ`, with §2's closing acceleration `a` |
 | `doppler_jerk_hzps2` | `(n_paths,)` | `2·j/λ` |
 
 Every existing builder and test therefore produces the same cube bit for bit (§6 A15).
 `line_of_sight_paths` gains `radial_acceleration_mps2` and `radial_jerk_mps3` keywords, default 0.
-`pulsed_baseband` advances range per pulse with the full polynomial instead of `v·t`. This widens
-D1 rather than changing it, and D1 below records it.
+`PropagationPaths.bistatic_range_at_m`, through which `pulsed_baseband` advances range per pulse,
+gains the cubic term beside its quadratic one. This widens D1 rather than changing it, and D1
+below records it.
 
 The alternative considered was a `range_history_m` override argument on the generator. It was
 rejected because it puts geometry into the signal generator and would let a ray-tracing backend
@@ -387,9 +389,9 @@ describe its paths in two incompatible ways.
 `pulsed_baseband` today samples the whole PRI: 12 000 samples at 600 MHz. It gains
 `range_gate_start_m: float = 0.0` and `n_gate_samples: int | None = None` (default: the whole
 PRI, today's behaviour). Range axes come from a new `dsp.delay_bin_centers_m(n_bins,
-sample_rate_hz, *, range_gate_start_m=0.0)`. This is the helper that
-`pipelines/scenarios.py::form_range_doppler_map` already says should exist and belongs in
-`core/dsp.py`.
+sample_rate_hz, *, range_gate_start_m=0.0)`. It replaces the pulsed range axis that
+`pipeline.map_axes` computes inline (bistatic, `c·n/f_s`), and belongs in
+`dsp.py`.
 
 ### 4.5 Jerk is in the model and is not observable at this CPI
 
@@ -425,17 +427,17 @@ comparison is the lesson. The A&M estimator is the default.
 > **Applied.** These amendments are folded into `spec/structure.md`; it is the authoritative
 > tree and decision list. This section records what changed and why.
 
-1. **Part B tree:** under `core/`, add
+1. **Part B tree:** beside the flat library modules, add
    `migration.py  # keystone (1st/2nd order, fold factor), Doppler-rate matched filter, RFT/GRFT; data_rfst in and out (D10)`
    and `datachip.py  # DataChip, crop, fine range/velocity/acceleration estimators with CRB (D9)`.
    Amend `signal.py`'s comment to add "polynomial radial kinematics; range gate".
-2. **B.1 rows:** `core/migration.py` ← Perry–DiPietro–Fante keystone; Zhu–Li–Zhu interpolation-free
+2. **B.1 rows:** `migration.py` ← Perry–DiPietro–Fante keystone; Zhu–Li–Zhu interpolation-free
    keystone; Huang et al. 2016 keystone + matched filtering; Kirkland second-order keystone;
-   Xu et al. RFT/GRFT (oracle). `core/datachip.py` ← Aboutanios–Mulgrew; Quinn, Jacobsen–Kootsookos,
+   Xu et al. RFT/GRFT (oracle). `datachip.py` ← Aboutanios–Mulgrew; Quinn, Jacobsen–Kootsookos,
    Candan (baselines); O'Shea CPF; Peleg–Porat HAF (baseline) and polynomial-phase CRB; Rife–Boorstyn.
 3. **Decisions D9 and D10**, as §4.1 and §4.2.
-4. **D1 widened**: `PropagationPaths` gains `doppler_rate_hzps` and `doppler_jerk_hzps2`,
-   defaulting to zero (§4.3).
+4. **D1 widened**: `PropagationPaths` gains `doppler_jerk_hzps2` beside `doppler_rate_hzps`,
+   both defaulting to zero (§4.3).
 5. **`scripts/check_conventions.py` `UNIT_SUFFIXES`** gains `_mps2`, `_mps3`, `_hzps`, `_hzps2`
    (shared file; additive edit in step 0).
 
@@ -444,18 +446,18 @@ comparison is the lesson. The A&M estimator is the default.
 This scenario claims:
 
 ```
-scenarios/scenario_004_keystone_{k1,k2,k3}.toml
+config/scenario_004_keystone_{k1,k2,k3}.toml   (with their [verify] tables)
 spec/scenario-004-keystone.md, a row in the Scenarios table of docs/README.md
-src/radar_forge/core/{migration,datachip}.py                       (new)
-src/radar_forge/core/propagation.py   (widened: two path fields, kinematics)
-src/radar_forge/core/signal.py        (widened: polynomial range, range gate)
-src/radar_forge/core/dsp.py           (additive: delay_bin_centers_m only)
-src/radar_forge/pipelines/{trajectories,scenarios}.py   (polynomial trajectory, gate keys)
-tests/core/test_{migration,datachip}.py, tests/pipelines/test_scenario_004.py
+src/radar_forge/{migration,datachip}.py                       (new)
+src/radar_forge/propagation.py   (widened: one path field, kinematics)
+src/radar_forge/signal.py        (widened: polynomial range, range gate)
+src/radar_forge/dsp.py           (additive: delay_bin_centers_m only)
+src/radar_forge/{scenario,pipeline}.py   (polynomial trajectory, gate keys)
+tests/test_{migration,datachip}.py
 ```
 
-`core/{windows,detection,radar,radar_equation,waveforms,ambiguity}.py` are consumed, never
-edited. Scenario 001–003 TOMLs and tests are read, never edited, and must stay green. Scenario
+`detection.py` and `radar.py` are consumed, never edited, as are the windows in `dsp.py`,
+`received_power_w` in `propagation.py`, and `lfm_chirp` and `ambiguity_function` in `signal.py`. Scenario 001–003 TOMLs and tests are read, never edited, and must stay green. Scenario
 006 owns multi-channel synthesis and consumes `DataChip` as specified here; a change to D9 is a
 change to both specs.
 
@@ -466,40 +468,40 @@ change to both specs.
 ```
   0. scripts/check_conventions.py   + _mps2 _mps3 _hzps _hzps2   (shared, additive)
              |
-  1. core/propagation.py (widen)     PropagationPaths +2 defaulted fields; line_of_sight_paths
-             |                        +accel/jerk; core/signal.py pulsed_baseband polynomial range + range gate
-  2. core/dsp.py (additive)          delay_bin_centers_m
+  1. propagation.py (widen)          PropagationPaths +1 defaulted field; line_of_sight_paths
+             |                        +accel/jerk; signal.py pulsed_baseband polynomial range + range gate
+  2. dsp.py (additive)               delay_bin_centers_m
              |
-  3. core/migration.py (new)         range_spectrum -> keystone (czt | sinc | dft oracle)
+  3. migration.py (new)              range_spectrum -> keystone (czt | sinc | dft oracle)
              |                        -> fold factor -> doppler_rate_compensation -> searches
              |                        -> second_order_keystone -> rft / grft (oracles)
-  4. core/datachip.py (new)          DataChip, crop_slow_time, crop_range_doppler, round trip
+  4. datachip.py (new)               DataChip, crop_slow_time, crop_range_doppler, round trip
              |                        -> tone interpolators -> HAF, CPF -> local GRFT ML -> CRB
-  5. pipelines/trajectories.py       kind = "polynomial" radial history; truth at CPI centre
-  6. pipelines/scenarios.py          gate keys in [[burst]]; [target] accel/jerk
-  7. scenarios/scenario_004_keystone_k{1,2,3}.toml
-  8. tests/pipelines/test_scenario_004.py     A3 (baseline fails) first
+  5. scenario.py                     kind = "polynomial" radial history; truth at CPI centre
+  6. scenario.py, pipeline.py        gate keys in [[burst]]; [[target]] accel/jerk
+  7. config/scenario_004_keystone_k{1,2,3}.toml
+  8. their [verify] tables, run by tests/test_scenarios.py     A3 (baseline fails) first
 ```
 
 | Step | Module | Consumes / widens / untouched |
 | :--- | :--- | :--- |
 | 0 | `scripts/check_conventions.py` | Widened (suffix list) |
-| 1 | `core/propagation.py`, `core/signal.py` | **Widened.** `PropagationPaths`, `line_of_sight_paths` (propagation); `pulsed_baseband` (signal); `fmcw_deramp_baseband` untouched (its stop-and-hop warning stays) |
-| 2 | `core/dsp.py` | **Widened** by one helper; `matched_filter`, `doppler_fft`, `doppler_bin_centers_mps` consumed |
-| 3 | `core/migration.py` | New. Uses `scipy.signal.czt`, already a dependency |
-| 4 | `core/datachip.py` | New. Consumes `core/windows.py` (window record only) and `core/detection.py` (`cfar_detect_2d`, `cluster_detections` give the crop centre) |
-| 5–6 | `pipelines/` | Widened. `load_scenario` / `iterate_frames` gain a polynomial trajectory and gate keys; CSV trajectories untouched |
-| 7–8 | TOMLs, tests | New. Three TOMLs differing only in `[target]` kinematics |
+| 1 | `propagation.py`, `signal.py` | **Widened.** `PropagationPaths`, `line_of_sight_paths` (propagation); `pulsed_baseband` (signal); `fmcw_deramp_baseband` untouched (its stop-and-hop warning stays) |
+| 2 | `dsp.py` | **Widened** by one helper; `matched_filter`, `doppler_fft`, `doppler_bin_centers_mps` consumed |
+| 3 | `migration.py` | New. Uses `scipy.signal.czt`, already a dependency |
+| 4 | `datachip.py` | New. Consumes `dsp.py` (window record only) and `detection.py` (`cfar_detect_2d`, `cluster_detections` give the crop centre) |
+| 5–6 | `scenario.py`, `pipeline.py` | Widened. `load_scenario` / `frames` gain a polynomial trajectory and gate keys; CSV trajectories untouched |
+| 7–8 | TOMLs, tests | New. Three TOMLs differing only in `[[target]]` kinematics |
 
-`core/radar.py`, `core/waveforms.py` (`lfm_chirp`), `core/windows.py`, `core/detection.py`,
-`core/constants.py` and `core/ambiguity_resolution.py` are consumed unchanged.
+`radar.py`, `signal.py`'s `lfm_chirp`, the windows and fold/unfold functions in `dsp.py`,
+`detection.py` and `constants.py` are consumed unchanged.
 
 ---
 
 ## 6. Acceptance Criteria
 
-Encoded as `tests/core/test_migration.py`, `tests/core/test_datachip.py` (fast, small analytic
-cases) and `tests/pipelines/test_scenario_004.py` (full-size, marked `slow`). Losses are measured
+Encoded as `tests/test_migration.py`, `tests/test_datachip.py` (fast, small analytic cases) and
+the `[verify]` tables of the three TOMLs, run by `tests/test_scenarios.py` (full-size, `slow`). Losses are measured
 on noiseless cubes against the matched value `N·K`, with the peak refined on a 1/16-bin grid
 (§3.4). The baseline tolerance is wider than the compensated one because a smeared peak is
 sensitive to the exact pulse spectrum (the LFM's Fresnel ripple versus §3.4's flat band), while a
@@ -589,8 +591,9 @@ starts producing outliers (the threshold effect [13]). That region is plotted, n
 
 From the retired structure spec.
 
-- **D1, widened.** A propagation backend returns `PropagationPaths`, never baseband; `core/signal.py`
+- **D1, widened.** A propagation backend returns `PropagationPaths`, never baseband; `signal.py`
   synthesises samples from any path set. Here the path set gains polynomial range motion, through
   `line_of_sight_paths` keywords and `bistatic_range_at_m`.
-- **D5, sign.** The closing-positive Doppler sign is superseded: range rate is positive receding and
-  Doppler is `-rate/wavelength` (`spec/data-001-formats.md` §5).
+- **D5, sign.** The closing-positive range rate is superseded: range rate is the time derivative of
+  bistatic range, positive receding, and Doppler is `-rate/wavelength`, written once in
+  `propagation.doppler_shift_hz` (`spec/data-001-formats.md` §5).

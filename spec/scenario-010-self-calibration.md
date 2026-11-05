@@ -108,11 +108,11 @@ kinds of calibration source are already in the repository:
 What the slice builds, end to end:
 
 ```
-  ArrayManifold (TRUTH)                     scenarios/scenario_010_*.toml
+  ArrayManifold (TRUTH)                     config/scenario_010_*.toml
   geometry + delta, C, g(t)    <---------   [impairments] [[calibration_source]]
         |  rx_response_linear(u)  (scenario-006 D13 item 7)
         v
-  core/signal.py  -> cube (n_pulses, n_samples, n_rx)  -> calibration snapshots
+  signal.py  -> cube (n_pulses, n_samples, n_rx)  -> calibration snapshots
         |                                         (transmitter; D14 cells; beacons)
         v
   array/calibration.py   identifiability (FIM)  ->  NonIdentifiableError, or
@@ -190,7 +190,7 @@ ill-conditioned rather than assumed away.
 | HPBW at broadside (untapered) | **6.346°**, 0.11075 in `u`; 0.1 HPBW = **0.6346°** | Adaptive beamformers run untapered; 009's 8.52° is the Taylor-tapered beam |
 | Per-channel `gain_rx_dbi` | 20.0 | Scenario-006 §3.1 |
 | `boresight_azimuth_deg` | **185.0** (not 006's 235.804; §4.4) | Specified |
-| Scenario-002 transmitter | 35.87750 °N, 78.78750 °W, 25 m; **19.601 km**, bearing **134.99°**, el **−0.19°**; array az **−50.01°** | Computed with `core/geodesy.py` |
+| Scenario-002 transmitter | 35.87750 °N, 78.78750 °W, 25 m; **19.601 km**, bearing **134.99°**, el **−0.19°**; array az **−50.01°** | Computed with the geodesy in `radar.py` |
 | Transmitter in band at 9.8 GHz | Scenario-002 B1's fiction, kept so the array is one hardware item across 006–010 | Scenario-002 §4.5 |
 | Transmitter line-of-sight SNR | 30 dB per channel per sample, `n_snapshots` 256 per frame | Specified: its antenna pattern towards Duke is unknown |
 | Line of sight | 4/3-Earth radio horizons sum to 52.5 km, against 19.6 km | Computed; terrain ignored |
@@ -382,8 +382,8 @@ Estimators: `known_direction_positions(snapshots_per_source, source_u, prior, *,
 generator, one `ManifoldEstimate` per frame), and `fisher_information_*` for each model.
 
 The beamformers in `array/adaptive.py` take a covariance and a **steering vector**. They do not
-import `calibration.py` or `manifold.py`. The pipeline (`pipelines/calibration.py`) is the only
-place the two meet: `estimate.manifold.steering_vectors(u_target)` is handed to
+import `array/calibration.py` or `array/manifold.py`. The pipeline (`radar_forge/calibration.py`)
+is the only place the two meet: `estimate.manifold.steering_vectors(u_target)` is handed to
 `robust_capon_weights`. So one estimate can be scored against several beamformers, one beamformer
 against several estimates, and each tested alone. This is the same separation as 009 D21 and
 007 D16.
@@ -455,7 +455,7 @@ pointing.
 > tree and decision list. This section records what changed and why.
 
 1. **Part B tree:** add `array/manifold.py`; widen the comments of `array/impairments.py`,
-   `array/calibration.py` and `array/adaptive.py`; add `pipelines/calibration.py`.
+   `array/calibration.py` and `array/adaptive.py`; add the pipeline `radar_forge/calibration.py`.
 2. **B.1 rows** for the four modules.
 3. **Decisions D22 and D23**, as §4.1–§4.2.
 
@@ -464,21 +464,21 @@ pointing.
 This scenario claims, and another workstream should not plan:
 
 ```
-scenarios/scenario_010_{position_known_source,coupling_blind,online_drift}.toml
+config/scenario_010_{position_known_source,coupling_blind,online_drift}.toml
 spec/scenario-010-self-calibration.md
 src/radar_forge/array/manifold.py                 (new)
 src/radar_forge/array/impairments.py              (widened: coupling, position error, drift)
 src/radar_forge/array/calibration.py              (widened: self-calibration estimators, FIM)
 src/radar_forge/array/adaptive.py                 (widened: RCB, worst case, robust LCMV)
-src/radar_forge/pipelines/calibration.py          (new)
+src/radar_forge/calibration.py                    (new: the pipeline)
 tests/array/test_manifold.py, tests/array/test_self_calibration.py,
-tests/array/test_robust_beamforming.py, tests/pipelines/test_scenario_010.py
+tests/array/test_robust_beamforming.py; scenario criteria in the TOMLs' [verify] tables
 ```
 
 `array/{geometry,beamforming,doa}.py` (006), the D16 record and `apply_weights` (007), and 009's
-pilot and IQ estimators are consumed, never edited. `core/{signal,dsp,geodesy}.py`,
-`pipelines/trajectories.py` and the scenario-002 site constants are consumed. 001–009's tests
-staying green is a precondition for every commit.
+pilot and IQ estimators are consumed, never edited. `signal.py`, `dsp.py`, `radar.py` (geodesy),
+`scenario.py` (trajectories) and the scenario-002 sites (`config/scenario_002_*.toml`) are
+consumed. 001–009's tests staying green is a precondition for every commit.
 
 ---
 
@@ -499,9 +499,9 @@ staying green is a precondition for every commit.
              |
   7. array/adaptive.py           robust_capon_weights, worst_case_weights, robust_lcmv_weights
              |
-  8. pipelines/calibration.py    snapshots -> estimate -> steering -> weights -> SINR
+  8. radar_forge/calibration.py  snapshots -> estimate -> steering -> weights -> SINR
              |
-  9. scenarios/*.toml, tests/pipelines/test_scenario_010.py
+  9. config/*.toml with [verify] tables, run by tests/test_scenarios.py
 ```
 
 | Step | Module | Notes |
@@ -511,15 +511,16 @@ staying green is a precondition for every commit.
 | 3 | `array/calibration.py` *(widen)* | The FIM functions come first: every estimator calls them |
 | 4–6 | `array/calibration.py` *(widen)* | Each estimator is a page of NumPy; the M2 steps are three closed forms |
 | 7 | `array/adaptive.py` *(widen)* | `AdaptiveWeights` and `apply_weights` unchanged |
-| 8 | `pipelines/calibration.py` *(new)* | Synthesis uses `ArrayManifold.rx_response_linear`; `core/signal.py` is not edited beyond 006's widening |
-| 9 | tests | `core/dsp.py` is called with `fast_time_axis=1` (006 D13) |
+| 8 | `radar_forge/calibration.py` *(new)* | Synthesis uses `ArrayManifold.rx_response_linear`; `signal.py` is not edited beyond 006's widening |
+| 9 | tests | `dsp.py` is called with `fast_time_axis=1` (006 D13) |
 
 ---
 
 ## 6. Acceptance Criteria
 
 Encoded in `tests/array/test_manifold.py`, `test_self_calibration.py`,
-`test_robust_beamforming.py` and `tests/pipelines/test_scenario_010.py`. Seeds are fixed. SINR
+`test_robust_beamforming.py` and the `[verify]` tables of `config/scenario_010_*.toml`, run by
+`tests/test_scenarios.py`. Seeds are fixed. SINR
 bounds are on the closed-form model covariance. Monte-Carlo tolerances are set from the
 prototype's measured values, with the margin stated.
 

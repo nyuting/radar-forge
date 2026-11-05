@@ -108,9 +108,9 @@ rate_tolerance_mps = 2.98741
 # and rate RMSE under 4 m/s. Measured 3.4 m and 0.34 m/s.
 range_rmse_max_m = 149.896
 range_rate_rmse_max_mps = 4.0
-# Fraction of confirmed frames with NEES inside chi2(2)'s 95 % interval. A filter
-# whose noise is a bin over sqrt(12) is pessimistic at these SNRs, so its NEES
-# falls below the interval, as scenario 003 found of the NIS. Measured 0.81.
+# Fraction of confirmed frames with NEES inside chi2(2)'s 95 % interval: 0.81
+# measured (95 of 118). The rest fall below it: a bin over sqrt(12) of noise
+# is pessimistic at these SNRs, as scenario 003 found of the NIS.
 nees_fraction_min = 0.75
 # 3-of-5 confirms on the third hit, two scans after birth (scenario 003 section 14.11).
 confirmation_latency_max_scans = 2
