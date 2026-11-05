@@ -652,6 +652,55 @@ def test_a_cluster_with_no_power_has_a_nan_centroid_on_every_axis(wrap_axes):
     assert np.isnan(found.centroid_index).all()
 
 
+@pytest.mark.parametrize("wrap_axes", [(), (0, 1)])
+def test_a_tied_peak_is_the_first_tied_cell_in_c_order(wrap_axes):
+    """A 2 x 2 block of equal power peaks at its top-left cell, wrapped or not."""
+    power_w = np.zeros((8, 8))
+    power_w[3:5, 4:6] = 2.0
+    (detection,) = cluster_detections(power_w > 0.0, power_w, wrap_axes=wrap_axes)
+    assert detection.peak_index == (3, 4)
+    assert detection.centroid_index == (3.5, 4.5)
+
+
+def test_cluster_summaries_match_the_ndimage_reference(rng):
+    """Peaks, totals and centroids agree with scipy.ndimage over every label.
+
+    The wrapped axis 0 is compared only for labels off its first and last rows, where the
+    circular centroid and the linear one coincide.
+    """
+    power_w = rng.exponential(size=(64, 128))
+    mask = power_w > 2.5
+    found = cluster_detections(mask, power_w, wrap_axes=(0,))
+    labels, n_groups = label_connected_cells(mask, wrap_axes=(0,))
+    index = np.arange(1, n_groups + 1)
+    peak_index = np.array([d.peak_index for d in found])
+    by_label = np.argsort(labels[tuple(peak_index.T)])
+    assert n_groups > 50
+    np.testing.assert_array_equal(np.sort(labels[tuple(peak_index.T)]), index)
+    np.testing.assert_array_equal(
+        peak_index[by_label], ndimage.maximum_position(power_w, labels, index)
+    )
+    np.testing.assert_allclose(
+        np.array([d.total_power_w for d in found])[by_label],
+        ndimage.sum_labels(power_w, labels, index),
+        rtol=1e-14,
+    )
+    np.testing.assert_allclose(
+        np.array([d.centroid_index[1] for d in found])[by_label],
+        np.array(ndimage.center_of_mass(power_w, labels, index))[:, 1],
+        rtol=1e-14,
+    )
+    touches_edge = np.zeros(n_groups + 1, dtype=bool)
+    touches_edge[labels[0]] = touches_edge[labels[-1]] = True
+    inside = ~touches_edge[1:]
+    assert inside.sum() > 40
+    np.testing.assert_allclose(
+        np.array([d.centroid_index[0] for d in found])[by_label][inside],
+        np.array(ndimage.center_of_mass(power_w, labels, index))[inside, 0],
+        rtol=1e-13,
+    )
+
+
 def test_clustering_an_empty_mask_returns_nothing():
     assert cluster_detections(np.zeros(16, dtype=bool), np.zeros(16)) == []
 
@@ -751,6 +800,7 @@ def test_a_target_on_the_doppler_wrap_gives_one_detection(rng):
             ),
             "do not match",
         ),
+        (lambda: cluster_detections(np.ones(4, dtype=bool), [1.0, np.nan, 1.0, 1.0]), "finite"),
         (lambda: label_connected_cells(np.zeros((4, 4)), connectivity=3), "connectivity must be"),
         (lambda: label_connected_cells(np.zeros((4, 4)), wrap_axes=(2,)), "out of bounds"),
     ],
