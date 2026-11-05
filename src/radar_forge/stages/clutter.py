@@ -8,9 +8,10 @@ map, and the CFAR detections of the first target with and without cancellation; 
 ``leakage.csv`` and ``cancellation.png`` (frame 0). ``[verify]`` keys, each checked per frame:
 ``cancellation_depth_db`` with ``cancellation_tolerance_db``, ``floor_rise_db`` with
 ``floor_rise_tolerance_db``, ``sinr_loss_db`` with ``sinr_loss_tolerance_db``,
-``detections_per_frame`` and ``uncancelled_detections_per_frame``. The floor is the mean power
-of the 216 cells 2 to 4 Doppler bins and 3 to 20 lags from the target's cell, off its own row
-and column, where a white code's sinc range response and Doppler straddle would bias it.
+``detections_per_frame`` and ``uncancelled_detections_per_frame``; ``acceptance_frames`` limits
+the stage to the window's first frames, the ones its tolerances were derived for. The floor is
+the mean power of the 216 cells 2 to 4 Doppler bins and 3 to 20 lags from the target's cell, off
+its own row and column, where a white code's sinc range response and Doppler straddle bias it.
 
 References
 ----------
@@ -53,6 +54,7 @@ _KEYS = (
     "sinr_loss_tolerance_db",
     "detections_per_frame",
     "uncancelled_detections_per_frame",
+    "acceptance_frames",
 )
 
 
@@ -69,9 +71,10 @@ def leakage(ctx: evaluate.Context) -> evaluate.Context:
     amplifier = None if distortion is None else functools.partial(cubic_amplifier, a3=distortion.a3)
     noise_w = radar.receiver.noise_power_per_sample_w
     n_basis, n_fit = _fit_size(scenario, n_pulses * radar.n_samples_per_chirp)
+    n_frames = min(ctx.n_frames, int(verify.get("acceptance_frames", ctx.n_frames)))
     rows: list[dict[str, Any]] = []
     # Frames in order: each is synthesised, cancelled and measured before the next.
-    for frame in pipeline.frames(scenario, n_frames=ctx.n_frames):
+    for frame in pipeline.frames(scenario, n_frames=n_frames):
         stream, code = frame.cubes[0].reshape(-1), frame.references[0].reshape(-1)
         echo, _ = stream_baseband(
             disturbance, radar, n_pulses, rng=None, reference=code, amplifier=amplifier

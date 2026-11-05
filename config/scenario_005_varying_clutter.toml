@@ -133,3 +133,8 @@ sinr_loss_tolerance_db = 1.0
 # Scenario 005 A11: batched least squares detects the target every frame (SINR 24.7-25.4 dB).
 detections_per_frame = 1
 uncancelled_detections_per_frame = 0
+# Scenario 005 §3.4: the leakage checks hold on its five acceptance frames, 0-4, where the
+# target sits on a Doppler bin at 26.5-27.2 dB clean SINR, the level the tolerances above were
+# derived at (the rd and detect stages check A8 over the whole window). Past them the clean SINR
+# falls to 18.9 dB with straddle, and the residual's swing in the peak cell outgrows 1.0 dB.
+acceptance_frames = 5

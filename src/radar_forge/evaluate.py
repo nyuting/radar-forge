@@ -9,12 +9,12 @@ Each prints its intermediate quantities and wall time, checks the thresholds the
 ``noise_tolerance_db``, ``peak_tolerance_db``, ``truth_within_bins`` with
 ``detection_fraction``, ``pfa_tolerance_factor``, ``rate_tolerance_mps``, ``range_rmse_max_m``,
 ``range_rate_rmse_max_mps``, ``nees_fraction_min``, ``confirmation_latency_max_scans``; and
-``leakage``'s (:mod:`~radar_forge.stages.clutter`) ``cancellation_depth_db``, ``floor_rise_db``,
-``sinr_loss_db`` with ``cancellation_``, ``floor_rise_``, ``sinr_loss_tolerance_db``,
-``detections_per_frame``, ``uncancelled_detections_per_frame``. A stage not listed does not run,
-a threshold not given is not checked, :func:`run` raises :class:`VerificationError` naming
-every failure. CSVs halve a monostatic radar's range and rate (:func:`~radar_forge.plots.
-display_axes`); all else is bistatic. The helpers below are what a stage module shares.
+``leakage``'s ``cancellation_depth_db``, ``floor_rise_db``, ``sinr_loss_db``, each with a
+``cancellation_``, ``floor_rise_`` or ``sinr_loss_tolerance_db``, ``detections_per_frame``,
+``uncancelled_detections_per_frame``, ``acceptance_frames``. A stage not listed does not run, a
+threshold not given is not checked, :func:`run` raises :class:`VerificationError` naming every
+failure. CSVs halve a monostatic radar's range and rate (``plots.display_axes``); all else is
+bistatic. The helpers below are what a stage module shares.
 """
 
 from __future__ import annotations
