@@ -319,7 +319,7 @@ def cluster_detections(
     [(15.5,)]
     """
     flags = np.asarray(mask, dtype=bool)
-    values_w = np.asarray(power_w, dtype=np.float64)
+    values_w = _power(power_w, min_ndim=1)
     at_peak_w = None if threshold_w is None else np.asarray(threshold_w, dtype=np.float64)
     shapes = {flags.shape, values_w.shape} | ({at_peak_w.shape} if at_peak_w is not None else set())
     if len(shapes) > 1:
@@ -334,14 +334,15 @@ def cluster_detections(
     value_w = values_w.ravel()[cells]
     n_cells = np.bincount(label_of, minlength=n_groups)
     total_w = np.bincount(label_of, weights=value_w, minlength=n_groups)
-    # Each group's strongest cell; a tie goes to the first in C order.
+    coords = np.unravel_index(cells, flags.shape)
+    # Each group's strongest cell; a tie goes to the first in C order. Sorted by label, each
+    # group's cells are contiguous, so its first row is the count of the cells before it.
     order = np.lexsort((cells, -value_w, label_of))
-    first = np.searchsorted(label_of[order], np.arange(n_groups))
-    peaks = np.stack(np.unravel_index(cells[order[first]], flags.shape), axis=1)
+    peaks = np.stack(coords, axis=1)[order[np.cumsum(n_cells) - n_cells]]
     wrapped = {_axis(axis, flags.ndim) for axis in wrap_axes}
     centroids = np.empty((n_groups, flags.ndim))
     # One pass per axis, of which there are one or two.
-    for axis, coord in enumerate(np.unravel_index(cells, flags.shape)):
+    for axis, coord in enumerate(coords):
         n = flags.shape[axis]
         # A circular axis measures from the peak the short way round; a cluster spans under half.
         offset = (coord - peaks[label_of, axis] + n // 2) % n - n // 2 if axis in wrapped else coord

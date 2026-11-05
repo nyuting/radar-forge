@@ -663,7 +663,11 @@ def test_a_tied_peak_is_the_first_tied_cell_in_c_order(wrap_axes):
 
 
 def test_cluster_summaries_match_the_ndimage_reference(rng):
-    """Peaks, totals and linear-axis centroids agree with scipy.ndimage over every label."""
+    """Peaks, totals and centroids agree with scipy.ndimage over every label.
+
+    The wrapped axis 0 is compared only for labels off its first and last rows, where the
+    circular centroid and the linear one coincide.
+    """
     power_w = rng.exponential(size=(64, 128))
     mask = power_w > 2.5
     found = cluster_detections(mask, power_w, wrap_axes=(0,))
@@ -685,6 +689,15 @@ def test_cluster_summaries_match_the_ndimage_reference(rng):
         np.array([d.centroid_index[1] for d in found])[by_label],
         np.array(ndimage.center_of_mass(power_w, labels, index))[:, 1],
         rtol=1e-14,
+    )
+    touches_edge = np.zeros(n_groups + 1, dtype=bool)
+    touches_edge[labels[0]] = touches_edge[labels[-1]] = True
+    inside = ~touches_edge[1:]
+    assert inside.sum() > 40
+    np.testing.assert_allclose(
+        np.array([d.centroid_index[0] for d in found])[by_label][inside],
+        np.array(ndimage.center_of_mass(power_w, labels, index))[inside, 0],
+        rtol=1e-13,
     )
 
 
@@ -787,6 +800,7 @@ def test_a_target_on_the_doppler_wrap_gives_one_detection(rng):
             ),
             "do not match",
         ),
+        (lambda: cluster_detections(np.ones(4, dtype=bool), [1.0, np.nan, 1.0, 1.0]), "finite"),
         (lambda: label_connected_cells(np.zeros((4, 4)), connectivity=3), "connectivity must be"),
         (lambda: label_connected_cells(np.zeros((4, 4)), wrap_axes=(2,)), "out of bounds"),
     ],
