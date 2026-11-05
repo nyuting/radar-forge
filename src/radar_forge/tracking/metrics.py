@@ -1,10 +1,10 @@
 r"""Scores of a tracker against the truth: filter consistency and accuracy.
 
-:func:`nees` is :math:`e^T P^{-1} e`, chi-square with n_state degrees of freedom for a
-consistent filter; the NIS, its truth-free twin, is ``Innovation.nis``.
-:func:`consistency_interval` bounds the average of N such draws [1]; :func:`rmse` is per
-coordinate [2]. OSPA and GOSPA, single scores for a multi-target scene, land here with
-scenario 011.
+:func:`nees`, the normalised estimation error squared (NEES) :math:`e^T P^{-1} e`, is chi-square
+with n_state degrees of freedom for a consistent filter; the normalised innovation squared (NIS),
+its truth-free twin, is ``Innovation.nis``. :func:`consistency_interval` bounds the average of
+N such draws [1]; :func:`rmse` is per coordinate [2]. OSPA and GOSPA, single scores for a
+multi-target scene, land here with scenario 011.
 
 References
 ----------
