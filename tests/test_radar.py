@@ -1,6 +1,6 @@
 """Tests for the radar, its sites, and the route geometry of a target.
 
-Ground truth: the scenario-001 parameter table (spec/scenario-001-xband.md §3.4)
+Ground truth: the scenario-001 parameter table (config/scenario_001_*.toml)
 for the waveform limits, closed-form triangles for the bistatic geometry, and
 the exact equatorial and cardinal cases for the WGS-84 transforms.
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from radar_forge.core.constants import (
+from radar_forge.constants import (
     SPEED_OF_LIGHT_MPS,
     WGS84_FLATTENING,
     WGS84_SEMI_MAJOR_AXIS_M,

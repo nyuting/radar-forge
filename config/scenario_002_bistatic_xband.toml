@@ -1,0 +1,89 @@
+# Scenario 002 -- bistatic radar over the North Carolina Piedmont.
+# The Raleigh-Durham Airport ATC transmitter, received at the Duke Receiver.
+# The two variants share every block below except [[burst]].carrier_frequency_hz;
+# the carrier is the whole comparison. The map carries the bistatic range
+# R_T + R_R and its rate, positive receding.
+
+[scenario]
+name = "scenario-002-bistatic-xband"
+description = "B1: 9.8 GHz over a 19.601 km baseline. Waveform identical to scenario-001 S1, so geometry is the only variable. The bistatic rate folds at +-15.3 m/s."
+seed = 20260915
+
+[[target]]
+name = "light-aircraft"
+rcs_dbsm = 10.0        # bistatic RCS, held constant and angle-independent
+trajectory_path = "../data/flight_coordinates.csv"
+altitude_m = 1500.0    # the CSV has no altitude column; held constant
+
+# The 120 s window that maximises the mean bistatic angle over the track:
+# beta runs 109.9-129.3 deg, so the geometry is strongly bistatic throughout.
+# Scenario 001's window would give 40.7-44.1 deg, where little is exercised.
+[frames]
+start_time_s = 13329.0
+duration_s = 120.0
+frame_rate_hz = 1.0
+
+# The transmitter. Delete [site.rx] and the same file is a monostatic
+# scenario at Raleigh-Durham.
+[site.tx]
+latitude_deg = 35.87750   # Raleigh-Durham Airport reference point
+longitude_deg = -78.78750
+altitude_m = 25.0         # assumed ATC antenna height; configurable
+
+# The receiving site: the Duke Receiver, here receiving echoes of a
+# transmitter 19.6 km away rather than of one standing beside it.
+[site.rx]
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
+
+# Identical in every parameter to scenario_001_fmcw_low_prf.toml.
+[[burst]]
+waveform = "fmcw"
+carrier_frequency_hz = 9.8e9
+bandwidth_hz = 2.0e6
+transmit_power_w = 100.0
+gain_tx_dbi = 30.0
+chirp_duration_s = 1.0e-3
+prf_hz = 1.0e3
+sample_rate_hz = 1.0e6
+n_pulses = 256
+
+[receiver]
+# The receive chain at the Duke Receiver, sited by [site.rx] above.
+gain_rx_dbi = 30.0
+noise_figure_db = 3.0
+
+# Cell-averaging CFAR along range, which wraps, as scenario 003 runs it. At
+# pfa = 1e-5, S1's map of 256 x 1000 cells holds about 2.6 false alarms a frame.
+[detection]
+pfa = 1e-5
+n_train = 16
+n_guard = 4
+variant = "ca"
+merge_range_bins = 1.0
+max_bistatic_range_rate_mps = 400.0   # 200 m/s radial
+
+# What the stepper checks (radar_forge.evaluate). Every number is re-derived for
+# bistatic range and rate, positive receding: twice the slant values.
+[verify]
+stages = ["geometry", "iq", "rd", "detect"]
+# Fraction of frames whose true range and rate lie inside the map, unfolded.
+# B1 folds the rate at +-15.3 m/s, about 8.6 times over the window.
+truth_in_map_fraction = [0.0, 0.25]
+# P_r T N / (k T0 F) on an exact bin at frame 0's ranges (R_T = 14,800.6 m, R_R = 7,523.6 m), from the
+# radar equation by hand: P_r = -134.198 dBW.
+expected_snr_db = 60.86
+snr_tolerance_db = 0.01
+# Five standard errors of a mean over 256,000 complex samples, 5 x 4.343 / sqrt(N) dB.
+noise_tolerance_db = 0.05
+# A noiseless echo has |a|^2 = P_r in every sample it fills.
+peak_tolerance_db = 0.01
+# Scenario 002 A2 and A3: a detection within one bin of the range and wrapped rate, every frame.
+truth_within_bins = 1.0
+detection_fraction = 1.0
+# Noise-only maps hold 30 expected false alarms; the Poisson 99.9 % interval,
+# about 14 to 50, lies within a factor of two.
+pfa_tolerance_factor = 2.0
+# Scenario 002 A3: the rate a plot is read with, against the wrapped truth: within one bin, 30.591 / 256 m/s.
+rate_tolerance_mps = 0.119496

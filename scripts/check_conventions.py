@@ -9,7 +9,7 @@ Rules
 R1  Configuration lives in TOML (``pyproject.toml`` only).
 R2  The import package is Python under ``src/radar_forge/``.
 R3  Every library module has a module docstring.
-R4  Physical constants are defined once, in ``core/constants.py``. No other file
+R4  Physical constants are defined once, in ``constants.py``. No other file
     may bind those names, and their literal values may not appear elsewhere.
 R5  Physical quantities carry a unit suffix; bare names like ``range`` or
     ``power`` are rejected.
@@ -21,10 +21,11 @@ R8  Python comments carry no hash banners and no ``Inputs:``/``Outputs:``
     blocks; parameters and returns belong in the NumPy docstring.
 R9  Python and Markdown files hold no control characters other than tab, line
     feed and carriage return, such as the BEL a tool writes for ``\\alpha``.
-R10 A Python module under ``src/``, ``scripts/`` or ``tools/`` warns past 500
-    lines and fails past 800, except the files grandfathered below.
-R11 The hot path, ``src/radar_forge/core/``, does no I/O, logging or timing: no
-    ``print``, ``open``, ``Path.write_*``, ``logging`` or ``time`` clocks.
+R10 A Python module under ``src/`` or ``scripts/`` warns past 500 lines and
+    fails past 800, except the files grandfathered below.
+R11 The hot path, every library module but the four that run a scenario
+    (``scenario``, ``pipeline``, ``evaluate``, ``plots``), does no I/O, logging or
+    timing: no ``print``, ``open``, ``Path.write_*``, ``logging`` or ``time`` clocks.
 R12 ``np.errstate``/``np.seterr`` in ``src/`` carry ``# errstate-exempt: <reason>``.
 
 Each failure prints the rule, the fix, and where the rule is documented. A
@@ -49,7 +50,7 @@ from typing import NamedTuple
 
 REPO = Path(__file__).resolve().parent.parent
 PKG = Path("src") / "radar_forge"
-CONSTANTS_MODULE = PKG / "core" / "constants.py"
+CONSTANTS_MODULE = PKG / "constants.py"
 STYLE = "docs/conventions/style.md"
 
 
@@ -96,7 +97,7 @@ ALLOWED_PACKAGE_SUFFIXES = {".py", ".pyi", ".typed", ".json", ".toml", ".csv"}
 
 # --- R4 — constants are defined once ---
 
-# Literal values that must only ever appear in core/constants.py, paired with
+# Literal values that must only ever appear in constants.py, paired with
 # the canonical name to import instead. Written as pairs rather than a dict
 # because several spellings collapse to the same float (6_371_000.0 is 6.371e6),
 # and the near-miss approximations are the ones worth catching.
@@ -115,7 +116,7 @@ CONSTANT_LITERALS: tuple[tuple[float, str], ...] = (
 
 
 def canonical_constant_names() -> set[str]:
-    """Return the names exported by core/constants.py, read from its ``__all__``."""
+    """Return the names exported by constants.py, read from its ``__all__``."""
     source = REPO / CONSTANTS_MODULE
     if not source.is_file():
         return set()
@@ -249,7 +250,7 @@ def check_units(tree: ast.AST, rel: Path) -> list[Problem]:
 
 
 def check_constants(tree: ast.AST, rel: Path, canonical: set[str]) -> list[Problem]:
-    """R4: constants are bound and valued only in core/constants.py."""
+    """R4: constants are bound and valued only in constants.py."""
     if rel == CONSTANTS_MODULE:
         return []
     problems: list[Problem] = []
@@ -275,7 +276,7 @@ def check_constants(tree: ast.AST, rel: Path, canonical: set[str]) -> list[Probl
                         "R4 constants",
                         f"'{name}' is defined in {CONSTANTS_MODULE.as_posix()}; "
                         f"assigning it here creates a second, divergent definition.",
-                        f"import it instead: from radar_forge.core.constants import {name}",
+                        f"import it instead: from radar_forge.constants import {name}",
                     )
                 )
 
@@ -285,7 +286,7 @@ def check_constants(tree: ast.AST, rel: Path, canonical: set[str]) -> list[Probl
             for literal, canonical_name in CONSTANT_LITERALS:
                 if value != literal:
                     continue
-                fix = f"import it: from radar_forge.core.constants import {canonical_name}"
+                fix = f"import it: from radar_forge.constants import {canonical_name}"
                 if canonical_name == "SPEED_OF_LIGHT_MPS" and value != 299_792_458.0:
                     fix += (
                         " — and note this approximation is 0.07% high, 70 cm of range error at 1 km"
@@ -534,23 +535,12 @@ def check_control_characters(rel: Path, text: str) -> list[Problem]:
 
 MODULE_WARN_LINES = 500
 MODULE_MAX_LINES = 800
-LENGTH_SCOPE = {"src", "scripts", "tools"}
+LENGTH_SCOPE = {"src", "scripts"}
 
 # Modules already over MODULE_MAX_LINES when R10 was added. They warn instead of
 # failing. The set only shrinks: once a module is split below the limit, delete
 # its line (tests/scripts/test_check_conventions.py fails until you do).
-LONG_MODULE_GRANDFATHER: frozenset[Path] = frozenset(
-    {
-        PKG / "core" / "detection.py",
-        PKG / "core" / "radar.py",
-        PKG / "core" / "tracking" / "kalman.py",
-        PKG / "core" / "tracking" / "measurement_models.py",
-        PKG / "core" / "tracking" / "tracker.py",
-        PKG / "pipelines" / "scenarios.py",
-        PKG / "pipelines" / "tracking.py",
-        Path("scripts") / "run_scenario.py",
-    }
-)
+LONG_MODULE_GRANDFATHER: frozenset[Path] = frozenset()
 
 
 def check_module_length(rel: Path, n_lines: int) -> list[Problem]:
@@ -575,9 +565,10 @@ def check_module_length(rel: Path, n_lines: int) -> list[Problem]:
 
 # --- R11 — the hot path does no I/O, logging or timing ---
 
-HOT_PATH = PKG / "core"
-# Modules under core/ that broke R11 when it was added. None did.
-HOT_PATH_GRANDFATHER: frozenset[Path] = frozenset()
+# The library modules that read a scenario, write a run or draw: they may do I/O.
+OFF_HOT_PATH = frozenset(
+    PKG / name for name in ("scenario.py", "pipeline.py", "evaluate.py", "plots.py")
+)
 HOT_PATH_BUILTINS = {"print", "open"}
 HOT_PATH_CLOCKS = {"time", "time_ns", "perf_counter", "perf_counter_ns", "monotonic"}
 HOT_PATH_WRITES = {
@@ -635,8 +626,8 @@ def hot_path_offence(node: ast.AST, time_names: set[str]) -> str | None:
 
 
 def check_hot_path(tree: ast.AST, rel: Path) -> list[Problem]:
-    """R11: core/ computes; the layers around it log, time and write."""
-    if rel.parts[: len(HOT_PATH.parts)] != HOT_PATH.parts or rel in HOT_PATH_GRANDFATHER:
+    """R11: the library computes; the modules that run a scenario log, time and write."""
+    if rel.parts[: len(PKG.parts)] != PKG.parts or rel in OFF_HOT_PATH:
         return []
     problems: list[Problem] = []
     time_names = module_aliases(tree, "time") | {"time"}
@@ -649,8 +640,8 @@ def check_hot_path(tree: ast.AST, rel: Path) -> list[Problem]:
                 rel,
                 getattr(node, "lineno", 0),
                 "R11 hot path",
-                f"core/ {offence}; the hot path does no I/O, logging or timing.",
-                "return the value and let pipelines/ or scripts/ print, log, time or "
+                f"a hot-path module {offence}; it does no I/O, logging or timing.",
+                "return the value and let evaluate.py or scripts/ print, log, time or "
                 "write it. Tell the user about a recoverable problem with warnings.warn.",
             )
         )
@@ -661,15 +652,9 @@ def check_hot_path(tree: ast.AST, rel: Path) -> list[Problem]:
 
 ERRSTATE_EXEMPT = re.compile(r"#\s*errstate-exempt:\s*\S")
 ERRSTATE_FUNCS = {"errstate", "seterr"}
-# Files that called np.errstate with no exempt comment when R12 was added. The
-# change that added R12 could not edit src/; Phase 2 of the governance plan adds
-# `# errstate-exempt: <reason>` to each call and empties this set.
-ERRSTATE_GRANDFATHER: frozenset[Path] = frozenset(
-    {
-        PKG / "core" / "radar.py",
-        PKG / "visualisation" / "plotting.py",
-    }
-)
+# Files that called np.errstate with no exempt comment when R12 was added. Every
+# call now carries one, and the set stays empty.
+ERRSTATE_GRANDFATHER: frozenset[Path] = frozenset()
 
 
 def check_errstate(tree: ast.AST, rel: Path, lines: list[str]) -> list[Problem]:

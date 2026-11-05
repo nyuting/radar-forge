@@ -1,5 +1,5 @@
 <!-- PRs squash-merge: the title becomes the commit subject, so it and every commit must be a valid
-     Conventional Commit, e.g. `fix(core): correct 1/R^4 term in range equation`.
+     Conventional Commit, e.g. `fix(propagation): correct 1/R^4 term in range equation`.
      A breaking change takes `!` after the scope and a `BREAKING CHANGE:` paragraph below.
      See docs/conventions/commits.md. -->
 
@@ -31,7 +31,7 @@
 
 - [ ] `make check` passes (lint, types, conventions, full tests). No `--no-verify`.
 - [ ] Physical quantities are SI with the unit in the name (`range_m`, `carrier_frequency_hz`); dB only at API boundaries, named `_db*`
-- [ ] Constants come from `radar_forge.core.constants`; no hard-coded values such as `3e8`
+- [ ] Constants come from `radar_forge.constants`; no hard-coded values such as `3e8`
 - [ ] Public API has NumPy-style docstrings with `References` and array shapes
 - [ ] Tests check against analytic ground truth where one exists; no tolerance was loosened
 - [ ] No generated arrays committed; small golden data only in `tests/data/golden/`

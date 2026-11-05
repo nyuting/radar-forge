@@ -30,11 +30,12 @@ Know this before you choose. Each item is something you may have to build in you
 
 - **No clutter.** The background is thermal noise only. Any clutter is clutter you add yourself,
   with parameters justified from a cited source on real radar data.
-- **One target per scenario, one receive channel.** Two targets, or crossing tracks, are yours to
-  synthesise. `radar_forge.core.propagation.line_of_sight_paths` takes arrays of ranges, velocities
-  and RCS, so one call can place several targets in one IQ cube.
-- **One tracker.** A UKF with constant-velocity or constant-acceleration motion
-  (`radar_forge.core.tracking.motion.CartesianMotion`), a chi-square gate, and global or greedy
+- **One target per shipped scenario, one receive channel.** Two targets, or crossing tracks, are
+  yours to synthesise. `radar_forge.propagation.line_of_sight_paths` takes a `TargetGeometry` of
+  any number of targets and their RCS, so one call can place several targets in one IQ cube.
+- **One tracker.** A KF, EKF or UKF with radial constant-velocity motion
+  (`radar_forge.tracking.models.RadialConstantVelocity`) or Cartesian constant-velocity or
+  constant-acceleration motion (`CartesianMotion`), a chi-square gate, and global or greedy
   nearest-neighbour assignment. There is no IMM, no PDA or JPDA, no MHT and no smoother.
 - **No resource manager.** Nothing schedules beams, revisits or dwells.
 

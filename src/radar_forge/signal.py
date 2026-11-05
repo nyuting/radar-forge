@@ -24,7 +24,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.signal import fftconvolve
 
-from radar_forge.core.constants import SPEED_OF_LIGHT_MPS
+from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.propagation import PropagationPaths, propagation_delay_s, propagation_phase_rad
 from radar_forge.radar import Radar, Transmitter
 

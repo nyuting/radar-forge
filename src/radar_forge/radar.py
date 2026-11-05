@@ -5,7 +5,7 @@ monostatic case. Sites are stationary and synchronised, with no direct signal. A
 target's route has transmit and receive ranges :math:`R_T`, :math:`R_R`, the
 bistatic range :math:`R_b = R_T + R_R` (monostatic :math:`2R`) and its rate
 :math:`dR_b/dt`, positive receding. Positions are WGS-84 local east, north, up
-metres; azimuth is zero north, clockwise (``spec/data-001-formats.md`` DF2).
+metres; azimuth is zero north, clockwise (``spec/data-001-formats.md`` §5).
 
 References
 ----------
@@ -27,7 +27,7 @@ from typing import Literal
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from radar_forge.core.constants import (
+from radar_forge.constants import (
     BOLTZMANN_JPK,
     SPEED_OF_LIGHT_MPS,
     STANDARD_NOISE_TEMPERATURE_K,

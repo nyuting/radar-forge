@@ -19,15 +19,15 @@ covariance being honest in two places:
 - **The gate.** A measurement is accepted for a track when its normalised innovation squared
   (NIS) is below a chi-square quantile. If the filter is consistent, the NIS of the true
   measurement is chi-square distributed, so `gate_probability = 0.99` keeps it 99 % of the
-  time. Read `ChiSquareGate` in `radar_forge.core.tracking.association`.
+  time. Read `chi_square_gate_threshold` and `gate` in `radar_forge.tracking.association`.
 - **The reported uncertainty.** Anyone using a track's position reads its covariance as an
   error bar.
 
 Both are promises that hold only if the motion and measurement models are right. Scenario 003's
 target is not a constant-velocity target. It is built from noisy ADS-B fixes 2–8 s apart, and
-its range rate jumps by several m/s between frames; read the comment above `sigma_accel_mps2`
-in `scenarios/scenario_003_tracking.toml`. So the promise may already be broken, and the
-question is by how much.
+its range rate jumps by several m/s between frames; read the comment above
+`sigma_acceleration_mps2` in `config/scenario_003_tracking.toml`. So the promise may already be
+broken, and the question is by how much.
 
 **Conformal prediction** offers a different promise. Calibrate a threshold on the empirical
 distribution of a score, such as the NIS, from held-out data. Then a new score falls below it
@@ -49,29 +49,30 @@ Nothing conformal is implemented in `radar-forge`. You will write it in your own
 
 - Use this repository at the latest `main`, and record the commit hash you used in your report.
 - Run `uv sync --extra dev --extra visualisation`. Add `--extra ml` only for the optional learned model.
-- `uv run python scripts/run_scenario.py scenarios/scenario_003_tracking.toml --out out/s1 --no-iq`
-  runs the chain end to end. Read that script to see how the pieces fit together. Don't commit
-  `out/`.
-- Two tracker paths gate by chi-square:
-  - `scenario_003_tracking.toml` runs the linear Kalman path;
-  - the `scenario_003_ukf_*.toml` files run the UKF (`Tracker`).
+- `uv run python scripts/run_scenario.py config/scenario_003_tracking.toml --out out/s1`
+  runs the chain end to end. Read that script and the stages it runs, in `radar_forge.evaluate`,
+  to see how the pieces fit together. Don't commit `out/`.
+- Two filters in the one `Tracker` gate by chi-square:
+  - `scenario_003_tracking.toml` runs the linear Kalman filter (`linearisation = "taylor"`);
+  - the `scenario_003_ukf_*.toml` files run the UKF (`linearisation = "unscented"`).
 
   Pick one and say why.
 - Useful entry points:
-  - `radar_forge.pipelines.tracking`: `ScenarioTracker.from_scenario` and its `step`. Each frame
-    gives a `FrameTracks`, and each `TrackRecord` in it carries the track's `state`,
-    `covariance` and `nis`. `score_primary_track` reports the mean NIS per measurement
-    dimension.
-  - `radar_forge.pipelines.scenarios`: `load_scenario`, `iterate_frames`. Each frame carries the
-    truth (`frame.range_m`, `frame.radial_velocity_mps`), so you can compute the normalised
-    estimation error squared (NEES) as well as the NIS.
-  - `radar_forge.core.tracking.estimation.innovation_stats`: NIS and log-likelihood of one
-    innovation.
+  - `radar_forge.pipeline`: `ScanTracker(scenario)` and its `scan`, fed by `frame_plots`. Each
+    scan returns a `TrackBank`, whose rows carry each track's `mean`, `covariance` and `nis`.
+    The `track` stage of `radar_forge.evaluate` scores each target's primary track into
+    `metrics.csv` (RMSE, NEES fraction, latency); nothing reports the mean NIS any more.
+  - `radar_forge.scenario.load_scenario` and `radar_forge.pipeline.frames`. Each frame carries
+    the truth (`frame.truth.bistatic_range_m`, `frame.truth.bistatic_range_rate_mps`: twice the
+    slant values here and positive receding, as the tracker's state is), so you can compute the
+    normalised estimation error squared (NEES) as well as the NIS.
+  - `radar_forge.tracking.filters.innovate`: the NIS and log-likelihood of every track against
+    every measurement of a scan.
 - **Data.** `data/flight_coordinates.csv` holds about 16,500 s of flight. Scenario 003 uses
   120 s of it, from `start_time_s = 663.0`. To get calibration and test windows, copy the TOML
-  and change `start_time_s`. The `[trajectory] path` is resolved relative to the TOML's own
-  folder, so keep the copy next to the original or make the path absolute. Decide how to split
-  the flight, and justify the split.
+  and change `start_time_s` in `[frames]`. The target's `trajectory_path` is resolved relative
+  to the TOML's own folder, so keep the copy next to the original or make the path absolute.
+  Decide how to split the flight, and justify the split.
 - A gate is a threshold on the NIS. Work out how to apply a threshold of your own without
   changing `src/`: on recorded NIS values, or through the tracker's existing settings.
 
@@ -92,7 +93,7 @@ Nothing conformal is implemented in `radar-forge`. You will write it in your own
 
    Is the filter optimistic or pessimistic, and is that the same over the whole window?
 3. **Make it wrong on purpose.** Repeat with a motion model you know is wrong: a much smaller
-   `sigma_accel_mps2`, or a stretch of the flight with turns. Show how the chi-square gate's
+   `sigma_acceleration_mps2`, or a stretch of the flight with turns. Show how the chi-square gate's
    coverage falls.
 4. **Conformal gates.** Calibrate a split-conformal threshold on the NIS from separate windows
    and seeds, and test it. Then try one online conformal method that adapts its level as it
@@ -128,7 +129,7 @@ Send the report, a link to your branch, and the note.
 
 Statistics you can defend: the right chi-square bands, coverage with error bars, and a clear
 account of what the conformal guarantee does and does not cover here. "Retuning
-`sigma_accel_mps2` fixed the gate, and conformal added nothing" is a strong answer if it is
+`sigma_acceleration_mps2` fixed the gate, and conformal added nothing" is a strong answer if it is
 true. A careful answer to questions 1–4 beats a rushed answer to all five.
 
 ### Optional, if you have time

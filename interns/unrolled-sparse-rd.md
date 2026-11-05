@@ -14,10 +14,10 @@ The background lists what the library does not have, and the rules every compari
 ## Background
 
 Scenario 003 forms its range-Doppler map with a plain two-dimensional FFT and no taper
-(`form_range_doppler_map`). A finite FFT has a resolution limit of about one bin, and sidelobes
-that can hide a weak target next to a strong one. The textbook remedy is a **taper**: a Taylor or
-Chebyshev window lowers the sidelobes and widens the main lobe, trading resolution for dynamic
-range. `radar_forge.core.windows.taper` provides both.
+(`radar_forge.pipeline.range_doppler_product`). A finite FFT has a resolution limit of about one
+bin, and sidelobes that can hide a weak target next to a strong one. The textbook remedy is a
+**taper**: a Taylor or Chebyshev window lowers the sidelobes and widens the main lobe, trading
+resolution for dynamic range. `radar_forge.dsp.window` provides both.
 
 A different remedy treats the map as a **sparse** sum of a few point targets and solves for them,
 for example with the iterative shrinkage-thresholding algorithm (ISTA) or ADMM. Sparse solvers
@@ -39,14 +39,15 @@ script. Leave `src/` alone.
 - Use this repository at the latest `main`, and record the commit hash you used in your report.
 - Run `uv sync --extra dev --extra visualisation --extra ml`.
 - Useful entry points:
-  - `radar_forge.pipelines.scenarios`: `load_scenario` (for scenario 003's waveform in
-    `scenario.bursts[0]`), `form_range_doppler_map`.
-  - `radar_forge.core.propagation.line_of_sight_paths` takes arrays, so one call places two
-    targets. `radar_forge.core.signal.fmcw_deramp_baseband` turns the paths into IQ, and
+  - `radar_forge.scenario.load_scenario` (for scenario 003's radar and waveform in
+    `scenario.radars[0]`), and `radar_forge.pipeline.range_doppler_product`.
+  - `radar_forge.propagation.line_of_sight_paths` takes a geometry of any number of targets
+    (`radar_forge.radar.TargetGeometry.monostatic` builds one), so one call places two
+    targets. `radar_forge.signal.fmcw_deramp_baseband` turns the paths into IQ, and
     `thermal_noise` gives noise-only data.
-  - `radar_forge.core.dsp.range_doppler_map`: the same FFT chain, with `fast_time_window` and
-    `slow_time_window` arguments for a taper.
-  - `radar_forge.core.windows`: `taper`, `coherent_gain_linear`, `processing_loss_db`.
+  - `radar_forge.dsp.range_doppler_map`: the same FFT chain, with `fast_time_weights` and
+    `slow_time_weights` arguments for a taper.
+  - `radar_forge.dsp`: `window`, `coherent_gain_linear`, `processing_loss_db`.
 - **You may work along one axis.** Doppler, across the 256 chirps at one range bin, is a
   one-dimensional problem with the same structure as the full map, and is much cheaper to train
   on. If you do, say why one axis is enough for your conclusion, or what would change in two.

@@ -58,7 +58,7 @@ constrained programme) is **not** built; §4.6 records why.
 
 The radar is scenario-001's S2 pulsed X-band radar at the Duke Receiver, with its receive antenna
 replaced by the shared 16-element ULA (scenario-006 D13). Geometry is fixed and synthetic so that
-every quantity has an analytic value. Angles are `azimuth_boresight_deg` (data-001 DF2): from
+every quantity has an analytic value. Angles are `azimuth_boresight_deg` (data-001 §5): from
 array boresight, positive towards the array's +x.
 
 ```
@@ -97,17 +97,17 @@ cell, so the only lever is the array.
 ### 2.2 The chain
 
 ```
-  scenarios/scenario_007_interference_*.toml
-          |  [target] fixed geometry   [[noise_interferer]]
+  config/scenario_007_interference_*.toml
+          |  [[target]] fixed geometry   [[noise_interferer]]
           v
-  core/propagation.py   line_of_sight_paths ------> PropagationPaths (two-way, aircraft)
-  core/interference.py  noise_interferer_sources -> NoiseInterfererSources (one-way power, aoa)  D15
+  propagation.py        line_of_sight_paths ------> PropagationPaths (two-way, aircraft)
+  interference.py       noise_interferer_sources -> NoiseInterfererSources (one-way power, aoa)  D15
           |
           v
   pulsed_baseband(..., rx_response_linear) (006 D13) + thermal_noise + interferer_noise
           |   cube (n_pulses, n_samples, n_rx) = (256, 100, 16)
           v
-  core/dsp.py  matched_filter(axis=1) -> doppler_fft(axis=0)    <-- UNCHANGED (006 D13)
+  dsp.py  matched_filter(axis=1) -> doppler_fft(axis=0)         <-- UNCHANGED (006 D13)
           |   data_rv (n_doppler_bins, n_range_bins, n_rx)
           v
   array/adaptive.py   training_snapshots (guard cells excluded)                         D16
@@ -117,7 +117,7 @@ cell, so the only lever is the array.
   array/adaptive.py   apply_weights  y = w^H x   (the only place weights touch data)
           |
           v
-  core/detection.py   cfar_detect_2d (Pfa = 1e-6)   <-- UNCHANGED
+  detection.py        cfar_detect_2d (Pfa = 1e-6)   <-- UNCHANGED
           |
           v
   detections.csv, interference.csv, products.h5 /beam
@@ -154,7 +154,7 @@ cell, so the only lever is the array.
 | :--- | :--- | :--- |
 | `rcs_dbsm` | −30.0 (0.001 m²), Swerling 0 | a small aircraft, the size of a small drone |
 | `range_m` | **5516.18 m** = 92 × c/(2·f_s), range sample 92 exactly | inside R_ua = 5995.8 m and outside the 1499.0 m eclipse; an exact bin (testing.md §3) |
-| `radial_velocity_mps` | **+19.4182 m/s** closing = 13 Doppler bins of 1.4937 m/s exactly | no straddle loss |
+| Closing speed | **+19.4182 m/s** = 13 Doppler bins of 1.4937 m/s exactly | no straddle loss |
 | `azimuth_boresight_deg`, `elevation_deg` | 0.0, 0.0 | on the steered look direction |
 
 ### 3.3 Interferers per variant
@@ -167,7 +167,7 @@ cell, so the only lever is the array.
 
 ### 3.4 Derived budgets
 
-All computed by script from `core/radar_equation.py`'s `received_power_w` and the one-way link of
+All computed by script from `propagation.py`'s `received_power_w` and the one-way link of
 §3.5; quoted verbatim. "Per element, processed" means after the matched filter (gain BT = 20,
 13.01 dB) and the 256-pulse Doppler FFT (24.08 dB), which raise a coherent signal by 37.09 dB and
 leave white noise and the wideband interferer where they were.
@@ -209,7 +209,7 @@ Scenario 001 §3.5 holds. Steering vectors, frame and weight application are sce
 
 | Contract | Statement |
 | :--- | :--- |
-| One-way link | `P = ERP · min(1, B_rx/B_j) · G_rx · λ² / ((4π)² R²)`, Friis [11]. `one_way_received_power_w` in `core/radar_equation.py`. Doubling the range costs 6 dB, not 12 |
+| One-way link | `P = ERP · min(1, B_rx/B_j) · G_rx · λ² / ((4π)² R²)`, Friis [11]. `one_way_received_power_w` in `propagation.py`. Doubling the range costs 6 dB, not 12 |
 | Snapshot | For Doppler bin d, range bin r: `x[d, r] = data_rv[d, r, 0:16]`, shape `(n_rx_adaptive,)` = `(16,)`. A training set is `(n_snapshots, 16)`, snapshots first |
 | Sample covariance | `R̂ = Xᴴ X / K`, X of shape `(K, 16)`; loaded form `R̂ + δI`, `δ` = `loading_w` [7] |
 | SINR | `SINR(w) = σ_s² \|wᴴ a_s\|² / (wᴴ R_in w)`, with `R_in = σ²I + Σ_j σ_j² a_j a_jᴴ` per element, processed |
@@ -247,7 +247,7 @@ As scenario-001 §3.6, plus:
 ### 4.1 D15 — interferers are one-way sources, in `PropagationPaths`-compatible form
 
 An interferer emits; it does not scatter. Its power falls as 1/R² over one leg, and the radar's
-transmit gain and the target's RCS play no part. `core/interference.py` represents it in the
+transmit gain and the target's RCS play no part. `interference.py` represents it in the
 names, units and angle convention the existing generators already use:
 
 | Kind | Representation | Field readings |
@@ -258,8 +258,7 @@ names, units and angle convention the existing generators already use:
 `thermal_noise`: it returns `(n_pulses, n_samples, n_rx)` spatially coloured noise
 `Σ_j a(θ_j) s_j[m, k]`, each `s_j` complex white Gaussian of variance `power_w[j]`, so the cube
 covariance is exactly `σ²I + Σ_j σ_j² a_j a_jᴴ`. The power comes from one function,
-`one_way_received_power_w` in `core/radar_equation.py`, which is the link-budget half that file
-already promises.
+`one_way_received_power_w` in `propagation.py`, beside the two-way `received_power_w`.
 
 `PropagationPaths` itself does not change; D1 and D6 stand.
 
@@ -360,10 +359,10 @@ The subspace search of §3.5 step 3 does not depend on how the eigenvectors happ
 > **Applied.** These amendments are folded into `spec/structure.md`; it is the authoritative
 > tree and decision list. This section records what changed and why.
 
-1. **Part B tree.** Add `core/interference.py  # wideband noise interferer sources, one-way (D15)`
+1. **Part B tree.** Add `interference.py  # wideband noise interferer sources, one-way (D15)`
    and `array/adaptive.py  # SLC, SMI-MVDR, LCMV/GSC, loading, INCM, EMP-CMR, peak maintenance; returns weights (D16)`.
-   Widen `core/radar_equation.py`'s comment to "… link budget, one-way (Friis) link for interferers".
-2. **B.1 mapping.** `core/interference.py` ← Friis (1946).
+   Widen the radar-equation comment (now `propagation.py`) to "… link budget, one-way (Friis) link for interferers".
+2. **B.1 mapping.** `interference.py` ← Friis (1946).
    `array/adaptive.py` ← Howells (1965), Applebaum (1976), Frost (1972),
    Griffiths & Jim (1982), Buckley & Griffiths (1986), Reed–Mallett–Brennan (1974),
    Carlson (1988), Gu & Leshem (2012), Yang et al. (2014);
@@ -375,19 +374,20 @@ The subspace search of §3.5 step 3 does not depend on how the eigenvectors happ
 This scenario claims:
 
 ```
-scenarios/scenario_007_interference_{sidelobe,mainlobe_edge}.toml
+config/scenario_007_interference_{sidelobe,mainlobe_edge}.toml   (with [verify])
 spec/scenario-007-interference.md
 a row in the Scenarios table of docs/README.md
-src/radar_forge/core/interference.py
+src/radar_forge/interference.py
 src/radar_forge/array/adaptive.py
-src/radar_forge/core/radar_equation.py   (one_way_received_power_w only)
-src/radar_forge/pipelines/scenarios.py   ([[noise_interferer]], fixed-geometry [target])
-tests/pipelines/test_scenario_007.py, tests/array/test_adaptive.py, tests/core/test_interference.py
+src/radar_forge/propagation.py           (one_way_received_power_w only)
+src/radar_forge/scenario.py              ([[noise_interferer]])
+src/radar_forge/pipeline.py              (interferer_noise added to each frame's cube)
+tests/array/test_adaptive.py, tests/test_interference.py
 ```
 
 `array/geometry.py`, `array/beamforming.py` and the multi-channel generators belong to scenario
-006 and are **consumed**; MVDR's closed form stays there. `core/{dsp,windows,detection}.py` are
-consumed unchanged. Robust beamformers (RCB, worst-case) join `array/adaptive.py` in scenario 010
+006 and are **consumed**; MVDR's closed form stays there. `dsp.py` (windows included) and
+`detection.py` are consumed unchanged. Robust beamformers (RCB, worst-case) join `array/adaptive.py` in scenario 010
 and must reuse `AdaptiveWeights`.
 
 ---
@@ -395,9 +395,9 @@ and must reuse `AdaptiveWeights`.
 ## 5. Build Sequence
 
 ```
-  1. core/radar_equation.py   + one_way_received_power_w            (Friis; 6 dB per range doubling)
+  1. propagation.py           + one_way_received_power_w            (Friis; 6 dB per range doubling)
              |
-  2. core/interference.py     + NoiseInterfererSources, noise_interferer_sources,
+  2. interference.py          + NoiseInterfererSources, noise_interferer_sources,
              |                  interferer_noise                    (D15)
   3. array/adaptive.py        + AdaptiveWeights, apply_weights, sample_covariance,
              |                  training_snapshots                 (D16; §4.3)
@@ -406,27 +406,28 @@ and must reuse `AdaptiveWeights`.
   5.                          + incm_covariance                     (Gu & Leshem)
   6.                          + eigen_projection, emp_cmr_weights, peak_maintained_weights
              |
-  7. pipelines/scenarios.py   [[noise_interferer]], fixed-geometry [target]
+  7. scenario.py, pipeline.py [[noise_interferer]], fixed-geometry [[target]]
              |
-  8. scenarios/scenario_007_interference_*.toml  (two)
+  8. config/scenario_007_interference_*.toml  (two, with [verify])
              |
-  9. tests: unit tests per step, then tests/pipelines/test_scenario_007.py
+  9. tests: unit tests per step, then the [verify] tables (tests/test_scenarios.py)
 ```
 
 | Step | Module | Notes |
 | :--- | :--- | :--- |
-| 1 | `core/radar_equation.py` *(edit)* | Additive. `received_power_w` and `bistatic_received_power_w` untouched |
-| 2 | `core/interference.py` *(new)* | Consumes `PropagationPaths` and `thermal_noise`'s conventions; adds no field to either |
+| 1 | `propagation.py` *(edit)* | Additive. `received_power_w`, which covers both sitings, untouched |
+| 2 | `interference.py` *(new)* | Consumes `PropagationPaths` and `thermal_noise`'s conventions; adds no field to either |
 | 3–6 | `array/adaptive.py` *(new)* | One function per step of §3.5, each returning its intermediate quantities. Baselines are built and tested before the current methods that are derived from them |
-| 7 | `pipelines/scenarios.py` *(edit)* | TOML order: `[scenario] [target] [[noise_interferer]] [[burst]] [receiver_site] [receive_array] [receiver] [adaptive]`: the truth, the emitters, the transmit end, the receive end, then processing. `[receive_array]` is 006's table unchanged; `[target]` without `[trajectory]` selects the fixed geometry |
-| 9 | tests | `core/dsp.py`, `core/detection.py` consumed unchanged; `test_scenario_001.py` and `test_scenario_006.py` stay green throughout |
+| 7 | `scenario.py`, `pipeline.py` *(edit)* | TOML order: `[scenario] [[target]] [frames] [[noise_interferer]] [site.tx] [[burst]] [receive_array] [receiver] [adaptive]`: the truth, the emitters, the transmit end, the receive end, then processing. `[receive_array]` is 006's table unchanged; a `[[target]]` with `position_enu_m` and `velocity_enu_mps` instead of `trajectory_path` is the fixed geometry, which the loader already reads |
+| 9 | tests | `dsp.py`, `detection.py` consumed unchanged; scenarios 001 and 006 pass their `[verify]` tables throughout |
 
 ---
 
 ## 6. Acceptance Criteria
 
-Unit criteria live in `tests/array/test_adaptive.py` and `tests/core/test_interference.py`;
-end-to-end ones in `tests/pipelines/test_scenario_007.py`, marked `slow`. Monte Carlo criteria use
+Unit criteria live in `tests/array/test_adaptive.py` and `tests/test_interference.py`;
+end-to-end ones in the `[verify]` tables of `config/scenario_007_interference_*.toml`, run by
+`tests/test_scenarios.py` and marked `slow`. Monte Carlo criteria use
 fixed seeds and assert against a stated confidence band, never a loosened tolerance (testing.md
 §10.9). Criterion numbers are stable because other specs cite them; A2 and A20–A23 are unused.
 

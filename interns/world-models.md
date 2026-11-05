@@ -18,10 +18,10 @@ see one direction done properly than a tour of all of them.
 
 **AI, machine learning and deep learning are not currently implemented in `radar-forge`.** There
 is no learned model, no training code and no PyTorch import anywhere in `src/`. The project
-`README.md` describes a `pipelines/datasets.py`
-with PyTorch wrappers; it does not exist yet. There is no clutter either: the background is
-thermal noise only. You will build what you need yourself, in your own script, on top of what the
-library already produces. That is the point of this task. As always, leave `src/` alone.
+`README.md` describes PyTorch dataset wrappers; they do not exist yet. There is no clutter
+either: the background is thermal noise only. You will build what you need yourself, in your own
+script, on top of what the library already produces. That is the point of this task. As always,
+leave `src/` alone.
 
 ### What a world model is
 
@@ -63,27 +63,32 @@ a different false-alarm rate. Your job is to find out on a problem we control.
 
 - Keep models small. They should train in minutes on a laptop CPU. A large model that wins is a
   weaker result than a small one that wins.
-- `uv run python scripts/run_scenario.py scenarios/scenario_003_tracking.toml --out out/s1 --no-iq`
-  runs the classical chain end to end. Read that script to see how the pieces fit together. Don't
-  commit `out/`.
+- `uv run python scripts/run_scenario.py config/scenario_003_tracking.toml --out out/s1`
+  runs the classical chain end to end. Read that script and the stages it runs, in
+  `radar_forge.evaluate`, to see how the pieces fit together. Don't commit `out/`.
 - Useful entry points:
-  - `radar_forge.pipelines.scenarios`: `load_scenario`, `iterate_frames`,
-    `form_range_doppler_map`. Each frame carries its IQ and the truth (`frame.range_m`,
-    `frame.radial_velocity_mps`, unfolded). The map has shape `(n_doppler, n_range)`.
-  - `radar_forge.pipelines.tracking`: `ScenarioTracker.from_scenario`, `frame_detections`,
-    `score_primary_track`. This is the classical baseline.
-  - `radar_forge.pipelines.trajectories`: `load_flight_csv`, `resample`, `to_radar_frame`.
-  - `radar_forge.core.tracking.motion.MotionModel`: the interface a motion model follows.
-    `radar_forge.core.tracking.tracker.build_tracker` and
-    `radar_forge.core.tracking.estimation.GaussianFilter` accept **any** object that follows
-    it, so you can put your own transition into the library's tracker from your script.
-  - `radar_forge.core.signal.thermal_noise`: noise-only data, as in the
+  - `radar_forge.scenario.load_scenario`, and `radar_forge.pipeline`: `frames`,
+    `range_doppler_product`. Each frame carries its IQ (`frame.cubes`) and the truth
+    (`frame.truth.bistatic_range_m`, `frame.truth.bistatic_range_rate_mps`: unfolded, twice the
+    slant values here, positive receding). The map has shape `(n_doppler, n_range)`.
+  - `radar_forge.pipeline`: `frame_plots`, `ScanTracker`, and the `track` stage of
+    `radar_forge.evaluate` that scores it. This is the classical baseline.
+  - `radar_forge.scenario.truth_geometry`: reads each target's trajectory, resamples it onto the
+    frame times and returns its geometry seen from the radar. Its steps, once `load_flight_csv`,
+    `resample` and `to_radar_frame`, are private now; `radar_forge.radar.geodetic_to_enu_m`
+    converts fixes of your own.
+  - `radar_forge.tracking.models.MotionModel`: the interface a motion model follows.
+    `radar_forge.tracking.Tracker` and `radar_forge.tracking.filters.predict` accept **any**
+    object that follows it, so you can put your own transition into the library's tracker
+    from your script.
+  - `radar_forge.signal.thermal_noise`: noise-only data, as in the
     [track-before-detect background](track-before-detect.md#noise-only-maps).
 - **Data.** `data/flight_coordinates.csv` is about 16,500 s of real ADS-B fixes for one light
   aircraft. Scenario 003 uses only 120 s of it (from 663 s). The rest is yours for training,
   validation and testing; decide how to split it and justify the split. The fixes are 2–8 s
   apart and noisy, which is why the simulated target's range rate jumps by several m/s between
-  frames. Read the comment above `sigma_accel_mps2` in `scenarios/scenario_003_tracking.toml`.
+  frames. Read the comment above `sigma_acceleration_mps2` in
+  `config/scenario_003_tracking.toml`.
 
 ## The questions
 

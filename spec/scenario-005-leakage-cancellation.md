@@ -26,7 +26,7 @@ Three reasons to make this the fifth slice:
    correlation sidelobes sit only 59.13 dB below its own peak, so without cancellation the aircraft
    lies about 14 dB *under* the leakage's sidelobe floor. Range-Doppler processing alone cannot
    reach it.
-2. **It builds the cancellation half of `core/clutter.py`.** `spec/structure.md` plans the
+2. **It builds the cancellation half of `clutter.py`.** `spec/structure.md` plans the
    leakage and clutter cancellers there (Part B, D12). This slice writes them from Haykin [2]_,
    Colone et al. [8]_ and Anttila et al. [4]_.
 3. **The method is a projection, and the projection can be checked exactly.** Every claim in §6
@@ -106,28 +106,28 @@ the stream, and not as a notch on the map afterwards.
 The processing chain. New blocks are marked `+`. Everything else is scenario 001 code, unchanged:
 
 ```
-  data/flight_coordinates.csv      scenarios/scenario_005_*.toml
+  data/flight_coordinates.csv      config/scenario_005_*.toml
             |                         [[burst]] waveform="noise"
             v                         [leakage] [[clutter]] [transmitter_distortion] [cancellation]
-  pipelines/trajectories.py  to_radar_frame  (001, unchanged)
+  scenario.py  truth_geometry  (001, unchanged)
             |
             v
-  core/propagation.py  line_of_sight_paths (001)   + leakage_paths, static_clutter_paths
+  propagation.py  line_of_sight_paths (001)   + leakage_paths, static_clutter_paths
             |
             v
-  + core/signal.py  stream_baseband  ->  data_t (n_stream_samples,), tx_t (n_stream_samples,)
+  + signal.py  stream_baseband  ->  data_t (n_stream_samples,), tx_t (n_stream_samples,)
             |        time origin = the transmit instant; lag m is range m*c/(2*fs)
             v
-  + core/clutter.py  ls_cancel | ls_cancel_batched | ls_cancel_sliding | wiener_smi
+  + clutter.py  ls_cancel | ls_cancel_batched | ls_cancel_sliding | wiener_smi
             |        stream projected off span{tx delayed by 0..K-1} (+ |tx|^2 tx for P3)
             v
-  + core/dsp.py  batched_correlation  ->  data_rfst (n_pulses, n_range_lags)
+  + dsp.py  batched_correlation  ->  data_rfst (n_pulses, n_range_lags)
             |
             v
-  core/dsp.py  doppler_fft (unchanged)  ->  data_rv
+  dsp.py  doppler_fft (unchanged)  ->  data_rv
             |
             v
-  core/detection.py  cfar_detect_2d (unchanged)
+  detection.py  cfar_detect_2d (unchanged)
 ```
 
 ---
@@ -140,7 +140,7 @@ The processing chain. New blocks are marked `+`. Everything else is scenario 001
 | :--- | :--- | :--- |
 | Site (Duke Receiver) | 36.00250 °N, 78.94100 °W, 60 m | **Scenario 001's site, unchanged**. Transmit and receive antennas share it |
 | Target | `data/flight_coordinates.csv`, 1500 m, 10 dBsm, Swerling 0 | As 001 |
-| Window | `start_time_s = 0.0`, `duration_s = 120.0`, 1 Hz frames | As 001: 16.63 – 18.36 km, −39.3 … +55.3 m/s |
+| Window | `start_time_s = 0.0`, `duration_s = 120.0`, 1 Hz frames | As 001: 16.63 – 18.36 km, closing at −39.3 … +55.3 m/s |
 | Waveform | Continuous noise code, 9.8 GHz, 8 MHz wide | See below |
 
 **Why a noise code.** The aim is a wideband waveform whose ambiguity function is a thumbtack [6]_,
@@ -179,7 +179,7 @@ gives an 18.7370 m range bin at 001's carrier.
 
 ### 3.3 Disturbance budget and the three variants
 
-The target's level uses the repo's monostatic `received_power_w` with 001's antennas. The leakage
+The target's level uses the repo's `received_power_w`, both ranges equal, with 001's antennas. The leakage
 and clutter are specified as levels at the ADC. Values are per sample, relative to noise:
 
 | Component | Range | Lag | Doppler | Level in the received stream |
@@ -310,14 +310,14 @@ A continuous-wave radar knows what it sent. The basis for cancelling its leakage
 clutter is therefore the **digital transmit waveform** `tx_t`, carried beside the received stream
 `data_t` over the same samples, with the same guards. It is not a receive channel. 005 has one
 receive channel, so it needs no channel axis before scenario 006's D13 creates one. Every function
-in `core/clutter.py` takes the transmit waveform and the received stream as separate arrays.
+in `clutter.py` takes the transmit waveform and the received stream as separate arrays.
 
 *Why the digital waveform and not a coupled-off sample of the transmitter:* the digital waveform
 holds no receiver noise, so the cancellation ceiling is the noise itself (§3.5, CA bound). What it
 does not hold is what the hardware did to it. P3 shows the cost, and the parallel-Hammerstein basis
 is the remedy.
 
-### 4.2 D12 — the least-squares cancellers live in `core/clutter.py`
+### 4.2 D12 — the least-squares cancellers live in `clutter.py`
 
 As `structure.md` plans (Part B, D12). The public functions:
 
@@ -341,7 +341,7 @@ returned, never applied silently**, which is the same rule scenario 007 states a
 weights. A Python loop runs over cancellation batches and filter blocks. Each is an independent
 solve, so the loop is the algorithm and not an unvectorised one. The code comment says so.
 
-Per D2 below, this adds the cancellation half of `core/clutter.py` alongside no clutter
+Per D2 below, this adds the cancellation half of `clutter.py` alongside no clutter
 model yet. Scenario 008 adds the Ward patch model, which is one clutter model. The promotion
 trigger, more than two clutter models plus the cancellation algorithms, is not reached by
 005 + 008.
@@ -365,7 +365,7 @@ A practical code has structure, such as a repetition period or a finite alphabet
 puts deterministic ridges into the ambiguity function [6]_. Modelling them would make §6's sidelobe
 floor a function of the code instead of `10·log10 N`, and the slice would be testing the waveform
 instead of the cancellation. White Gaussian noise has no structure, so its floor is flat. It also
-gives the amplifier model of P3 closed-form moments. `core/waveforms.py` gains
+gives the amplifier model of P3 closed-form moments. `signal.py` gains
 `noise_waveform(n_samples, rng)`, unit power.
 
 ### 4.5 What is out of scope, and why it is not a gap in the bar
@@ -388,28 +388,29 @@ gives the amplifier model of P3 closed-form moments. `core/waveforms.py` gains
 > **Applied.** These amendments are folded into `spec/structure.md`; it is the authoritative
 > tree and decision list. This section records what changed and why.
 
-1. **Part B tree.** Annotate `core/clutter.py` as
+1. **Part B tree.** Annotate `clutter.py` as
    `# land/sea clutter; least-squares leakage and clutter cancellation (005); Ward clutter patch, ICM taper (008)`.
-   `core/signal.py` adds `stream_baseband, leakage_paths, static_clutter_paths`.
-   `core/waveforms.py` adds `noise (a long pseudo-random code)`. `core/dsp.py` adds
+   `signal.py` adds `stream_baseband, leakage_paths, static_clutter_paths`, and to its
+   waveforms `noise (a long pseudo-random code)`. `dsp.py` adds
    `batched correlation for continuous waveforms`.
-2. **B.1 mapping.** The `core/clutter.py` row reads: *"Least-squares, batched and Wiener-SMI
+2. **B.1 mapping.** The `clutter.py` row reads: *"Least-squares, batched and Wiener-SMI
    cancellers (Haykin 2014); sliding-window estimation (Colone et al. 2016); parallel-Hammerstein self-interference cancellation
    (Anttila et al. 2013), written from the papers; padasip (MIT, adaptive-filter structure); …"*.
-   The `core/dsp.py` batched-correlation row reads *Kulpa 2013*.
+   The `dsp.py` batched-correlation row reads *Kulpa 2013*.
 3. **Part A §A.6** is padasip (MIT), the interface reference for the cancellers.
 4. **Decisions D11 and D12**, as §4.1 and §4.2:
    - *D11 — The canceller's basis is the radar's own transmitted waveform.* It is carried beside a
      single-channel stream, not as a channel column.
-   - *D12 — Leakage and clutter cancellation lives in `core/clutter.py`.* The block least-squares,
+   - *D12 — Leakage and clutter cancellation lives in `clutter.py`.* The block least-squares,
      batched, sliding-window, Wiener-SMI and parallel-Hammerstein cancellers are written from the
      texts. Each returns its residual and its weights, and none applies weights silently. The D2
      trigger is unchanged.
-5. **`RadarLike` widening.**
+5. **`Radar` widening.**
    - `WaveformKind` gains `"noise"`. For it, `chirp_duration_s` holds the correlation batch and
-     `prf_hz` its reciprocal, so `unambiguous_velocity_mps`, `n_samples_per_pri` and
+     `prf_hz` its reciprocal, so `unambiguous_bistatic_range_rate_mps`, `n_samples_per_pri` and
      `doppler_bin_centers_mps` apply unchanged. That is D7 working again.
-   - `Radar.unambiguous_range_m` gains a `"noise"` branch, `n_range_lags·c/(2f_s)`.
+   - `Radar.unambiguous_delay_s` gains a `"noise"` branch, `n_range_lags/f_s`, so
+     `unambiguous_bistatic_range_m` is `n_range_lags·c/f_s`, one-way `n_range_lags·c/(2f_s)`.
    - The correlation receiver gets its own range axis, `m·c/(2f_s)`, beside the deramp
      `range_bin_centers_m`.
 
@@ -418,17 +419,17 @@ gives the amplifier model of P3 closed-form moments. `core/waveforms.py` gains
 This scenario claims:
 
 ```
-scenarios/scenario_005_{static_leakage,varying_clutter,distorted_transmitter}.toml
+config/scenario_005_{static_leakage,varying_clutter,distorted_transmitter}.toml   (with their [verify] tables)
 spec/scenario-005-leakage-cancellation.md
-src/radar_forge/core/clutter.py            (cancellation half)
-src/radar_forge/core/{signal,waveforms,dsp,radar}.py   (additive widenings only)
-src/radar_forge/pipelines/scenarios.py     ([leakage], [[clutter]], [transmitter_distortion], [cancellation]; the "noise" dispatch)
-tests/core/test_clutter.py, tests/pipelines/test_scenario_005.py
+src/radar_forge/clutter.py            (cancellation half)
+src/radar_forge/{signal,dsp,radar}.py   (additive widenings only)
+src/radar_forge/{scenario,pipeline}.py     ([leakage], [[clutter]], [transmitter_distortion], [cancellation]; the "noise" dispatch)
+tests/test_clutter.py
 ```
 
-`core/detection.py`, `core/windows.py`, `core/geodesy.py` and `pipelines/trajectories.py` are
-consumed and never edited. `test_scenario_001.py`, `test_scenario_002.py` and
-`test_scenario_003.py` must stay green at every commit. The Ward patch model in `core/clutter.py`
+`detection.py`, the windows in `dsp.py`, the geodesy in `radar.py` and the trajectory reading in
+`scenario.py` are consumed and never edited. The `[verify]` tables of scenarios 001–003, run by
+`tests/test_scenarios.py`, must stay green at every commit. The Ward patch model in `clutter.py`
 belongs to scenario 008, and `array/` to 006 onward.
 
 ---
@@ -436,37 +437,37 @@ belongs to scenario 008, and `array/` to 006 onward.
 ## 5. Build Sequence
 
 ```
-  1. core/waveforms.py   + noise_waveform                  (new function)
-  2. core/radar.py       WaveformKind += "noise"; unambiguous_range_m branch   (widen)
-  3. core/propagation.py + leakage_paths, static_clutter_paths;
-     core/signal.py      + stream_baseband (amplifier model optional)
-  4. core/dsp.py         + batched_correlation, correlation range axis   (doppler_fft unchanged)
-  5. core/clutter.py     + delay_basis_gram, ls_weights, wiener_smi, ls_cancel,
+  1. signal.py           + noise_waveform                  (new function)
+  2. radar.py            WaveformKind += "noise"; unambiguous_delay_s branch   (widen)
+  3. propagation.py      + leakage_paths, static_clutter_paths;
+     signal.py           + stream_baseband (amplifier model optional)
+  4. dsp.py              + batched_correlation, correlation range axis   (doppler_fft unchanged)
+  5. clutter.py          + delay_basis_gram, ls_weights, wiener_smi, ls_cancel,
                            ls_cancel_batched, ls_cancel_sliding, parallel_hammerstein_basis,
                            depth, notch and distortion helpers
-  6. tests/core/test_clutter.py        A1-A5 first: projection, degeneracy, notch
-  7. pipelines/scenarios.py            new tables; "noise" dispatch; stream frames
-  8. scenarios/scenario_005_*.toml     three files
-  9. tests/pipelines/test_scenario_005.py   A6-A14
+  6. tests/test_clutter.py             A1-A5 first: projection, degeneracy, notch
+  7. scenario.py, pipeline.py          new tables; "noise" dispatch; stream frames
+  8. config/scenario_005_*.toml        three files
+  9. their [verify] tables, run by tests/test_scenarios.py   A6-A14
  10. notebooks/: the dynamic-range ladder, the notch plot, the distortion floor (visualisation extra)
 ```
 
 | Step | Module | Reuse |
 | :--- | :--- | :--- |
-| 1 | `core/waveforms.py` | New. Unit-power complex Gaussian from a passed `rng` |
-| 2 | `core/radar.py` | Widened. `Transmitter` validation is unchanged: duty cycle 1, as FMCW |
-| 3 | `core/propagation.py`, `core/signal.py` | **Consumes** `PropagationPaths` unchanged (D1, D6). Leakage and clutter are paths built in `core/propagation.py` with `bounce_count = 1` and zero Doppler (P2 adds one with 2 Hz). The target comes from 001's `line_of_sight_paths`. `thermal_noise` is consumed. A loop over paths (fewer than ten) applies each FFT delay. The comment says why |
-| 4 | `core/dsp.py` | New function. `doppler_fft` and `doppler_bin_centers_mps` are consumed |
-| 5 | `core/clutter.py` | New cancellation half; `scipy.linalg.cho_factor`. No new dependency |
-| 7 | `pipelines/scenarios.py` | No `[transmitter_site]`, so `Radar` (monostatic). `iterate_frames` dispatches `"noise"` to `stream_baseband` (today it falls through to the FMCW generator) and yields the stream |
-| 9 | tests | `to_radar_frame` gives truth exactly as in 001's A2 |
+| 1 | `signal.py` | New. Unit-power complex Gaussian from a passed `rng` |
+| 2 | `radar.py` | Widened. `Transmitter` validation is unchanged: duty cycle 1, as FMCW |
+| 3 | `propagation.py`, `signal.py` | **Consumes** `PropagationPaths` unchanged (D1, D6). Leakage and clutter are paths built in `propagation.py` with `n_bounces = 1` and zero Doppler (P2 adds one with 2 Hz). The target comes from 001's `line_of_sight_paths`. `thermal_noise` is consumed. A loop over paths (fewer than ten) applies each FFT delay. The comment says why |
+| 4 | `dsp.py` | New function. `doppler_fft` and `doppler_bin_centers_mps` are consumed |
+| 5 | `clutter.py` | New cancellation half; `scipy.linalg.cho_factor`. No new dependency |
+| 7 | `scenario.py`, `pipeline.py` | No `[site.rx]`, so `Radar` is monostatic. `frames`, through `synthesise`, dispatches `"noise"` to `stream_baseband` (today it falls through to the FMCW generator) and yields the stream |
+| 9 | tests | `truth_geometry` gives truth exactly as in 001's A2 |
 
 ---
 
 ## 6. Acceptance Criteria
 
-The unit tests (`tests/core/test_clutter.py`) are small and fast. The scenario tests
-(`tests/pipelines/test_scenario_005.py`) are **`slow`**. The bounds were checked against a numpy
+The unit tests (`tests/test_clutter.py`) are small and fast. The scenario checks, the
+`[verify]` tables run by `tests/test_scenarios.py`, are **`slow`**. The bounds were checked against a numpy
 prototype of the §3.5 model, run on one realisation per case. Its measured values are given in
 brackets.
 
@@ -479,7 +480,7 @@ brackets.
 | A5 | **The notch is one bin wide.** The full-CPI fit leaves the neighbouring bins, ±9.765625 Hz, at 0 dB. A probe at f_d = 0 inside the tap span is removed | ±0.1 dB; removal ≤ −100 dB noiseless | `|D|²` at a null is O(1/N) = 1.2e-6 | unit |
 | A6 | **Cancellation bound.** P1, least squares, K = 192: CA = 40.946 dB | ±0.05 dB | Power estimated from 8.192e5 samples has a std of 0.005 dB, so this is ≥ 10σ, plus O(K/N) model error [40.943] | P1 |
 | A7 | **Tap count.** K = 96 cannot reach the lag-160 echo: CA = 28.680 dB, floor rise 12.27 dB | CA ±0.05 dB; floor ±1.0 dB | As A6; floor as A9 [28.676; 11.84] | P1 |
-| A8 | **Target at the true bins.** After cancellation (P1 least squares; P2 batched and sliding; P3 parallel-Hammerstein), the CFAR peak nearest the truth sits at range `m·c/(2f_s)` and radial velocity from `to_radar_frame` | one range bin (18.7370 m) and one velocity bin (0.14937 m/s), in all five frames | 001's A2/A3 contract, through the correlation range axis | P1, P2, P3 |
+| A8 | **Target at the true bins.** After cancellation (P1 least squares; P2 batched and sliding; P3 parallel-Hammerstein), the CFAR peak nearest the truth sits at range `m·c/(2f_s)` and radial velocity, half the bistatic rate from `truth_geometry` | one range bin (18.7370 m) and one velocity bin (0.14937 m/s), in all five frames | 001's A2/A3 contract, through the correlation range axis | P1, P2, P3 |
 | A9 | **Floor rise matches the budget.** Floor over the clean run: P1 least squares 0.00 dB; P2 batched 1.89 dB; P3 linear 22.14 dB | ±1.0 dB | The floor is a mean of 216 cells. Across 400 positions on one map its std was 0.33 dB, and the bound is 3σ [P1 0.01; P2 2.06; P3 21.85] | P1, P2, P3 |
 | A10 | **SINR after cancellation.** Within 1.0 dB of clean for P1 least squares and P3 parallel-Hammerstein, and within 1.0 dB of §3.4's prediction for P2 batched (1.89 dB loss) | as stated | The peak cell carries interference with amplitude ratio 10^(−SINR/20). At 25 dB that is ±0.5 dB, plus the floor's 0.33 dB [P1 −0.01 dB, P3 −0.01 dB from clean; P2 batched −0.72 dB from prediction] | P1, P2, P3 |
 | A11 | **The baselines fail; the current methods succeed.** At `pfa = 1e-6`: **no cancellation** detects the target in **none** of the five frames (Pd ≤ 1.7e-6 each). **Full-CPI least squares on P2** and **the linear basis on P3** detect it in **at most one** (Pd ≤ 1.1e-2 and ≤ 4.7e-3 each; P(≥ 2 of 5) ≤ 1.2e-3). Least squares (P1), batched and sliding (P2) and parallel-Hammerstein (P3) detect it in **all five** (predicted SINR ≥ 24.7 dB, Pd ≈ 1) | counts | Fixed seed. The counts carry margin against the predicted Pd, and the margin is what makes the test not flaky | P1, P2, P3 |
@@ -530,7 +531,7 @@ brackets.
 
 From the retired structure spec.
 
-- **D2.** A `core/` module becomes a subpackage once it carries more than about one module of
+- **D2.** A library module becomes a subpackage once it carries more than about one module of
   responsibility, and not before; the subpackage re-exports every public name so import paths never
-  change. `core/clutter.py` is promoted when it holds more than two clutter models plus the
+  change. `clutter.py` is promoted when it holds more than two clutter models plus the
   cancellation algorithms.

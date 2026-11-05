@@ -15,7 +15,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from radar_forge.core.constants import SPEED_OF_LIGHT_MPS
+from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.dsp import (
     WINDOW_NAMES,
     apply_window,

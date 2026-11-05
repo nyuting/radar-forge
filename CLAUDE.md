@@ -11,15 +11,15 @@ and students. Neither half is traded for the other.
 - Everything through `uv` (`uv run pytest`), never `pip install` — the hooks call `uv run`.
 - `make check` green before you say you are done; `--no-verify` is not a fix — CI runs the same.
 - SI units with the unit in the name (`range_m`, `gain_tx_dbi`, never `gain_tx`) — R5.
-- Physical constants only from `radar_forge.core.constants`; never `3e8` — R4, mypy `Final`.
-- Lean NumPy docstrings: one summary line; a citation with equation number; Parameters/Returns only where a unit, shape or convention is not in the name; no Raises or Examples unless the example is the test — ruff `D`, R3, `tests/test_docstrings.py`.
-- Complete annotations, `ArrayLike` in, `NDArray` out — `mypy --strict`, ruff `ANN`, `tests/test_public_api.py`.
-- Every module defines `__all__` — `tests/test_public_api.py`. `msg = "…"` then `raise`, no `assert` — ruff `EM`, `S101`.
+- Physical constants only from `radar_forge.constants`; never `3e8` — R4, mypy `Final`.
+- Lean NumPy docstrings: one summary line; a citation with equation number; Parameters/Returns only where a unit, shape or convention is not in the name; no Raises or Examples unless the example is the test — ruff `D`, R3, `tests/test_conventions.py`.
+- Complete annotations, `ArrayLike` in, `NDArray` out — `mypy --strict`, ruff `ANN`, `tests/test_conventions.py`.
+- Every module defines `__all__` — `tests/test_conventions.py`. `msg = "…"` then `raise`, no `assert` — ruff `EM`, `S101`.
 - Broadcast, don't tile, unless `# broadcast-exempt: <reason>` — R6. No banners, `# Inputs:` or control chars — R8, R9.
-- Modules warn past 500 lines, fail past 800 — R10. `core/` does no I/O, logging or timing — R11.
+- Modules warn past 500 lines, fail past 800 — R10. Only `scenario`, `pipeline`, `evaluate`, `plots` do I/O, logging or timing — R11.
 - No `np.errstate`/`np.seterr` in `src/` without `# errstate-exempt: <reason>` — R12.
 - No generated arrays committed; golden data only in `tests/data/golden/` — pre-commit hook.
-- Conventional Commits, `feat(core): add Taylor taper`; PRs squash-merge — commit-msg hook, CI.
+- Conventional Commits, `feat(dsp): add Taylor taper`; PRs squash-merge — commit-msg hook, CI.
 
 ## Judgement calls
 
@@ -43,7 +43,7 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 
 ## Conventions you cannot grep for
 
-- Range rate: today's code is closing-positive (data-001 §5); the Phase 2 physics PR switches the whole repo to the time derivative of range, positive receding, with Doppler = -rate/wavelength written once. Until then, negate at any Stone Soup boundary.
+- Range rate is the time derivative of range, positive receding; Doppler = -rate/wavelength, written once in `propagation.doppler_shift_hz`. Map axes and tracker states are bistatic, R_T + R_R and its rate (2R monostatic); only `plots.display_axes` halves them, for figures and CSVs.
 - The FMCW generator relies on a down-sweep.
 - British spelling (`normalise`, `visualisation`) except where mirroring an outside API.
   SI units internally; dB only at API boundaries, named `_db*`.
@@ -52,39 +52,35 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 
 | Relation | Function (file under `src/radar_forge/`) |
 | :--- | :--- |
-| wavelength; PRI, duty cycle, sweep rate | `Transmitter.wavelength_m`; `.pulse_repetition_interval_s`, `.duty_cycle_linear`, `.sweep_rate_hzps` (core/radar.py) |
-| range resolution c/2B | `range_resolution_m` (core/waveforms.py); `_RadarChain.range_resolution_m` (core/radar.py) |
-| bistatic range resolution | `BistaticRadar.range_resolution_at_bistatic_angle_m` (core/radar.py) |
-| unambiguous delay, range, velocity | `_RadarChain.unambiguous_delay_s`, `Radar.unambiguous_range_m`, `BistaticRadar.unambiguous_range_m` (cτ, a range sum), `_RadarChain.unambiguous_velocity_mps` (core/radar.py) |
-| beat frequency ↔ range | `beat_frequency_hz`, `range_from_beat_frequency_m` (core/waveforms.py) |
-| delay, phase, Doppler, range-sum rate | `propagation_delay_s`, `propagation_phase_rad`, `doppler_shift_hz`, `range_sum_rate_mps` (core/propagation.py) |
-| stop-and-hop range evolution | `PropagationPaths.range_sum_at_m` (core/propagation.py) |
-| baseline, bistatic angle | `BistaticRadar.baseline_m`, `.bistatic_angle_rad` (core/radar.py) |
-| radar equation | `received_power_w`, `bistatic_received_power_w` (core/radar_equation.py) |
-| noise N0 = kT0F, per sample, in band | `Receiver.noise_density_w_per_hz`, `.noise_power_per_sample_w`, `_RadarChain.noise_power_matched_w` (core/radar.py) |
-| thermal noise draw; baseband synthesis | `thermal_noise`; `fmcw_deramp_baseband`, `pulsed_baseband` (core/signal.py) |
-| LFM chirp | `lfm_chirp` (core/waveforms.py) |
-| matched filter, range/Doppler FFT, map | `matched_filter`, `range_fft`, `doppler_fft`, `range_doppler_map` (core/dsp.py) |
-| bin axes; MTI | `range_bin_centers_m`, `doppler_bin_centers_mps`; `mti_filter` (core/dsp.py) |
-| windows, coherent gain, processing loss | `taper`, `coherent_gain_linear`, `processing_loss_db` (core/windows.py) |
-| CFAR Pfa, threshold, detect; clustering | `cfar_probability_of_false_alarm`, `cfar_threshold_factor`, `cfar_detect`, `cfar_detect_2d`; `cluster_detections` (core/detection.py) |
-| fold, dual-PRF unfold | `fold_into_period`, `unfold_doppler_dual_prf`, `unfold_range_dual_prf` (core/ambiguity_resolution.py) |
-| geodesy | `geodetic_to_enu_m`, `enu_to_range_azimuth_elevation_rad` (core/geodesy.py) |
-| RCS dBsm → m² | `dbsm_to_m2` (core/targets.py) |
-| Kalman predict/update, NIS | `GaussianFilter`, `innovation_stats` (core/tracking/estimation.py) |
-| DWNA/CWNA process noise | `CartesianMotion`, `RadialMotion` (core/tracking/motion.py) |
-| χ² gate, GNN | `ChiSquareGate`, `GlobalNearestNeighbour` (core/tracking/association.py) |
-| M-of-N confirmation | `LifecyclePolicy` (core/tracking/lifecycle.py) |
+| wavelength; PRI, duty cycle, sweep rate | `Transmitter.wavelength_m`; `.pulse_repetition_interval_s`, `.duty_cycle_linear`, `.sweep_rate_hzps` (radar.py) |
+| range resolution c/2B | `Radar.range_resolution_m` (radar.py); `range_resolution_m` (signal.py) |
+| unambiguous delay, range, rate | `Radar.unambiguous_delay_s`, `.unambiguous_bistatic_range_m` (cτ), `.unambiguous_bistatic_range_rate_mps` (λ PRF, the whole span) (radar.py) |
+| route geometry, baseline, bistatic angle | `Radar.geometry` -> `TargetGeometry`, `Radar.baseline_m`, `TargetGeometry.bistatic_angle_rad` (radar.py) |
+| beat frequency ↔ bistatic range | `beat_frequency_hz`, `bistatic_range_from_beat_frequency_m` (signal.py) |
+| delay, phase, Doppler; stop-and-hop | `propagation_delay_s`, `propagation_phase_rad`, `doppler_shift_hz`; `PropagationPaths.bistatic_range_at_m` (propagation.py) |
+| radar equation; RCS, Swerling 0-4 | `received_power_w` (R_T² R_R²); `dbsm_to_m2`, `swerling_rcs_m2` (propagation.py) |
+| noise N0 = kT0F, per sample, in band | `Receiver.noise_density_w_per_hz`, `.noise_power_per_sample_w`, `Radar.noise_power_matched_w` (radar.py) |
+| SNR, single pulse and integrated | `received_power_w / Radar.noise_power_matched_w`; times B T N on the map (evaluate.py geometry stage) |
+| thermal noise; synthesis; LFM chirp; ambiguity | `thermal_noise`; `fmcw_deramp_baseband`, `pulsed_baseband`; `lfm_chirp`; `ambiguity_function` (signal.py) |
+| windows, coherent gain, processing loss | `window`, `apply_window`, `coherent_gain_linear`, `processing_loss_db` (dsp.py) |
+| matched filter, range/Doppler FFT, map | `matched_filter`, `range_fft`, `doppler_fft`, `range_doppler_map` (dsp.py); `range_doppler_product` (pipeline.py) |
+| bin axes, Doppler resolution; MTI | `range_bin_centers_m`, `doppler_bin_centers_mps` (its spacing λ/(N T)); `mti_filter` (dsp.py) |
+| fold, dual-PRF unfold | `fold_velocity_mps`, `unfold_doppler_dual_prf`, `unfold_range_dual_prf` (dsp.py) |
+| CFAR Pfa, threshold, detect; clustering | `cfar_probability_of_false_alarm`, `cfar_threshold_factor`, `cfar_detect`, `cfar_detect_2d`; `cluster_detections` (detection.py) |
+| geodesy | `geodetic_to_enu_m`, `enu_to_range_azimuth_elevation_rad` (radar.py) |
+| predict, innovate, update; NEES | `predict`, `innovate`, `update`, `TaylorLinearisation`, `UnscentedTransform` (tracking/filters.py); `nees` (tracking/metrics.py) |
+| CWNA/DWNA process noise | `CartesianMotion`, `RadialConstantVelocity` (tracking/models.py) |
+| χ² gate, GNN; M-of-N | `chi_square_gate_threshold`, `GlobalNearestNeighbour` (tracking/association.py); `LifecyclePolicy` (tracking/tracker.py) |
 
-No function yet: SNR, Doppler resolution, integration gain, Pd/Swerling.
+No function yet: Pd (Swerling detection curves).
 
 ## Where things are: files
 
 | Path | What |
 | :--- | :--- |
-| `src/radar_forge/core/radar_equation.py` | The style exemplar; copy its shape |
-| `src/radar_forge/core/constants.py` | Every physical constant, defined once |
+| `src/radar_forge/propagation.py` | The style exemplar; copy its shape |
+| `src/radar_forge/constants.py` | Every physical constant, defined once |
 | `docs/conventions/` | `style.md`, `testing.md`, `review.md` (also `/pr-review`), `commits.md` |
 | `.githooks/`,`Makefile`, `scripts/check_conventions.py` | Hooks; every gate defined once; rules R1–R12 |
-| `scenarios/*.toml` | Scenario configurations (and, once implemented, their `[verify]` numbers) |
+| `config/*.toml`, `scripts/run_scenario.py` | Scenarios with their `[verify]` numbers; the stepper (`evaluate.py`) runs them |
 | `spec/` | Unimplemented scenarios, data-001 formats, tracker-001 architecture |

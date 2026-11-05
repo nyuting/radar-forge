@@ -16,7 +16,7 @@ The background lists what the library does not have, and the rules every compari
 Every detector needs a threshold, and every fair comparison in these tasks sets thresholds at a
 fixed false-alarm probability. That is easy when theory gives the answer. For cell-averaging CFAR
 (CA-CFAR) in complex Gaussian noise it does: `cfar_threshold_factor` in
-`radar_forge.core.detection` computes the factor exactly, for any Pfa. It is hard when it does
+`radar_forge.detection` computes the factor exactly, for any Pfa. It is hard when it does
 not:
 
 - in clutter that is not Gaussian;
@@ -47,11 +47,12 @@ your own script. Leave `src/` alone. SciPy, a core dependency, has the distribut
 - Use this repository at the latest `main`, and record the commit hash you used in your report.
 - Run `uv sync --extra dev --extra visualisation`. Add `--extra ml` only for the optional flow.
 - Useful entry points:
-  - `radar_forge.core.detection`: `cfar_threshold_factor`, `cfar_probability_of_false_alarm`,
-    `cfar_noise_estimate_w`, `cfar_detect`, `cfar_detect_2d`. Read the module docstring; it
-    explains what each variant assumes.
-  - `radar_forge.core.signal.thermal_noise`: complex Gaussian noise of any shape.
-  - `radar_forge.pipelines.scenarios.form_range_doppler_map`, and the
+  - `radar_forge.detection`: `cfar_threshold_factor`, `cfar_probability_of_false_alarm`,
+    `cfar_detect`, `cfar_detect_2d`. Each detector returns its threshold beside the detections;
+    the noise estimate alone (`cfar_noise_estimate_w` before) is no longer public. Read the
+    module docstring; it explains what each variant assumes.
+  - `radar_forge.signal.thermal_noise`: complex Gaussian noise of any shape.
+  - `radar_forge.pipeline.range_doppler_product`, and the
     [noise-only maps recipe](track-before-detect.md#noise-only-maps), if you want maps with
     scenario 003's exact shape.
 

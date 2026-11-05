@@ -1,17 +1,16 @@
 # Tracker 001 — Tracking architecture
 
-> Status: target architecture for the Phase 2 tracking PR. Until it merges the code exports
-> `UnscentedLinearisation`, `NearestNeighbour`, `RadialMotion`, `BistaticRangeDopplerModel`,
-> `MeasurementBatch` and the legacy `KalmanTracker`; see `src/radar_forge/core/tracking/`.
+> Status: built, in `src/radar_forge/tracking/` (`models`, `filters`, `association`, `tracker`,
+> `metrics`). Where this page and the code differ in a name, the code's name stands.
 >
 > The tracker after the tracking refactor: one Gaussian filter, a batched track bank, one
 > correction core, one scan loop. Running it is in [the user guide](../docs/user-guide/06-tracking.md).
 
 ## 1. Scope and principles
 
-In scope: `core/tracking/`: one Gaussian filter (Kalman, extended and unscented are its
+In scope: `tracking/`: one Gaussian filter (Kalman, extended and unscented are its
 transforms), motion and measurement models, gating, assignment, M-of-N confirmation with
-covariance-based deletion, and the interface the pipelines use. Out of scope: random-finite-set
+covariance-based deletion, and the interface the pipeline uses. Out of scope: random-finite-set
 trackers inside the loop, track-to-track fusion, real-time operation.
 
 1. **Models are data; the filter is generic.** A new sensor or target needs a new model, never a
@@ -47,10 +46,10 @@ Predictor and updater are one `Estimator` here, and the hypothesiser is the gate
 
 **Decoupling.** Swapping the transform (KF, EKF to UKF), the associator or the initiator changes
 one constructor argument and no pipeline code. A branch on the type of a transform, filter or
-tracker in the filter, the tracker or `pipelines/` breaks this. There is one `Tracker`.
+tracker in the filter, the tracker or `pipeline.py` breaks this. There is one `Tracker`.
 
-**Dependencies.** `core/tracking/` imports from `core/` only, never `pipelines/`; pipelines build
-the `Measurement`s and the `Scan`.
+**Dependencies.** `tracking/` imports NumPy and SciPy only, never `pipeline.py`; the pipeline
+builds the `Scan`.
 
 ## 3. The filter
 
@@ -68,7 +67,7 @@ The protocol `Linearisation` has `predict(motion, state, dt_s)` (mean `(n_state,
 S without R `(n_meas, n_meas)`, and H `(n_meas, n_state)` or `None`) and `check_motion_model(motion)`,
 which refuses a bad pairing at construction. `GaussianFilter` holds an estimate, a motion model and
 a transform; `predict_to` calls `predict`; `innovation_statistics` calls `measure`, adds R and
-returns ν, S, NIS and the log-likelihood from the one `innovation_stats` (Cholesky-whitened);
+returns ν, S, NIS and the log-likelihood from the one `innovate` (Cholesky-whitened, every pair);
 `update` hands the same moments to the correction core. It never branches on the transform type.
 A cubature or Gauss-Hermite transform is a new `Linearisation`, never a new filter.
 
@@ -116,17 +115,20 @@ interval at 99.9 %; covariances stay symmetric to `rtol=1e-12` with Cholesky suc
 
 - **Cartesian state**: per-axis interleaved `[x_m, xdot_mps, y_m, ydot_mps, z_m, zdot_mps]` in
   local ENU (x east, y north, z up); other orders via `CartesianMotion(order=...)`.
-- **Radial state**: `RadialConstantVelocity`, `[range_m, range_rate_mps]`, transition
-  `[[1, T], [0, 1]]`. This is scenario 003's `range_1d`.
+- **Radial state**: `RadialConstantVelocity`, `[bistatic_range_m, bistatic_range_rate_mps]`:
+  the route length R_T + R_R and its time derivative, positive receding, with transition
+  `[[1, T], [0, 1]]`. Monostatic, both are twice the slant values; nothing in the pipeline
+  halves the state, and only a display does (`plots.display_axes`). Scenario 003 tracks with it.
 - **Process noise**: `"cwna"`, continuous white-noise acceleration (q in m²/s³; Bar-Shalom, Li and
   Kirubarajan 2001, §6.2.2), is the default because its Q is right for any step length. `"dwna"`,
   the discrete model (σₐ² in m²/s⁴, §6.3.2), is kept because scenario 003 pins it.
-- **State models are configurations**: `range_1d`, `enu_2d`, `enu_3d` are named pairs of a motion
-  and a measurement model, built by one function.
+- **State models are configurations**: a motion and a measurement model in one layout.
+  `pipeline.ScanTracker` builds the radial one from a scenario's `[tracking]` table; an ENU
+  one pairs `CartesianMotion` with a spherical or bistatic model.
 - **Spherical measurements stay spherical.** `RangeAzimuthElevationRangeRate` maps an ENU state to
   `(range_m, azimuth_rad, elevation_rad, range_rate_mps)` about a sensor pose: r = |p − pₛ|,
   azimuth atan2(Δe, Δn) clockwise from north (periodic), elevation asin(Δu/r), range rate
-  +(p − pₛ)·v/r. The geometry is one function shared with `core.geodesy`; the model raises rather
+  +(p − pₛ)·v/r. The geometry is written inline (PR 77), not imported from `radar`; the model raises rather
   than return a non-finite Jacobian at r → 0 or the zenith. Converting to Cartesian is allowed only
   to seed a track, with the measurement-conditioned conversion of Duan, Han and Li (2004) and
   Bordonaro, Willett and Bar-Shalom (2014).
@@ -199,12 +201,12 @@ position covariance exceeds `max_position_sigma_m`, whatever the miss count. Mis
 for "we no longer know where it is"; the covariance is the thing itself. `None` turns it off.
 (Stone Soup's `CovarianceBasedDeleter` thresholds the trace, which mixes units.)
 
-**Range-only bootstrap, retry and reset.** Mechanism in core, policy in the scenario. A
+**Range-only bootstrap, retry and reset.** Mechanism in `tracking/`, policy in the scenario. A
 measurement model can return its marginal over named components. The pipeline passes a selector (a
-callable from a `TrackSnapshot` and a `Measurement` to the ordered model IDs to try); the tracker
-gates against them in order and keeps the first that passes, which gives the range-only bootstrap
+callable from the bank and the scan's model ID to the ordered `(model_id, allowed rows)` pairs to
+try); the tracker gates against them in order and keeps the first that passes, which gives the range-only bootstrap
 and the range-only retry when the velocity gate fails. On the miss that starts re-acquisition, the
-coordinates named in `LifecyclePolicy.reacquire_reset` (scenario 003: `("range_rate_mps",)`) have
+coordinates named in `LifecyclePolicy.reacquire_reset` (scenario 003: `("bistatic_range_rate_mps",)`) have
 their variances reset to the prior and their cross-covariances zeroed. The default selector returns
 the measurement's own model.
 
@@ -224,17 +226,18 @@ not yet built; none changes the loop.
   `n_scan = 1` and `k_best = 1` it reduces to GNN, its first test.
 - **PMBM** (García-Fernández et al. 2018) cannot sit inside `Tracker`: hypotheses, existence and
   birth are part of its density, leaving no associator, initiator or lifecycle to swap. It is a
-  comparison tracker in `core/tracking/rfs/pmbm.py`, sharing the models, `innovation_stats`,
+  comparison tracker in `tracking/rfs/pmbm.py`, sharing the models, `innovate`,
   Murty's algorithm, `clutter_density` and the metrics.
 
 ## 7. Integration, performance and validation
 
-**Data flow.** `core.detection.Detection` (cell indices, W) will be converted by
-`pipelines/tracking.py` to the pipeline's detection report (m, m/s, positive receding), built into
-a `Scan` of `Measurement`s, passed to `Tracker.process(scan)`, and returned as one `TrackSnapshot`
-per live track plus the scan's association. `scripts/run_scenario.py` will write `tracks.csv` and
-`detections.csv` from them (`spec/data-001-formats.md` §6.5, §6.6). Settings come from the scenario TOML's
-`[tracking]` table, read once by the pipeline; scenario-only settings stay in `pipelines/`. Every
+**Data flow.** `detection.Detection` (cell indices, W) is converted by `pipeline.frame_plots` to
+plots (bistatic m and m/s, positive receding), which `pipeline.ScanTracker` builds into a `Scan`
+and passes to `Tracker.process(scan)`; that returns the bank, each row with its NIS and the
+measurement it took. The stepper's track stage (`evaluate.py`) writes `tracks.csv` and
+`metrics.csv` from them (`spec/data-001-formats.md` §6.6, §6.9). Settings come from the scenario
+TOML's `[tracking]` table, read once; scenario-only policy (track-aided unfolding) stays in
+`pipeline.py`. Every
 measurement in a scan carries the scan's time and scans arrive in order. Every sensor registers in
 one `Tracker`, so one target has one track whichever sensor sees it.
 
@@ -243,13 +246,13 @@ matrices come from one batched computation, not a loop over pairs: Taylor Jacobi
 n_meas, n_state)`, sigma points as `(n_tracks, 2 n_state + 1, n_state)`. `np.linalg.cholesky` and
 `solve` take stacks over leading axes, so batched functions keep the textbook names. Gating is
 O(n_tracks · n_measurements · n_meas³); assignment is O(n³). A loop off the hot path carries a
-comment saying why. No compiled dependency in core; a backend comes only when a benchmark shows
+comment saying why. No compiled dependency in the library; a backend comes only when a benchmark shows
 NumPy is the limit, and then as an extra.
 
 **Validation.** Analytic (dead reckoning, Q against the published matrices, a known GNN optimum,
 M-of-N by hand, Jacobians against central differences, `rtol=1e-12`); consistency (NEES and NIS over
 200 runs × 30 steps, every transform, Bar-Shalom, Li and Kirubarajan 2001 §5.4.2); the drift guards
-of §3; hand-countable lifecycles; the batched gate against `innovation_stats` pair by pair
+of §3; hand-countable lifecycles; the batched gate against the textbook formulas pair by pair
 (`rtol=1e-12`); `benchmark` tests holding a scan of scenario 003's load and of 100 tracks × 1000
 measurements to a committed budget; scenario 003 end to end; OSPA (Schuhmacher, Vo and Vo 2008) and
 the metrics of `spec/data-001-formats.md` §6.9. Never loosen a tolerance to pass.
@@ -261,7 +264,7 @@ the metrics of `spec/data-001-formats.md` §6.9. Never loosen a tolerance to pas
   built as a UKF (hides the KF a student looks for); Joseph form everywhere (the UKF has no H).
 - **Spherical measurements stay spherical.** Rejected: Cartesian conversion then a linear KF
   (state-dependent covariance, bias growing with range × angle error).
-- **Mechanism in core, policy in pipelines** (the range-only selector), not in `Tracker`.
+- **Mechanism in `tracking/`, policy in `pipeline.py`** (the range-only selector), not in `Tracker`.
 - **D26: `CoordinatedTurn`, with the turn rate in the state.** One `MotionModel` in `motion.py`,
   exact discretisation with a series form near zero turn rate.
 - **D27: `IMM` is an `Estimator` of `Estimator`s.** Mixing by name in the union layout; transition

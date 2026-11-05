@@ -159,7 +159,7 @@ algorithm. The variants therefore sweep from 2× down to 0.1× Rayleigh, where t
 | Aircraft A bearing | 232.34 – 238.57 ° true |
 | Aircraft A off-boresight azimuth | −3.468 – +2.763 ° (`u` = −0.06031 – +0.04805) |
 | Aircraft A elevation | 4.42 – 4.89 ° |
-| Aircraft A radial velocity | −39.32 – +55.30 m/s |
+| Aircraft A closing speed | −39.32 – +55.30 m/s |
 | Aircraft A cross-range speed | 0.81 – 41.72 m/s |
 
 **Array approximations, checked.** Far field begins at `2D²/λ` = 3.92 m. The largest transit
@@ -259,7 +259,7 @@ Scenario-001 §3.5 and scenario-002 §3.5 hold unchanged. Added:
 | Deterministic ML [8], [11] | `û = argmax_u xᴴ P_A(u) x`, `P_A = A (AᴴA)⁻¹ Aᴴ`; RELAX alternation or a 2-D grid then a local refine |
 | CRB [11] | `CRB(u) = (σ² / 2) {Re[(Dᴴ P_A^⊥ D) ⊙ (s sᴴ)ᵀ]}⁻¹`, one snapshot, `D = ∂A/∂u`. One source: `6σ² / (π² |s|² n_rx (n_rx² − 1))` at d = λ/2 (equation number to confirm at implementation) |
 | Resolved | Two estimates, sorted, each within `Δu/2` of the matching true `u`. The same criterion for every method |
-| Angle units | `u` dimensionless inside `array/`; radians inside `core/`; `azimuth_boresight_deg` and `azimuth_deg` at file boundaries (data-001 DF2) |
+| Angle units | `u` dimensionless inside `array/`; radians in the other library modules; `azimuth_boresight_deg` and `azimuth_deg` at file boundaries (data-001 §5) |
 
 ### 3.7 Output schema
 
@@ -268,8 +268,8 @@ As scenario-001 §3.6, with:
 | File | Change |
 | :--- | :--- |
 | `truth.csv` | One row per aircraft per frame (`target_id` `aircraft_a`, `aircraft_b`), plus `azimuth_boresight_deg` and `direction_cosine_x` |
-| `iq.h5` | `data` carries the trailing `rx` axis that data-001 §6.7 already provides |
-| `products.h5` | `/rd/burst0/data` gains a trailing `n_rx` axis; new optional `/doa/burst0/spectrum` |
+| `iq_NNNNN.npz` | Each `burst{i}` array gains the trailing `n_rx` axis; data-001 §6.7 is `(n_pulses, n_samples)` today |
+| `products.h5` *(new)* | `/rd/burst0/data` with a trailing `n_rx` axis; optional `/doa/burst0/spectrum` |
 | `doa.csv` | **New.** One row per estimated source per detection per method; §4.6 gives the columns |
 | `metadata.json` | New `receive_array` block: `n_rx`, `element_positions_m`, `boresight_azimuth_deg`, `boresight_elevation_deg` |
 
@@ -299,9 +299,9 @@ Fixed here and referenced by 007–010 as "scenario-006 D13".
    averaging relies on it and raises `ValueError` on a geometry that is not centro-symmetric.
 6. **Site to array.** The array's boresight is given as a compass bearing and an elevation tilt,
    `boresight_azimuth_deg` and `boresight_elevation_deg`. `array/geometry.py` owns the one
-   rotation from the site's ENU frame (data-001 DF2) into the array frame. With zero tilt,
+   rotation from the site's ENU frame (data-001 §5) into the array frame. With zero tilt,
    off-boresight azimuth is the bearing minus the boresight bearing, wrapped to ±180°.
-7. **Synthesis.** `core/signal.py` stays geometry-agnostic. The generators gain one optional
+7. **Synthesis.** `signal.py` stays geometry-agnostic. The generators gain one optional
    argument, `rx_response_linear`, shape `(n_paths, n_rx)` complex: each channel's complex
    response to each path. `array/beamforming.py::steering_vectors` builds it from the paths'
    arrival angles. With it the cube is 3-D. Without it the 2-D cube is bit-identical to today's,
@@ -311,10 +311,11 @@ Fixed here and referenced by 007–010 as "scenario-006 D13".
    small against `1/B`: 1.53 × 10⁻³ here, stated in `signal.py`'s Notes with the bound. 009 owns
    the wideband case.
 
-One wrinkle in existing code: `core/dsp.py::range_fft` and `range_doppler_map` default to
-`fast_time_axis = -1`, which on a 3-D cube is the channel axis. `pipelines/scenarios.py` must
-pass `fast_time_axis=1` (and `matched_filter(..., axis=1)`) explicitly. On a 2-D cube axis 1 is
-axis −1, so the change alters no 001–003 result. `core/dsp.py` itself is not edited.
+One wrinkle in existing code: `dsp.py::range_fft` and `range_doppler_map` default to the last
+axis (`axis=-1`, `fast_time_axis=-1`), which on a 3-D cube is the channel axis.
+`pipeline.py::range_doppler_product` must pass `fast_time_axis=1` explicitly, and its pulsed
+chain, which compresses the rows as one stream, must keep each channel's stream apart. On a 2-D
+cube axis 1 is axis −1, so the change alters no 001–003 result. `dsp.py` itself is not edited.
 
 ### 4.2 D14 — which snapshots form a covariance
 
@@ -361,8 +362,8 @@ case for the bound (§3.4). A real airframe's echo phase changes with aspect fro
 the second path carries a **scattering phase**, drawn uniformly per frame from the scenario's
 seeded generator in F1 and F2, and set explicitly in tests.
 
-Today's generators discard the phase of `amplitude_linear` and rebuild it from `delay_s`; the
-`PropagationPaths` docstring records this as a gap in D1. 006 closes it: `PropagationPaths`
+Today's generators discard the phase of `amplitude_linear` and rebuild it from `delay_s`, as the
+`PropagationPaths` docstring records; that is a gap in D1. 006 closes it: `PropagationPaths`
 gains an optional field `scattering_phase_rad`, shape `(n_paths,)`, default zeros, added to the
 propagation phase by both generators. Zeros reproduce today's cubes bit for bit.
 
@@ -414,7 +415,7 @@ snapshot, iterated) → ML (the model fitted exactly).
    rotation (D13)"; `array/beamforming.py` reads "steering vectors (D13), conventional, MVDR
    weights"; `array/doa.py` reads "DoAEstimator base + Bartlett, Capon, MUSIC, Root-MUSIC,
    ESPRIT, spatial smoothing, FB, IAA, SPICE, deterministic ML; CRB, resolution limit".
-   `core/signal.py` reads "baseband synthesis (single and multi-channel), superposition, noise,
+   `signal.py` reads "baseband synthesis (single and multi-channel), superposition, noise,
    phase noise".
 2. **B.1 rows.** `array/beamforming.py`: Capon (1969); Phased-Array-Antenna-Model steering
    vectors. `array/doa.py`: unchanged row, plus "Shan–Wax–Kailath, Pillai–Kwon, Yardibi et al.
@@ -429,19 +430,20 @@ snapshot, iterated) → ML (the model fitted exactly).
 This scenario claims:
 
 ```
-scenarios/scenario_006_parallel_{resolved,subrayleigh,sweep}.toml
+config/scenario_006_parallel_{resolved,subrayleigh,sweep}.toml
 spec/scenario-006-parallel-approach-doa.md
 src/radar_forge/array/{__init__,geometry,beamforming,doa}.py
-src/radar_forge/core/signal.py            (rx_response_linear, scattering_phase_rad)
-src/radar_forge/pipelines/scenarios.py    ([second_aircraft], [receive_array], [doa]; explicit axes)
-src/radar_forge/pipelines/doa.py          (detection -> chip -> estimators -> doa.csv)
+src/radar_forge/signal.py                 (rx_response_linear, scattering_phase_rad)
+src/radar_forge/propagation.py            (PropagationPaths.scattering_phase_rad)
+src/radar_forge/scenario.py               ([second_aircraft], [receive_array], [doa])
+src/radar_forge/pipeline.py               (explicit axes; detection -> chip -> estimators)
+src/radar_forge/evaluate.py               (a stage writing doa.csv)
 notebooks/006_parallel_approach_doa.ipynb
 ```
 
-Consumed, never edited: `core/{dsp,windows,detection,radar,radar_equation,constants}.py`,
-`core/datachip.py` (004's), `pipelines/trajectories.py`, `data/flight_coordinates.csv`.
-`test_scenario_001.py`, `test_scenario_002.py` and `test_scenario_003.py` staying green is a
-precondition for every commit. `array/{adaptive,stap,calibration,impairments}.py` belong to
+Consumed, never edited: `{dsp,detection,radar,constants}.py`, `datachip.py` (004's), the
+trajectory reading in `scenario.py`, `data/flight_coordinates.csv`. Scenarios 001, 002 and 003
+passing their `[verify]` tables (`tests/test_scenarios.py`) is a precondition for every commit. `array/{adaptive,stap,calibration,impairments}.py` belong to
 007–010.
 
 ---
@@ -455,19 +457,19 @@ precondition for every commit. `array/{adaptive,stap,calibration,impairments}.py
   2. array/beamforming.py       steering_vectors (D13), conventional, mvdr_weights
              |
              v
-  3. core/signal.py (widen)     rx_response_linear -> (n_pulses, n_samples, n_rx)
+  3. signal.py (widen)          rx_response_linear -> (n_pulses, n_samples, n_rx)
              |                    scattering_phase_rad on PropagationPaths
              v
   4. array/doa.py               covariance, smoothing, FB; Bartlett, Capon, MUSIC,
              |                    Root-MUSIC, ESPRIT; IAA, SPICE, ML; CRB, monopulse
              v
-  5. pipelines/scenarios.py     [second_aircraft] [receive_array] [doa]; fast_time_axis=1
+  5. scenario.py, pipeline.py   [second_aircraft] [receive_array] [doa]; fast_time_axis=1
              |
              v
-  6. pipelines/doa.py           CFAR -> DataChip (004) -> D14 snapshot -> estimators
+  6. pipeline.py (DOA step)     CFAR -> DataChip (004) -> D14 snapshot -> estimators
              |
              v
-  7. scenarios/*.toml, scripts/run_scenario.py writes doa.csv
+  7. config/*.toml; an evaluate.py stage writes doa.csv
              |
              v
   8. tests, then notebooks/006_parallel_approach_doa.ipynb (F3 curves)
@@ -477,23 +479,22 @@ precondition for every commit. `array/{adaptive,stap,calibration,impairments}.py
 | :--- | :--- | :--- |
 | 1 | `array/geometry.py` *(new)* | Pure geometry; no signal code. |
 | 2 | `array/beamforming.py` *(new)* | The D13 sign lives here and nowhere else. |
-| 3 | `core/signal.py` *(widen)* | Two optional arguments; the 2-D path is bit-identical (A12). |
+| 3 | `signal.py` *(widen)* | Two optional arguments; the 2-D path is bit-identical (A12). |
 | 4 | `array/doa.py` *(new)* | Each estimator lands with its analytic test (A3–A6) before the scenario tests. |
-| 5 | `pipelines/scenarios.py` *(edit)* | TOML order: `[scenario] [target] [trajectory] [second_aircraft] [[burst]] [receiver_site] [receive_array] [receiver] [doa]`. |
-| 6 | `pipelines/doa.py` *(new)* | Consumes `core/detection.py::cfar_detect_2d` on the beam-summed map, and 004's `crop`. |
-| 7 | `scenarios/*.toml` *(new)* | Three files differing only in `[second_aircraft]`. |
+| 5 | `scenario.py`, `pipeline.py` *(edit)* | TOML order: `[scenario] [[target]] [frames] [second_aircraft] [site.tx] [[burst]] [receive_array] [receiver] [doa]`. |
+| 6 | `pipeline.py` *(widen)* | Consumes `detection.py::cfar_detect_2d` on the beam-summed map, and 004's `crop`. |
+| 7 | `config/*.toml` *(new)* | Three files differing only in `[second_aircraft]`. |
 | 8 | tests, notebook | F3's curves are the notebook's; the suite checks one point (A14). |
 
-`core/dsp.py`, `core/windows.py`, `core/detection.py` and `core/datachip.py` are consumed
-unchanged. pyroomacoustics is not a dependency: the A15 cross-check imports it with
+`dsp.py` (windows included), `detection.py` and `datachip.py` are consumed unchanged. pyroomacoustics is not a dependency: the A15 cross-check imports it with
 `pytest.importorskip` and is skipped when it is absent.
 
 ---
 
 ## 6. Acceptance Criteria
 
-Unit criteria live in `tests/array/test_{geometry,beamforming,doa}.py`; scenario criteria in
-`tests/pipelines/test_scenario_006.py`. "Trials" are seeded snapshot-model draws (§3.6).
+Unit criteria live in `tests/array/test_{geometry,beamforming,doa}.py`; scenario criteria in the
+`[verify]` tables of `config/scenario_006_*.toml`, run by `tests/test_scenarios.py`. "Trials" are seeded snapshot-model draws (§3.6).
 
 | # | Criterion | Bound | Justification | Applies to |
 | :--- | :--- | :--- | :--- | :--- |

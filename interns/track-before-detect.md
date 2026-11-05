@@ -54,28 +54,31 @@ All three tasks use the same data and the same definitions, so results can be co
 At its default 100 W, scenario 003's target is so strong that TBD has nothing to do. Lower the
 power first:
 
-- Copy `scenarios/scenario_003_tracking.toml` and change `transmit_power_w` in the copy. The
-  `[trajectory] path` is resolved relative to the TOML's own folder, so either keep the copy next
-  to the original or make the path absolute. Working out what power puts the target where you
-  need it is part of your task.
-- Load it with `radar_forge.pipelines.scenarios.load_scenario` and step through
-  `iterate_frames`. For each frame, `form_range_doppler_map(frame.iq[0], scenario.bursts[0])`
-  gives the complex map `rd_map`, of shape `(n_doppler, n_range)`, with its `range_axis_m`
-  and `velocity_axis_mps`. Power is `abs(rd_map) ** 2`. This map has not been thresholded.
+- Copy `config/scenario_003_tracking.toml` and change `transmit_power_w` in the copy. The
+  target's `trajectory_path` is resolved relative to the TOML's own folder, so either keep the
+  copy next to the original or make the path absolute. Working out what power puts the target
+  where you need it is part of your task.
+- Load it with `radar_forge.scenario.load_scenario` and step through
+  `radar_forge.pipeline.frames`. For each frame,
+  `range_doppler_product(frame.cubes[0], scenario.radars[0])` gives the complex map `rd_map`, of
+  shape `(n_doppler, n_range)`, with its `range_axis_m` and `rate_axis_mps`. Power is
+  `abs(rd_map) ** 2`. This map has not been thresholded.
 - Frames share one random generator, so consume them in order. Skipping or reordering frames
   changes the noise.
 - The map's power is an unnormalised FFT output, not a calibrated power in watts. Normalise by an
   estimate of the noise level, and say which estimate you used.
-- Each frame carries the truth: `frame.range_m` and `frame.radial_velocity_mps` (unfolded,
-  positive closing). The map's velocity axis folds at its edges; the waveform's unambiguous
-  interval is something you should derive and check, not assume.
+- Each frame carries the truth: `frame.truth.bistatic_range_m` and
+  `frame.truth.bistatic_range_rate_mps` (unfolded; twice the slant range and its rate here, as
+  the map's axes are; positive receding). The map's rate axis folds at its edges; the
+  waveform's unambiguous interval is something you should derive and check, not assume.
 
 ### Noise-only maps
 
 Setting a TBD threshold takes many noise-only runs. You do not need the full scenario for them:
-`radar_forge.core.signal.thermal_noise((n_pulses, n_samples), burst.receiver.noise_power_per_sample_w, rng=...)`
-passed through the same `form_range_doppler_map` gives a noise-only map with the same statistics
-as the real one. Check that claim yourself before you rely on it.
+`radar_forge.signal.thermal_noise((n_pulses, n_samples), radar.receiver.noise_power_per_sample_w, rng=...)`,
+with `radar = scenario.radars[0]`, passed through the same `range_doppler_product` gives a
+noise-only map with the same statistics as the real one. Check that claim yourself before you
+rely on it.
 
 ### Definitions
 

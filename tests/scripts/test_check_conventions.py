@@ -125,8 +125,8 @@ def test_a_repeated_heading_is_reached_with_a_numbered_suffix() -> None:
     assert checker.heading_slugs(["Notes", "Notes", "Notes"]) == {"notes", "notes-1", "notes-2"}
 
 
-LIBRARY_MODULE = Path("src/radar_forge/pipelines/x.py")
-HOT_PATH_MODULE = Path("src/radar_forge/core/x.py")
+LIBRARY_MODULE = Path("src/radar_forge/pipeline.py")
+HOT_PATH_MODULE = Path("src/radar_forge/x.py")
 
 
 def _blocking(problems: list) -> list[bool]:
@@ -142,13 +142,14 @@ def test_module_length_warns_past_500_and_fails_past_800(n_lines: int, expected:
     assert _blocking(checker.check_module_length(LIBRARY_MODULE, n_lines)) == expected
 
 
-def test_a_grandfathered_module_only_warns() -> None:
-    rel = Path("src/radar_forge/core/detection.py")
+def test_a_grandfathered_module_only_warns(monkeypatch: pytest.MonkeyPatch) -> None:
+    rel = Path("src/radar_forge/x.py")
+    monkeypatch.setattr(checker, "LONG_MODULE_GRANDFATHER", frozenset({rel}))
     assert _blocking(checker.check_module_length(rel, 5_000)) == [False]
 
 
 def test_tests_and_markdown_have_no_length_limit() -> None:
-    assert checker.check_module_length(Path("tests/core/test_x.py"), 5_000) == []
+    assert checker.check_module_length(Path("tests/tracking/test_x.py"), 5_000) == []
     assert checker.check_module_length(Path("src/radar_forge/x.md"), 5_000) == []
 
 
@@ -190,8 +191,14 @@ def test_the_hot_path_allows_warnings_and_non_clock_time_names() -> None:
     assert _r11_lines(source) == []
 
 
-def test_r11_applies_only_to_core() -> None:
-    assert _r11_lines("print(x)\n", LIBRARY_MODULE) == []
+@pytest.mark.parametrize("name", ["scenario.py", "pipeline.py", "evaluate.py", "plots.py"])
+def test_r11_spares_the_modules_that_run_a_scenario(name: str) -> None:
+    assert _r11_lines("print(x)\n", Path("src/radar_forge") / name) == []
+
+
+def test_r11_covers_the_tracking_package_and_spares_scripts() -> None:
+    assert _r11_lines("print(x)\n", Path("src/radar_forge/tracking/x.py")) == [1]
+    assert _r11_lines("print(x)\n", Path("scripts/x.py")) == []
 
 
 def _r12_lines(source: str, rel: Path = LIBRARY_MODULE) -> list[int]:

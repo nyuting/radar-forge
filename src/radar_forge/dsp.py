@@ -34,7 +34,8 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.signal import fftconvolve, get_window
 
-from radar_forge.core.constants import SPEED_OF_LIGHT_MPS
+from radar_forge.constants import SPEED_OF_LIGHT_MPS
+from radar_forge.propagation import bistatic_range_rate_from_doppler_mps
 
 __all__ = [
     "WINDOW_NAMES",
@@ -338,8 +339,11 @@ def doppler_bin_centers_mps(
         raise ValueError(msg)
 
     doppler_hz = np.fft.fftshift(np.fft.fftfreq(n_bins, d=pulse_repetition_interval_s))
-    # Adding +0.0 turns the stationary bin's -0.0 (from negating 0 Hz) into +0.0.
-    result: NDArray[np.float64] = -wavelength_m * doppler_hz + 0.0
+    # The sign is the one propagation.doppler_shift_hz defines; adding +0.0 turns the
+    # stationary bin's -0.0 (from negating 0 Hz) into +0.0.
+    result: NDArray[np.float64] = (
+        bistatic_range_rate_from_doppler_mps(doppler_hz, wavelength_m) + 0.0
+    )
     return result
 
 

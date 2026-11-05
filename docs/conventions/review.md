@@ -42,7 +42,7 @@ Blocking first:
 
 - **Licence and provenance.** The repo is MIT; unlicensed or copyleft code is never copied in.
 - **Extend, don't fork.** A second pipeline, tracker or CFAR beside `main`'s is the costliest
-  pattern; tracking lives in `core/tracking/`.
+  pattern; tracking lives in `src/radar_forge/tracking/`.
 - **No new lint exemptions.** `per-file-ignores`, `force-exclude` or a `# noqa` in `src/`
   is a departure; the per-line escapes are `# broadcast-exempt:` and `# errstate-exempt:`.
 
@@ -58,7 +58,8 @@ Then, with a run counterexample for each correctness finding:
 - **Scale**: think at a scenario's real size; O(n²) loops, copies in loops, `inv` per scan.
 - **Design and API**: units in names, no swappable adjacent arguments of one type and unit,
   keyword-only after the leading arrays, a return contract that holds for every input, reuse of
-  `core/`, one reader and one writer per file format (data-001), writers that only write.
+  the library's modules, one reader and one writer per file format (data-001), writers that only
+  write.
 - **Docs**: a docstring that says something the code does not do costs students the most; read
   ten lines either side before calling it wrong. Every unavoidable loop has a "why" comment.
 - **Tests**: analytic ground truth, NEES/NIS for a filter, clutter and missed detections for a
