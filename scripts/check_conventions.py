@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Enforce the conventions that ruff and mypy cannot express.
 
+This docstring is the canonical list of rules; ``docs/conventions/style.md`` and
+``CLAUDE.md`` point here rather than restating them.
+
 Pure standard library on purpose: the hooks and CI call it through ``uv run``,
 but it must also run under any Python with no environment at all.
 
@@ -8,13 +11,15 @@ Rules
 -----
 R1  Configuration lives in TOML (``pyproject.toml`` only).
 R2  The import package is Python under ``src/radar_forge/``.
-R3  Every library module has a module docstring.
+R3  Retired: ruff D100 checks module docstrings. D100 skips private modules
+    (``_validation.py``) on purpose: their underscore says nothing in them is
+    public. Numbers are never reused.
 R4  Physical constants are defined once, in ``constants.py``. No other file
     may bind those names, and their literal values may not appear elsewhere.
 R5  Physical quantities carry a unit suffix; bare names like ``range`` or
     ``power`` are rejected.
 R6  ``np.tile``/``np.repeat`` used to fake broadcasting must carry a one-line
-    justification.
+    justification. ``np.broadcast_to`` returns a view, so it is not flagged.
 R7  Every in-file Markdown anchor (``](#section)``) resolves to a real heading
     in that same file, so a summary table's jump links cannot rot.
 R8  Python comments carry no hash banners and no ``Inputs:``/``Outputs:``
@@ -28,7 +33,8 @@ R11 The hot path, every library module but the four that run a scenario
     timing: no ``print``, ``open``, ``Path.write_*``, ``logging`` or ``time`` clocks.
 R12 ``np.errstate``/``np.seterr`` in ``src/`` carry ``# errstate-exempt: <reason>``.
 
-Each failure prints the rule, the fix, and where the rule is documented. A
+Each failure prints the rule, the fix, and this docstring as where the rule is
+documented; ``docs/conventions/style.md`` holds the judgement calls around them. A
 warning (R10 between the two limits) is printed and does not block.
 
 Usage
@@ -51,7 +57,7 @@ from typing import NamedTuple
 REPO = Path(__file__).resolve().parent.parent
 PKG = Path("src") / "radar_forge"
 CONSTANTS_MODULE = PKG / "constants.py"
-STYLE = "docs/conventions/style.md"
+RULES_DOC = "the module docstring of scripts/check_conventions.py"
 
 
 class Problem(NamedTuple):
@@ -62,7 +68,7 @@ class Problem(NamedTuple):
     rule: str
     message: str
     fix: str
-    doc: str = STYLE
+    doc: str = RULES_DOC
     blocking: bool = True
 
     def render(self) -> str:
@@ -87,9 +93,20 @@ BANNED_CONFIG = {
     "mypy.ini": "mypy config belongs in pyproject.toml [tool.mypy]",
     ".mypy.ini": "mypy config belongs in pyproject.toml [tool.mypy]",
     "pytest.ini": "pytest config belongs in pyproject.toml [tool.pytest.ini_options]",
-    "requirements.txt": "dependencies are declared in pyproject.toml [project]",
-    "requirements-dev.txt": "dev deps go in [project.optional-dependencies].dev",
 }
+# requirements.txt, requirements-dev.txt, requirements-test.txt and the like.
+REQUIREMENTS_RE = re.compile(r"^requirements.*\.txt$")
+REQUIREMENTS_FIX = (
+    "dependencies go in pyproject.toml [project] or an [project.optional-dependencies] extra"
+)
+
+
+def banned_config_fix(name: str) -> str | None:
+    """Return the fix for a root config file outside pyproject.toml, or None if allowed."""
+    if REQUIREMENTS_RE.match(name):
+        return REQUIREMENTS_FIX
+    return BANNED_CONFIG.get(name)
+
 
 # --- R2 — the import package is Python ---
 
@@ -193,7 +210,7 @@ UNIT_EXEMPT = {"n", "i", "j", "k", "idx", "axis", "out", "dtype", "rng", "seed",
 # --- R6 — broadcasting ---
 
 BROADCAST_EXEMPT = re.compile(r"#\s*broadcast-exempt:\s*\S")
-TILE_FUNCS = {"tile", "repeat", "broadcast_to"}
+TILE_FUNCS = {"tile", "repeat"}
 
 
 def has_unit_suffix(name: str) -> bool:
@@ -340,15 +357,10 @@ def is_justified(lineno: int, lines: list[str], pattern: re.Pattern[str]) -> boo
 def check_path_rules(rel: Path) -> list[Problem]:
     """R1 and R2: file placement and configuration format."""
     problems: list[Problem] = []
-    if rel.name in BANNED_CONFIG and len(rel.parts) == 1:
+    config_fix = banned_config_fix(rel.name) if len(rel.parts) == 1 else None
+    if config_fix is not None:
         problems.append(
-            Problem(
-                rel,
-                0,
-                "R1 toml",
-                "configuration must live in pyproject.toml.",
-                BANNED_CONFIG[rel.name],
-            )
+            Problem(rel, 0, "R1 toml", "configuration must live in pyproject.toml.", config_fix)
         )
     if rel.parts[:2] == PKG.parts and rel.suffix not in ALLOWED_PACKAGE_SUFFIXES:
         problems.append(
@@ -726,17 +738,6 @@ def check_file(rel: Path, canonical: set[str]) -> list[Problem]:
         tree = ast.parse(source, filename=str(rel))
     except SyntaxError as exc:  # ruff reports these far better than we can
         return [*problems, Problem(rel, exc.lineno or 0, "syntax", str(exc.msg), "fix the syntax")]
-
-    if ast.get_docstring(tree) is None:
-        problems.append(
-            Problem(
-                rel,
-                1,
-                "R3 docstring",
-                "module has no docstring.",
-                "say what the module models and cite the reference it implements.",
-            )
-        )
 
     lines = source.splitlines()
     problems += check_units(tree, rel)

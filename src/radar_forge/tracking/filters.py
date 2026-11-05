@@ -429,7 +429,6 @@ def innovate(
     measurements = np.asarray(measurements, dtype=np.float64)
     n_meas, size = measurements.shape
     # A shared R becomes a read-only view per measurement, so every pair indexes its R alike.
-    # broadcast-exempt: a view, not a copy; the stack shape is what update() indexes.
     noise = np.broadcast_to(np.asarray(noise_covariance, dtype=np.float64), (n_meas, size, size))
     moments = linearisation.measure(model, bank)
     innovation = model.measurement_layout.residual(
