@@ -196,6 +196,7 @@ def test_the_radars_unambiguous_limits_are_the_maps_periods(path: Path) -> None:
     scenario = load_scenario(path)
     for radar, n_pulses in zip(scenario.radars, scenario.n_pulses, strict=True):
         range_m, rate_mps = map_axes(radar, n_pulses)
+        assert min(range_m.size, rate_mps.size) > 1, f"{path.stem}: an axis of one bin has no step"
         np.testing.assert_allclose(
             range_m.size * (range_m[1] - range_m[0]), radar.unambiguous_bistatic_range_m, rtol=1e-12
         )

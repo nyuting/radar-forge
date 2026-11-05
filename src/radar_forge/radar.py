@@ -17,6 +17,7 @@ References
        and Performance*, 2nd ed., Ganga-Jamuna Press, 2006.
 .. [5] M. I. Skolnik, *Introduction to Radar Systems*, 3rd ed., McGraw-Hill, 2001.
 .. [6] G. L. Charvat, *Small and Short-Range Radar Systems*, CRC Press, 2014.
+.. [7] A. V. Oppenheim and R. W. Schafer, *Discrete-Time Signal Processing*, 3rd ed., 2010.
 """
 
 from __future__ import annotations
@@ -266,7 +267,13 @@ class Radar:
 
     @property
     def unambiguous_delay_s(self) -> float:
-        r"""Longest unfolded delay, the map's range span: one PRI; FMCW :math:`f_s/\alpha` [6]_."""
+        r"""Delay period the map wraps at: one PRI; FMCW :math:`f_s/\alpha` (Oppenheim [7]_ §8.5).
+
+        Pulsed, the map holds ``round(PRI f_s)`` samples, equal whenever the PRI is a whole number
+        of samples (every config is). FMCW, it mirrors :func:`~radar_forge.dsp.range_bin_centers_m`
+        and can exceed the chirp (S3: :math:`2T_c` at :math:`f_s = 2B`), though a sawtooth deramp
+        caps the physical reach at :math:`T_c` (Charvat [6]_, ch. 3).
+        """
         if self.transmitter.waveform == "pulsed":
             return self.transmitter.pulse_repetition_interval_s
         return self.receiver.sample_rate_hz / self.transmitter.sweep_rate_hzps

@@ -45,7 +45,7 @@ N_PULSES = 32
 # Long enough that Harris's asymptotic sidelobe and loss figures are reached.
 N_LONG = 4096
 FIXED_WINDOWS = [name for name in WINDOW_NAMES if name not in ("taylor", "chebyshev")]
-# Scenario 001 S3's two bursts: half-intervals in about 5:6, maps of 60 and 50 km.
+# Scenario 001 S3's two bursts: rate spans in about 5:6, maps of 60 and 50 km.
 SPAN_A_MPS, SPAN_B_MPS = 76.48, 91.78
 SPAN_A_M, SPAN_B_M, REPEAT_M = 60_000.0, 50_000.0, 300_000.0
 

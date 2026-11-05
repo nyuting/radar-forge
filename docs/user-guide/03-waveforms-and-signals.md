@@ -58,7 +58,7 @@ generator for you; `pipeline.frames` does that for every frame of a scenario.
 | Beat frequency | $f_b$ | $f_b = \alpha \tau = \alpha R_b / c$ | `signal.beat_frequency_hz` | 234304.7 Hz |
 | Bistatic range from beat | $R_b$ | $R_b = c f_b / \alpha$ | `signal.bistatic_range_from_beat_frequency_m` | 35121.4 m |
 | Samples per chirp | $N_s$ | $N_s = T_c f_s$ | `Radar.n_samples_per_chirp`, `Radar.n_samples_per_pri` | 1000 |
-| Span of the FMCW range axis | $R_{\mathrm{span}}$ | $R_{\mathrm{span}} = c f_s / \alpha$ | `pipeline.map_axes`, `RangeDopplerProduct.range_period_m` | 149896.2 m (74948.1 m slant) |
+| Span of the FMCW range axis | $R_{\mathrm{span}}$ | $R_{\mathrm{span}} = c f_s / \alpha$ | `pipeline.map_axes`, `RangeDopplerProduct.range_period_m`, `Radar.unambiguous_bistatic_range_m` | 149896.2 m (74948.1 m slant) |
 | Motion during one chirp | $\delta R_b$ | $\delta R_b = \lvert \dot R_b \rvert T_c$ | checked in both generators | 0.0562 m (warns above $\Delta R_b/4$ = 37.4741 m) |
 | Noise density | $N_0$ | $N_0 = k T_0 F$ | `Receiver.noise_density_w_per_hz` | 7.9888e-21 W/Hz |
 | Noise power per sample | $P_n$ | $P_n = N_0 f_s$ | `Receiver.noise_power_per_sample_w` | 7.9888e-15 W |
