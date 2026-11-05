@@ -5,131 +5,110 @@
 **Status: specified, not implemented.** The fourth vertical slice, and the first in which the
 target moves far enough within one coherent processing interval (CPI) to matter.
 
-Scenario 001 §4.2 records the approximation every slice so far has relied on: at 2 MHz bandwidth
-an 80 m/s target moves a quarter of a 74.95 m range bin per CPI, so range migration "is
-negligible". That stays true only while the range bins are coarse and the target is slow. This
-slice changes both. It uses a wideband pulse (500 MHz, 0.3 m resolution) and a fast,
-accelerating target, so that over one 20.48 ms CPI the echo **walks across 28 range bins** and an
-acceleration **smears the Doppler peak over 4 bins**. Plain range-Doppler processing then loses
-**26.5 dB** of its 30.1 dB coherent gain, and the target falls below any detection threshold.
+Every slice so far has relied on one approximation: at 2 MHz bandwidth an 80 m/s target moves
+**0.0109** of a 74.95 m range bin in scenario 001 S2's 10.24 ms CPI (80 × 0.01024 / 74.95), so
+range migration is negligible. That stays true only while the range bins are coarse and the target
+is slow. This slice changes both. It uses a wideband pulse (500 MHz, 0.3 m slant resolution) and a
+fast, accelerating target, so that over one 20.48 ms CPI the echo **walks across 27.9 range bins**
+and an acceleration **spreads the Doppler peak over 4.03 bins**. Plain range-Doppler processing
+then loses **25.8 dB** of its 30.1 dB coherent gain, and the target falls below any detection
+threshold.
+
+All ranges and rates are **bistatic**, as the repo's maps carry them: range is
+:math:`R_b = R_T + R_R = c\tau` (twice the slant range here, monostatic), its rate
+:math:`\dot R_b` is **positive receding**, and Doppler is :math:`f_D = -\dot R_b/\lambda`, written
+once in `propagation.doppler_shift_hz`. Only `plots.display_axes` halves them, for figures and CSVs.
 
 The slice builds four things, in the order the signal meets them:
 
-1. **Migration correction** (`migration.py`, decision D10). The keystone transform removes
-   linear range walk for every target at once, without knowing its velocity. A Doppler-rate
-   matched filter in the range-frequency domain then removes the quadratic and cubic phase that
-   acceleration and jerk leave behind. A fold-factor search handles Doppler-ambiguous targets.
-2. **Polynomial-phase estimation.** "Polyphase" is read here as
-   *polynomial-phase* motion compensation: velocity, acceleration and jerk are the first three
-   coefficients of the slow-time phase. (The other reading, the polyphase channeliser, belongs to
-   scenario 009.)
-3. **The datachip** (`datachip.py`, decision D9). A small crop of the cube around a
-   detection, carrying its offsets into the parent and the parent's bin-centre axes. Scenario 006
-   consumes it for angle estimation on multi-channel chips.
-4. **Fine parameter estimation** on the chip. Sub-bin range and velocity come from interpolation
-   on Fourier coefficients, and acceleration comes from the cubic phase function. A local
-   maximum-likelihood refinement then brings every estimate to within a stated factor of the
-   Cramér–Rao bound (CRB). This search is too expensive over the whole cube, but on the chip it
-   is cheap, and that is the reason the chip exists.
+1. **Migration correction** (`migration.py`). The keystone transform removes linear range walk for
+   every target at once, without knowing its velocity. A Doppler-rate filter in the
+   range-frequency domain then removes the quadratic and cubic phase that acceleration and jerk
+   leave behind. A fold-factor search handles Doppler-ambiguous targets.
+2. **Polynomial-phase estimation.** "Polyphase" is read as *polynomial-phase* motion
+   compensation: rate, acceleration and jerk are the first three coefficients of the slow-time
+   phase. (The polyphase channeliser belongs to scenario 009.)
+3. **The datachip** (`datachip.py`). A small crop of the cube around a target, carrying its
+   offsets into the parent and the parent's bin values. Scenario 006 consumes it for angle
+   estimation on multi-channel chips.
+4. **Fine estimation** on the chip: sub-bin range and rate by interpolation on Fourier
+   coefficients, acceleration from the cubic phase function, a local maximum-likelihood
+   refinement, each against its Cramér–Rao bound (CRB). Too expensive over the cube, cheap on the
+   chip: that is why the chip exists.
 
-Single channel, monostatic. It extends scenario 001's pulsed chain (S2: LFM pulse, matched filter)
-and does not touch the FMCW path.
-
-| Section | What it fixes |
-| :--- | :--- |
-| §2 Overview & Geometry | The target, why walk appears, the processing chain |
-| §3 Parameter Matrix | Waveform, link budget, the three variants, derived walk/spread/loss, contracts, schema |
-| §4 Core Decisions | D9 `DataChip`, D10 migration on `data_rfst`; kinematic paths; what is not modelled |
-| §5 Build Sequence | What is new, what is widened, what is untouched |
-| §6 Acceptance Criteria | Analytic bounds, led by the baseline that fails |
+Single channel, monostatic. It extends scenario 001's pulsed chain (LFM pulse, matched filter) and
+does not touch the FMCW path.
 
 ### 1.1 Upstream inspiration
 
-| Upstream | What it is | What radar-forge takes | Licence | Baseline or current |
-| :--- | :--- | :--- | :--- | :--- |
-| Moving-target detection (MTD): range-compress, then Doppler FFT per range bin [11] | The textbook pulse-Doppler chain; scenario 001 S2 | The uncompensated reference whose loss §6 predicts and asserts | textbook, written from equations | **Baseline** |
-| Perry, DiPietro & Fante 1999 [1] | Origin of the keystone transform: rescale slow time per range frequency so linear walk vanishes for all velocities at once | First-order keystone in `migration.py` | paper, written from equations | Current (for linear walk) |
-| Zhu, Li & Zhu 2007 [2] | Keystone without interpolation, by a scaled transform | The keystone's time scaling as a chirp-z transform per range frequency; truncated-sinc interpolation kept as the baseline | paper, written from equations | Current (implementation) |
-| `scipy.signal.czt` | Chirp-z transform | The scaled DFT inside the keystone; already a core dependency | BSD-3-Clause | Dependency |
-| Xu, Yu, Peng & Xia, RFT I–III, 2011–2012 [3]–[5] | Radon–Fourier transform: a generalised Doppler filter bank that integrates along range-walk trajectories; blind-speed sidelobes; optimality | RFT as the test oracle for linear walk; its blind-speed-sidelobe analysis informs the fold-factor search | paper, written from equations | Oracle |
-| Xu et al. 2012, GRFT [6] | Generalised RFT: the maximum-likelihood estimator of high-order motion parameters, with their CRB | Local GRFT on the chip as the ML refinement; its CRB form for the acceptance bounds | paper, written from equations | **Current** (on the chip), oracle (on the cube) |
-| Huang, Liao, Yang, Xia & Ma 2016 [7] | Keystone, then matched filtering in range frequency and slow time, for velocity, acceleration and jerk, with the Doppler-ambiguous cases | The K2 and K3 chain: keystone, Doppler-rate matched filter, fold factor | paper, written from equations | **Current** |
-| Kirkland 2011 [8] | Second-order keystone transform, for range curvature | `second_order_keystone`, unit-tested; not needed by K2 (§3.4) | paper, written from equations | Current (extension) |
-| Peleg & Porat 1991, HAF [9] | High-order ambiguity function for polynomial-phase signals | Acceleration and jerk baseline on the chip | paper, written from equations | **Baseline** |
-| Peleg & Porat 1991, CRB [10] | CRB for constant-amplitude polynomial-phase signals | Bound for the acceleration and jerk criteria | paper, written from equations | Oracle |
-| O'Shea 2004, CPF [12] | Cubic phase function: quadratic-FM parameters by 1-D maximisations | Acceleration and jerk on the chip, as the start for ML | paper, written from equations | Current |
-| Rife & Boorstyn 1974 [13] | ML single-tone estimation and its CRB | The tone CRB; the frame for every sub-bin estimator | paper, written from equations | Oracle |
-| Parabolic interpolation on \|X\|; Quinn 1994 [14]; Jacobsen & Kootsookos 2007 [15]; Candan 2011 [16] | Three-bin DFT interpolators | Sub-bin range and velocity baselines; parabolic is the one shown to fail | paper, written from equations | **Baseline** |
-| Aboutanios & Mulgrew 2005 [17] | Iterative interpolation on Fourier coefficients; near-CRB everywhere on the bin | Sub-bin range and velocity on the chip | paper, written from equations | **Current** |
+| Upstream | What radar-forge takes | Baseline or current |
+| :--- | :--- | :--- |
+| Moving-target detection: compress, then Doppler FFT per range bin (Richards [11] §5.3) | The uncompensated map whose loss §6 asserts | **Baseline** |
+| Perry, DiPietro & Fante 1999 [1] | The keystone: rescale slow time per range frequency, :math:`t = \tau f_0/(f_0+f)` | Current |
+| Zhu, Li & Zhu 2007 [2] | The keystone's rescaling as a chirp-z transform per range frequency; truncated sinc kept as the baseline | Current (implementation) |
+| Bluestein 1970 [18] | The chirp-z transform as one batched convolution; `scipy.signal.czt` is its test reference | Current (implementation) |
+| Xu, Yu, Peng & Xia, RFT I–III [3]–[5] | The Radon–Fourier transform as a **test oracle** for linear walk | Oracle |
+| Xu et al. 2012, GRFT [6] | Local GRFT on the chip as the ML refinement | **Current** (on the chip) |
+| Huang, Liao, Yang, Xia & Ma 2016 [7] | Keystone, Doppler-rate filter, fold-factor search: the K2 and K3 chain | **Current** |
+| Kirkland 2011 [8] | Second-order keystone :math:`t = \tau\sqrt{f_0/(f_0+f)}`, unit-tested, not in a chain | Current (extension) |
+| Peleg & Porat 1991, HAF [9] | Acceleration and jerk baseline on the chip | **Baseline** |
+| Peleg & Porat 1991, CRB [10] | Bound for acceleration and jerk | Oracle |
+| O'Shea 2004, CPF [12] | Acceleration and jerk on the chip; the ML start | Current |
+| Rife & Boorstyn 1974 [13] | The tone CRB; the frame for every sub-bin estimator | Oracle |
+| Parabolic on \|X\|; Quinn 1994 [14]; Jacobsen & Kootsookos 2007 [15]; Candan 2011 [16] | Three-bin interpolators; parabolic is the one shown to fail | **Baseline** |
+| Aboutanios & Mulgrew 2005 [17] | Iterative interpolation on Fourier coefficients | **Current** |
 
-No code is vendored. File Exchange implementations of GRFT and of the second-order keystone exist,
-but none is a reference here, because this spec is written from the papers.
+No code is vendored; everything is written from the papers.
 
 ---
 
 ## 2. Overview & Geometry
 
-A wideband X-band tracking radar sited downrange of a sounding-rocket launch pad observes one fast
-target in the radial direction: a sounding rocket flying towards it along the radar's line of
-sight, coasting (K1), under thrust (K2) or after burnout (K3). The rocket is closing throughout,
-so under thrust its closing speed increases. The
-geometry is one-dimensional. Only range and its derivatives matter, so there is no trajectory
-file. The target follows a polynomial range history about the centre of the CPI:
+A wideband X-band tracking radar sited downrange of a sounding-rocket launch pad observes one
+target along its line of sight: a rocket closing on the radar, coasting (K1), under thrust (K2) or
+after burnout (K3). Only range and its derivatives matter. Slow time starts at **pulse 0**, the
+frame's truth time; the target follows
 
 ```
-   R(t) = R0 - v t - a t^2/2 - j t^3/6          closing positive (superseded: receding positive, data-001 §5)
-          t in [-T/2, T/2),  t = 0 at pulse n_pulses // 2
+   R_b(t) = R_b0 + Rdot_b t + Rddot_b t^2/2 + J_b t^3/6        bistatic, positive receding
+            t = m / PRF, m = 0 ... N-1; truth at t = 0
 
-   [ radar ]  <-----------  R0 = 2500 m  ------------  [ target ]  ===> closing at v
-                                                         a: closing speed increasing
+   [ radar ]  <-----------  2500 m slant (5000 m bistatic)  ---------  [ target ]  ===> closing
 ```
 
-Walk is what the target does during a CPI. What it costs depends on the bin size:
+The TOML gives the target as `position_enu_m`, `velocity_enu_mps` and an optional
+`acceleration_enu_mps2` (it then follows p + v t + a t²/2); `Radar.geometry` returns
+:math:`\ddot R_b` exactly, the velocity across the line of sight included. Jerk is a field of
+`PropagationPaths` (default 0); no scenario sets it.
+
+Walk is what the target does during a CPI; what it costs depends on the bin:
 
 ```
-  range bin index (0.2498 m each)    0    5   10   15   20   25   30
-  pulse 0       (t = -T/2)                                       ##
-  pulse 256                                               ##
-  pulse 512     (t = 0)                            ##
-  pulse 768                                 ##
-  pulse 1023    (t = +T/2)           ##
-                                     |<----- 27.87 bins: K1 ----->|
-
-  Uncompensated: each range bin holds ~1/28 of the pulses     -> -26.52 dB
-  After keystone: every pulse in one bin                      ->  -0.05 dB (grid)
+  range bin (0.49965 m bistatic)     370  375  380  385  390  395  400
+  pulse 0       (t = 0)                                              ##
+  pulse 512                                       ##
+  pulse 1023    (t = T)              ##
+                                     |<---- 27.87 bins: K1 ---->|
+  Uncompensated: each range bin holds ~1/28 of the pulses       -> -25.8 dB
+  After keystone (reference pulse 0): every pulse in bin 400    -> -0.08 dB
 ```
 
-The chain this slice builds. New stages are in capitals; everything else exists:
+The chain; new steps are in capitals:
 
 ```
-  config/scenario_004_keystone_k{1,2,3}.toml
-            |       [[target]] kind = "polynomial"   [[burst]] range gate
-            v
-  scenario.py    polynomial radial history -> truth at CPI centre
-            |
-            v
-  propagation.py  line_of_sight_paths(+accel, +jerk) -> PropagationPaths (+1 defaulted field)
-            |
-            v
-     pulsed_baseband(..., range gate)  + thermal_noise    -> data_ftst (n_pulses, n_gate)
-            |
-            v
-  dsp.py  matched_filter, trim group delay                -> data_rfst (n_pulses, n_range_bins)
-            |
-            +-------------------------------> doppler_fft -> MTD map (BASELINE, loses 26.5 dB)
-            v
-  migration.py   RANGE SPECTRUM  (FFT along range, zero-padded, signed f)
-            |          KEYSTONE  t -> f0/(f0+f) tau       [fold factor F]
-            |          DOPPLER-RATE MATCHED FILTER  (a, j)   search curve exposed
-            |          back to data_rfst
-            v
-  dsp.py  doppler_fft -> data_rv  -> detection.py cfar_detect_2d, cluster_detections
-            |
-            v
-  datachip.py   CROP -> DataChip (offsets, parent axes, processing metadata)
-            |          FINE ESTIMATION: Aboutanios-Mulgrew (R, v), CPF (a, j), local GRFT (ML)
-            v
-     FineEstimate in PARENT coordinates, with its CRB      -> estimates.csv, products.h5
+  config/scenario_004_keystone_k{1,2,3}.toml   [[burst]] range gate, [migration]
+     |
+  scenario.py     target p + v t + a t^2/2 -> truth at the first pulse
+  propagation.py  line_of_sight_paths: doppler_rate_hzps from the route's acceleration
+  signal.py       pulsed_baseband(..., RANGE GATE)                       -> (n_pulses, n_gate)
+  pipeline.py     pulse_compress: matched filter, group delay cut         -> data_rfst
+     |---------------------------------------------> Doppler FFT -> MTD map (BASELINE)
+  migration.py    RANGE SPECTRUM (FFT along range, zero-padded, signed f)
+                  KEYSTONE t = tau f0/(f0+f)  [FOLD-FACTOR SEARCH]
+                  DOPPLER-RATE FILTER (a[, j]), search curve exposed      -> data_rfst
+  pipeline.py     Doppler FFT -> map -> CFAR, clustering (unchanged)
+  datachip.py     CROP -> DataChip; FINE ESTIMATION: A&M (range, rate), CPF, local GRFT, CRB
+  stages/migration.py   stage "keystone": migration.csv, keystone.png
 ```
 
 ---
@@ -138,430 +117,313 @@ The chain this slice builds. New stages are in capitals; everything else exists:
 
 ### 3.1 Waveform: the same in all three variants
 
-All numbers below come from `derive.py` and `crb.py` in the scenario's scratch directory. They
-will be re-derived in tests from `radar.py` rather than read from this table.
-
 | Parameter | Value | Why |
 | :--- | :--- | :--- |
-| Waveform | LFM pulse, matched filter | Scenario 001 S2's chain; the range spectrum after compression is what the keystone acts on |
-| `carrier_frequency_hz` | 9.8 GHz → λ = **30.5911 mm** | Scenario 001's carrier, so the Doppler numbers compare directly |
-| `bandwidth_hz` | 500 MHz → c/2B = **0.29979 m** | Fractional bandwidth B/f0 = **0.05102**. The keystone's correction scales with it; at 2 MHz it would be 2·10⁻⁴ and walk would not exist |
-| `chirp_duration_s` | 0.5 µs, time-bandwidth product **250** | Short enough that intra-pulse motion is 0.55 mm at 1100 m/s (§4.6) |
-| `sample_rate_hz` | 600 MHz, fs/B = 1.2 → range bin c/2fs = **0.24983 m** | Complex sampling with 20% margin; 300 reference samples |
-| `prf_hz` | 50 kHz, PRI 20 µs, duty 0.025 | v_ua = λ·PRF/4 = **±382.3883 m/s**, so K1/K2 at 340 m/s are unambiguous and K3 is not |
-| `n_pulses` | 1024 → CPI T = **20.480 ms** | Long enough for walk and Doppler spread to be several bins; ideal gain 10·log10(1024) = **30.10 dB** |
-| Velocity resolution | λ/2T = **0.74685 m/s** (48.8281 Hz) | |
-| Unambiguous range | c/2PRF = **2997.925 m** | The target sits inside it: range folding is scenario 001's lesson, not this one's |
-| Range gate | `range_gate_start_m` = 2400 m, `n_gate_samples` = 1024 (1.7067 µs, 255.823 m) | Fully-compressed span **181.125 m**, covering 2400–2581 m. Without a gate the cube would be 1024 × 12 000 samples |
-| `transmit_power_w` | 100 W | Sets the link budget below |
+| Waveform | LFM pulse, matched filter | Scenario 001's pulsed chain |
+| `carrier_frequency_hz` | 9.8 GHz → λ = **30.5911 mm** | Scenario 001's carrier |
+| `bandwidth_hz` | 500 MHz → c/2B = **0.29979 m** slant | Fractional bandwidth **0.05102**: the keystone's correction scales with it |
+| `chirp_duration_s` | 0.5 µs, time-bandwidth **250** | Intra-pulse motion 0.55 mm at 1100 m/s (§4.6) |
+| `sample_rate_hz` | 600 MHz, f_s/B = 1.2 → one bin c/f_s = **0.49965 m** bistatic | 300 samples per pulse |
+| `prf_hz` | 50 kHz, PRI 20 µs | Rate span `Radar.unambiguous_bistatic_range_rate_mps` = λ·PRF = **1529.55 m/s** (±764.78): K1, K2 unambiguous, K3 not |
+| `n_pulses` | 1024 → CPI **20.48 ms** | Ideal gain 10·log10(1024) = **30.10 dB** |
+| Rate bin | λ·PRF/N = **1.49370 m/s** (48.83 Hz) | `dsp.doppler_bin_centers_mps`; rates fall with index |
+| Unambiguous range | c·PRI = **5995.85 m** bistatic | The target, at 5000 m, sits inside it |
+| Range gate | `range_gate_start_m` = **4800 m bistatic**, `n_gate_samples` = 1024 | Opens on sample round(4800 f_s/c) = 9607, i.e. **4800.18 m**; 511.65 m long; 725 fully compressed bins (362.2 m). Without a gate the cube is 1024 × 12 000 (197 MB) |
+| `transmit_power_w` | 100 W | |
 | `gain_tx_dbi`, `gain_rx_dbi` | 25.0 dBi each | |
 | `noise_figure_db` | 3.0 dB | As scenario 001 |
-| IQ cube | `(1024, 1024)` complex128, **16.78 MB** | Range spectrum `(1024, 2048)`, 33.55 MB |
+| IQ cube | `(1024, 1024)` complex128, 16.8 MB | Range spectrum `(1024, 2048)` |
 
-**Why this waveform and no other.** For an unambiguous target (|v|·PRI < λ/4), the walk over a CPI
-is bounded by `N·B/(2·f0)` resolution cells, which is **26.12 cells** (31.35 sample bins) here.
-Walk therefore needs fractional bandwidth *and* pulses. Scenario 001 S2 (2 MHz, 256 pulses) walks
-**0.0109** of a bin at 80 m/s. No target speed fixes that without making Doppler ambiguous, and
-that is why the bandwidth had to change.
+**Why this waveform.** For an unambiguous target (|f_D| < PRF/2) the walk over a CPI is bounded
+by N·B/(2 f0) = **26.12 resolution cells** (31.35 bins). Walk needs fractional bandwidth and
+pulses; scenario 001 S2 (2 MHz, 256 pulses) walks 0.0109 of a bin at 80 m/s.
 
-### 3.2 Link budget, at R0 = 2500 m, RCS 0.1 m² (−10 dBsm)
+### 3.2 Link budget, at 2500 m slant, RCS 0.1 m² (−10 dBsm)
 
 | Quantity | Value |
 | :--- | ---: |
-| Received power | 1.2073e-14 W |
-| Thermal noise kT₀BF at 500 MHz | 3.9944e-12 W |
-| SNR per fast-time sample | −25.20 dB |
-| After pulse compression, E/N₀ per pulse | **−1.22 dB** |
-| After 1024 pulses, ideally integrated, ρ | **28.89 dB** |
-
-The target is invisible in any one pulse and comfortably detectable after ideal integration, but
-**not** after uncompensated integration (§3.4). The RCS is small because the scenario is about
-integration gain; a 10 m² target would detect even with the 26.5 dB loss and teach nothing.
+| Received power (`received_power_w`) | 1.2073e-14 W, −139.182 dBW |
+| Noise in the band, kT₀BF (`Radar.noise_power_matched_w`) | 3.9944e-12 W; SNR in band −25.20 dB |
+| Noise per sample, kT₀F·f_s | −113.194 dBW; SNR per sample −25.99 dB |
+| After pulse compression, E/N₀ per pulse | **−1.217 dB** |
+| After 1024 pulses, ideally integrated, ρ | **28.886 dB** |
 
 ### 3.3 The three variants
 
-| | **K1** `keystone-walk` | **K2** `keystone-accel` | **K3** `keystone-ambiguous` |
+| | **K1** coasting | **K2** under thrust | **K3** after burnout |
 | :--- | :--- | :--- | :--- |
-| Target | sounding rocket, coasting | sounding rocket under thrust | sounding rocket after burnout |
-| `radial_velocity_mps` at t = 0 | 340.0 | 340.0 | 1100.0 |
-| `radial_acceleration_mps2` | 0 | **147.0998** (15 g) | 0 |
-| `radial_jerk_mps3` | 0 | 0 (see §4.5) | 0 |
-| Doppler f_d / PRF | 0.4446 | 0.4446 (±1.506 m/s over the CPI) | **1.4383** |
-| Fold factor F | 0 | 0 | **1**, folded to 335.2233 m/s |
-| What it adds | linear walk | + quadratic phase (Doppler spread) | + Doppler ambiguity |
-| Method | first-order keystone | keystone + Doppler-rate matched filter [7] | keystone + fold-factor search [7] |
+| Bistatic rate at pulse 0 | −680 m/s (340 radial, closing) | −680 m/s | **−2200 m/s** (1100 radial) |
+| Bistatic acceleration | 0 | **−294.1995 m/s²** (15 g closing) | 0 |
+| Doppler f_D / PRF | 0.4446 | 0.4446 → 0.4486 over the CPI | **1.4383** |
+| Fold factor F | 0 | 0 | **1**; folded rate −670.45 m/s |
+| `[migration]` method | `keystone` | `keystone_doppler_rate`, `acceleration_search_mps2 = [-400, -200, 10]` | `keystone`, `fold_factor_max = 3` |
 
-All three share `range_m` = 2500 m at t = 0 and the waveform of §3.1.
+The fold factor counts whole PRFs of Doppler: :math:`f_D = f_{D,\mathrm{folded}} + F\,\mathrm{PRF}`,
+so the unfolded rate is the folded one less :math:`F\lambda\,\mathrm{PRF}`.
 
 ### 3.4 Derived walk, spread and loss, per variant
 
-Losses are the peak of the processed range-Doppler map relative to the ideal matched value
-`N·K` (K = 1707 in-band range-frequency samples), with the peak refined on a 1/16-bin grid in
-both axes so that scalloping does not masquerade as migration. The ideal cube itself reads
-−0.049 dB on that grid; that is the grid's own residual and is included in every figure below.
+A loss is the map's peak, refined off the bin grid (Doppler by Aboutanios–Mulgrew iterations,
+range on a 1/16-bin grid), over N² times pulse 0's compressed peak: 0 dB is ideal integration.
+Expected values are re-derived from the range-frequency model
+:math:`|P(f)|^2 e^{-j2\pi(f_0+f)R_b(t)/c}` with the chirp's own spectrum ("LFM"), and with a flat
+band ("flat") for comparison; the time-domain chain (synthesis, matched filter, keystone) must match
+the LFM column within the tolerances of §6.
 
 | Quantity | K1 | K2 | K3 |
 | :--- | ---: | ---: | ---: |
-| Range walk v·T | 6.9632 m | 6.9632 m | 22.5280 m |
-| … in sample bins (0.2498 m) | **27.872** | **27.872** | **90.174** |
-| … in resolution cells (0.2998 m) | 23.227 | 23.227 | 75.145 |
-| Range curvature a·T²/8 | 0 | 7.7123 mm = **0.031 bins** | 0 |
-| Doppler spread 2aT/λ | 0 | 196.960 Hz = **4.034 bins** | 0 |
-| Quadratic phase at the CPI edge | 0 | 3.168 rad | 0 |
-| Slow-time frequency across the band, ν(f0 ± B/2)/f0 | 0.4332 – 0.4559 | 0.4332 – 0.4559 | 1.4016 – 1.4750 |
-| **MTD (no compensation) loss** | **−26.52 dB** | **−25.53 dB** | **−31.80 dB** |
-| Keystone, F = 0 | **−0.05 dB** | −4.06 dB | −32.94 dB |
-| Keystone + Doppler-rate matched filter (true a) | — | **−0.055 dB** | — |
-| Dechirp only, no keystone | — | −26.51 dB | — |
-| Keystone, F = 1 | — | — | **−0.06 dB** |
-| Integrated SNR, MTD | 2.37 dB | 3.36 dB | −2.91 dB |
-| Integrated SNR, compensated | ≈ 28.8 dB | ≈ 28.8 dB | ≈ 28.8 dB |
+| Walk, rate × T / bin | **27.872 bins** | 27.872; least-squares slope over the CPI (the mid-CPI rate, 683.01 m/s) **27.995** | **90.174** |
+| Range curvature a T²/8 | 0 | 0.031 bins | 0 |
+| Doppler spread |a| T/λ | 0 | 196.96 Hz = **4.034 bins** | 0 |
+| Quadratic phase, sagitta π|a|T²/(4λ) | 0 | 3.168 rad | 0 |
+| Doppler across the band, ν(1 ∓ B/2f0) | 0.4332 – 0.4559 | 0.4332 – 0.4559 | 1.4016 – 1.4750 |
+| **MTD (no compensation)**, LFM / flat | **−25.78** / −26.56 dB | **−25.60** / −25.61 dB | **−34.67** / −36.78 dB |
+| Keystone, F = 0, LFM / flat | 0.00 dB | **−4.26** / −4.26 dB | **−31.21** / −32.86 dB |
+| Dechirp (true a) only, no keystone | — | **−25.90** / −26.64 dB | — |
+| Compensated (keystone [+ filter], right F) | ≈ 0 | ≈ 0 | ≈ 0 |
 
 Three things to read from the table:
 
-- **K2's acceleration shows up as Doppler spread, not as range curvature.** 15 g bends the range
-  history by 7.7 mm, 0.031 of a bin, but it puts 3.17 rad of quadratic phase across the CPI. So
-  the second-order keystone (which corrects curvature) is the wrong tool here, and the
-  Doppler-rate matched filter (which corrects phase) is the right one. Each step fixes one thing.
-  The keystone alone leaves 4.06 dB on the table; dechirping alone, without the keystone, recovers
-  nothing (−26.51 dB).
-- **K3 keystoned with the wrong fold factor is worse than not keystoning at all** (−32.94 vs
-  −31.80 dB). The keystone rescales the alias, not the true frequency. §3.5 gives the correction.
-- **K3 is near the edge of one fold factor.** The fold factor is constant across the band only
-  while ν(f0 + B/2)/f0 stays below F + 1/2. For F = 1 that holds up to **1118.63 m/s**; K3 at
-  1100 m/s has 1.4750 < 1.5. A faster target spans two fold factors across the band, which [7]
-  treats as a separate case. It is out of scope here and the code must detect it and say so.
+- **K2's acceleration shows as Doppler spread, not range curvature**: 0.031 bins of curvature,
+  3.17 rad of quadratic phase. The second-order keystone corrects curvature and is the wrong tool;
+  the Doppler-rate filter corrects phase. The keystone alone leaves 4.26 dB; dechirping alone,
+  without the keystone, recovers nothing.
+- **K3 keystoned at the wrong fold factor keystones the alias.** With F = 0 the rescaling treats
+  the Doppler as 0.438 PRF and removes that share of the walk, 27.5 of 90.2 bins; 62.7 remain.
+  That is 3.5 dB better than no keystone and 31 dB short of F = 1.
+- **The smeared peak depends on the pulse's spectrum.** An uncompensated map integrates a slice
+  of the band at a time, so the LFM's Fresnel ripple moves its loss by up to 2.1 dB (K3) from the
+  flat-band value; a focused peak integrates the whole band and does not care.
+- **K3 is near the edge of one fold factor.** F is constant across the band only while
+  ν(1 + B/2f0) < F + ½: up to **2237.26 m/s** bistatic for F = 1; K3 has 1.4750 < 1.5. A faster
+  target spans two fold factors across the band, a case [7] treats separately: the code refuses
+  it.
 
 ### 3.5 Mathematical contracts
 
 | Contract | Statement |
 | :--- | :--- |
-| Range history | `R(t) = R0 − v t − a t²/2 − j t³/6`, `v`, `a`, `j` the closing speed and its derivatives (the library's bistatic rate is `−2v`), t = 0 at pulse `n_pulses // 2`. `R0`, `v`, `a`, `j` are reported **at the CPI centre** |
-| `data_ftst` | `(n_pulses, n_gate_samples[, n_rx])` complex128, from `pulsed_baseband` with a range gate. Sample 0 is delay `2·range_gate_start_m/c` |
-| `data_rfst` | `(n_pulses, n_range_bins[, n_rx])` complex128: `matched_filter` output with the reference's group delay `n_reference − 1` trimmed, as `pipeline.range_doppler_product` does today. Range axis `range_gate_start_m + k·c/(2·fs)` |
-| Range spectrum (internal to D10) | `FFT(data_rfst, n = n_range_fft, axis = 1)`, unshifted. Its frequency axis is the **signed** baseband `range_frequency_hz = fftfreq(n_range_fft, 1/fs)`, so the true RF frequency is `f0 + f`. `n_range_fft ≥ n_range_bins + max walk`, default the next power of two ≥ `2·n_range_bins` (2048 here) so walk cannot wrap |
-| Signal model in the range spectrum | `S(f, t) = A·\|P(f)\|²·exp(−j·4π·(f0 + f)·R(t)/c)`; the `f·v·t` term is the walk, the `f0·a·t²` term the spread |
-| Keystone | `S_K(f, τ) = S(f, t = f0/(f0 + f)·τ)`, evaluated as band-limited (DFT) interpolation in slow time, by a chirp-z transform per range frequency. Reference index `n_pulses // 2`. After it, the linear term is `exp(+j·4π·f0·v·τ/c)`, independent of f [1] |
-| Fold factor | With `v = v_folded + F·λ·PRF/2`, band-limited interpolation sees the alias, so multiply by `exp(+j·2π·F·(f0/(f0+f))·m_c)` after the keystone, `m_c = m − n_pulses//2`. F is found by maximising the integrated peak over `F ∈ [−F_max, F_max]` [7] (equation number to confirm at implementation) |
-| Doppler-rate matched filter | After the keystone, multiply by `H(f, τ) = exp(−j·(4π/c)·[f0²/(f0+f)·(a/2)·τ² + f0³/(f0+f)²·(j/6)·τ³])`, derived by substituting the keystone into the model above; the form of [7] (equation number to confirm at implementation). `a` (and `j`) by 1-D (2-D) search; the search curve is returned |
-| Second-order keystone | `t = sqrt(f0/(f0 + f))·τ` [8]; removes the `f·a·t²` curvature term. Exposed, unit-tested, not in the K2 chain |
-| Acceleration from phase | Slow-time phase `φ(t) = (4π f0/c)(v t + a t²/2 + j t³/6)`, so `a = (λ/2)·ḟ_d` and `j = (λ/2)·f̈_d` |
-| Velocity in parent coordinates | `v = velocity_bin_centers_mps` at the fractional Doppler index, plus `F·λ·PRF/2` |
-| CRB | Fisher information of the model above with complex white noise, parameters `(|A|, φ, R0, v, a[, j])`, `F = (2/σ²)·Re(JᴴJ)` [6], [10], [13]. Single-tone special case `var(ω̂) ≥ 6/(SNR·N(N²−1))` [13] |
-| Shapes | Every `migration.py` and `datachip.py` function accepts a trailing `n_rx` axis and acts on axes 0 and 1 only |
+| Range history | §2; truth and the keystone's reference at pulse 0 |
+| `data_rfst` | `(n_pulses, n_range[, n_rx])` complex128: the gated cube compressed row by row, the reference's group delay `n_ref − 1` cut. Range axis `dsp.delay_bin_centers_m` = c(n₀ + n)/f_s, n₀ the gate's first sample |
+| Range spectrum | `FFT(data_rfst, n = n_range_fft, axis = 1)`, unshifted; signed `range_frequency_hz = fftfreq(n_range_fft, 1/f_s)`, the radio frequency f0 + f. Default `n_range_fft` the next power of two ≥ 2·n_range, so walk cannot wrap |
+| Signal model | `S(f, t) = A·|P(f)|²·exp(−j·2π·(f0 + f)·R_b(t)/c)`; the f·Ṙ_b·t term is the walk, the f0·R̈_b·t² term the spread |
+| Keystone | `S_K(f, τ) = S(f, t = f0/(f0 + f)·τ)` by band-limited (DFT) interpolation of the N pulses, a chirp-z transform per range frequency [2], reference pulse 0. Then the rate term is f0·Ṙ_b·τ, independent of f [1]. Interpolation past the last pulse (low frequencies are stretched there) reads the periodic extension: the closing pulses ring |
+| Fold factor | Slow time sees the alias ν − F; multiply by `exp(+j·2π·F·m·f0/(f0+f))` after the keystone. F maximises the integrated peak over [−F_max, F_max] [7] |
+| Doppler-rate filter | After the keystone multiply by `H(f, τ) = exp(+j·(2π/c)·[f0²/(f0+f)·a·τ²/2 + f0³/(f0+f)²·j·τ³/6])`, a, j bistatic, by substituting the keystone into the model [7]. Searched on a grid; the curve is returned |
+| Second-order keystone | `t = sqrt(f0/(f0 + f))·τ` [8]; removes the f·R̈_b·t² curvature term |
+| Phase polynomial | The range-focused slow-time phase is c1 m + c2 m² + c3 m³ with c1 = −2πṘ_b T/λ (folded), c2 = −πR̈_b T²/λ, c3 = −πJ_b T³/(3λ), T the PRI |
+| CRB | Fisher information of the model with complex white noise, parameters (|A|, φ, R0, Ṙ[, R̈[, J]]), flat band, t from pulse 0: `F = 2ρ·mean(h hᵀ)`. Single-tone case `var(ω̂) ≥ 6/(ρ (N² − 1))` [13] |
+| Shapes | Every `migration.py` function accepts a trailing `n_rx` axis and acts on axes 0 and 1 only |
 
-CRB at the nominal ρ = 28.89 dB, and at 20 dB (the lowest SNR at which §6 asserts efficiency):
+CRB at ρ = 28.886 dB and 20 dB, bistatic, t from pulse 0 (`datachip.cramer_rao_bounds`):
 
-| Parameter | CRB std, ρ = 28.89 dB | in bins | CRB std, ρ = 20 dB | in bins |
+| Model | Range | Rate | Acceleration | Jerk |
 | :--- | ---: | ---: | ---: | ---: |
-| Range R0 | 4.1994 mm | 0.01681 | 11.6867 mm | 0.04678 |
-| Velocity v | 10.4613 mm/s | 0.01401 | 29.1130 mm/s | 0.03898 |
-| Acceleration a | 3.9567 m/s² | — | 11.0111 m/s² | — |
-| Jerk j (cubic model) | **2285.9 m/s³** | — | — | — |
+| Range, rate; 28.886 dB | 8.406 mm (0.0168 bins) | 0.02093 m/s (0.0140 bins) | — | — |
+| Range, rate; 20 dB | 23.38 mm | 0.05823 m/s | — | — |
+| + acceleration; 28.886 dB | 8.410 mm | 0.0837 m/s at pulse 0 | 7.917 m/s² | — |
+| + jerk; 28.886 dB | 8.417 mm | 0.209 m/s | 47.46 m/s² | **4574 m/s³** |
 
-Adding the acceleration parameter barely changes the range and velocity bounds (4.1989 → 4.1994 mm,
-10.4612 → 10.4613 mm/s): with t centred, odd and even phase terms decouple.
+With t from pulse 0 the rate at pulse 0 couples to the acceleration (centred, its bound would stay
+0.0209 m/s); range barely moves. These replace the spec's slant, CPI-centred figures (4.1994 mm,
+10.46 mm/s, 3.957 m/s², 2286 m/s³), which are the same bounds halved and centred.
 
-### 3.6 Output schema
+### 3.6 Output
 
-As scenario 001 §3.6, written through `spec/data-001-formats.md`, with these additions:
-
-| File | Content |
-| :--- | :--- |
-| `truth.csv` | gains `radial_acceleration_mps2`, `radial_jerk_mps3`, `fold_factor`; `time_s` is the **CPI centre** |
-| `estimates.csv` *(new)* | per frame and detection: `range_m`, `radial_velocity_mps`, `radial_acceleration_mps2`, `radial_jerk_mps3`, `fold_factor`, each with a `_crb_std` sibling (e.g. `range_crb_std_m`), `snr_db`, `estimator` |
-| `products.h5` `/chips/burst{k}/chip{i}/` *(new)* | the `DataChip` of §4.1 on disk: `data`, `range_m`, `velocity_mps`, attrs for offsets and processing |
-| `products.h5` `/migration/burst{k}/` *(new)* | `acceleration_search_mps2` and its `integrated_peak_linear` curve; `fold_factor_search` and its curve |
-| `figures/` | MTD map, keystoned map, compensated map side by side; walk overlay; search curves |
+The stepper writes PNG and CSV only (no HDF5 here). The `keystone` stage writes
+`migration.csv`, one row for frame 0: walk, residual walk, the losses, the searched fold factor
+and acceleration, and the fine estimates with their CRBs and errors in CRB units; and
+`keystone.png`, range against pulse for the compressed, keystoned and compensated frame 0. The
+search curves are printed. `truth.csv` is scenario 001's.
 
 ---
 
 ## 4. Core Decisions
 
-### 4.1 D9 — the `DataChip` contract
+### 4.1 The `DataChip`
 
-A `DataChip` is a crop of a cube around one detection, carrying everything needed to refine
-that detection without the parent. It is a frozen dataclass in `datachip.py`:
+A frozen dataclass in `datachip.py`:
 
 ```python
 @dataclass(frozen=True)
-class ChipProcessing:  # the parent's processing, as the chip needs it to refine
+class ChipProcessing:          # the parent's processing, as the chip needs it to refine
     carrier_frequency_hz: float
     bandwidth_hz: float
     sample_rate_hz: float
     prf_hz: float
-    n_pulses: int
-    n_range_fft: int  # the range spectrum length used by D10
-    n_doppler_fft: int
-    range_gate_start_m: float
-    fast_time_weights: NDArray[np.float64] | None  # (n_range_bins,) as applied, or None
-    slow_time_weights: NDArray[np.float64] | None  # (n_pulses,) as applied, or None
-    keystone_applied: bool
-    fold_factor: int  # F used, 0 if none
-    compensated_acceleration_mps2: float
-    compensated_jerk_mps3: float
-
+    noise_power_w: float       # per cell of the parent's data_rfst
+    keystone_applied: bool = False
+    fold_factor: int = 0
+    compensated_acceleration_mps2: float = 0.0
+    compensated_jerk_mps3: float = 0.0
 
 @dataclass(frozen=True)
 class DataChip:
-    data: NDArray[np.complex128]  # (n_axis0_chip, n_range_chip[, n_rx]), PARENT axis order
-    domain: Literal["slow_time", "doppler"]  # axis 0 is pulses, or fftshifted Doppler bins
-    axis0_offset: int  # first pulse (always 0 for slow_time) or Doppler bin
-    range_offset: int  # first range bin in the parent
-    range_bin_centers_m: NDArray[np.float64]  # (n_range_chip,)  parent values
-    velocity_bin_centers_mps: NDArray[np.float64]  # (n_axis0_chip,) for doppler;
-    # the parent's full axis for slow_time
+    data: NDArray[np.complex128]           # (n_axis0, n_range[, n_rx]), parent axis order
+    domain: Literal["slow_time", "doppler"]
+    axis0_offset: int                      # 0 for slow_time; first (wrapped) Doppler bin
+    range_offset: int
+    parent_shape: tuple[int, int]
+    range_bin_centers_m: NDArray[np.float64]   # the parent's values
+    rate_bin_centers_mps: NDArray[np.float64]  # doppler: the chip's; slow_time: the parent's
     processing: ChipProcessing
 ```
 
-The rules, each of which is a test (§6, A10–A11):
+Rules, each a test (§6 A10–A11):
 
-1. **Parent axis order, untouched.** Axis 0 is slow time or Doppler, axis 1 range, and a trailing
-   `n_rx` axis is carried whole and never cropped. Scenario 006 crops `(n_doppler, n_range, n_rx)`
-   chips from a multi-channel map with the same function.
-2. **Range does not wrap; Doppler does.** A range crop that would leave the parent is clipped,
-   the chip gets shorter, and `range_offset` records where it starts. A Doppler crop is taken
-   modulo `n_doppler_fft`, because the Doppler axis is circular. A chip straddling ±v_ua
-   therefore carries the parent's velocity values verbatim, **including the jump at the fold**.
-3. **Exact round trip.** `parent = (chip + offset)` on the range axis and
-   `parent = (chip + offset) mod n_doppler_fft` on the Doppler axis, in integers. Fractional
-   positions map through the parent's uniform spacing, `range_m = range_bin_centers_m[0] + δ·Δr`,
-   so a sub-bin estimate never passes through an interpolation table.
-4. **The chip is unwindowed data.** The windows the parent applied for display or detection are
-   recorded, not baked in. Fine estimators assume a rectangular window [13], [17]; baking a taper
-   in would bias them silently.
-5. **Results leave in parent coordinates.** Every estimator returns `range_m`,
-   `radial_velocity_mps` (with the fold factor applied), `radial_acceleration_mps2` and their
-   CRB, never chip-local indices. The fractional chip indices are exposed as intermediates.
+1. **Parent axis order.** Axis 0 slow time or shifted Doppler, axis 1 range; a trailing channel
+   axis is carried whole.
+2. **Range does not wrap; Doppler does.** A range crop leaving the parent is clipped; a Doppler
+   crop is taken modulo the parent's Doppler bins and carries the parent's rates verbatim, the
+   jump at the fold included.
+3. **Exact round trip** in integers; a fractional range maps through the parent's uniform spacing.
+4. **Unwindowed.** The pipeline applies no window, so there is nothing to record.
+5. **Results leave in parent coordinates**: range, rate unfolded by F, acceleration with what the
+   compensation removed added back, each with its CRB; chip-local indices are intermediates.
 
-Two crop functions, one per domain: `crop_slow_time(data_rfst, …)` for refinement (the chip keeps
-every pulse, so acceleration is still observable), and `crop_range_doppler(data_rv, …)` for angle
-estimation (006). A ±16-bin range chip keeps all but **0.034 dB** of a point target's energy at the
-worst sub-bin offset, against 0.139 dB for ±4 bins. That is why the default half-width is 16.
+`crop_slow_time(data_rfst, …)` keeps every pulse; `crop_range_doppler(data_rv, …)` is for 006.
+A ±16-bin range chip keeps all but **0.040 dB** of a compressed echo at the worst sub-bin offset
+(0.144 dB for ±4): the default half-width is 16.
 
-### 4.2 D10 — migration correction lives in `migration.py` and operates on `data_rfst`
+### 4.2 Migration correction lives in `migration.py` and maps `data_rfst` to `data_rfst`
 
-Every public function in `migration.py` takes `data_rfst` and returns `data_rfst` of the same
-shape. The range spectrum is an internal domain, entered and left inside the module. Three
-reasons:
+Every public function takes `data_rfst` and returns a frozen result holding the new `data_rfst`
+and its intermediates (range-frequency axis, scale factors, search curves); nothing is modified in
+place. The range spectrum is entered and left inside the module. K2 reads
+`doppler_rate_compensation(keystone(x).data_rfst)`. `pipeline.range_doppler_product(...,
+migration=...)` applies `[migration]` between compression and the Doppler FFT, so detection sees
+the compensated map.
 
-- **The caller's contract does not change.** A keystoned `data_rfst` goes into
-  `dsp.doppler_fft` exactly as an uncompensated one does, so the MTD baseline and the compensated
-  chain differ by one function call, which is what §6 compares.
-- **The range spectrum is fragile.** It needs a signed frequency axis (`f0 + f`, not `f0 + |f|`),
-  enough zero-padding that walk cannot wrap, and the same `n_range_fft` on the way back. Keeping
-  it inside one module keeps those three facts in one place.
-- **It composes.** `keystone`, `doppler_rate_compensation` and `second_order_keystone` each map
-  `data_rfst → data_rfst`, so K2 is `doppler_rate_compensation(keystone(x))` and reads that way.
-
-Functions return a result dataclass with the corrected `data_rfst` and their intermediates
-(range-frequency axis, scale factors, search curves), never a bare array. That satisfies
-the bar in `CLAUDE.md`. The cube is never modified in place.
-
-The keystone's slow-time interpolation has one known artefact, and the spec records it rather
-than hiding it: band-limited (DFT) interpolation treats the CPI as periodic, so the **first and
-last pulse** ring (they are the only pulses that do; §6 A2 excludes them, by name).
+Searches, as implemented: the fold factor is scored on every ⌊M/n_range⌋-th range frequency (the
+map's range circle is then the gate, so nothing aliases); the acceleration on the five range bins
+about the keystoned map's brightest cell, with H at f = 0 (the rest of H straightens a curvature
+under a tenth of a bin and moves no Doppler); the best hypothesis's whole filter is applied.
 
 ### 4.3 `PropagationPaths` carries two defaulted fields
 
-D1 has survived a bistatic geometry unchanged (scenario 002 §4.1). It does not survive
-acceleration unchanged, because a path's Doppler is a single number, so a path set can only
-describe constant velocity. `doppler_rate_hzps` already exists; `doppler_jerk_hzps2` is added.
-Each **defaults to zero**:
-
-| Field | Shape | Meaning |
-| :--- | :--- | :--- |
-| `doppler_rate_hzps` | `(n_paths,)` | `−R̈_b/λ = 2·a/λ`, with §2's closing acceleration `a` |
-| `doppler_jerk_hzps2` | `(n_paths,)` | `2·j/λ` |
-
-Every existing builder and test therefore produces the same cube bit for bit (§6 A15).
-`line_of_sight_paths` gains `radial_acceleration_mps2` and `radial_jerk_mps3` keywords, default 0.
-`PropagationPaths.bistatic_range_at_m`, through which `pulsed_baseband` advances range per pulse,
-gains the cubic term beside its quadratic one. This widens D1 rather than changing it, and D1
-below records it.
-
-The alternative considered was a `range_history_m` override argument on the generator. It was
-rejected because it puts geometry into the signal generator and would let a ray-tracing backend
-describe its paths in two incompatible ways.
+`doppler_rate_hzps` (exists) and `doppler_jerk_hzps2` (new), each defaulting to zero, so every
+existing path set synthesises bit for bit (§6 A15). `line_of_sight_paths` fills the rate from
+`TargetGeometry.bistatic_range_acceleration_mps2` through `propagation.doppler_rate_hzps`
+(= −R̈_b/λ, which calls `doppler_shift_hz`, so the sign lives once). `bistatic_range_at_m` gains the
+cubic term, added last so zero jerk changes nothing. `Radar.geometry` gains
+`acceleration_enu_mps2`; without it R̈_b is zero (not the centripetal term), so trajectory scenarios
+are unchanged.
 
 ### 4.4 The range gate
 
-`pulsed_baseband` today samples the whole PRI: 12 000 samples at 600 MHz. It gains
-`range_gate_start_m: float = 0.0` and `n_gate_samples: int | None = None` (default: the whole
-PRI, today's behaviour). Range axes come from a new `dsp.delay_bin_centers_m(n_bins,
-sample_rate_hz, *, range_gate_start_m=0.0)`. It replaces the pulsed range axis that
-`pipeline.map_axes` computes inline (bistatic, `c·n/f_s`), and belongs in
-`dsp.py`.
+`pulsed_baseband(..., range_gate_start_m=0.0, n_gate_samples=None)` synthesises only the gate:
+samples from `round(start·f_s/c)` (start bistatic), `None` the rest of the PRI, so a gated cube is
+those columns of the whole one. `dsp.delay_bin_centers_m(n_bins, sample_rate_hz, *,
+range_gate_start_m=0.0)` labels them; `pipeline.map_axes` uses it for pulsed bursts (identical
+numbers without a gate). A gated map's range axis is a window on the unambiguous range circle.
 
 ### 4.5 Jerk is in the model and is not observable at this CPI
 
-The code estimates velocity, acceleration and jerk. At this
-CPI, though, jerk is a thing to measure the absence of. A jerk of 300 m/s³ (about 30 g/s, an abrupt
-thrust change such as burnout or staging) puts **0.0221 rad** of cubic phase at the CPI edge. Jerk would need **21 367.6 m/s³** to
-reach π/2, and its CRB at the nominal SNR is **2285.9 m/s³**. So the scenario sets `j = 0`. The
-chip estimator still fits the cubic model, reports `j` with its CRB, and §6 asserts consistency
-with zero. Jerk *recovery* is tested on a synthetic polynomial-phase signal where it is
-observable. A teaching scenario should say outright which parameters a CPI can support, and this
-is how this one says it.
+A radial jerk of 300 m/s³ (about 30 g/s, burnout or staging; 600 m/s³ bistatic) puts 0.022 rad
+of cubic phase at the CPI's edges about its centre; a bistatic jerk would need 42 700 m/s³ to
+reach π/2, and its bound is 4574 m/s³. So no scenario sets jerk. The
+chip estimator fits the cubic model on request (`polynomial_order = 3`), reports jerk with its
+bound, and §6 asserts consistency with zero; recovery is tested on a model chip where jerk is
+observable.
 
 ### 4.6 What is not modelled, with the size of the omission
 
 | Effect | Size here | Why it is left out |
 | :--- | :--- | :--- |
-| LFM range–Doppler coupling (peak shift f_d/α) | 3.332 mm (K1), **10.780 mm** (K3), against a 4.2 mm range CRB | `pulsed_baseband` is stop-and-hop: no intra-pulse Doppler, so the simulation cannot produce the shift and the estimator must not "correct" it. On recorded data it would be a 2.6σ bias in K3; a future intra-pulse generator must add both |
-| Intra-pulse motion | 0.170 mm (K1), 0.550 mm (K3) | Four orders below a bin |
-| Two fold factors across the band | none: K3 max 1.4750 < 1.5 | Out of scope (§3.4); detected and refused |
-| Range ambiguity, eclipsing | none: 2.5 km < 2.998 km, gate clear of the pulse | Scenario 001's lesson; not repeated |
+| LFM range–Doppler coupling | 6.66 mm (K1), 21.6 mm (K3) bistatic, against an 8.4 mm range CRB | `pulsed_baseband` is stop-and-hop: the simulation cannot produce the shift and the estimator must not correct it. On recorded data it would be a 2.6σ bias in K3 |
+| Intra-pulse motion | 0.34 mm (K1), 1.1 mm (K3) bistatic | Far below a bin |
+| Two fold factors across the band | none (K3 1.4750 < 1.5) | Detected and refused |
+| Range ambiguity, eclipsing | none: 5000 m < 5995.85 m, gate clear of the pulse | Scenario 001's lesson |
+| Range-gate tracking | the gate is fixed, so a frame window is three frames (75 ms) | Out of scope |
 
 ### 4.7 Why sub-bin estimation is not parabolic interpolation
 
-Parabolic interpolation on |X| is what most code does, and for a rectangular window it is biased
-by up to **0.234 bins** even without noise. At ρ = 28.89 dB that bias is **12.2×** the CRB, so
-the error budget is entirely bias. The three-bin complex interpolators (Quinn, Jacobsen, Candan)
-remove the bias (≤ 1.2·10⁻⁶ bins) and sit within 1.29–1.55× the CRB. Aboutanios–Mulgrew, with two
-iterations, reaches **1.01×** the CRB at every offset. All five are implemented, because the
-comparison is the lesson. The A&M estimator is the default.
-
-### 4.8 Amendments to `spec/structure.md`
-
-> **Applied.** These amendments are folded into `spec/structure.md`; it is the authoritative
-> tree and decision list. This section records what changed and why.
-
-1. **Part B tree:** beside the flat library modules, add
-   `migration.py  # keystone (1st/2nd order, fold factor), Doppler-rate matched filter, RFT/GRFT; data_rfst in and out (D10)`
-   and `datachip.py  # DataChip, crop, fine range/velocity/acceleration estimators with CRB (D9)`.
-   Amend `signal.py`'s comment to add "polynomial radial kinematics; range gate".
-2. **B.1 rows:** `migration.py` ← Perry–DiPietro–Fante keystone; Zhu–Li–Zhu interpolation-free
-   keystone; Huang et al. 2016 keystone + matched filtering; Kirkland second-order keystone;
-   Xu et al. RFT/GRFT (oracle). `datachip.py` ← Aboutanios–Mulgrew; Quinn, Jacobsen–Kootsookos,
-   Candan (baselines); O'Shea CPF; Peleg–Porat HAF (baseline) and polynomial-phase CRB; Rife–Boorstyn.
-3. **Decisions D9 and D10**, as §4.1 and §4.2.
-4. **D1 widened**: `PropagationPaths` gains `doppler_jerk_hzps2` beside `doppler_rate_hzps`,
-   both defaulting to zero (§4.3).
-5. **`scripts/check_conventions.py` `UNIT_SUFFIXES`** gains `_mps2`, `_mps3`, `_hzps`, `_hzps2`
-   (shared file; additive edit in step 0).
-
-### 4.9 Workstream boundary
-
-This scenario claims:
-
-```
-config/scenario_004_keystone_{k1,k2,k3}.toml   (with their [verify] tables)
-spec/scenario-004-keystone.md, a row in the Scenarios table of docs/README.md
-src/radar_forge/{migration,datachip}.py                       (new)
-src/radar_forge/propagation.py   (widened: one path field, kinematics)
-src/radar_forge/signal.py        (widened: polynomial range, range gate)
-src/radar_forge/dsp.py           (additive: delay_bin_centers_m only)
-src/radar_forge/{scenario,pipeline}.py   (polynomial trajectory, gate keys)
-tests/test_{migration,datachip}.py
-```
-
-`detection.py` and `radar.py` are consumed, never edited, as are the windows in `dsp.py`,
-`received_power_w` in `propagation.py`, and `lfm_chirp` and `ambiguity_function` in `signal.py`. Scenario 001–003 TOMLs and tests are read, never edited, and must stay green. Scenario
-006 owns multi-channel synthesis and consumes `DataChip` as specified here; a change to D9 is a
-change to both specs.
+Parabolic interpolation on |X| is biased by up to **0.234 bins** for a rectangular window, without
+noise; at ρ = 28.886 dB that bias is about ten CRBs. Quinn and Jacobsen remove it to 1.18·10⁻⁶ bins,
+Candan to 3.9·10⁻⁷, and Aboutanios–Mulgrew, two iterations, to rounding (5·10⁻¹³). All five are
+implemented because the comparison is the lesson; A&M is the default.
 
 ---
 
 ## 5. Build Sequence
 
-```
-  0. scripts/check_conventions.py   + _mps2 _mps3 _hzps _hzps2   (shared, additive)
-             |
-  1. propagation.py (widen)          PropagationPaths +1 defaulted field; line_of_sight_paths
-             |                        +accel/jerk; signal.py pulsed_baseband polynomial range + range gate
-  2. dsp.py (additive)               delay_bin_centers_m
-             |
-  3. migration.py (new)              range_spectrum -> keystone (czt | sinc | dft oracle)
-             |                        -> fold factor -> doppler_rate_compensation -> searches
-             |                        -> second_order_keystone -> rft / grft (oracles)
-  4. datachip.py (new)               DataChip, crop_slow_time, crop_range_doppler, round trip
-             |                        -> tone interpolators -> HAF, CPF -> local GRFT ML -> CRB
-  5. scenario.py                     kind = "polynomial" radial history; truth at CPI centre
-  6. scenario.py, pipeline.py        gate keys in [[burst]]; [[target]] accel/jerk
-  7. config/scenario_004_keystone_k{1,2,3}.toml
-  8. their [verify] tables, run by tests/test_scenarios.py     A3 (baseline fails) first
-```
-
-| Step | Module | Consumes / widens / untouched |
+| Step | Module | Change |
 | :--- | :--- | :--- |
-| 0 | `scripts/check_conventions.py` | Widened (suffix list) |
-| 1 | `propagation.py`, `signal.py` | **Widened.** `PropagationPaths`, `line_of_sight_paths` (propagation); `pulsed_baseband` (signal); `fmcw_deramp_baseband` untouched (its stop-and-hop warning stays) |
-| 2 | `dsp.py` | **Widened** by one helper; `matched_filter`, `doppler_fft`, `doppler_bin_centers_mps` consumed |
-| 3 | `migration.py` | New. Uses `scipy.signal.czt`, already a dependency |
-| 4 | `datachip.py` | New. Consumes `dsp.py` (window record only) and `detection.py` (`cfar_detect_2d`, `cluster_detections` give the crop centre) |
-| 5–6 | `scenario.py`, `pipeline.py` | Widened. `load_scenario` / `frames` gain a polynomial trajectory and gate keys; CSV trajectories untouched |
-| 7–8 | TOMLs, tests | New. Three TOMLs differing only in `[[target]]` kinematics |
-
-`radar.py`, `signal.py`'s `lfm_chirp`, the windows and fold/unfold functions in `dsp.py`,
-`detection.py` and `constants.py` are consumed unchanged.
+| 1 | `radar.py`, `propagation.py` | `geometry(acceleration_enu_mps2=)`, `TargetGeometry.bistatic_range_acceleration_mps2`; `doppler_rate_hzps`, `doppler_jerk_hzps2`, the cubic term |
+| 2 | `signal.py`, `dsp.py` | The range gate; `delay_bin_centers_m` |
+| 3 | `migration.py` | range spectrum, keystone (chirp-z, sinc), fold-factor search, Doppler-rate filter, second-order keystone, integrated peak |
+| 4 | `datachip.py` | chip, crops, tone interpolators, HAF, CPF, local GRFT, CRB |
+| 5 | `scenario.py`, `pipeline.py` | `[[target]] acceleration_enu_mps2`, `[[burst]]` gate keys, `[migration]`; `pulse_compress`, `compensate_migration`, `frame_products` |
+| 6 | `stages/migration.py`, `plots.py` | Stage `keystone`; `render_range_slow_time` |
+| 7 | `config/scenario_004_keystone_k{1,2,3}.toml` | With their `[verify]` tables |
 
 ---
 
 ## 6. Acceptance Criteria
 
-Encoded as `tests/test_migration.py`, `tests/test_datachip.py` (fast, small analytic cases) and
-the `[verify]` tables of the three TOMLs, run by `tests/test_scenarios.py` (full-size, `slow`). Losses are measured
-on noiseless cubes against the matched value `N·K`, with the peak refined on a 1/16-bin grid
-(§3.4). The baseline tolerance is wider than the compensated one because a smeared peak is
-sensitive to the exact pulse spectrum (the LFM's Fresnel ripple versus §3.4's flat band), while a
-focused peak is not.
+Encoded in `tests/test_migration.py`, `tests/test_datachip.py` and the `[verify]` tables of the
+three TOMLs (run by `tests/test_scenarios.py`; their three frames are the whole window). Losses
+are measured on frame 0's noiseless cube (the generator's `rng=None` path). Monte Carlo trials add
+compressed noise (white noise matched-filtered along range) to the chain's own noiseless chip or
+map: the keystone and the Doppler-rate filter resample slow time near-unitarily, so this is the
+chain's noise, and the chain runs once.
 
-| # | Criterion | Bound | Applies to |
+| # | Criterion | Bound | Where |
 | :--- | :--- | :--- | :--- |
-| A1 | Uncompensated walk, measured as the per-pulse range-peak track, matches v·T/Δr | 27.872 (K1, K2), 90.174 (K3) bins, ±1 bin | K1–K3 |
-| A2 | **Residual walk after the keystone**, per-pulse peak track over pulses 1 … N−2 (the two end pulses ring, §4.2), noiseless | < 0.5 bin (computed: only pulses 0 and 1023 exceed it; pulses 8 … 1015 read 0.000 on a 1/8-bin grid) | K1; K3 with F = 1 |
-| A3 | **The baseline fails.** MTD loss matches §3.4, and at ρ = 28.89 dB a CA-CFAR at Pfa = 10⁻⁶ on the MTD map detects the target in ≤ 5 of 100 trials | −26.52 / −25.53 / −31.80 dB, ±1.0 dB | K1, K2, K3 |
-| A4 | **Compensation recovers the gain.** Compensated peak within 0.3 dB of `10·log10(N)` ideal, and the same CFAR detects in ≥ 95 of 100 trials | ≥ −0.3 dB; ≥ 95% | K1 (keystone), K2 (keystone + matched filter), K3 (keystone, F = 1) |
-| A5 | **Each step fixes one thing (K2).** Keystone alone leaves the spread; dechirp alone leaves the walk | −4.06 ± 0.5 dB; −26.51 ± 1.0 dB | K2 |
-| A6 | **K3 fold factor recovered** by the search over F ∈ [−3, 3]; the wrong F = 0 loses as predicted | F̂ = 1 in 200 of 200 trials at ρ = 28.89 dB; F = 0: −32.94 ± 1.0 dB | K3 |
-| A7 | Acceleration search peak at the true a | within one search step; the curve is returned | K2 |
-| A8 | **Fine range and velocity** (A&M on the chip), RMSE / CRB, 500 trials, `slow` | ≤ 1.15 at ρ = 20 and 28.89 dB (computed for a pure tone: 0.984, 1.011) | K1 |
-| A9 | **Fine acceleration**, RMSE / CRB: local GRFT ≤ 1.2; CPF alone ≤ 1.5; HAF reported, not bounded | as stated | K2 |
-| A10 | **Chip round trip is exact**: integer indices `==`; metres to `rtol = 1e-12`; Doppler crops across ±v_ua wrap; range crops at the edge clip | exact | unit |
-| A11 | A ±16-bin chip keeps ≥ −0.05 dB of a point target's energy at the worst offset | computed −0.034 dB | unit |
-| A12 | **Interpolator bias** on a noiseless tone, max over offsets in [−0.5, 0.5]: parabolic > 0.1 bin (it **fails**, computed 0.234); Quinn and Jacobsen ≤ 2·10⁻⁶; Candan ≤ 1·10⁻⁶; A&M ≤ 1·10⁻⁹ | as stated | unit |
-| A13 | Parabolic RMSE / CRB at ρ = 28.89 dB **exceeds 3** (bias-limited; computed 12.2) while A&M stays ≤ 1.15 | as stated | unit |
-| A14 | Jerk: on K1–K3 the cubic-model estimate of j is within 3 CRB std of 0 in ≥ 99% of trials. On a synthetic cubic-phase tone where j is observable, CPF + ML recovers it within 1.5 CRB std | as stated | K1–K3; unit |
-| A15 | `PropagationPaths` defaults reproduce every scenario 001–003 cube bit for bit; their tests stay green | exact | regression |
-| A16 | Keystone implementations agree: `czt` equals the O(N²) `dft` oracle; truncated-sinc error reported | `rtol = 1e-10` (computed 3.3·10⁻¹⁴ on a 64-point test) | unit |
-| A17 | Range spectrum of `dsp.matched_filter`'s output equals X(f)·P*(f) in the linear-convolution length | `rtol = 1e-12` | unit |
-| A18 | Second-order keystone straightens a pure quadratic range history with ≥ 3 bins of curvature | residual < 0.5 bin | unit |
-| A19 | Velocity estimates reported in parent coordinates with F applied: K3 recovers 1100 m/s, not 335.22 | within 3 CRB std | K3 |
+| A1 | Uncompensated walk, the per-pulse peak track's least-squares slope times N | 27.872 (K1), 27.995 (K2), 90.174 (K3) bins, ±1 | `[verify]` `walk_bins`, `walk_tolerance_bins` |
+| A2 | Residual walk after the configured correction, peak-to-peak over pulses 1 … N−2, noiseless | < 0.5 bin | `residual_walk_max_bins`; unit tests |
+| A3 | **The baseline fails.** MTD loss as §3.4 (LFM), and CA-CFAR at Pfa 10⁻⁶ on the MTD map detects in ≤ 5 of 100 trials at 28.886 dB | −25.78 / −25.60 / −34.67 dB, ±1.0 dB | `uncompensated_loss_db`, `loss_tolerance_db`; slow test |
+| A4 | **Compensation recovers the gain**, and the same CFAR detects in ≥ 95 of 100 trials | ≥ −0.3 dB; ≥ 95 % | `compensated_loss_min_db`; slow test |
+| A5 | **Each step fixes one thing (K2)**: keystone alone; dechirp alone | −4.26 ± 0.5 dB; −25.90 ± 1.0 dB | `keystone_only_loss_db`, `keystone_only_loss_tolerance_db`, `dechirp_only_loss_db` |
+| A6 | **K3 fold factor found** over F ∈ [−3, 3]; the wrong F = 0 loses as predicted | F̂ = 1 (and in 200 of 200 trials at 28.886 dB); F = 0: −31.21 ± 1.0 dB | `fold_factor`, `keystone_only_loss_db`; slow test |
+| A7 | Acceleration search peak at the true acceleration | within one 10 m/s² step | `acceleration_tolerance_mps2` |
+| A8 | **Fine range and rate** (A&M on the K1 chip), RMSE / CRB, 500 trials | ≤ 1.15 at 20 and 28.886 dB | slow test |
+| A9 | **Fine acceleration** (K2), RMSE / CRB: local GRFT ≤ 1.2; CPF ≤ 1.5; HAF reported | as stated | slow test |
+| A10 | Chip round trip exact: integers `==`, metres the parent's, Doppler crops wrap, range crops clip | exact | unit |
+| A11 | A ±16-bin chip keeps ≥ −0.05 dB of a compressed echo at the worst offset | computed −0.040 dB | unit |
+| A12 | Interpolator bias on a noiseless 1024-point tone, offsets in [−0.5, 0.5]: parabolic > 0.1 bin; Quinn, Jacobsen ≤ 2·10⁻⁶; Candan ≤ 1·10⁻⁶; A&M ≤ 1·10⁻⁹ | computed 0.234, 1.18e-6, 3.9e-7, 5e-13 | unit |
+| A13 | Parabolic RMSE / CRB at 28.886 dB **exceeds 3**, A&M ≤ 1.15 | as stated | unit |
+| A14 | Jerk: on K1–K3 the cubic fit's j within 3 CRB of 0 in ≥ 99 % of 100 trials; on a model chip with observable jerk, recovered within 1.5 CRB (RMSE, 200 trials) | as stated | slow tests |
+| A15 | Defaults reproduce every scenario 001–003 cube bit for bit: their fingerprints stay | exact | `tests/data/golden/fingerprints.csv` |
+| A16 | The chirp-z keystone equals the O(N²) DFT-interpolation oracle and `scipy.signal.czt` per frequency; the sinc baseline also straightens walk | rtol 1e-10; < 0.5 bin | unit |
+| A17 | Range spectrum of `dsp.matched_filter`'s output is X(f)·P*(f) in the linear-convolution length | rtol 1e-12 | unit |
+| A18 | Second-order keystone straightens a quadratic history with ≥ 3 bins of curvature | residual < 0.5 bin | unit |
+| A19 | Rate reported in parent coordinates with F applied: K3 recovers −2200 m/s bistatic, not −670.45 | within 3 CRB | `rate_error_max_crb` (all variants); unit |
 
-The tolerances: 1/16-bin peak refinement leaves 0.05 dB, so 0.3 dB is six times the grid
-residual. 500 Monte Carlo trials estimate an RMSE to about ±3% (1/√1000), so a bound of 1.15
-against a computed 1.01 is about 4σ of sampling error. CPF's 1.5 follows O'Shea's result that two
-of its four phase parameters have mean-square errors within 50% of the bound at high SNR [12],
-which is about 1.22 in RMSE, plus margin. No bound is below ρ = 20 dB, where every estimator
-starts producing outliers (the threshold effect [13]). That region is plotted, not asserted.
+Tolerances: the losses compare a time-domain chain with a frequency-domain model; ±1.0 dB covers
+the smeared peak's sensitivity, ±0.5 dB the keystone-only peak's. 500 Monte Carlo trials know an
+RMSE to about 3 %, so 1.15 against a computed 1.01 is about 4σ. CPF's 1.5 follows O'Shea's result
+that its estimates' mean-square errors come within 50 % of the bound at high SNR [12] (1.22 in
+RMSE) with margin. No bound is asserted below 20 dB, where every estimator starts producing
+outliers (the threshold effect [13]).
 
 ---
 
 ## References
 
 .. [1] R. P. Perry, R. C. DiPietro and R. L. Fante, "SAR imaging of moving targets," *IEEE Trans.
-       Aerospace and Electronic Systems*, 35(1), pp. 188-200, 1999. doi:10.1109/7.745691
-       (equation numbers to confirm at implementation).
+       Aerospace and Electronic Systems*, 35(1), pp. 188-200, 1999. doi:10.1109/7.745691 — the
+       keystone formatting and its rescaling of slow time per range frequency.
 .. [2] D. Zhu, Y. Li and Z. Zhu, "A keystone transform without interpolation for SAR ground
        moving-target imaging," *IEEE Geoscience and Remote Sensing Letters*, 4(1), pp. 18-22,
-       2007. doi:10.1109/LGRS.2006.882147.
+       2007. doi:10.1109/LGRS.2006.882147 — the keystone as a scaled DFT (chirp-z).
 .. [3] J. Xu, J. Yu, Y.-N. Peng and X.-G. Xia, "Radon-Fourier transform for radar target
        detection, I: Generalized Doppler filter bank," *IEEE Trans. Aerospace and Electronic
        Systems*, 47(2), pp. 1186-1202, 2011. doi:10.1109/TAES.2011.5751251.
 .. [4] J. Xu, J. Yu, Y.-N. Peng and X.-G. Xia, "Radon-Fourier transform for radar target
-       detection (II): Blind speed sidelobe suppression," *IEEE Trans. Aerospace and Electronic
-       Systems*, 47(4), pp. 2473-2489, 2011. doi:10.1109/TAES.2011.6034645.
+       detection (II): Blind speed sidelobe suppression," *IEEE Trans. AES*, 47(4),
+       pp. 2473-2489, 2011. doi:10.1109/TAES.2011.6034645.
 .. [5] J. Yu, J. Xu, Y.-N. Peng and X.-G. Xia, "Radon-Fourier transform for radar target
-       detection (III): Optimality and fast implementations," *IEEE Trans. Aerospace and
-       Electronic Systems*, 48(2), pp. 991-1004, 2012. doi:10.1109/TAES.2012.6178044.
+       detection (III): Optimality and fast implementations," *IEEE Trans. AES*, 48(2),
+       pp. 991-1004, 2012. doi:10.1109/TAES.2012.6178044.
 .. [6] J. Xu, X.-G. Xia, S.-B. Peng, J. Yu, Y.-N. Peng and L.-C. Qian, "Radar maneuvering target
        motion estimation based on generalized Radon-Fourier transform," *IEEE Trans. Signal
        Processing*, 60(12), pp. 6190-6201, 2012. doi:10.1109/TSP.2012.2217137.
 .. [7] P. Huang, G. Liao, Z. Yang, X.-G. Xia, J.-T. Ma and J. Ma, "Long-time coherent integration
        for weak maneuvering target detection and high-order motion parameter estimation based on
        keystone transform," *IEEE Trans. Signal Processing*, 64(15), pp. 4013-4026, 2016.
-       doi:10.1109/TSP.2016.2558161 (equation numbers to confirm at implementation).
+       doi:10.1109/TSP.2016.2558161 — keystone, the matched filter in range frequency and slow
+       time, and the fold factor.
 .. [8] D. Kirkland, "Imaging moving targets using the second-order keystone transform," *IET
        Radar, Sonar & Navigation*, 5(8), pp. 902-910, 2011. doi:10.1049/iet-rsn.2010.0304.
 .. [9] S. Peleg and B. Porat, "Estimation and classification of polynomial-phase signals," *IEEE
@@ -570,8 +432,7 @@ starts producing outliers (the threshold effect [13]). That region is plotted, n
         polynomial phase," *IEEE Trans. Signal Processing*, 39(3), pp. 749-752, 1991.
         doi:10.1109/78.80864.
 .. [11] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed., McGraw-Hill, 2014,
-        §4.6.1 (LFM), §4.2 (the matched filter); the Doppler-processing chapter (section number
-        to confirm at implementation).
+        §4.6 (FM pulse compression), §5.3 (pulse Doppler processing).
 .. [12] P. O'Shea, "A fast algorithm for estimating the parameters of a quadratic FM signal,"
         *IEEE Trans. Signal Processing*, 52(2), pp. 385-393, 2004. doi:10.1109/TSP.2003.821097.
 .. [13] D. C. Rife and R. R. Boorstyn, "Single-tone parameter estimation from discrete-time
@@ -586,14 +447,18 @@ starts producing outliers (the threshold effect [13]). That region is plotted, n
 .. [17] E. Aboutanios and B. Mulgrew, "Iterative frequency estimation by interpolation on Fourier
         coefficients," *IEEE Trans. Signal Processing*, 53(4), pp. 1237-1242, 2005.
         doi:10.1109/TSP.2005.843719.
+.. [18] L. I. Bluestein, "A linear filtering approach to the computation of discrete Fourier
+        transform," *IEEE Trans. Audio and Electroacoustics*, 18(4), pp. 451-455, 1970.
+
+Equation numbers are not given for [1]–[10], [12]–[17]: the papers were not available to check
+them against (IEEE paywall), and a guessed number is worse than none. Each citation names the
+result it supports.
 
 ## Decisions inherited
 
-From the retired structure spec.
-
 - **D1, widened.** A propagation backend returns `PropagationPaths`, never baseband; `signal.py`
-  synthesises samples from any path set. Here the path set gains polynomial range motion, through
-  `line_of_sight_paths` keywords and `bistatic_range_at_m`.
-- **D5, sign.** The closing-positive range rate is superseded: range rate is the time derivative of
-  bistatic range, positive receding, and Doppler is `-rate/wavelength`, written once in
-  `propagation.doppler_shift_hz` (`spec/data-001-formats.md` §5).
+  synthesises samples from any path set. The path set gains Doppler rate (filled from the route's
+  acceleration) and jerk (defaulted), through `line_of_sight_paths` and `bistatic_range_at_m`.
+- **D5, sign.** Range rate is the time derivative of bistatic range, positive receding; Doppler is
+  `−rate/wavelength`, written once in `propagation.doppler_shift_hz` (`spec/data-001-formats.md`
+  §5).
