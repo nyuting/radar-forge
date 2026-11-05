@@ -16,7 +16,7 @@ import pytest
 
 from radar_forge import evaluate
 from radar_forge.detection import cluster_detections
-from radar_forge.pipeline import frame_plots, frames, range_doppler_product
+from radar_forge.pipeline import frame_plots, frame_products, frames
 from radar_forge.scenario import load_scenario
 
 REPO = Path(__file__).resolve().parents[1]
@@ -25,10 +25,13 @@ CONFIGS = sorted((REPO / "config").glob("*.toml"))
 
 def _cube_bytes(path: Path) -> int:
     scenario = load_scenario(path)
-    # complex128: 16 bytes a sample.
+    # complex128: 16 bytes a sample. A noise burst holds its code beside its stream, and its map
+    # is n_range_lags wide, not a batch: those count with the cube.
     return sum(
-        16 * n * r.n_samples_per_pri
-        for r, n in zip(scenario.radars, scenario.n_pulses, strict=True)
+        16 * n * (r.n_samples_per_pri * (2 if lags else 1) + lags)
+        for r, n, lags in zip(
+            scenario.radars, scenario.n_pulses, scenario.n_range_lags, strict=True
+        )
     )
 
 
@@ -40,10 +43,7 @@ def test_one_frame_of_the_largest_scenario_holds_at_most_two_cubes_and_64_mib():
     tracemalloc.start()
     try:
         frame = next(frames(scenario, n_frames=1))
-        products = [
-            range_doppler_product(c, r) for c, r in zip(frame.cubes, scenario.radars, strict=True)
-        ]
-        frame_plots(products, scenario.detection)
+        frame_plots(frame_products(frame, scenario), scenario.detection)
         _, peak_bytes = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()

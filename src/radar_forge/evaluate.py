@@ -8,11 +8,13 @@ Each prints its intermediate quantities and wall time, checks the thresholds the
 ``truth_in_map_fraction = [low, high]``, ``expected_snr_db`` with ``snr_tolerance_db``,
 ``noise_tolerance_db``, ``peak_tolerance_db``, ``truth_within_bins`` with
 ``detection_fraction``, ``pfa_tolerance_factor``, ``rate_tolerance_mps``, ``range_rmse_max_m``,
-``range_rate_rmse_max_mps``, ``nees_fraction_min`` and ``confirmation_latency_max_scans``. A
-stage not listed does not run, a threshold not given is not checked, and :func:`run` raises
-:class:`VerificationError` naming every failure. CSVs show a monostatic radar's range and rate
-halved (:func:`~radar_forge.plots.display_axes`); everything else is bistatic. The helpers
-below are what a stage module shares.
+``range_rate_rmse_max_mps``, ``nees_fraction_min``, ``confirmation_latency_max_scans``; and
+``leakage``'s (:mod:`~radar_forge.stages.clutter`) ``cancellation_depth_db``, ``floor_rise_db``,
+``sinr_loss_db`` with ``cancellation_``, ``floor_rise_``, ``sinr_loss_tolerance_db``,
+``detections_per_frame``, ``uncancelled_detections_per_frame``. A stage not listed does not run,
+a threshold not given is not checked, :func:`run` raises :class:`VerificationError` naming
+every failure. CSVs halve a monostatic radar's range and rate (:func:`~radar_forge.plots.
+display_axes`); all else is bistatic. The helpers below are what a stage module shares.
 """
 
 from __future__ import annotations
@@ -180,7 +182,9 @@ def target_power_w(radar: Radar, truth: TargetGeometry, rcs_m2: ArrayLike) -> ND
 
 def spans(scenario: Scenario, burst: int) -> tuple[float, float, float]:
     """Return a burst's range span, rate span and range bin, m and m/s."""
-    range_axis_m, rate_axis_mps = map_axes(scenario.radars[burst], scenario.n_pulses[burst])
+    range_axis_m, rate_axis_mps = map_axes(
+        scenario.radars[burst], scenario.n_pulses[burst], n_range_lags=scenario.n_range_lags[burst]
+    )
     range_bin_m = float(range_axis_m[1] - range_axis_m[0])
     rate_span_mps = float(rate_axis_mps.size * (rate_axis_mps[0] - rate_axis_mps[1]))
     return range_axis_m.size * range_bin_m, rate_span_mps, range_bin_m

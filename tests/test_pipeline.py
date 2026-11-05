@@ -23,13 +23,15 @@ from radar_forge.pipeline import (
     Plots,
     ScanTracker,
     frame_plots,
+    frame_products,
+    frames,
     map_axes,
     range_doppler_product,
     synthesise,
 )
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter
-from radar_forge.scenario import Target, load_scenario, truth_geometry
-from radar_forge.signal import thermal_noise
+from radar_forge.scenario import CancellationSettings, Target, load_scenario, truth_geometry
+from radar_forge.signal import noise_waveform, thermal_noise
 from radar_forge.stages import core
 
 REPO = Path(__file__).resolve().parents[1]
@@ -193,14 +195,21 @@ def test_a_dual_prf_pair_unfolds_a_rate_neither_burst_resolves(rng):
 
 @pytest.mark.parametrize("path", sorted((REPO / "config").glob("*.toml")), ids=lambda p: p.stem)
 def test_the_radars_unambiguous_limits_are_the_maps_periods(path: Path) -> None:
-    """Each burst's unambiguous range and rate are the spans its map wraps at, both waveforms."""
+    """Each burst's unambiguous range and rate are the spans its map wraps at, every waveform.
+
+    A noise burst's lags are a window that folds nothing: its delay period is infinite.
+    """
     scenario = load_scenario(path)
-    for radar, n_pulses in zip(scenario.radars, scenario.n_pulses, strict=True):
-        range_m, rate_mps = map_axes(radar, n_pulses)
+    bursts = zip(scenario.radars, scenario.n_pulses, scenario.n_range_lags, strict=True)
+    for radar, n_pulses, n_range_lags in bursts:
+        range_m, rate_mps = map_axes(radar, n_pulses, n_range_lags=n_range_lags)
         assert min(range_m.size, rate_mps.size) > 1, f"{path.stem}: an axis of one bin has no step"
-        np.testing.assert_allclose(
-            range_m.size * (range_m[1] - range_m[0]), radar.unambiguous_bistatic_range_m, rtol=1e-12
-        )
+        if radar.transmitter.waveform != "noise":
+            np.testing.assert_allclose(
+                range_m.size * (range_m[1] - range_m[0]),
+                radar.unambiguous_bistatic_range_m,
+                rtol=1e-12,
+            )
         np.testing.assert_allclose(
             rate_mps.size * abs(rate_mps[1] - rate_mps[0]),
             radar.unambiguous_bistatic_range_rate_mps,
@@ -371,3 +380,60 @@ def test_trajectory_files_share_one_time_base(one_frame_scenario, tmp_path):
     np.testing.assert_allclose(
         truth.bistatic_range_rate_mps[1], truth.bistatic_range_rate_mps[0], rtol=1e-9
     )
+
+
+# --- Scenario 005: a noise burst's map, and the tables that describe it ---
+
+NOISE_CONFIG = REPO / "config" / "scenario_005_static_leakage.toml"
+
+
+def test_a_noise_maps_range_axis_is_one_lag_a_bin():
+    """Lag m is the route c m / f_s, a window that does not wrap; it needs a lag count."""
+    radar = load_scenario(NOISE_CONFIG).radar
+    range_axis_m, rate_axis_mps = map_axes(radar, 2048, n_range_lags=1024)
+    np.testing.assert_allclose(range_axis_m, SPEED_OF_LIGHT_MPS * np.arange(1024) / 8.0e6)
+    assert rate_axis_mps.size == 2048
+    with pytest.raises(ValueError, match="n_range_lags"):
+        map_axes(radar, 2048)
+
+
+def test_a_noise_target_lands_on_its_lag_and_doppler_bin():
+    """A noiseless echo at lag 500, closing at 30 Doppler bins, peaks in that cell."""
+    radar = load_scenario(NOISE_CONFIG).radar
+    doppler_hz = 30 * 9.765625
+    route_m = 500 * SPEED_OF_LIGHT_MPS / 8.0e6
+    geometry = TargetGeometry.monostatic(route_m / 2.0, -doppler_hz * radar.wavelength_m / 2.0)
+    cube = synthesise(radar, geometry, [10.0], 2048, rng=None)
+    code = noise_waveform(cube.size, rng=np.random.default_rng(0))  # synthesise's noiseless code
+    product = range_doppler_product(cube, radar, reference=code, n_range_lags=1024)
+    power_w = np.abs(product.rd_map) ** 2
+    assert np.unravel_index(np.argmax(power_w), power_w.shape) == (1024 + 30, 500)
+    with pytest.raises(ValueError, match="reference"):
+        range_doppler_product(cube, radar, n_range_lags=1024)
+
+
+def test_noise_tables_need_a_noise_burst(tmp_path):
+    """[leakage] and the rest describe a noise burst; a scenario without one refuses them."""
+    text = (REPO / "config" / "scenario_001_fmcw_low_prf.toml").read_text(encoding="utf-8")
+    path = tmp_path / "fmcw_with_leakage.toml"
+    path.write_text(text + "\n[leakage]\nlags = [0]\ninr_db = [40.0]\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="noise burst"):
+        load_scenario(path)
+
+
+def test_cancellation_settings_refuse_what_wiener_smi_cannot_do():
+    """Wiener-SMI fits the whole CPI on the linear basis; an extension needs a batch."""
+    with pytest.raises(ValueError, match="wiener"):
+        CancellationSettings("wiener", 192, n_samples_per_batch=400)
+    with pytest.raises(ValueError, match="extension"):
+        CancellationSettings("least_squares", 192, n_samples_extension=400)
+
+
+def test_each_noise_frame_carries_its_code_beside_the_stream():
+    """frames() hands a noise burst's stream with the code it sent, the same shape."""
+    scenario = load_scenario(NOISE_CONFIG)
+    frame = next(frames(scenario, n_frames=1))
+    assert len(frame.cubes) == len(frame.references) == 1
+    assert frame.cubes[0].shape == frame.references[0].shape == (2048, 400)
+    product = frame_products(frame, scenario)[0]
+    assert product.rd_map.shape == (2048, 1024)

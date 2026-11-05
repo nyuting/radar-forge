@@ -4,9 +4,10 @@ A scenario is data. ``[site.tx]`` and an optional ``[site.rx]`` (absent: monosta
 ``[[burst]]`` per coherent processing interval and ``[receiver]`` make the radar; each
 ``[[target]]`` is a recorded trajectory or a constant velocity, played over ``[frames]``;
 ``[detection]`` and ``[tracking]`` set the processing (:mod:`radar_forge.pipeline`); ``[verify]``
-is read by :mod:`radar_forge.evaluate`. :func:`load_scenario` refuses an unknown table, key or
-value type, so a typo is never silently ignored. :func:`truth_geometry` gives the unfolded
-truth: bistatic range :math:`R_T + R_R` and its rate, positive receding.
+is read by :mod:`radar_forge.evaluate`. A noise burst adds ``[leakage]``, ``[[clutter]]``,
+``[transmitter_distortion]`` and ``[cancellation]``. :func:`load_scenario` refuses an unknown
+table, key or value type, so a typo is never silently ignored. :func:`truth_geometry` gives the
+unfolded truth: bistatic range :math:`R_T + R_R` and its rate, positive receding.
 
 References
 ----------
@@ -32,7 +33,11 @@ from radar_forge.propagation import dbsm_to_m2
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter, geodetic_to_enu_m
 
 __all__ = [
+    "CancellationSettings",
+    "ClutterSettings",
     "DetectionSettings",
+    "DistortionSettings",
+    "LeakageSettings",
     "Scenario",
     "Target",
     "TrackingSettings",
@@ -44,6 +49,10 @@ _SITE_KEYS = {"latitude_deg", "longitude_deg", "altitude_m"}
 _BURST_KEYS = {f.name for f in fields(Transmitter)} | {"sample_rate_hz", "n_pulses"}
 _TABLES = {"scenario", "target", "frames", "site", "burst", "receiver"}
 _OPTIONAL_TABLES = {"detection", "tracking", "verify"}
+# Scenario 005's continuous noise radar: a [[burst]] key and four tables of its own.
+_BURST_KEYS |= {"n_range_lags"}
+_NOISE_TABLES = {"leakage", "clutter", "transmitter_distortion", "cancellation"}
+_OPTIONAL_TABLES |= _NOISE_TABLES
 
 
 @dataclass(frozen=True)
@@ -128,6 +137,75 @@ class TrackingSettings:
 
 
 @dataclass(frozen=True)
+class LeakageSettings:
+    """``[leakage]``: the transmitter's leakage at the ADC, one whole-sample lag per path.
+
+    ``inr_db`` is each path's power over the noise in one sample, not over the matched band.
+    """
+
+    lags: tuple[int, ...] = ()
+    inr_db: tuple[float, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Require one non-negative whole lag per level."""
+        lags_ok = all(type(lag) is int and lag >= 0 for lag in self.lags)
+        if not (self.lags and lags_ok and len(self.lags) == len(self.inr_db)):
+            msg = "[leakage] needs lags, non-negative integers, and one inr_db for each."
+            raise ValueError(msg)
+        object.__setattr__(self, "inr_db", tuple(float(value) for value in self.inr_db))
+
+
+@dataclass(frozen=True)
+class ClutterSettings:
+    """One ``[[clutter]]`` scatterer: its bistatic route, power over noise per sample, Doppler."""
+
+    range_m: float = 0.0
+    relative_power_db: float = 0.0
+    doppler_hz: float = 0.0
+
+    def __post_init__(self) -> None:
+        """Require a route: a scatterer at zero range is leakage."""
+        if not self.range_m > 0.0:
+            msg = f"[[clutter]] range_m must be strictly positive; got {self.range_m!r}."
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True)
+class DistortionSettings:
+    """``[transmitter_distortion]``: the third-order term of the transmit amplifier."""
+
+    a3: float = 0.0
+
+
+@dataclass(frozen=True)
+class CancellationSettings:
+    """``[cancellation]``: the canceller a noise burst's stream passes before correlation.
+
+    ``least_squares`` fits the CPI, or each ``n_samples_per_batch`` block, on the block widened
+    by ``n_samples_extension`` a side (:func:`~radar_forge.clutter.least_squares_cancel`);
+    ``wiener`` is Wiener-SMI on the CPI, linear; ``none`` passes the stream through.
+    """
+
+    method: Literal["none", "least_squares", "wiener"] = "least_squares"
+    n_taps: int = 1
+    n_samples_per_batch: int = 0
+    n_samples_extension: int = 0
+    odd_orders: tuple[int, ...] = (1,)
+    diagonal_loading: float = 0.0
+
+    def __post_init__(self) -> None:
+        """Refuse a count below its floor, or a Wiener fit asked to batch or to go nonlinear."""
+        counts = (self.n_taps - 1, self.n_samples_per_batch, self.n_samples_extension)
+        if min(counts) < 0 or (self.n_samples_extension and not self.n_samples_per_batch):
+            msg = "[cancellation] needs n_taps >= 1, and an extension only around a batch."
+            raise ValueError(msg)
+        batched = self.n_samples_per_batch or self.odd_orders != (1,)
+        if self.method == "wiener" and batched:
+            msg = '[cancellation] method = "wiener" fits the whole CPI with the linear basis.'
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True)
 class Scenario:
     """Everything a run needs, resolved from its TOML; ``radars`` holds one per burst."""
 
@@ -143,6 +221,11 @@ class Scenario:
     detection: DetectionSettings = DetectionSettings()
     tracking: TrackingSettings | None = None
     verify: Mapping[str, Any] = field(default_factory=dict)
+    n_range_lags: tuple[int, ...] = ()
+    leakage: LeakageSettings | None = None
+    clutter: tuple[ClutterSettings, ...] = ()
+    transmitter_distortion: DistortionSettings | None = None
+    cancellation: CancellationSettings | None = None
 
     def __post_init__(self) -> None:
         """Reject a scenario that could not run."""
@@ -164,6 +247,25 @@ class Scenario:
                 '[tracking] rate_unfolding must be "none" with two bursts: the dual-PRF '
                 "pair unfolds the rate itself, so a track has nothing to unfold."
             )
+            raise ValueError(msg)
+        self._check_noise_bursts()
+
+    def _check_noise_bursts(self) -> None:
+        """Give each burst its lag count; refuse noise tables without a noise burst to read them."""
+        if not self.n_range_lags:
+            object.__setattr__(self, "n_range_lags", (0,) * len(self.radars))
+        noise = [radar.transmitter.waveform == "noise" for radar in self.radars]
+        span = [n * r.n_samples_per_chirp for n, r in zip(self.n_pulses, self.radars, strict=True)]
+        lags_ok = [
+            (1 <= lags <= samples) if is_noise else lags == 0
+            for lags, samples, is_noise in zip(self.n_range_lags, span, noise, strict=True)
+        ]
+        if not all(lags_ok) or (any(noise) and len(noise) > 1):
+            msg = "a noise burst stands alone, its n_range_lags between 1 and its CPI samples."
+            raise ValueError(msg)
+        tables = (self.leakage, self.clutter, self.transmitter_distortion, self.cancellation)
+        if not any(noise) and any(tables):
+            msg = f"tables {sorted(_NOISE_TABLES)} describe a noise burst; this scenario has none."
             raise ValueError(msg)
 
     @property
@@ -224,7 +326,7 @@ def _radar(
         **{
             k: float(v)
             for k, v in burst.items()
-            if k not in ("waveform", "n_pulses", "sample_rate_hz")
+            if k not in ("waveform", "n_pulses", "sample_rate_hz", "n_range_lags")
         },
         waveform=burst.get("waveform", "fmcw"),
     )
@@ -278,7 +380,19 @@ def load_scenario(path: Path | str) -> Scenario:
         detection=_settings(DetectionSettings, document.get("detection", {}), "detection"),
         tracking=None if tracking is None else _settings(TrackingSettings, tracking, "tracking"),
         verify=dict(document.get("verify", {})),
+        n_range_lags=tuple(int(burst.get("n_range_lags", 0)) for burst in document["burst"]),
+        leakage=_optional(LeakageSettings, document, "leakage"),
+        clutter=tuple(
+            _settings(ClutterSettings, t, "clutter") for t in document.get("clutter", [])
+        ),
+        transmitter_distortion=_optional(DistortionSettings, document, "transmitter_distortion"),
+        cancellation=_optional(CancellationSettings, document, "cancellation"),
     )
+
+
+def _optional(kind: Any, document: Mapping[str, Any], name: str) -> Any:
+    """Build a settings table if the document has it, else ``None``."""
+    return _settings(kind, document[name], name) if name in document else None
 
 
 def _read_trajectory(path: Path, altitude_m: float) -> tuple[NDArray[np.float64], ...]:

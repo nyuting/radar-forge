@@ -13,4 +13,7 @@ locals named ``truth`` and ``spans``, which would shadow a bare import and raise
 
 from radar_forge.stages import core
 
-__all__ = ["core"]
+# isort: split
+from radar_forge.stages import clutter
+
+__all__ = ["clutter", "core"]

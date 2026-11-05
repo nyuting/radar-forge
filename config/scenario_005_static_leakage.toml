@@ -1,0 +1,124 @@
+# Scenario 005 -- a continuous noise radar at the Duke Receiver: its own transmitter leaks
+# into its receiver, and buildings a few hundred metres out echo it, 71-73 dB above the
+# aircraft. The radar knows the code it sent, so it fits the leakage and near clutter as
+# delayed copies of that code and subtracts them before correlation. The three variants
+# share every block below except [cancellation], [transmitter_distortion] and P2's moving
+# clutter. Every range and rate on the map is bistatic: monostatic, twice the slant range
+# and twice the radial velocity.
+
+[scenario]
+name = "scenario-005-static-leakage"
+description = "P1: leakage at lags 0-2 (INR 40/30/20 dB) and four static clutter echoes at lags 16-160 (CNR 30-12 dB), 40.94 dB above noise in all. Without cancellation their correlation floor buries the aircraft 13-14 dB deep; a full-CPI least-squares fit on 192 delays of the code removes them to the noise."
+seed = 20261106
+
+[[target]]
+name = "light-aircraft"
+rcs_dbsm = 10.0        # 10 m^2, Swerling 0 (non-fluctuating)
+trajectory_path = "../data/flight_coordinates.csv"
+altitude_m = 1500.0    # the CSV has no altitude column; held constant
+
+[frames]
+start_time_s = 0.0
+duration_s = 120.0     # scenario 001's window: 33.28-36.72 km bistatic
+frame_rate_hz = 1.0
+
+[site.tx]
+# The Duke Receiver: 101 Science Drive, Durham NC. Transmit and receive antennas side by
+# side on its 60 m roof; with no [site.rx] the radar is monostatic.
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
+
+# One burst: a white Gaussian noise code across the 8 MHz sampled band, transmitted without a
+# break. It is correlated in batches of 50 us (400 samples): the batch is a continuous
+# radar's pulse, so chirp_duration_s is the batch and prf_hz its rate, duty one. 2048
+# batches = 0.1024 s = 819 200 samples of CPI: 10 log10(819 200) = 59.13 dB of gain. 1024
+# lags of c / f_s = 37.474 m each map 0-38.37 km of bistatic range.
+[[burst]]
+waveform = "noise"
+carrier_frequency_hz = 9.8e9
+bandwidth_hz = 8.0e6
+transmit_power_w = 1.0
+gain_tx_dbi = 30.0
+chirp_duration_s = 50.0e-6
+prf_hz = 20.0e3
+sample_rate_hz = 8.0e6
+n_pulses = 2048
+n_range_lags = 1024
+
+[receiver]
+gain_rx_dbi = 30.0
+noise_figure_db = 3.0
+
+# What antenna isolation and an analog canceller leave at the ADC, per sample over the
+# noise k T0 F f_s = -131.94 dBW: the front end's short impulse response at lags 0-2.
+[leakage]
+lags = [0, 1, 2]
+inr_db = [40.0, 30.0, 20.0]
+
+# Four buildings and stretches of terrain, on whole lags of c / f_s: routes of 16, 40, 80
+# and 160 lags (299.79-2997.92 m slant). Levels per sample over the noise.
+[[clutter]]
+range_m = 599.584916
+relative_power_db = 30.0
+
+[[clutter]]
+range_m = 1498.96229
+relative_power_db = 24.0
+
+[[clutter]]
+range_m = 2997.92458
+relative_power_db = 18.0
+
+[[clutter]]
+range_m = 5995.84916
+relative_power_db = 12.0
+
+# Least squares on the whole CPI, K = 192 delays of the code: past lag 160 with margin.
+[cancellation]
+method = "least_squares"
+n_taps = 192
+
+# Cell-averaging CFAR along range. The map holds 2048 x 1024 cells, so pfa = 1e-6 is about
+# two false alarms a frame; the ideal threshold is 11.40 dB.
+[detection]
+pfa = 1e-6
+n_train = 16
+n_guard = 4
+variant = "ca"
+merge_range_bins = 1.0
+max_bistatic_range_rate_mps = 400.0   # 200 m/s radial
+
+[verify]
+stages = ["geometry", "iq", "rd", "detect", "leakage"]
+# Fraction of frames whose true bistatic range and rate lie on the map, unfolded: the window
+# runs 33.28-36.72 km against the 38.37 km of lags, and -110.6...+78.6 m/s against +-305.9.
+truth_in_map_fraction = [1.0, 1.0]
+# P_r N / (k T0 F f_s) on an exact bin at frame 0 (R = 17 560.7 m), by hand: P_r = -163.046 dBW,
+# noise -131.944 dBW a sample, N = 819 200 (59.134 dB).
+expected_snr_db = 28.03
+snr_tolerance_db = 0.01
+# Five standard errors of a mean over 819 200 complex samples, 5 x 4.343 / sqrt(N) dB.
+noise_tolerance_db = 0.025
+# Scenario 005 A8: the CFAR peak within one bin of the truth on both axes, every frame: one
+# lag, c / f_s = 37.474 m bistatic, and one Doppler bin, lambda / CPI = 0.29874 m/s bistatic.
+truth_within_bins = 1.0
+detection_fraction = 1.0
+rate_tolerance_mps = 0.298741
+# Scenario 005 A6: CA = (1 + INR) / (1 - K/N), the ceiling with every disturbance in the span:
+# INR 12 430.1 (40.945 dB), K = 192, N = 819 200, +0.001 dB: 40.946 dB. A power over 819 200
+# samples scatters 0.005 dB, so 0.05 dB is ten standard errors.
+cancellation_depth_db = 40.946
+cancellation_tolerance_db = 0.05
+# Scenario 005 A9: the floor 2-4 Doppler bins and 3-20 lags off the target, over the clean
+# run's (same code, noise and target, no leakage or clutter): (1 - K/N), -0.001 dB. 216 cells
+# of exponential power scatter 0.3 dB alone; the clean run shares their noise, so far less.
+floor_rise_db = 0.0
+floor_rise_tolerance_db = 1.0
+# Scenario 005 A10: SINR at the truth cell within 1.0 dB of the clean run's.
+sinr_loss_db = 0.0
+sinr_loss_tolerance_db = 1.0
+# Scenario 005 A11: the target detected, once, every frame after cancellation (SINR 26-27 dB
+# over a floor; Pd = 1.000), and never without it (13-14 dB under the leakage floor, Pd 1e-6).
+detections_per_frame = 1
+uncancelled_detections_per_frame = 0

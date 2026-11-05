@@ -30,6 +30,7 @@ from radar_forge.pipeline import (
     RangeDopplerProduct,
     ScanTracker,
     frame_plots,
+    frame_products,
     frames,
     range_doppler_product,
     synthesise,
@@ -181,9 +182,7 @@ def rd(ctx: evaluate.Context) -> evaluate.Context:
     scenario, verify = ctx.scenario, evaluate.thresholds(ctx, "rd")
     bins, hits = float(verify.get("truth_within_bins", 1.0)), []
     for frame in frames(scenario, n_frames=ctx.n_frames):
-        products = [
-            range_doppler_product(c, r) for c, r in zip(frame.cubes, scenario.radars, strict=True)
-        ]
+        products = frame_products(frame, scenario)
         found = frame_plots(products, scenario.detection)
         ctx.plots.append(found)
         for k, product in enumerate(products):
