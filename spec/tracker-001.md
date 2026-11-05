@@ -190,7 +190,7 @@ the track, a *miss* one in which none was.
 | M-of-N confirmation, counted from birth | `n_confirm_hits`, `n_confirm_scans` |
 | Tentative deletion once M is unreachable | (derived) |
 | Deletion after misses in a row; after a coast time | `n_delete_misses`; `max_coast_time_s` |
-| Re-acquisition window for confirmed tracks | `n_reacquire_scans` |
+| Re-acquisition window for confirmed tracks: extra misses in a row | `n_reacquire_misses` |
 | Covariance-based deletion | `max_position_sigma_m` |
 | Existence-based confirm and delete (JIPDA) | `ExistencePolicy(confirm, delete)` |
 
