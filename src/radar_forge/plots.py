@@ -1,4 +1,4 @@
-r"""Figures for reading a run: the range-Doppler map and the range-time history.
+r"""Figures for reading a run: the range-Doppler map, the range-time history, a ground scene.
 
 Matplotlib is the ``visualisation`` extra and is imported inside each drawing function, so
 ``import radar_forge`` needs no extra. :func:`display_axes` is the one place a monostatic
@@ -32,6 +32,7 @@ __all__ = [
     "magnitude_db",
     "render_range_doppler",
     "render_range_time_history",
+    "render_scene",
     "save_figure",
 ]
 
@@ -268,4 +269,45 @@ def render_range_time_history(
     range_axes.legend(loc="upper right", fontsize="small", framealpha=0.85)
     if title is not None:
         range_axes.set_title(title)
+    return figure
+
+
+def render_scene(
+    truths: Sequence[tuple[str, ArrayLike]],
+    *,
+    plot_enu_m: ArrayLike = (),
+    plot_is_false: ArrayLike = (),
+    tracks: Sequence[tuple[str, ArrayLike]] = (),
+    title: str | None = None,
+) -> Any:
+    """Draw a plot-level scene in the ground plane: truth paths, plots and track paths, km.
+
+    Each truth and track is ``(label, enu_m)`` with ``enu_m`` ``(n, 2)``, a truth labelled
+    where it starts; false plots are drawn fainter than target plots. The radar is at the
+    origin.
+    """
+    plt = _pyplot()
+    figure, axes = plt.subplots(figsize=(8.0, 8.0))
+    plotted = np.asarray(plot_enu_m, dtype=np.float64).reshape(-1, 2) * 1e-3
+    false = np.asarray(plot_is_false, dtype=bool).reshape(-1)
+    if false.size == len(plotted):
+        axes.scatter(*plotted[false].T, s=1.0, color="0.7", label="false plots")
+        axes.scatter(*plotted[~false].T, s=4.0, color="tab:orange", label="target plots")
+    # One line per truth and per track: tens of each.
+    for k, (label, enu_m) in enumerate(truths):
+        path = np.asarray(enu_m, dtype=np.float64) * 1e-3
+        axes.plot(*path.T, color="tab:green", linewidth=1.5, label="truth" if k == 0 else None)
+        finite = np.flatnonzero(np.isfinite(path[:, 0]))
+        if finite.size:
+            axes.annotate(label, path[finite[0]], fontsize="x-small", color="tab:green")
+    for k, (_, enu_m) in enumerate(tracks):
+        path = np.asarray(enu_m, dtype=np.float64) * 1e-3
+        axes.plot(*path.T, linestyle="--", linewidth=1.0, label="tracks" if k == 0 else None)
+    axes.plot(0.0, 0.0, marker="^", color="black", label="radar")
+    axes.set_aspect("equal")
+    axes.set_xlabel("East (km)")
+    axes.set_ylabel("North (km)")
+    axes.legend(loc="upper right", fontsize="small", framealpha=0.85)
+    if title is not None:
+        axes.set_title(title)
     return figure

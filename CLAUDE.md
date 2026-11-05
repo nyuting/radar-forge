@@ -70,6 +70,10 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 | predict, innovate, update; NEES | `predict`, `innovate`, `update`, `TaylorLinearisation`, `UnscentedTransform` (tracking/filters.py); `nees` (tracking/metrics.py) |
 | CWNA/DWNA process noise | `CartesianMotion`, `RadialConstantVelocity` (tracking/models.py) |
 | χ² gate, GNN; M-of-N | `chi_square_gate_threshold`, `GlobalNearestNeighbour` (tracking/association.py); `LifecyclePolicy` (tracking/tracker.py) |
+| coordinated turn; IMM mixing, Π = expm(ΛT) | `CoordinatedTurn` (tracking/models.py); `InteractingMultipleModel`, `imm_mix`, `imm_predict`, `imm_update` (tracking/imm.py) |
+| PDA/JPDA/JPDA*/set weights, JIPDA existence; weighted update | `probabilistic_data_association`, `joint_probabilistic_data_association` (tracking/association.py); `update_weighted` (tracking/filters.py); `ExistencePolicy` (tracking/tracker.py) |
+| GOSPA, trajectory GOSPA | `gospa`, `trajectory_gospa` (tracking/metrics.py) |
+| arcs; plot merge P_u = exp(-d²/2), Pd, clutter per m·rad, clutter map | `Arc`, `resolve`, `detect`, `measure`, `ClutterComponent`, `ClutterMap` (tracking/scene.py) |
 
 No function yet: Pd (Swerling detection curves).
 

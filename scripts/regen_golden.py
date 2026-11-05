@@ -38,6 +38,12 @@ FINGERPRINT = (
     "rate_error_max_mps",
     "range_rmse_m",
     "nees_fraction",
+    # Scenario 011's multitarget stage.
+    "gospa_mean_m",
+    "measured_pd",
+    "false_plot_ratio",
+    "n_false_plots",
+    "n_false_alarms",
 )
 
 

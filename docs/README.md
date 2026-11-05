@@ -61,4 +61,5 @@ acceptance numbers in a `[verify]` table and its spec is deleted. Run one with
 | [008, STAP](../spec/scenario-008-stap.md): airborne clutter ridge | none | Specified, not built |
 | [009, receiver chain](../spec/scenario-009-receiver-chain.md): front end, DDC, impairments | none | Specified, not built |
 | [010, self-calibration](../spec/scenario-010-self-calibration.md): array perturbations | none | Specified, not built |
-| [011, terminal-area tracking](../spec/scenario-011-terminal-area-tracking.md): crossings, turns, clutter; IMM, JPDA, MHT, PMBM | none | Specified, not built |
+| 011a, terminal-area tracking: turns, crossings, clutter; IMM, JPDA, JIPDA, the plot model | `scenario_011_manoeuvre.toml`, `scenario_011_crossing.toml`, `scenario_011_terminal_dense.toml`, `scenario_011_iq_check.toml` | Runs; checked by `[verify]` |
+| [011b, MHT and PMBM](../spec/scenario-011b-mht-pmbm.md): the separation sweep | none | Specified, not built |

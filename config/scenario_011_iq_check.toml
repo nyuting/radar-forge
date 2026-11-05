@@ -1,0 +1,134 @@
+# Scenario 011, V5 "iq_check": is the plot model honest? Scenario 001's S3
+# dual-PRF chain (the one waveform whose Doppler does not fold) with four pairs
+# of aircraft placed in radar coordinates, each pair's members on one bearing at
+# one velocity, so their separation holds for the whole run: 0.5, 1.5, 3 and 6
+# of the map's bistatic range bins (149.896 m). The rd stage detects as
+# scenario 003 does (pipeline.frame_plots); the multitarget stage measures Pd,
+# the false-alarm rate over the cells away from the pairs, and the fraction of
+# frames each pair gives one detection: the merge the plot model draws with
+# P_u(d) = exp(-d^2/2). Azimuth is not modelled here: this checks the
+# range-Doppler half of the plot model (spec 011 §3.5).
+
+[scenario]
+name = "scenario-011-iq-check"
+description = "V5: scenario 001's S3 dual-PRF chain with four pairs of aircraft 0.5 to 6 range bins apart, measuring Pd, false-alarm rate and the merged-detection fraction the plot model assumes."
+seed = 20261109
+
+[frames]
+start_time_s = 0.0
+duration_s = 120.0
+frame_rate_hz = 1.0
+
+[site.tx]
+# The Duke Receiver, monostatic, as scenario 001.
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
+
+# S3 burst A: 200 us sweep, 2 MHz, 800 samples at 4 MHz, PRF 5.0 kHz.
+[[burst]]
+waveform = "fmcw"
+carrier_frequency_hz = 9.8e9
+bandwidth_hz = 2.0e6
+transmit_power_w = 100.0
+gain_tx_dbi = 30.0
+chirp_duration_s = 200.0e-6
+prf_hz = 5.0e3
+sample_rate_hz = 4.0e6
+n_pulses = 128
+
+# S3 burst B: PRF 6.0 kHz at 100 % duty.
+[[burst]]
+waveform = "fmcw"
+carrier_frequency_hz = 9.8e9
+bandwidth_hz = 2.0e6
+transmit_power_w = 100.0
+gain_tx_dbi = 30.0
+chirp_duration_s = 1.6666666666666667e-4
+prf_hz = 6.0e3
+sample_rate_hz = 4.0e6
+n_pulses = 128
+
+[receiver]
+gain_rx_dbi = 30.0
+noise_figure_db = 3.0
+
+[detection]
+pfa = 1e-5
+n_train = 16
+n_guard = 4
+variant = "ca"
+merge_range_bins = 1.0
+max_bistatic_range_rate_mps = 400.0
+
+[verify]
+stages = ["geometry", "iq", "rd", "multitarget"]
+# Every pair, 24 to 42 km of bistatic range at 100 m/s receding, lies inside S3's maps.
+truth_in_map_fraction = [1.0, 1.0]
+# Five standard errors of a mean over 85,376 (burst B) complex samples, as scenario 001.
+noise_tolerance_db = 0.08
+# Noise-only maps hold 30 expected false alarms; the Poisson 99.9 % interval lies within two.
+pfa_tolerance_factor = 2.0
+# Spec 011 A13: the plot model is given Pd 0.99 for these targets (40 to 48 dB of SNR, a
+# merged pair counting as both detected): over 120 frames of 8 targets the 99 % binomial
+# interval is [0.982, 0.997]; 0.9958 measured.
+pd_min = 0.982
+# Spec 011 A13: false alarms away from the pairs over the design Pfa times the cells left,
+# 159 expected over 120 frames; the 99 % Poisson upper bound is 193, a ratio of 1.21.
+false_alarm_rate_max = 1.21
+
+# Pair P1a: 0.5 bistatic range bins apart (37.47 m slant), bearing 45 deg.
+[[target]]
+name = "P1a"
+rcs_dbsm = 10.0
+position_enu_m = [8423.966, 8423.966, 1500.0]
+velocity_enu_mps = [35.355339, 35.355339, 0.0]
+
+# Pair P1b: 0.5 bistatic range bins apart (37.47 m slant), bearing 45 deg.
+[[target]]
+name = "P1b"
+rcs_dbsm = 10.0
+position_enu_m = [8450.656, 8450.656, 1500.0]
+velocity_enu_mps = [35.355339, 35.355339, 0.0]
+
+# Pair P2a: 1.5 bistatic range bins apart (112.42 m slant), bearing 75 deg.
+[[target]]
+name = "P2a"
+rcs_dbsm = 10.0
+position_enu_m = [14421.968, 3864.355, 1500.0]
+velocity_enu_mps = [48.296291, 12.940952, 0.0]
+
+# Pair P2b: 1.5 bistatic range bins apart (112.42 m slant), bearing 75 deg.
+[[target]]
+name = "P2b"
+rcs_dbsm = 10.0
+position_enu_m = [14531.059, 3893.586, 1500.0]
+velocity_enu_mps = [48.296291, 12.940952, 0.0]
+
+# Pair P3a: 3 bistatic range bins apart (224.84 m slant), bearing 105 deg.
+[[target]]
+name = "P3a"
+rcs_dbsm = 10.0
+position_enu_m = [17330.938, -4643.811, 1500.0]
+velocity_enu_mps = [48.296291, -12.940952, 0.0]
+
+# Pair P3b: 3 bistatic range bins apart (224.84 m slant), bearing 105 deg.
+[[target]]
+name = "P3b"
+rcs_dbsm = 10.0
+position_enu_m = [17548.811, -4702.190, 1500.0]
+velocity_enu_mps = [48.296291, -12.940952, 0.0]
+
+# Pair P4a: 6 bistatic range bins apart (449.69 m slant), bearing 135 deg.
+[[target]]
+name = "P4a"
+rcs_dbsm = 10.0
+position_enu_m = [14814.290, -14814.290, 1500.0]
+velocity_enu_mps = [35.355339, -35.355339, 0.0]
+
+# Pair P4b: 6 bistatic range bins apart (449.69 m slant), bearing 135 deg.
+[[target]]
+name = "P4b"
+rcs_dbsm = 10.0
+position_enu_m = [15133.002, -15133.002, 1500.0]
+velocity_enu_mps = [35.355339, -35.355339, 0.0]

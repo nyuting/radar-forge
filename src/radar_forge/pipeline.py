@@ -5,7 +5,9 @@ burst's cube synthesised from line-of-sight paths. :func:`range_doppler_product`
 cube a :class:`RangeDopplerProduct`; :func:`frame_plots` runs CFAR along range, clusters, and
 pairs two bursts by dual PRF into :class:`Plots`; :class:`ScanTracker` feeds the accepted plots
 to a :class:`~radar_forge.tracking.Tracker`. The map axes carry bistatic range
-:math:`R_T + R_R` and its rate, positive receding; nothing here halves them.
+:math:`R_T + R_R` and its rate, positive receding; nothing here halves them. A plot-level
+scenario skips the IQ: :func:`scans` plays its plots rotation by rotation and
+:class:`PlotTracker` tracks them in the ground plane.
 
 References
 ----------
@@ -38,21 +40,46 @@ from radar_forge.dsp import (
 )
 from radar_forge.propagation import line_of_sight_paths
 from radar_forge.radar import Radar, TargetGeometry
-from radar_forge.scenario import DetectionSettings, Scenario, truth_geometry
+from radar_forge.scenario import DetectionSettings, Scenario, TrackingSettings, truth_geometry
 from radar_forge.signal import fmcw_deramp_baseband, lfm_chirp, pulsed_baseband
-from radar_forge.tracking.association import GlobalNearestNeighbour
+from radar_forge.tracking.association import (
+    GlobalNearestNeighbour,
+    JointProbabilisticDataAssociation,
+)
 from radar_forge.tracking.filters import (
     TaylorLinearisation,
     TrackBank,
     TrackStatus,
     UnscentedTransform,
 )
-from radar_forge.tracking.initiation import DirectStateInitiator
-from radar_forge.tracking.models import LinearMeasurement, RadialConstantVelocity, marginal
-from radar_forge.tracking.tracker import LifecyclePolicy, Scan, Tracker
+from radar_forge.tracking.imm import InteractingMultipleModel
+from radar_forge.tracking.initiation import DebiasedSphericalInitiator, DirectStateInitiator
+from radar_forge.tracking.models import (
+    CartesianMotion,
+    CoordinatedTurn,
+    LinearMeasurement,
+    RadialConstantVelocity,
+    RangeAzimuthElevationRangeRate,
+    marginal,
+)
+from radar_forge.tracking.scene import (
+    LEAST_INTENSITY_PER_M_RAD,
+    ClutterMap,
+    FixedDiscretes,
+    clutter_intensity,
+    detect,
+    detection_probability,
+    measure,
+    poisson_clutter_plots,
+    polar,
+    resolve,
+)
+from radar_forge.tracking.tracker import ExistencePolicy, LifecyclePolicy, Scan, Tracker
 
 __all__ = [
     "Frame",
+    "PlotScan",
+    "PlotTracker",
     "Plots",
     "RangeDopplerProduct",
     "ScanTracker",
@@ -60,11 +87,15 @@ __all__ = [
     "frames",
     "map_axes",
     "range_doppler_product",
+    "scans",
     "synthesise",
 ]
 
 # The model IDs a scan is measured through: the scan's own, and its range-only marginal.
 _MEASURED, _RANGE = "range_rate", "range"
+# A plot-level scan's one model, and the state coordinates a sector's coverage reads.
+_PLOTS = "plots"
+_POSITION_VELOCITY = ("x_m", "xdot_mps", "y_m", "ydot_mps")
 
 
 def synthesise(
@@ -508,3 +539,261 @@ class ScanTracker:
         bank = self.tracker.process(Scan(time_s, measurements, self.noise_covariance, _MEASURED))
         self._record(bank, measurements[:, 0], time_s)
         return bank, accepted
+
+
+# Plot-level scenarios (scenario 011): a rotating radar's plots, and the tracker they feed.
+
+# The fixed-point iterations that find when the beam crosses a moving target: its azimuth moves
+# under a degree a rotation, so each iteration shrinks the time error a hundredfold.
+_BEAM_ITERATIONS = 3
+
+
+@dataclass(frozen=True, eq=False)
+class PlotScan:
+    """One rotation of a plot-level scenario: its plots, and the truth behind them.
+
+    Plots ``(n_plots,)``: the time the beam crossed each, horizontal range, azimuth, the
+    sector it is batched in, its ``source`` (``target``, ``merged``, ``clutter``,
+    ``discrete``) and ``source_ids`` (truth names joined by ``;``), and the clutter
+    intensity there per (m rad), the oracle. Echoes ``(n_targets,)``: when the beam crossed
+    each target, whether it was in coverage, in the MTI notch, and detected (alone or merged).
+    The tracker never reads ``source`` or the echoes.
+    """
+
+    index: int
+    start_time_s: float
+    time_s: NDArray[np.float64]
+    range_m: NDArray[np.float64]
+    azimuth_rad: NDArray[np.float64]
+    sector: NDArray[np.int64]
+    source: tuple[str, ...]
+    source_ids: tuple[str, ...]
+    clutter_intensity_per_m_rad: NDArray[np.float64]
+    echo_time_s: NDArray[np.float64]
+    echo_in_coverage: NDArray[np.bool_]
+    echo_in_notch: NDArray[np.bool_]
+    echo_detected: NDArray[np.bool_]
+
+
+def _beam_crossing(
+    scenario: Scenario, start_s: float
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    """Return when the beam crosses each target in a rotation, and its position and velocity."""
+    period_s = scenario.sensor.scan_period_s if scenario.sensor else 1.0
+    time_s = np.full(len(scenario.arcs), start_s)
+    # A short fixed-point iteration per rotation: time from azimuth, azimuth from time.
+    for _ in range(_BEAM_ITERATIONS):
+        states = [target.arc.state(t) for target, t in zip(scenario.arcs, time_s, strict=True)]
+        position_m = np.array([p for p, _ in states])
+        _, azimuth = polar(np.nan_to_num(position_m))
+        time_s = start_s + azimuth / (2 * np.pi) * period_s
+    return time_s, position_m, np.array([v for _, v in states])
+
+
+def scans(
+    scenario: Scenario, *, n_frames: int | None = None, rng: np.random.Generator | None = None
+) -> Iterator[PlotScan]:
+    """Play a plot-level scenario back one rotation at a time, with the truth behind each plot.
+
+    Each target is seen when the beam crosses it; echoes merge, are detected and measured by
+    :mod:`~radar_forge.tracking.scene`'s plot model; clutter and fixed discretes are added.
+    One generator (default: the scenario's seed) draws everything, so a run replays.
+    """
+    sensor = scenario.sensor
+    if sensor is None:
+        msg = f"scenario {scenario.name!r} has no [sensor]: it is not plot-level."
+        raise ValueError(msg)
+    rng = np.random.default_rng(scenario.seed) if rng is None else rng
+    names = np.array([target.name for target in scenario.arcs])
+    pd = np.array([getattr(sensor, f"pd_{target.target_class}") for target in scenario.arcs])
+    sector_rad = 2 * np.pi / sensor.n_sectors
+    sigma_az = math.radians(sensor.sigma_azimuth_deg)
+    count = scenario.n_frames if n_frames is None else min(n_frames, scenario.n_frames)
+    # A loop over rotations: each is drawn and handed out before the next.
+    for index in range(count):
+        start_s = scenario.start_time_s + index * sensor.scan_period_s
+        echo_s, position_m, velocity_mps = _beam_crossing(scenario, start_s)
+        ranges, azimuths = polar(position_m)
+        rate_mps = np.sum(position_m * velocity_mps, axis=-1) / ranges
+        seen = np.isfinite(ranges) & (ranges >= sensor.range_min_m) & (ranges < sensor.range_max_m)
+        notch = np.abs(rate_mps) < sensor.mti_notch_mps
+        rows = np.flatnonzero(seen)
+        group = resolve(
+            ranges[rows],
+            azimuths[rows],
+            alpha_range_m=sensor.range_cell_m,
+            alpha_azimuth_rad=math.radians(sensor.beamwidth_azimuth_deg),
+            rng=rng,
+        )
+        echo_pd = detection_probability(
+            rate_mps[rows],
+            pd[rows],
+            mti_notch_mps=sensor.mti_notch_mps,
+            notch_detection_probability=sensor.pd_notch,
+        )
+        found = detect(group, echo_pd, rng)
+        plot_r, plot_az = measure(
+            ranges[rows],
+            azimuths[rows],
+            group,
+            sigma_range_m=sensor.sigma_range_m,
+            sigma_azimuth_rad=sigma_az,
+            rng=rng,
+        )
+        members = [names[rows][group == g] for g in range(found.size)]
+        detected = np.zeros(len(names), dtype=bool)
+        detected[rows] = found[group]
+        clutter_r, clutter_az, _ = poisson_clutter_plots(
+            scenario.clutter_plots.components, start_s, rng
+        )
+        discretes = scenario.clutter_plots.discretes or FixedDiscretes(
+            np.zeros(0), np.zeros(0), 0.0
+        )
+        fixed_r, fixed_az = discretes.plots(sensor.sigma_range_m, sigma_az, rng)
+        range_m = np.concatenate([plot_r[found], clutter_r, fixed_r])
+        azimuth_rad = np.concatenate([plot_az[found], clutter_az, fixed_az])
+        kinds = [("merged" if len(m) > 1 else "target", ";".join(m)) for m in members]
+        source = [k for k, keep in zip(kinds, found, strict=True) if keep]
+        source += [("clutter", "")] * clutter_r.size + [("discrete", "")] * fixed_r.size
+        yield PlotScan(
+            index=index,
+            start_time_s=start_s,
+            time_s=start_s + azimuth_rad / (2 * np.pi) * sensor.scan_period_s,
+            range_m=range_m,
+            azimuth_rad=azimuth_rad,
+            sector=np.minimum(azimuth_rad // sector_rad, sensor.n_sectors - 1).astype(np.int64),
+            source=tuple(s for s, _ in source),
+            source_ids=tuple(i for _, i in source),
+            clutter_intensity_per_m_rad=clutter_intensity(
+                scenario.clutter_plots.components, range_m, azimuth_rad, start_s
+            ),
+            echo_time_s=echo_s,
+            echo_in_coverage=seen,
+            echo_in_notch=notch,
+            echo_detected=detected,
+        )
+
+
+class PlotTracker:
+    """The ``[tracking]`` table as a ground-plane :class:`~radar_forge.tracking.Tracker`.
+
+    The state is ENU (x, y) and velocity, plus the turn rate under ``motion = "imm"``, whose
+    modes are CV quiet, coordinated turn and CV agile; z is (horizontal range, azimuth), the
+    radar at the origin and z fixed at its height. A rotation reaches the tracker as
+    ``n_sectors`` batches, each at its centre time, and a batch sees only the tracks whose
+    extrapolated azimuth lies in its sector. GNN costs by the likelihood ratio with no
+    assignment cheaper than ln(P_D / (1 - P_D P_G)), the track score's break-even; JPDA weighs
+    confirmed tracks jointly and tentative ones alone, with the clutter intensity at each plot
+    from the scene (``"oracle"``) or a :class:`~radar_forge.tracking.scene.ClutterMap`
+    (``"map"``) fed every plot no confirmed track took.
+    """
+
+    def __init__(self, scenario: Scenario) -> None:
+        settings, sensor = scenario.tracking, scenario.sensor
+        if settings is None or sensor is None:
+            msg = f"scenario {scenario.name!r} needs [sensor] and [tracking] to track plots."
+            raise ValueError(msg)
+        self.sensor, self.settings = sensor, settings
+        self.period_s = sensor.scan_period_s
+        quiet, turn, agile = settings.mode_sigma_acceleration_mps2
+        cv = CartesianMotion("xy", sigma_acceleration_mps2=settings.sigma_acceleration_mps2)
+        motion: Any = cv
+        if settings.motion == "imm":
+            motion = InteractingMultipleModel(
+                (
+                    CartesianMotion("xy", sigma_acceleration_mps2=quiet),
+                    CoordinatedTurn(turn, settings.turn_rate_noise_density_rad2ps3),
+                    CartesianMotion("xy", sigma_acceleration_mps2=agile),
+                ),
+                settings.sojourn_time_s,
+                {"turn_rate_radps": math.radians(settings.turn_rate_sigma_degps)},
+            )
+        layout = motion.state_layout
+        model = RangeAzimuthElevationRangeRate(
+            layout, np.zeros(3), ("range_m", "azimuth_rad"), fixed={"z_m": 0.0}
+        )
+        self.noise_covariance = np.diag(
+            [sensor.sigma_range_m**2, math.radians(sensor.sigma_azimuth_deg) ** 2]
+        )
+        prior = np.diag([v**2 for v in self._prior_sigma(layout.names, settings)])
+        p_d, p_g = settings.detection_probability, settings.gate_probability
+        components = scenario.clutter_plots.components
+        volume = sum(c.volume_m_rad(scenario.start_time_s) for c in components)
+        plots = sum(
+            c.intensity_per_m_rad * c.volume_m_rad(scenario.start_time_s) for c in components
+        )
+        self.mean_intensity = max(plots / volume if volume else 0.0, LEAST_INTENSITY_PER_M_RAD)
+        associator: Any = GlobalNearestNeighbour(math.log(p_d / (1 - p_d * p_g)))
+        if settings.association == "jpda":
+            associator = JointProbabilisticDataAssociation(p_d, p_g, settings.coalescence)
+        self.tracker = Tracker(
+            {_PLOTS: model},
+            motion,
+            {"taylor": TaylorLinearisation, "unscented": UnscentedTransform}[
+                settings.linearisation
+            ](),
+            p_g,
+            associator,
+            DebiasedSphericalInitiator(np.zeros(layout.dimension), prior),
+            LifecyclePolicy(
+                settings.n_confirm_hits,
+                settings.n_confirm_scans,
+                settings.n_delete_misses,
+                max_coast_time_s=(settings.n_delete_misses + 1) * self.period_s,
+                max_position_sigma_m=min(settings.max_position_sigma_m, 1e12),
+            ),
+            "negative_log_likelihood_ratio",
+            {_PLOTS: self.mean_intensity},
+            assignment=settings.assignment,
+            coverage=self._covers,
+            existence=ExistencePolicy() if settings.existence else None,
+            max_birth_clutter_intensity=settings.max_birth_clutter_intensity_per_m_rad,
+        )
+        # The map starts at twice the birth threshold: no track starts where it has not looked.
+        limit = settings.max_birth_clutter_intensity_per_m_rad
+        self.clutter_map = ClutterMap(range_max_m=sensor.range_max_m, prior_per_m_rad=2 * limit)
+        self._sector = 0
+
+    @staticmethod
+    def _prior_sigma(names: Sequence[str], settings: TrackingSettings) -> list[float]:
+        """Return a new track's prior standard deviation per coordinate; positions are replaced."""
+        speed, turn = settings.initial_speed_sigma_mps, math.radians(settings.turn_rate_sigma_degps)
+        sigma = {"x_m": 1.0, "y_m": 1.0, "xdot_mps": speed, "ydot_mps": speed}
+        return [sigma.get(name, turn) for name in names]
+
+    def _covers(self, bank: TrackBank, scan: Scan) -> NDArray[np.bool_]:
+        """Return the tracks whose azimuth, extrapolated to the batch, lies in its sector."""
+        layout = bank.layout
+        x, xdot, y, ydot = (bank.mean[:, layout.names.index(n)] for n in _POSITION_VELOCITY)
+        dt_s = scan.time_s - bank.time_s
+        _, azimuth = polar(np.column_stack([x + xdot * dt_s, y + ydot * dt_s]))
+        sector = np.minimum(
+            azimuth // (2 * np.pi / self.sensor.n_sectors), self.sensor.n_sectors - 1
+        )
+        return np.asarray(sector == self._sector, dtype=bool)
+
+    def rotation(self, plots: PlotScan) -> list[tuple[TrackBank, Any]]:
+        """Track one rotation, sector by sector; return each batch's bank and JPDA clusters."""
+        n_sectors = self.sensor.n_sectors
+        oracle = self.settings.clutter_intensity == "oracle"
+        intensity = (
+            plots.clutter_intensity_per_m_rad
+            if oracle
+            else self.clutter_map.intensity(plots.range_m, plots.azimuth_rad)
+        )
+        results, taken = [], np.zeros(plots.range_m.size, dtype=bool)
+        # Sector by sector: each batch's tracks are the next one's prior.
+        for sector in range(n_sectors):
+            self._sector = sector
+            mine = np.flatnonzero(plots.sector == sector)
+            time_s = plots.start_time_s + (sector + 0.5) / n_sectors * self.period_s
+            z = np.column_stack([plots.range_m[mine], plots.azimuth_rad[mine]])
+            scan = Scan(time_s, z, self.noise_covariance, _PLOTS, intensity[mine])
+            self.tracker.last_association = None
+            bank = self.tracker.process(scan)
+            confirmed = np.isin(bank.status, (TrackStatus.CONFIRMED, TrackStatus.COASTING))
+            used = bank.measurement_index[confirmed & (bank.measurement_index >= 0)]
+            taken[mine[used]] = True
+            results.append((bank, self.tracker.last_association))
+        self.clutter_map.update(plots.range_m[~taken], plots.azimuth_rad[~taken])
+        return results

@@ -1,14 +1,17 @@
 r"""The stepper: a scenario run as named stages, each printing, checking and writing one step.
 
 The stages live in :mod:`radar_forge.stages` and run in that package's import order;
-:mod:`radar_forge.stages.core` holds ``geometry``, ``iq``, ``rd``, ``detect`` and ``track``.
+:mod:`radar_forge.stages.core` holds ``geometry``, ``iq``, ``rd``, ``detect`` and ``track``,
+:mod:`radar_forge.stages.tracking` holds ``multitarget``.
 Each prints its intermediate quantities and wall time, checks the thresholds the scenario's
 ``[verify]`` table gives, and writes its files under the run directory
 (``spec/data-001-formats.md``). ``[verify]`` holds ``stages`` and thresholds:
 ``truth_in_map_fraction = [low, high]``, ``expected_snr_db`` with ``snr_tolerance_db``,
 ``noise_tolerance_db``, ``peak_tolerance_db``, ``truth_within_bins`` with
 ``detection_fraction``, ``pfa_tolerance_factor``, ``rate_tolerance_mps``, ``range_rmse_max_m``,
-``range_rate_rmse_max_mps``, ``nees_fraction_min`` and ``confirmation_latency_max_scans``. A
+``range_rate_rmse_max_mps``, ``nees_fraction_min`` and ``confirmation_latency_max_scans``;
+``gospa_mean_max_m``, ``swap_fraction_max``, ``mode_latency_max_scans``, ``pd_min`` and
+``false_alarm_rate_max`` (``multitarget``). A
 stage not listed does not run, a threshold not given is not checked, and :func:`run` raises
 :class:`VerificationError` naming every failure. CSVs show a monostatic radar's range and rate
 halved (:func:`~radar_forge.plots.display_axes`); everything else is bistatic. The helpers

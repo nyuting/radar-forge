@@ -4,9 +4,11 @@ A scenario is data. ``[site.tx]`` and an optional ``[site.rx]`` (absent: monosta
 ``[[burst]]`` per coherent processing interval and ``[receiver]`` make the radar; each
 ``[[target]]`` is a recorded trajectory or a constant velocity, played over ``[frames]``;
 ``[detection]`` and ``[tracking]`` set the processing (:mod:`radar_forge.pipeline`); ``[verify]``
-is read by :mod:`radar_forge.evaluate`. :func:`load_scenario` refuses an unknown table, key or
-value type, so a typo is never silently ignored. :func:`truth_geometry` gives the unfolded
-truth: bistatic range :math:`R_T + R_R` and its rate, positive receding.
+is read by :mod:`radar_forge.evaluate`. A plot-level scenario (scenario 011) has a
+``[sensor]`` instead of the site, bursts and receiver, ``[[target]] kind = "arc"`` trajectories
+and ``[clutter_plots]``. :func:`load_scenario` refuses an unknown table, key or value type, so a
+typo is never silently ignored. :func:`truth_geometry` gives the unfolded truth: bistatic range
+:math:`R_T + R_R` and its rate, positive receding.
 
 References
 ----------
@@ -18,6 +20,7 @@ References
 from __future__ import annotations
 
 import csv
+import math
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
@@ -30,10 +33,14 @@ from numpy.typing import NDArray
 from radar_forge.detection import CfarVariant
 from radar_forge.propagation import dbsm_to_m2
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter, geodetic_to_enu_m
+from radar_forge.tracking.scene import Arc, ClutterComponent, FixedDiscretes, Leg
 
 __all__ = [
+    "ArcTarget",
+    "ClutterPlotSettings",
     "DetectionSettings",
     "Scenario",
+    "SensorSettings",
     "Target",
     "TrackingSettings",
     "load_scenario",
@@ -116,15 +123,76 @@ class TrackingSettings:
     rate_unfolding: Literal["none", "track_aided"] = "none"
     unfold_sigma_gate: float = 6.0
     n_slope_scans: int = 5
+    # Plot-level tracking (scenario 011): ENU ground-plane states, z = (range, azimuth).
+    motion: Literal["cv", "imm"] = "cv"
+    association: Literal["gnn", "jpda"] = "gnn"
+    coalescence: Literal["none", "jpda_star", "set"] = "none"
+    existence: bool = False
+    mode_sigma_acceleration_mps2: tuple[float, ...] = (0.5, 0.5, 3.1623)
+    turn_rate_noise_density_rad2ps3: float = 1.6e-5
+    sojourn_time_s: tuple[float, ...] = (120.0, 30.0, 20.0)
+    turn_rate_sigma_degps: float = 3.0
+    clutter_intensity: Literal["oracle", "map"] = "oracle"
+    detection_probability: float = 0.9
+    max_birth_clutter_intensity_per_m_rad: float = 0.01
+    initial_speed_sigma_mps: float = 150.0
+    max_position_sigma_m: float = np.inf
 
     def __post_init__(self) -> None:
-        """Refuse track-aided unfolding behind a seed that takes the folded rate."""
+        """Refuse track-aided unfolding behind a folded seed, and existence without JPDA."""
         if self.rate_unfolding == "track_aided" and self.initiator != "range_only":
             msg = (
                 '[tracking] rate_unfolding = "track_aided" needs initiator = "range_only": a '
                 f"{self.initiator!r} seed takes the folded rate, at a bin of variance."
             )
             raise ValueError(msg)
+        if self.existence and self.association != "jpda":
+            msg = '[tracking] existence = true is JIPDA: it needs association = "jpda".'
+            raise ValueError(msg)
+        if len(self.mode_sigma_acceleration_mps2) != 3 or len(self.sojourn_time_s) != 3:
+            msg = "[tracking] the IMM's modes are quiet, turn and agile: give three values each."
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True)
+class SensorSettings:
+    """``[sensor]``: a rotating surveillance radar's plots, z = (horizontal range, azimuth).
+
+    The beam crosses azimuth a at ``scan start + a / (2π) scan_period_s``; a rotation reaches
+    the tracker in ``n_sectors`` batches, each at its centre time. Echoes merge within the
+    resolution cell ``range_cell_m`` by ``beamwidth_azimuth_deg``.
+    """
+
+    carrier_frequency_hz: float = 2.8e9
+    scan_period_s: float = 4.8
+    beamwidth_azimuth_deg: float = 1.4
+    range_cell_m: float = 115.75
+    range_min_m: float = 1000.0
+    range_max_m: float = 40000.0
+    sigma_range_m: float = 33.414
+    sigma_azimuth_deg: float = 0.15
+    pd_aircraft: float = 0.9
+    pd_bird: float = 0.3
+    mti_notch_mps: float = 4.0
+    pd_notch: float = 0.3
+    n_sectors: int = 16
+
+
+@dataclass(frozen=True)
+class ArcTarget:
+    """One ``[[target]] kind = "arc"``: its class (``aircraft`` or ``bird``) and trajectory."""
+
+    name: str
+    target_class: Literal["aircraft", "bird"]
+    arc: Arc
+
+
+@dataclass(frozen=True)
+class ClutterPlotSettings:
+    """``[clutter_plots]``: Poisson components and fixed discretes, in plots per (m rad)."""
+
+    components: tuple[ClutterComponent, ...] = ()
+    discretes: FixedDiscretes | None = None
 
 
 @dataclass(frozen=True)
@@ -143,14 +211,22 @@ class Scenario:
     detection: DetectionSettings = DetectionSettings()
     tracking: TrackingSettings | None = None
     verify: Mapping[str, Any] = field(default_factory=dict)
+    sensor: SensorSettings | None = None
+    arcs: tuple[ArcTarget, ...] = ()
+    clutter_plots: ClutterPlotSettings = ClutterPlotSettings()
 
     def __post_init__(self) -> None:
         """Reject a scenario that could not run."""
         bursts = len(self.radars)
-        if not (1 <= bursts <= 2 and len(self.n_pulses) == bursts and min(self.n_pulses) >= 1):
+        plot_level = self.sensor is not None and bursts == 0 and self.arcs and not self.targets
+        if not plot_level and not (
+            1 <= bursts <= 2 and len(self.n_pulses) == bursts and min(self.n_pulses) >= 1
+        ):
             msg = f"need one burst or a dual-PRF pair, each with n_pulses >= 1; got {bursts}."
             raise ValueError(msg)
-        if not (self.targets and self.duration_s > 0.0 and self.frame_rate_hz > 0.0):
+        if not (
+            (self.targets or plot_level) and self.duration_s > 0.0 and self.frame_rate_hz > 0.0
+        ):
             msg = "need a [[target]], and duration_s and frame_rate_hz strictly positive."
             raise ValueError(msg)
         if self.n_frames < 1:
@@ -246,6 +322,72 @@ def _target(table: Mapping[str, Any], directory: Path) -> Target:
     return Target(**values)
 
 
+def _arc_target(table: Mapping[str, Any]) -> ArcTarget:
+    """Build one ``[[target]] kind = "arc"``; each leg is straight, turning or accelerating."""
+    keys = {"name", "kind", "class", "start_time_s", "position_enu_m", "heading_deg", "speed_mps"}
+    values = _keys(table, keys | {"legs", "repeat"}, "target")
+    if values.get("kind") != "arc" or values.get("class") not in ("aircraft", "bird"):
+        msg = f'target {values.get("name")!r} needs kind = "arc" and class aircraft or bird.'
+        raise ValueError(msg)
+    legs = []
+    for entry in values.get("legs", []):
+        leg = _keys(entry, {"duration_s", "turn_rate_degps", "acceleration_mps2"}, "target.legs")
+        turn_radps = math.radians(leg.get("turn_rate_degps", 0.0))
+        legs.append(Leg(float(leg["duration_s"]), turn_radps, leg.get("acceleration_mps2", 0.0)))
+    east_m, north_m = (float(v) for v in values["position_enu_m"])
+    heading_rad, speed_mps = math.radians(values["heading_deg"]), float(values["speed_mps"])
+    start_s, repeat = float(values.get("start_time_s", 0.0)), int(values.get("repeat", 1))
+    arc = Arc(start_s, (east_m, north_m), heading_rad, speed_mps, tuple(legs) * repeat)
+    return ArcTarget(str(values["name"]), values["class"], arc)
+
+
+def _clutter_plots(table: Mapping[str, Any]) -> ClutterPlotSettings:
+    """Build ``[clutter_plots]``: its ``[[component]]`` regions and optional ``[discretes]``."""
+    table = _keys(table, {"component", "discretes"}, "clutter_plots")
+    component_keys = {f.name for f in fields(ClutterComponent)} | {"name"}
+    components = []
+    for entry in table.get("component", []):
+        values = _keys(entry, component_keys, "clutter_plots.component")
+        values.pop("name", None)
+        for key in ("centre_enu_m", "drift_enu_mps"):
+            if key in values:
+                values[key] = tuple(float(v) for v in values[key])
+        components.append(ClutterComponent(**values))
+    discretes = None
+    if "discretes" in table:
+        keys = {"count", "range_min_m", "range_max_m", "report_probability", "seed"}
+        discretes = FixedDiscretes.uniform(**_keys(table["discretes"], keys, "discretes"))
+    return ClutterPlotSettings(tuple(components), discretes)
+
+
+def _plot_level(document: Mapping[str, Any], path: Path) -> Scenario:
+    """Build a plot-level scenario: ``[sensor]``, arc targets and ``[clutter_plots]``."""
+    allowed = {"scenario", "target", "frames", "sensor", "clutter_plots", "tracking", "verify"}
+    if set(document) - allowed or {"scenario", "target", "frames"} - set(document):
+        msg = f"{path}: a [sensor] scenario has tables {sorted(allowed)}; got {sorted(document)}."
+        raise ValueError(msg)
+    sensor = _settings(SensorSettings, document["sensor"], "sensor")
+    head = _keys(document["scenario"], {"name", "description", "seed"}, "scenario")
+    window = _keys(document["frames"], {"start_time_s", "duration_s"}, "frames")
+    tracking = document.get("tracking")
+    return Scenario(
+        name=str(head["name"]),
+        description=str(head.get("description", "")),
+        seed=int(head["seed"]),
+        radars=(),
+        n_pulses=(),
+        targets=(),
+        start_time_s=float(window["start_time_s"]),
+        duration_s=float(window["duration_s"]),
+        frame_rate_hz=1.0 / sensor.scan_period_s,
+        tracking=None if tracking is None else _settings(TrackingSettings, tracking, "tracking"),
+        verify=dict(document.get("verify", {})),
+        sensor=sensor,
+        arcs=tuple(_arc_target(t) for t in document["target"]),
+        clutter_plots=_clutter_plots(document.get("clutter_plots", {})),
+    )
+
+
 def load_scenario(path: Path | str) -> Scenario:
     """Read a scenario TOML; an unknown table or key raises, so a typo is never ignored.
 
@@ -257,6 +399,8 @@ def load_scenario(path: Path | str) -> Scenario:
     """
     toml_path = Path(path)
     document = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+    if "sensor" in document:
+        return _plot_level(document, toml_path)
     missing, unknown = _TABLES - set(document), set(document) - _TABLES - _OPTIONAL_TABLES
     if missing or unknown or "tx" not in document["site"]:
         msg = f"{toml_path}: missing {sorted(missing)} or [site.tx]; unknown {sorted(unknown)}."
