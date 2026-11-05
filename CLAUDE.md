@@ -70,6 +70,10 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 | predict, innovate, update; NEES | `predict`, `innovate`, `update`, `TaylorLinearisation`, `UnscentedTransform` (tracking/filters.py); `nees` (tracking/metrics.py) |
 | CWNA/DWNA process noise | `CartesianMotion`, `RadialConstantVelocity` (tracking/models.py) |
 | χ² gate, GNN; M-of-N | `chi_square_gate_threshold`, `GlobalNearestNeighbour` (tracking/association.py); `LifecyclePolicy` (tracking/tracker.py) |
+| route acceleration R̈_b; Doppler rate | `Radar.geometry(acceleration_enu_mps2=)` (radar.py); `doppler_rate_hzps` (propagation.py) |
+| range gate; its delay axis | `pulsed_baseband(range_gate_start_m=, n_gate_samples=)`, `range_gate_first_sample` (signal.py); `delay_bin_centers_m` (dsp.py) |
+| keystone, fold factor, Doppler-rate filter | `keystone`, `second_order_keystone`, `fold_factor_search`, `doppler_rate_compensation` (migration.py); `compensate_migration` (pipeline.py) |
+| data chip; sub-bin and polynomial-phase estimates; CRB | `crop_slow_time`, `crop_range_doppler`, `estimate_tone`, `estimate_fine`, `cramer_rao_bounds` (datachip.py) |
 
 No function yet: Pd (Swerling detection curves).
 

@@ -54,7 +54,7 @@ acceptance numbers in a `[verify]` table and its spec is deleted. Run one with
 | 001, X-band: trajectory to IQ to range-Doppler map, three ambiguity variants | `scenario_001_fmcw_low_prf.toml`, `scenario_001_fmcw_dual_prf.toml`, `scenario_001_pulsed_medium_prf.toml` | Runs; checked by `[verify]` |
 | 002, bistatic: the Raleigh-Durham transmitter received at the Duke receiver | `scenario_002_bistatic_xband.toml`, `scenario_002_bistatic_sband.toml` | Runs; checked by `[verify]` |
 | 003, tracking: CFAR, association and tracking on 001 | `scenario_003_tracking.toml`, `scenario_003_tracking_dual_prf.toml`, `scenario_003_ukf_*.toml` | Runs; checked by `[verify]` |
-| [004, keystone](../spec/scenario-004-keystone.md): fast sounding rocket | none | Specified, not built |
+| 004, keystone: a fast sounding rocket; range walk, Doppler spread and fold, corrected and estimated on a data chip | `scenario_004_keystone_k1.toml`, `scenario_004_keystone_k2.toml`, `scenario_004_keystone_k3.toml` | Runs; checked by `[verify]` |
 | [005, leakage cancellation](../spec/scenario-005-leakage-cancellation.md): continuous-wave leakage | none | Specified, not built |
 | [006, parallel-approach DoA](../spec/scenario-006-parallel-approach-doa.md): two aircraft in one cell | none | Specified, not built |
 | [007, interference](../spec/scenario-007-interference.md): strong interferers against a weak target | none | Specified, not built |
