@@ -4,7 +4,7 @@ Four rules from ``CLAUDE.md`` and ``docs/conventions/style.md`` that hold for th
 library and no module can test of itself:
 
 * ``import radar_forge`` needs no extra: matplotlib, the ``visualisation`` extra, is imported
-  only inside the functions that draw (``spec/scenario-001-xband.md`` A8, kept here);
+  only inside the functions that draw (scenario 001's acceptance A8, kept here);
 * every module declares ``__all__``, exports no private or repeated name, and every type a
   public callable returns is on its surface; array arguments are ``ArrayLike`` in, float64 out;
 * every docstring example runs and prints what it claims, and every export is documented;

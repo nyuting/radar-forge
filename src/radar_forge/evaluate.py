@@ -465,6 +465,14 @@ def _track(ctx: Context) -> Context:
     scores, metric_rows, tracks = _score(ctx, period_m)
     for name, value in scores.items():
         ctx.record(name, value)
+    # The file shows errors as tracks.csv shows the state: halved and renamed if monostatic.
+    shown = {
+        "range_rmse_m": show.range_name.removesuffix("_m") + "_rmse_m",
+        "range_rate_rmse_mps": show.rate_name.removesuffix("_mps") + "_rmse_mps",
+    }
+    for row in metric_rows:
+        if row["metric"] in shown:
+            row["metric"], row["value"] = shown[row["metric"]], row["value"] * show.scale
     _write_csv(ctx.out_dir / "metrics.csv", metric_rows)
     # A run shorter than two confirmation windows scores too few frames to judge a tracker.
     if ctx.n_frames < 2 * settings.n_confirm_scans:

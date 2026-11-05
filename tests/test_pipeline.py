@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 
 from radar_forge import evaluate
-from radar_forge.core.constants import SPEED_OF_LIGHT_MPS
+from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.pipeline import frame_plots, map_axes, range_doppler_product, synthesise
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter
 from radar_forge.scenario import load_scenario

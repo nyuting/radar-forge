@@ -12,7 +12,7 @@ produces range errors that look like a calibration issue and take days to find.
 Two mechanisms keep that from happening:
 
 1. Every constant is annotated :data:`typing.Final`, so ``mypy`` rejects any
-   reassignment — including ``radar_forge.core.constants.SPEED_OF_LIGHT_MPS = 3e8``
+   reassignment — including ``radar_forge.constants.SPEED_OF_LIGHT_MPS = 3e8``
    from another module.
 2. ``scripts/check_conventions.py`` (run by the pre-commit and pre-push hooks)
    rejects any *other* file that assigns one of these names, and rejects the

@@ -1,7 +1,7 @@
 r"""Propagation paths: how energy gets from the transmitter, via the scene, to the receiver.
 
 Every propagation model produces a :class:`PropagationPaths` for
-:mod:`radar_forge.signal` to sample (``spec/structure.md`` D1). A path is the
+:mod:`radar_forge.signal` to sample (``spec/data-001-formats.md`` D1). A path is the
 whole route, transmitter to receiver; its delay :math:`R_b/c`, phase
 :math:`-2\pi R_b/\lambda` and Doppler :math:`-\dot R_b/\lambda` follow from its
 length :math:`R_b = R_T + R_R` and rate, positive receding. Free space only.
@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from radar_forge.core.constants import SPEED_OF_LIGHT_MPS
+from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.radar import Radar, TargetGeometry
 
 __all__ = [
@@ -193,7 +193,7 @@ def received_power_w(
     r"""Return the received power :math:`P_t G_t G_r \lambda^2\sigma/(4\pi)^3 R_T^2 R_R^2 L`, W.
 
     Willis [2] eq. (4.1); equal ranges give Richards' [1] §2.2.1 :math:`R^4` form.
-    ``rcs_m2`` is the bistatic cross-section, taken as given (``spec/structure.md`` D8).
+    ``rcs_m2`` is the bistatic cross-section, taken as given: angle-independent here.
     """
     numerator = (
         np.asarray(transmit_power_w, dtype=np.float64)

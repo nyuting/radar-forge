@@ -203,7 +203,7 @@ def test_reference_cell_count_matches_the_explicit_footprint():
 
 
 def test_scenario_003_calibration_matches_its_specification():
-    """spec/scenario-003-tracking.md §2 and §12: cells tested, and alpha inside and at the ends.
+    """config/scenario_003_tracking.toml's CFAR: cells tested, and alpha inside and at the ends.
 
     CA along range, N = 16, guard 4, pfa = 1e-5 on (256, 1000). Interior M = 32:
     32 (1e5^(1/32) - 1) = 13.8564 = 11.4165 dB. The outermost n_guard + 1 = 5 cells of each

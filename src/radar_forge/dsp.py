@@ -34,7 +34,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.signal import fftconvolve, get_window
 
-from radar_forge.core.constants import SPEED_OF_LIGHT_MPS
+from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.propagation import bistatic_range_rate_from_doppler_mps
 
 __all__ = [

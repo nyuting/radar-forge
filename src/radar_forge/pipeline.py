@@ -24,7 +24,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from radar_forge.core.constants import SPEED_OF_LIGHT_MPS
+from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.detection import Detection, cfar_detect, cluster_detections
 from radar_forge.dsp import (
     doppler_bin_centers_mps,
@@ -277,11 +277,11 @@ def _detect(
     )
 
 
-def _strictly_nearest(distance: NDArray[np.float64], axis: int) -> NDArray[np.bool_]:
+def _strictly_nearest(gap_m: NDArray[np.float64], axis: int) -> NDArray[np.bool_]:
     """Mark the one smallest entry of each line along ``axis``; a tie marks none."""
-    if distance.shape[axis] == 0:
-        return np.zeros(distance.shape, dtype=bool)
-    smallest = distance == distance.min(axis=axis, keepdims=True)
+    if gap_m.shape[axis] == 0:
+        return np.zeros(gap_m.shape, dtype=bool)
+    smallest = gap_m == gap_m.min(axis=axis, keepdims=True)
     return np.asarray(smallest & (smallest.sum(axis=axis, keepdims=True) == 1), dtype=bool)
 
 
@@ -345,7 +345,7 @@ class ScanTracker:
     The rate is measured where it cannot fold: after dual-PRF pairing, from one burst whose
     rate interval exceeds the largest rate, or once a track can unfold it; otherwise range
     alone. Range is measured modulo the first map's span (the state stays continuous), with a
-    bin over √12 of noise. ``rate_unfolding = "track_aided"`` is scenario 003 §5.3's policy: a
+    bin over √12 of noise. ``rate_unfolding = "track_aided"`` is scenario 003's policy: a
     track may unfold after N associated ranges, the least N whose least-squares slope is
     certain to a ``unfold_sigma_gate``-th of a fold span, :math:`(\sigma_R/T)\sqrt{12/(N(N^2-1))}
     < v_{span}/g` (Bar-Shalom [2] §5.5). The track with the longest such history gives each

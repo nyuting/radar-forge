@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 
-from radar_forge.core import constants
+from radar_forge import constants
 
 
 def test_speed_of_light_is_the_exact_si_value() -> None:

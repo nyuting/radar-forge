@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from scipy import stats
 
-from radar_forge.core.constants import SPEED_OF_LIGHT_MPS
+from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.propagation import (
     PointTarget,
     PropagationPaths,
