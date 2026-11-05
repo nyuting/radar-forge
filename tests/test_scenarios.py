@@ -24,6 +24,18 @@ CONFIGS = sorted((REPO / "config").glob("*.toml"))
 GOLDEN = REPO / "tests" / "data" / "golden" / "fingerprints.csv"
 
 
+# rtol 1e-9 holds a value computed the same way; an error is a difference of nearly equal
+# numbers (a measured rate less the truth's), so the platform's FFT round-off, 1e-15 of each,
+# can be 1e-8 of the difference. Each unit also gets an absolute tolerance far below anything
+# physical: a micrometre a second against S1's 0.12 m/s rate bin, a millimetre against its
+# 150 m range bin, a micro-decibel. Counts, indices and fractions stay exact.
+ABSOLUTE_TOLERANCE = {"_mps": 1e-6, "_m": 1e-3, "_db": 1e-6, "_dbw": 1e-6}
+
+
+def _atol(key: str) -> float:
+    return next((atol for unit, atol in ABSOLUTE_TOLERANCE.items() if key.endswith(unit)), 0.0)
+
+
 def _golden() -> dict[str, dict[str, float]]:
     with GOLDEN.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
@@ -52,11 +64,10 @@ def test_three_frames_match_the_golden_fingerprint(short_run):
     assert name in golden, f"no fingerprint for {name}: run scripts/regen_golden.py"
     expected = golden[name]
     measured = {key: report.values.get(key, math.nan) for key in expected}
-    # rtol 1e-9: the same seeded run; a looser match would hide a moved number.
     mismatched = {
         key: (measured[key], value)
         for key, value in expected.items()
-        if not np.isclose(measured[key], value, rtol=1e-9, atol=0.0, equal_nan=True)
+        if not np.isclose(measured[key], value, rtol=1e-9, atol=_atol(key), equal_nan=True)
     }
     assert not mismatched, (
         f"{name} moved (measured, golden): {mismatched}. If the change is intended, run "

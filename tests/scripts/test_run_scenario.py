@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCENARIO = REPO_ROOT / "config" / "scenario_003_ukf_pulsed_medium_prf.toml"
 
@@ -32,21 +34,35 @@ run_scenario = _load_script()
 
 
 def test_three_frames_write_every_stage_file_and_exit_zero(tmp_path, capsys):
-    """Every stage runs, prints its wall time, and writes its files; the checks pass."""
+    """Every stage runs, prints its wall time, and writes its files; the checks pass.
+
+    ``--no-plots``, so it runs without the visualisation extra, as the fast CI job does.
+    """
     status = run_scenario.main(
-        [str(SCENARIO), "--frames", "3", "--save-iq", "--out", str(tmp_path)]
+        [str(SCENARIO), "--frames", "3", "--save-iq", "--no-plots", "--out", str(tmp_path)]
     )
     printed = capsys.readouterr().out
     assert status == 0
     assert printed.count("wall time") == 5
-    expected = {"truth.csv", "detections.csv", "tracks.csv", "metrics.csv", "track.png"}
-    expected |= {f"rd_{k:05d}.png" for k in range(3)} | {f"iq_{k:05d}.npz" for k in range(3)}
-    assert expected <= {path.name for path in tmp_path.iterdir()}
+    expected = {"truth.csv", "detections.csv", "tracks.csv", "metrics.csv"}
+    expected |= {f"iq_{k:05d}.npz" for k in range(3)}
+    written = {path.name for path in tmp_path.iterdir()}
+    assert expected <= written
+    assert not any(name.endswith(".png") for name in written)
     with (tmp_path / "truth.csv").open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     # Monostatic, so the file shows the slant range and radial velocity: half the map's values.
     assert [int(row["frame"]) for row in rows] == [0, 1, 2]
     assert {"range_m", "range_rate_mps"} <= set(rows[0])
+
+
+def test_the_figures_are_drawn_with_the_visualisation_extra(tmp_path):
+    """Scenario 003 criterion 8: an rd map per frame and the range-time history exist."""
+    pytest.importorskip("matplotlib")
+    status = run_scenario.main([str(SCENARIO), "--frames", "2", "--out", str(tmp_path)])
+    assert status == 0
+    expected = {"rd_00000.png", "rd_00001.png", "track.png"}
+    assert expected <= {path.name for path in tmp_path.iterdir()}
 
 
 def test_stop_after_runs_only_the_stages_up_to_it(tmp_path, capsys):
