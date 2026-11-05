@@ -68,13 +68,7 @@ def leakage(ctx: evaluate.Context) -> evaluate.Context:
     distortion = scenario.transmitter_distortion
     amplifier = None if distortion is None else functools.partial(cubic_amplifier, a3=distortion.a3)
     noise_w = radar.receiver.noise_power_per_sample_w
-    inr_linear = float(np.sum(np.abs(disturbance.amplitude_linear) ** 2) / noise_w)
     n_basis, n_fit = _fit_size(scenario, n_pulses * radar.n_samples_per_chirp)
-    ctx.record("disturbance_inr_db", evaluate.to_db(inr_linear))
-    bound_db = ctx.record(
-        "cancellation_depth_bound_db",
-        clutter.expected_cancellation_depth_db(inr_linear, n_basis, n_fit),
-    )
     rows: list[dict[str, Any]] = []
     # Frames in order: each is synthesised, cancelled and measured before the next.
     for frame in pipeline.frames(scenario, n_frames=ctx.n_frames):
@@ -104,8 +98,16 @@ def leakage(ctx: evaluate.Context) -> evaluate.Context:
             for name in ("cancelled", "uncancelled")
         }
         row: dict[str, Any] = {"frame": frame.index, "time_s": frame.time_s}
+        # The ceiling on the frame's own disturbance: paths on one route add in phase.
+        row["disturbance_inr_db"] = evaluate.to_db(np.mean(np.abs(echo) ** 2) / noise_w)
         row["cancellation_depth_db"] = clutter.cancellation_depth_db(stream, result.residual)
-        row["cancellation_depth_bound_db"] = bound_db
+        row["cancellation_depth_bound_db"] = (
+            clutter.expected_cancellation_depth_db(
+                10.0 ** (row["disturbance_inr_db"] / 10.0), n_basis, n_fit
+            )
+            if n_basis
+            else 0.0
+        )
         row["floor_rise_db"] = evaluate.to_db(floor_w["cancelled"] / floor_w["clean"])
         row["uncancelled_floor_rise_db"] = evaluate.to_db(floor_w["uncancelled"] / floor_w["clean"])
         row["sinr_db"], row["clean_sinr_db"] = sinr_db["cancelled"], sinr_db["clean"]
@@ -115,7 +117,7 @@ def leakage(ctx: evaluate.Context) -> evaluate.Context:
         row["uncancelled_target_detections"] = found["uncancelled"]
         row["gram_condition_number_max"] = float(np.max(result.gram_condition_number, initial=0))
         for name, value in row.items():
-            if name not in ("frame", "time_s", "cancellation_depth_bound_db"):
+            if name not in ("frame", "time_s"):
                 ctx.record(f"{name}[{frame.index}]", value)
         _check(ctx, verify, row)
         rows.append(row)
