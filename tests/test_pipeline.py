@@ -24,11 +24,12 @@ from radar_forge.pipeline import (
     ScanTracker,
     frame_plots,
     map_axes,
+    pulse_compress,
     range_doppler_product,
     synthesise,
 )
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter
-from radar_forge.scenario import Target, load_scenario, truth_geometry
+from radar_forge.scenario import RangeGate, Target, load_scenario, truth_geometry
 from radar_forge.signal import thermal_noise
 from radar_forge.stages import core
 
@@ -371,3 +372,65 @@ def test_trajectory_files_share_one_time_base(one_frame_scenario, tmp_path):
     np.testing.assert_allclose(
         truth.bistatic_range_rate_mps[1], truth.bistatic_range_rate_mps[0], rtol=1e-9
     )
+
+
+def _k_variant(variant: str) -> str:
+    return (REPO / "config" / f"scenario_004_keystone_{variant}.toml").read_text(encoding="utf-8")
+
+
+def test_a_gated_map_labels_its_window_of_the_range_circle():
+    """A gated map's axis starts at the gate and its range circle is still c times the PRI.
+
+    The noiseless K1 echo at frame 0 peaks in the bin index_of predicts, within one.
+    """
+    scenario = load_scenario(REPO / "config" / "scenario_004_keystone_k1.toml")
+    radar, gate, truth = scenario.radar, scenario.gates[0], truth_geometry(scenario)[0]
+    cube = synthesise(radar, truth, [0.1], 1024, rng=None, gate=gate)
+    product = range_doppler_product(cube, radar, range_gate_start_m=gate.range_gate_start_m)
+    assert product.rd_map.shape == (1024, 1024)
+    np.testing.assert_allclose(product.range_axis_m[0], 9607 * SPEED_OF_LIGHT_MPS / 600e6)
+    assert product.range_period_m == radar.unambiguous_bistatic_range_m
+    range_index, _ = product.index_of(truth.bistatic_range_m, truth.bistatic_range_rate_mps)
+    peak = np.unravel_index(int(np.argmax(np.abs(product.rd_map))), product.rd_map.shape)
+    # Uncompensated, the walk smears the peak over 28 bins below the pulse-0 range.
+    assert -29.0 <= peak[1] - range_index[0] <= 1.0
+
+
+def test_a_gated_cube_compresses_as_the_whole_stream_does_inside_the_gate():
+    """Row by row inside the gate equals the whole PRI's stream compression, rtol 1e-9 (FFTs)."""
+    radar = load_scenario(REPO / "config" / "scenario_001_pulsed_medium_prf.toml").radar
+    geometry = TargetGeometry.monostatic(1_500.0, -30.0)
+    whole = synthesise(radar, geometry, [10.0], 4, rng=None)
+    gate_m = 20 * SPEED_OF_LIGHT_MPS / radar.receiver.sample_rate_hz
+    gated = synthesise(radar, geometry, [10.0], 4, rng=None, gate=RangeGate(gate_m, 60))
+    full = pulse_compress(whole, radar)
+    rows = pulse_compress(gated, radar, range_gate_start_m=gate_m)
+    inside = 60 - radar.n_samples_per_chirp
+    np.testing.assert_allclose(rows[:, :inside], full[:, 20 : 20 + inside], rtol=1e-9, atol=1e-18)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        ('method = "keystone"\n', 'method = "keystone_doppler_rate"\n', "acceleration_search"),
+        ('method = "keystone"\n', 'method = "none"\nfold_factor_max = 1\n', "fold_factor_max"),
+        ("n_gate_samples = 1024\n", "n_gate_samples = 1024.0\n", "positive integer"),
+    ],
+)
+def test_a_migration_or_gate_setting_that_cannot_run_is_refused(tmp_path, old, new, message):
+    """A search the method does not run, a method without its grid, a fractional gate."""
+    text = _k_variant("k1")
+    assert old in text
+    path = tmp_path / "wrong.toml"
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+    with pytest.raises((ValueError, TypeError), match=message):
+        load_scenario(path)
+
+
+def test_an_accelerating_target_carries_its_route_acceleration():
+    """K2's 15 g along the line of sight is -294.1995 m/s^2 bistatic at every frame."""
+    scenario = load_scenario(REPO / "config" / "scenario_004_keystone_k2.toml")
+    for frame in truth_geometry(scenario):
+        np.testing.assert_allclose(frame.bistatic_range_acceleration_mps2, [-294.1995], rtol=1e-12)
+    np.testing.assert_allclose(scenario.migration.accelerations_mps2[[0, -1]], [-400.0, -200.0])
+    assert scenario.migration.accelerations_mps2.size == 21

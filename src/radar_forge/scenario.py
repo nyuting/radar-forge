@@ -4,9 +4,11 @@ A scenario is data. ``[site.tx]`` and an optional ``[site.rx]`` (absent: monosta
 ``[[burst]]`` per coherent processing interval and ``[receiver]`` make the radar; each
 ``[[target]]`` is a recorded trajectory or a constant velocity, played over ``[frames]``;
 ``[detection]`` and ``[tracking]`` set the processing (:mod:`radar_forge.pipeline`); ``[verify]``
-is read by :mod:`radar_forge.evaluate`. :func:`load_scenario` refuses an unknown table, key or
-value type, so a typo is never silently ignored. :func:`truth_geometry` gives the unfolded
-truth: bistatic range :math:`R_T + R_R` and its rate, positive receding.
+is read by :mod:`radar_forge.evaluate`. A pulsed ``[[burst]]`` may record a range gate, and
+``[migration]`` corrects range migration (:mod:`radar_forge.migration`). :func:`load_scenario`
+refuses an unknown table, key or value type, so a typo is never silently ignored.
+:func:`truth_geometry` gives the unfolded truth: bistatic range :math:`R_T + R_R` and its rate,
+positive receding.
 
 References
 ----------
@@ -30,9 +32,12 @@ from numpy.typing import NDArray
 from radar_forge.detection import CfarVariant
 from radar_forge.propagation import dbsm_to_m2
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter, geodetic_to_enu_m
+from radar_forge.signal import range_gate_first_sample
 
 __all__ = [
     "DetectionSettings",
+    "MigrationSettings",
+    "RangeGate",
     "Scenario",
     "Target",
     "TrackingSettings",
@@ -41,16 +46,19 @@ __all__ = [
 ]
 
 _SITE_KEYS = {"latitude_deg", "longitude_deg", "altitude_m"}
-_BURST_KEYS = {f.name for f in fields(Transmitter)} | {"sample_rate_hz", "n_pulses"}
+_GATE_KEYS = {"range_gate_start_m", "n_gate_samples"}
+_BURST_KEYS = {f.name for f in fields(Transmitter)} | {"sample_rate_hz", "n_pulses"} | _GATE_KEYS
 _TABLES = {"scenario", "target", "frames", "site", "burst", "receiver"}
-_OPTIONAL_TABLES = {"detection", "tracking", "verify"}
+_OPTIONAL_TABLES = {"detection", "tracking", "verify", "migration"}
 
 
 @dataclass(frozen=True)
 class Target:
-    """One point target: a trajectory CSV at a fixed altitude, or a constant ENU velocity.
+    r"""One point target: a trajectory CSV at a fixed altitude, or a constant ENU motion.
 
-    ``position_enu_m`` is at the first frame, in the receiver site's east, north, up frame.
+    ``position_enu_m`` is at the first frame, in the receiver site's east, north, up frame; the
+    target then follows :math:`p + v t + a t^2/2`. Without ``acceleration_enu_mps2`` its
+    route's :math:`\ddot R_b` is not modelled (zero), as for a trajectory.
     """
 
     name: str
@@ -59,11 +67,15 @@ class Target:
     altitude_m: float = 0.0
     position_enu_m: tuple[float, float, float] | None = None
     velocity_enu_mps: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    acceleration_enu_mps2: tuple[float, float, float] | None = None
 
     def __post_init__(self) -> None:
-        """Require exactly one way of moving."""
+        """Require exactly one way of moving; an acceleration only with a position."""
         if (self.trajectory_path is None) == (self.position_enu_m is None):
             msg = f"target {self.name!r} needs one of trajectory_path and position_enu_m."
+            raise ValueError(msg)
+        if self.acceleration_enu_mps2 is not None and self.position_enu_m is None:
+            msg = f"target {self.name!r}: acceleration_enu_mps2 needs position_enu_m."
             raise ValueError(msg)
 
     @property
@@ -128,8 +140,74 @@ class TrackingSettings:
 
 
 @dataclass(frozen=True)
+class RangeGate:
+    """A burst's receive window: ``[[burst]] range_gate_start_m`` (bistatic) and ``n_gate_samples``.
+
+    Pulsed only. The gate opens on the sample nearest the start's delay; ``None`` samples to the
+    end of the PRI, so the default records the whole PRI.
+    """
+
+    range_gate_start_m: float = 0.0
+    n_gate_samples: int | None = None
+
+    def n_samples(self, radar: Radar) -> int:
+        """Return the fast-time samples the gate records in each pulse."""
+        if self.n_gate_samples is not None:
+            return self.n_gate_samples
+        first = range_gate_first_sample(self.range_gate_start_m, radar.receiver.sample_rate_hz)
+        return radar.n_samples_per_pri - first
+
+
+@dataclass(frozen=True)
+class MigrationSettings:
+    """``[migration]``: range-migration correction between pulse compression and Doppler FFT.
+
+    ``"keystone"`` removes linear walk (:func:`~radar_forge.migration.keystone`, interpolating
+    by ``keystone``); ``"keystone_doppler_rate"`` then searches ``acceleration_search_mps2 =
+    [low, high, step]``, bistatic and inclusive, with the Doppler-rate filter. A positive
+    ``fold_factor_max`` searches the keystone's fold factor over ``[-max, max]``.
+    """
+
+    method: Literal["none", "keystone", "keystone_doppler_rate"] = "none"
+    keystone: Literal["czt", "sinc"] = "czt"
+    fold_factor_max: int = 0
+    acceleration_search_mps2: tuple[float, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Refuse a search the method does not run, or a grid that is not ``[low, high, step]``."""
+        grid = tuple(float(value) for value in self.acceleration_search_mps2)
+        object.__setattr__(self, "acceleration_search_mps2", grid)
+        searches = self.method == "keystone_doppler_rate"
+        if self.fold_factor_max < 0 or (self.method == "none" and self.fold_factor_max):
+            msg = "[migration] fold_factor_max must be >= 0, and needs a keystone method."
+            raise ValueError(msg)
+        if searches != bool(grid) or (grid and not (len(grid) == 3 and grid[0] <= grid[1])):
+            msg = (
+                "[migration] acceleration_search_mps2 = [low, high, step], low <= high, goes "
+                'with method = "keystone_doppler_rate" and only with it.'
+            )
+            raise ValueError(msg)
+        if grid and not grid[2] > 0.0:
+            msg = f"[migration] acceleration_search_mps2 step must be positive; got {grid[2]}."
+            raise ValueError(msg)
+
+    @property
+    def accelerations_mps2(self) -> NDArray[np.float64]:
+        """The acceleration grid, ``low`` to ``high`` inclusive; empty without a search."""
+        if not self.acceleration_search_mps2:
+            return np.zeros(0)
+        low, high, step = self.acceleration_search_mps2
+        steps = np.arange(round((high - low) / step) + 1, dtype=np.float64)
+        result: NDArray[np.float64] = low + step * steps
+        return result
+
+
+@dataclass(frozen=True)
 class Scenario:
-    """Everything a run needs, resolved from its TOML; ``radars`` holds one per burst."""
+    """Everything a run needs, resolved from its TOML; ``radars`` holds one per burst.
+
+    ``gates`` holds one :class:`RangeGate` per burst, the whole PRI when not given.
+    """
 
     name: str
     description: str
@@ -143,12 +221,21 @@ class Scenario:
     detection: DetectionSettings = DetectionSettings()
     tracking: TrackingSettings | None = None
     verify: Mapping[str, Any] = field(default_factory=dict)
+    gates: tuple[RangeGate, ...] = ()
+    migration: MigrationSettings = MigrationSettings()
 
     def __post_init__(self) -> None:
         """Reject a scenario that could not run."""
         bursts = len(self.radars)
         if not (1 <= bursts <= 2 and len(self.n_pulses) == bursts and min(self.n_pulses) >= 1):
             msg = f"need one burst or a dual-PRF pair, each with n_pulses >= 1; got {bursts}."
+            raise ValueError(msg)
+        if not self.gates:
+            object.__setattr__(self, "gates", (RangeGate(),) * bursts)
+        pulsed = all(radar.transmitter.waveform == "pulsed" for radar in self.radars)
+        gated = any(gate != RangeGate() for gate in self.gates)
+        if len(self.gates) != bursts or ((gated or self.migration.method != "none") and not pulsed):
+            msg = "need one range gate per burst; a gate and [migration] need pulsed bursts."
             raise ValueError(msg)
         if not (self.targets and self.duration_s > 0.0 and self.frame_rate_hz > 0.0):
             msg = "need a [[target]], and duration_s and frame_rate_hz strictly positive."
@@ -224,7 +311,7 @@ def _radar(
         **{
             k: float(v)
             for k, v in burst.items()
-            if k not in ("waveform", "n_pulses", "sample_rate_hz")
+            if k not in ("waveform", "n_pulses", "sample_rate_hz", *_GATE_KEYS)
         },
         waveform=burst.get("waveform", "fmcw"),
     )
@@ -240,10 +327,19 @@ def _target(table: Mapping[str, Any], directory: Path) -> Target:
     values = _keys(table, allowed, "target")
     if "trajectory_path" in values:
         values["trajectory_path"] = (directory / values["trajectory_path"]).resolve()
-    for key in ("position_enu_m", "velocity_enu_mps"):
+    for key in ("position_enu_m", "velocity_enu_mps", "acceleration_enu_mps2"):
         if key in values:
             values[key] = tuple(float(v) for v in values[key])
     return Target(**values)
+
+
+def _gate(burst: Mapping[str, Any]) -> RangeGate:
+    """Build one burst's range gate from its optional keys; the default is the whole PRI."""
+    n_samples = burst.get("n_gate_samples")
+    if n_samples is not None and (type(n_samples) is not int or n_samples < 1):
+        msg = f"[burst] n_gate_samples must be a positive integer; got {n_samples!r}."
+        raise TypeError(msg)
+    return RangeGate(float(burst.get("range_gate_start_m", 0.0)), n_samples)
 
 
 def load_scenario(path: Path | str) -> Scenario:
@@ -278,6 +374,8 @@ def load_scenario(path: Path | str) -> Scenario:
         detection=_settings(DetectionSettings, document.get("detection", {}), "detection"),
         tracking=None if tracking is None else _settings(TrackingSettings, tracking, "tracking"),
         verify=dict(document.get("verify", {})),
+        gates=tuple(_gate(burst) for burst in document["burst"]),
+        migration=_settings(MigrationSettings, document.get("migration", {}), "migration"),
     )
 
 
@@ -315,7 +413,13 @@ def _motion(target: Target, scenario: Scenario) -> tuple[NDArray[np.float64], ND
         velocity_mps = np.asarray(target.velocity_enu_mps, dtype=np.float64)
         elapsed_s = (times_s - times_s[0])[:, None]
         position_m = np.asarray(target.position_enu_m, dtype=np.float64) + elapsed_s * velocity_mps
-        return position_m, np.zeros_like(position_m) + velocity_mps
+        if target.acceleration_enu_mps2 is None:
+            return position_m, np.zeros_like(position_m) + velocity_mps
+        acceleration_mps2 = np.asarray(target.acceleration_enu_mps2, dtype=np.float64)
+        return (
+            position_m + acceleration_mps2 * elapsed_s**2 / 2.0,
+            velocity_mps + acceleration_mps2 * elapsed_s,
+        )
     fix_time_s, *geodetic = _read_trajectory(target.trajectory_path, target.altitude_m)
     step_s = 1.0 / scenario.frame_rate_hz
     grid_s = np.concatenate([[times_s[0] - step_s], times_s, [times_s[-1] + step_s]])
@@ -346,9 +450,19 @@ def _motion(target: Target, scenario: Scenario) -> tuple[NDArray[np.float64], ND
 
 
 def truth_geometry(scenario: Scenario) -> list[TargetGeometry]:
-    """Return every frame's true geometry, one row per target, unfolded."""
+    """Return every frame's true geometry, one row per target, unfolded.
+
+    The route's acceleration is modelled once any target gives one, each other then at zero.
+    """
     motions = [_motion(target, scenario) for target in scenario.targets]
     position_m = np.stack([m[0] for m in motions], axis=1)
     velocity_mps = np.stack([m[1] for m in motions], axis=1)
+    given = [target.acceleration_enu_mps2 for target in scenario.targets]
+    acceleration_mps2 = (
+        None if all(a is None for a in given) else np.array([a or (0.0, 0.0, 0.0) for a in given])
+    )
     # One geometry per frame: TargetGeometry holds one frame's targets.
-    return [scenario.radar.geometry(p, v) for p, v in zip(position_m, velocity_mps, strict=True)]
+    return [
+        scenario.radar.geometry(p, v, acceleration_enu_mps2=acceleration_mps2)
+        for p, v in zip(position_m, velocity_mps, strict=True)
+    ]
