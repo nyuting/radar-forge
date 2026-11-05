@@ -24,6 +24,7 @@ from scipy.stats import chi2
 
 from radar_forge import evaluate, plots
 from radar_forge.detection import cfar_detect
+from radar_forge.dsp import fold_into_period
 from radar_forge.pipeline import (
     Plots,
     RangeDopplerProduct,
@@ -163,8 +164,14 @@ def _hits(
     )
     n_rate, n_range = product.rd_map.shape
     cells = cells.reshape(-1, 2)
-    near_rate = np.abs(evaluate.wrapped(cells[None, :, 0] - rate_index[:, None], n_rate)) <= bins
-    near_range = np.abs(evaluate.wrapped(cells[None, :, 1] - range_index[:, None], n_range)) <= bins
+    # Offsets in bins the short way round each axis, in [-n/2, n/2).
+    rate_offset = fold_into_period(
+        cells[None, :, 0] - rate_index[:, None], n_rate, lower=-n_rate / 2
+    )
+    range_offset = fold_into_period(
+        cells[None, :, 1] - range_index[:, None], n_range, lower=-n_range / 2
+    )
+    near_rate, near_range = np.abs(rate_offset) <= bins, np.abs(range_offset) <= bins
     return list(np.any(near_rate & near_range, axis=1))
 
 
@@ -254,16 +261,20 @@ def detect(ctx: evaluate.Context) -> evaluate.Context:
         accepted = found.accepted
         for k, rate_mps in enumerate(frame.bistatic_range_rate_mps):
             gap_m = np.abs(
-                evaluate.wrapped(
-                    found.bistatic_range_m[accepted] - frame.bistatic_range_m[k], range_span_m
+                fold_into_period(
+                    found.bistatic_range_m[accepted] - frame.bistatic_range_m[k],
+                    range_span_m,
+                    lower=-range_span_m / 2.0,
                 )
             )
             if np.any(gap_m <= within_m):
                 plot = accepted[np.argmin(gap_m)]
                 unfolded_mps = found.bistatic_range_rate_mps[plot]
                 # Unfolded, against the truth; read off the map, against the truth folded too.
-                folded_gap_mps = evaluate.wrapped(
-                    found.folded_rate_mps[plot] - rate_mps, rate_span_mps
+                folded_gap_mps = fold_into_period(
+                    found.folded_rate_mps[plot] - rate_mps,
+                    rate_span_mps,
+                    lower=-rate_span_mps / 2.0,
                 )
                 errors_mps.append(
                     abs(unfolded_mps - rate_mps if unfolded_mps == unfolded_mps else folded_gap_mps)
@@ -410,7 +421,11 @@ def _score(
     # Each frame's confirmed tracks vote for the target nearest in range: a few rows a frame.
     for (bank, _), mask, frame in zip(ctx.banks, confirmed, truth, strict=True):
         for row in np.flatnonzero(mask):
-            gap_m = np.abs(evaluate.wrapped(frame.bistatic_range_m - bank.mean[row, 0], period_m))
+            gap_m = np.abs(
+                fold_into_period(
+                    frame.bistatic_range_m - bank.mean[row, 0], period_m, lower=-period_m / 2.0
+                )
+            )
             key = (int(np.argmin(gap_m)), int(bank.track_id[row]))
             votes[key] = votes.get(key, 0) + 1
     low, high = chi2.ppf([0.025, 0.975], 2)
@@ -428,8 +443,10 @@ def _score(
         scored = [i for i, r in enumerate(rows) if r.size and confirmed[i][r[0]]]
         mean = np.array([ctx.banks[i][0].mean[rows[i][0]] for i in scored])
         covariance = np.array([ctx.banks[i][0].covariance[rows[i][0]] for i in scored])
-        range_error_m = evaluate.wrapped(
-            [truth[i].bistatic_range_m[target] for i in scored] - mean[:, 0], period_m
+        range_error_m = fold_into_period(
+            [truth[i].bistatic_range_m[target] for i in scored] - mean[:, 0],
+            period_m,
+            lower=-period_m / 2.0,
         )
         rate_error_mps = [truth[i].bistatic_range_rate_mps[target] for i in scored] - mean[:, 1]
         error = np.column_stack([range_error_m, rate_error_mps])

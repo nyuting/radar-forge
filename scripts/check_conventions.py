@@ -645,7 +645,7 @@ def check_hot_path(tree: ast.AST, rel: Path) -> list[Problem]:
     if (
         rel.parts[: len(PKG.parts)] != PKG.parts
         or rel in OFF_HOT_PATH
-        or rel.parent in OFF_HOT_PATH_PACKAGES
+        or any(package in rel.parents for package in OFF_HOT_PATH_PACKAGES)
     ):
         return []
     problems: list[Problem] = []

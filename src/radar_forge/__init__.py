@@ -9,9 +9,9 @@ there too, but may move. Modules, in signal-path order:
     The radar and its sites; propagation paths and the radar equation; waveforms and IQ.
 ``dsp``, ``detection``, ``tracking``
     Range-Doppler processing; CFAR and clustering; batched multi-target tracking.
-``scenario``, ``pipeline``, ``evaluate``, ``plots``
-    A scenario file, the chain from it to tracks, the stepper that checks each stage, and
-    figures (the ``visualisation`` extra, imported only when drawing).
+``scenario``, ``pipeline``, ``evaluate``, ``stages``, ``plots``
+    A scenario file, the chain from it to tracks, the stepper that checks each stage, the
+    stages it runs, and figures (the ``visualisation`` extra, imported only when drawing).
 """
 
 from __future__ import annotations

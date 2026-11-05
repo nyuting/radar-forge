@@ -68,11 +68,18 @@ def test_importing_the_library_does_not_pull_in_matplotlib():
 
 # Slow: a fresh interpreter, so no earlier import of radar_forge.stages hides a missing one.
 @pytest.mark.slow
-def test_the_core_stages_register_in_their_run_order():
-    """Catches the stages import at the foot of evaluate.py going missing or going lazy."""
+@pytest.mark.parametrize(
+    "first_import", ["radar_forge.evaluate", "radar_forge.stages", "radar_forge.stages.core"]
+)
+def test_the_core_stages_register_in_their_run_order(first_import: str) -> None:
+    """Whichever module is imported first, the five stages register, in run order.
+
+    Catches the stages import at the foot of evaluate.py going missing or going lazy, and
+    either stages import breaking on the partly initialised module it passes through.
+    """
     code = (
-        "import radar_forge.evaluate as e; "
-        "assert list(e.STAGES) == ['geometry', 'iq', 'rd', 'detect', 'track'], list(e.STAGES)"
+        f"import {first_import}; from radar_forge.evaluate import STAGES; "
+        "assert list(STAGES) == ['geometry', 'iq', 'rd', 'detect', 'track'], list(STAGES)"
     )
     result = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True, check=False

@@ -303,6 +303,7 @@ def test_the_hot_path_allows_warnings_and_non_clock_time_names() -> None:
         "plots.py",
         "stages/__init__.py",
         "stages/core.py",
+        "stages/scenario_007/doa.py",
     ],
 )
 def test_r11_spares_the_modules_that_run_a_scenario(name: str) -> None:

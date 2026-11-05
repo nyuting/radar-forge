@@ -48,7 +48,6 @@ __all__ = [
     "thresholds",
     "to_db",
     "truth",
-    "wrapped",
     "write_csv",
 ]
 
@@ -117,9 +116,9 @@ class Context:
         print(f"  {name} = {value:.6g}")
         return float(value)
 
-    def check(self, stage: str, name: str, value: float, low: Any, high: Any) -> None:
+    def check(self, stage_name: str, name: str, value: float, low: Any, high: Any) -> None:
         """Record a check that ``value`` lies in ``[low, high]``."""
-        result = Check(stage, name, float(value), float(low), float(high))
+        result = Check(stage_name, name, float(value), float(low), float(high))
         self.report.checks.append(result)
         verdict = "pass" if result.passed else "FAIL"
         print(f"  check {name} = {value:.6g} in [{low}, {high}]: {verdict}")
@@ -133,18 +132,21 @@ VERIFY_KEYS: dict[str, tuple[str, ...]] = {}
 
 
 def stage(name: str, *keys: str) -> Callable[[Stage], Stage]:
-    """Register a stage under ``name``, with the ``[verify]`` keys it reads."""
+    """Register a stage under ``name``, once, with the ``[verify]`` keys it reads."""
 
     def register(function: Stage) -> Stage:
+        if name in STAGES:
+            msg = f"a stage named {name!r} is already registered, by {STAGES[name].__module__}."
+            raise ValueError(msg)
         STAGES[name], VERIFY_KEYS[name] = function, keys
         return function
 
     return register
 
 
-def thresholds(ctx: Context, stage: str) -> dict[str, Any]:
+def thresholds(ctx: Context, stage_name: str) -> dict[str, Any]:
     """Return the ``[verify]`` thresholds a stage registered, and only those."""
-    return {k: v for k, v in ctx.scenario.verify.items() if k in VERIFY_KEYS[stage]}
+    return {k: v for k, v in ctx.scenario.verify.items() if k in VERIFY_KEYS[stage_name]}
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -161,12 +163,6 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 def to_db(value: ArrayLike) -> float:
     """Return a power ratio or a power in W as decibels."""
     return float(10.0 * np.log10(value))
-
-
-def wrapped(value: ArrayLike, period: float) -> NDArray[np.float64]:
-    """Return ``value`` folded into ``[-period/2, period/2)``: the short way round."""
-    result: NDArray[np.float64] = (np.asarray(value) + period / 2.0) % period - period / 2.0
-    return result
 
 
 def target_power_w(radar: Radar, truth: TargetGeometry, rcs_m2: ArrayLike) -> NDArray[np.float64]:
@@ -222,11 +218,11 @@ def run(
     count = scenario.n_frames if n_frames is None else min(n_frames, scenario.n_frames)
     ctx = Context(scenario, out, count, save_iq, Report(scenario.name), render)
     print(f"{scenario.name}: {count} frame(s), {len(scenario.radars)} burst(s) -> {out}")
-    for name, stage in STAGES.items():
+    for name, function in STAGES.items():
         if name in names:
             print(f"[{name}]")
             start_s = time.perf_counter()
-            ctx = stage(ctx)
+            ctx = function(ctx)
             ctx.report.wall_time_s[name] = time.perf_counter() - start_s
             print(f"  wall time {ctx.report.wall_time_s[name]:.2f} s")
     if ctx.report.failures:
