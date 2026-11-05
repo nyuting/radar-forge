@@ -47,7 +47,7 @@ The [Quickstart](#quickstart) below runs on today's `main`.
 | Area | What it covers |
 | :--- | :--- |
 | **The radar chain** | `radar` (sites, transmitter, receiver, bistatic geometry), `propagation` (the radar equation, Swerling models), `signal` (FMCW and pulsed waveforms, IQ), `dsp` (range-Doppler processing, windows, MTI, dual-PRF unfolding), `detection` (CFAR and clustering), `tracking/` (KF, EKF and UKF over a batched track bank) |
-| **Scenarios** | `scenario` (a TOML file and its truth), `pipeline` (frames to tracks), `evaluate` (the stepper, which checks each stage against the file's `[verify]` table), `plots` |
+| **Scenarios** | `scenario` (a TOML file and its truth), `pipeline` (frames to tracks), `evaluate` (the stepper, which checks each stage against the file's `[verify]` table), `stages/` (the stepper's stages), `plots` |
 | **`array`** | Phased array geometries (linear, planar, circular, conformal), Taylor/Chebyshev tapering, beam and null steering, phase quantization, DoA estimation |
 | **`raytracing`** | A single scene abstraction over pluggable ray-tracing backends (RadarSimPy, Mitsuba/Dr.Jit, NVIDIA Omniverse RTX), all optional extras |
 | **Datasets** | ML dataset synthesis, with COCO-annotation and range-Doppler-cube exporters plus PyTorch dataset wrappers (planned) |
@@ -154,7 +154,8 @@ radar-forge/
         ├── tracking/           # Models, filters, association, tracker, metrics
         ├── scenario.py         # A scenario TOML and its truth
         ├── pipeline.py         # Frames, range-Doppler products, plots, scans
-        ├── evaluate.py         # The stepper: geometry, iq, rd, detect, track
+        ├── evaluate.py         # The stepper: runs the stages, checks [verify]
+        ├── stages/             # The stages, in run order: core (geometry, iq, rd, detect, track)
         └── plots.py            # Figures (the visualisation extra)
 ```
 

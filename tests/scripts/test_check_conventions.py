@@ -294,7 +294,17 @@ def test_the_hot_path_allows_warnings_and_non_clock_time_names() -> None:
     assert _r11_lines(source) == []
 
 
-@pytest.mark.parametrize("name", ["scenario.py", "pipeline.py", "evaluate.py", "plots.py"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "scenario.py",
+        "pipeline.py",
+        "evaluate.py",
+        "plots.py",
+        "stages/__init__.py",
+        "stages/core.py",
+    ],
+)
 def test_r11_spares_the_modules_that_run_a_scenario(name: str) -> None:
     assert _r11_lines("print(x)\n", Path("src/radar_forge") / name) == []
 

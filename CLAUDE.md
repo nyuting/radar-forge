@@ -15,7 +15,7 @@ and students. Neither half is traded for the other.
 - Physical constants only from `radar_forge.constants`; never `3e8` — R4, mypy `Final`.
 - Lean NumPy docstrings: one summary line; a citation with equation number; Parameters/Returns only where a unit, shape or convention is not in the name; no Raises or Examples unless the example is the test — ruff `D`, `tests/test_conventions.py`.
 - Complete annotations, `ArrayLike` in, `NDArray` out; every module defines `__all__`; `msg = "…"` then `raise`, no `assert` — `mypy --strict`, ruff `ANN EM S101`, `tests/test_conventions.py`.
-- Broadcast, don't tile — R6. Only `scenario`, `pipeline`, `evaluate`, `plots` do I/O, logging or timing — R11. Modules warn
+- Broadcast, don't tile — R6. Only `scenario`, `pipeline`, `evaluate`, `plots` and `stages/` do I/O, logging or timing — R11. Modules warn
   past 500 lines, fail past 800 — R10.
 - No generated arrays committed; golden data only in `tests/data/golden/` — pre-commit hook.
 - Conventional Commits, `feat(dsp): add Taylor taper`; PRs squash-merge — commit-msg hook, CI.
@@ -59,7 +59,7 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 | delay, phase, Doppler; stop-and-hop | `propagation_delay_s`, `propagation_phase_rad`, `doppler_shift_hz`; `PropagationPaths.bistatic_range_at_m` (propagation.py) |
 | radar equation; RCS, Swerling 0-4 | `received_power_w` (R_T² R_R²); `dbsm_to_m2`, `swerling_rcs_m2` (propagation.py) |
 | noise N0 = kT0F, per sample, in band | `Receiver.noise_density_w_per_hz`, `.noise_power_per_sample_w`, `Radar.noise_power_matched_w` (radar.py) |
-| SNR, single pulse and integrated | `received_power_w / Radar.noise_power_matched_w`; times B T N on the map (evaluate.py geometry stage) |
+| SNR, single pulse and integrated | `received_power_w / Radar.noise_power_matched_w`; times B T N on the map (stages/core.py geometry stage) |
 | thermal noise; synthesis; LFM chirp; ambiguity | `thermal_noise`; `fmcw_deramp_baseband`, `pulsed_baseband`; `lfm_chirp`; `ambiguity_function` (signal.py) |
 | windows, coherent gain, processing loss | `window`, `apply_window`, `coherent_gain_linear`, `processing_loss_db` (dsp.py) |
 | matched filter, range/Doppler FFT, map | `matched_filter`, `range_fft`, `doppler_fft`, `range_doppler_map` (dsp.py); `range_doppler_product` (pipeline.py) |

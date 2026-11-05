@@ -42,7 +42,7 @@ MODULE_NAMES = sorted(
     info.name for info in pkgutil.walk_packages(radar_forge.__path__, prefix="radar_forge.")
 )
 PUBLIC_MODULE_NAMES = [n for n in MODULE_NAMES if not n.rsplit(".", 1)[-1].startswith("_")]
-PACKAGE_NAMES = ["radar_forge.tracking"]
+PACKAGE_NAMES = ["radar_forge.stages", "radar_forge.tracking"]
 
 
 def test_package_imports_and_has_version():
@@ -59,6 +59,20 @@ def test_importing_the_library_does_not_pull_in_matplotlib():
     code = (
         "import sys, radar_forge, radar_forge.plots, radar_forge.evaluate; "
         "assert 'matplotlib' not in sys.modules, 'matplotlib imported'"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
+
+
+# Slow: a fresh interpreter, so no earlier import of radar_forge.stages hides a missing one.
+@pytest.mark.slow
+def test_the_core_stages_register_in_their_run_order():
+    """Catches the stages import at the foot of evaluate.py going missing or going lazy."""
+    code = (
+        "import radar_forge.evaluate as e; "
+        "assert list(e.STAGES) == ['geometry', 'iq', 'rd', 'detect', 'track'], list(e.STAGES)"
     )
     result = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True, check=False
