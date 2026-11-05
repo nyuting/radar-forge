@@ -256,9 +256,8 @@ def _pulse_echo(
     envelope_phase_rad = (
         np.pi * elapsed_s * (transmitter.sweep_rate_hzps * elapsed_s - transmitter.bandwidth_hz)
     )
-    echo: NDArray[np.complex128] = within_pulse * np.exp(
-        1j * (envelope_phase_rad + residual_phase_rad[..., None])
-    )
+    carrier = np.exp(1j * (envelope_phase_rad + residual_phase_rad[..., None]))
+    echo: NDArray[np.complex128] = np.where(within_pulse, carrier, 0j)
     return echo
 
 
