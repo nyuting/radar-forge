@@ -19,12 +19,14 @@ import pytest
 
 from radar_forge import evaluate
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
+from radar_forge.detection import Detection
+from radar_forge.migration import pulse_compress
 from radar_forge.pipeline import (
     Plots,
+    RangeDopplerProduct,
     ScanTracker,
     frame_plots,
     map_axes,
-    pulse_compress,
     range_doppler_product,
     synthesise,
 )
@@ -386,7 +388,7 @@ def test_a_gated_map_labels_its_window_of_the_range_circle():
     scenario = load_scenario(REPO / "config" / "scenario_004_keystone_k1.toml")
     radar, gate, truth = scenario.radar, scenario.gates[0], truth_geometry(scenario)[0]
     cube = synthesise(radar, truth, [0.1], 1024, rng=None, gate=gate)
-    product = range_doppler_product(cube, radar, range_gate_start_m=gate.range_gate_start_m)
+    product = range_doppler_product(cube, radar, gate=gate)
     assert product.rd_map.shape == (1024, 1024)
     np.testing.assert_allclose(product.range_axis_m[0], 9607 * SPEED_OF_LIGHT_MPS / 600e6)
     assert product.range_period_m == radar.unambiguous_bistatic_range_m
@@ -404,7 +406,7 @@ def test_a_gated_cube_compresses_as_the_whole_stream_does_inside_the_gate():
     gate_m = 20 * SPEED_OF_LIGHT_MPS / radar.receiver.sample_rate_hz
     gated = synthesise(radar, geometry, [10.0], 4, rng=None, gate=RangeGate(gate_m, 60))
     full = pulse_compress(whole, radar)
-    rows = pulse_compress(gated, radar, range_gate_start_m=gate_m)
+    rows = pulse_compress(gated, radar, gate=RangeGate(gate_m, 60))
     inside = 60 - radar.n_samples_per_chirp
     np.testing.assert_allclose(rows[:, :inside], full[:, 20 : 20 + inside], rtol=1e-9, atol=1e-18)
 
@@ -415,6 +417,11 @@ def test_a_gated_cube_compresses_as_the_whole_stream_does_inside_the_gate():
         ('method = "keystone"\n', 'method = "keystone_doppler_rate"\n', "acceleration_search"),
         ('method = "keystone"\n', 'method = "none"\nfold_factor_max = 1\n', "fold_factor_max"),
         ("n_gate_samples = 1024\n", "n_gate_samples = 1024.0\n", "positive integer"),
+        (
+            'method = "keystone"\n',
+            'method = "keystone_doppler_rate"\nacceleration_search_mps2 = [-400.0, -200.0, 30.0]\n',
+            "whole number",
+        ),
     ],
 )
 def test_a_migration_or_gate_setting_that_cannot_run_is_refused(tmp_path, old, new, message):
@@ -434,3 +441,44 @@ def test_an_accelerating_target_carries_its_route_acceleration():
         np.testing.assert_allclose(frame.bistatic_range_acceleration_mps2, [-294.1995], rtol=1e-12)
     np.testing.assert_allclose(scenario.migration.accelerations_mps2[[0, -1]], [-400.0, -200.0])
     assert scenario.migration.accelerations_mps2.size == 21
+
+
+def test_a_detection_across_a_gated_window_is_not_a_hit_on_its_far_side():
+    """A gated window is not circular: the far end is 99 bins from the near end, not 1.
+
+    A 100-bin window of a 12000-bin range circle; the truth at index 0.3, a detection at 99.6
+    misses, one at 0.5 hits.
+    """
+    product = RangeDopplerProduct(
+        np.zeros((8, 100), complex),
+        1000.0 + 0.5 * np.arange(100),
+        np.arange(8.0)[::-1],
+        unambiguous_range_m=6000.0,
+    )
+    truth = TargetGeometry.monostatic(500.075, 1.5)  # bistatic 1000.15 m, 3 m/s: Doppler bin 4
+    for range_index, expected in ((99.6, False), (0.5, True)):
+        detection = Detection((4, int(range_index)), (4.0, range_index), 1.0, 1.0, 1)
+        found = dataclasses.replace(_one_plot(1000.0, 0.0), detections=(detection,))
+        assert core._hits(found, 0, product, truth, 1.0) == [expected]
+
+
+def test_only_a_target_given_an_acceleration_carries_its_routes_acceleration(tmp_path):
+    """The accelerating target gets u.a plus the turning term; a crossing one beside it, zero.
+
+    K2's rocket with 30 m/s across the line of sight: 2 (-147.09975 + 30^2 / 2500) m/s^2. A
+    second target crossing at 50 m/s has no acceleration given, so none is modelled for it.
+    """
+    text = _k_variant("k2").replace(
+        "velocity_enu_mps = [0.0, -340.0, 0.0]", "velocity_enu_mps = [30.0, -340.0, 0.0]"
+    )
+    text += (
+        '\n[[target]]\nname = "crossing"\nrcs_dbsm = -10.0\n'
+        "position_enu_m = [1000.0, 3000.0, 0.0]\nvelocity_enu_mps = [50.0, 0.0, 0.0]\n"
+    )
+    path = tmp_path / "two.toml"
+    path.write_text(text, encoding="utf-8")
+    first = truth_geometry(load_scenario(path))[0]
+    np.testing.assert_allclose(
+        first.bistatic_range_acceleration_mps2[0], 2 * (-147.09975 + 30.0**2 / 2500.0), rtol=1e-12
+    )
+    assert first.bistatic_range_acceleration_mps2[1] == 0.0

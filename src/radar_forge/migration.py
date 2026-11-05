@@ -11,6 +11,8 @@ the :math:`f R_b` term walks in range, the :math:`f_0 R_b` term is the Doppler p
 Slow time :math:`t = m/\mathrm{PRF}` is zero at pulse 0, the frame's truth time and the
 keystone's reference. :math:`R_b` is bistatic and its rate positive receding, so
 :math:`f_D = -\dot R_b/\lambda` (:func:`~radar_forge.propagation.doppler_shift_hz`).
+:func:`pulse_compress` makes ``data_rfst`` from a cube, through its range gate, and
+:func:`compensate_migration` applies a scenario's ``[migration]`` to it.
 
 References
 ----------
@@ -28,6 +30,7 @@ References
        transform," *IEEE Trans. Audio and Electroacoustics*, vol. 18, no. 4, pp. 451-455, 1970.
 .. [6] A. V. Oppenheim and R. W. Schafer, *Discrete-Time Signal Processing*, 3rd ed.,
        Pearson, 2010.
+.. [7] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed., McGraw-Hill, 2014.
 """
 
 from __future__ import annotations
@@ -39,20 +42,28 @@ from typing import Any, Literal, get_args
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from radar_forge._fourier import aboutanios_mulgrew, signed_cycles
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
+from radar_forge.dsp import matched_filter
+from radar_forge.radar import Radar
+from radar_forge.scenario import MigrationSettings, RangeGate
+from radar_forge.signal import lfm_chirp
 
 __all__ = [
     "KEYSTONE_METHODS",
+    "CompensatedPulses",
     "DopplerRateCompensation",
     "FoldFactorSearch",
     "IntegratedPeak",
     "KeystoneMethod",
     "KeystoneResult",
     "RangeSpectrum",
+    "compensate_migration",
     "doppler_rate_compensation",
     "fold_factor_search",
     "integrated_peak",
     "keystone",
+    "pulse_compress",
     "range_spectrum",
     "second_order_keystone",
 ]
@@ -69,6 +80,8 @@ _SINC_HALF_TAPS = 8
 _PEAK_ITERATIONS = 3
 # Range bins either side of the brightest cell that score an acceleration hypothesis.
 _STRIP_HALF_WIDTH = 2
+# Range frequencies the chirp-z transform works on at once: 256 x L complex is 8 MiB at L = 2048.
+_PLAN_BLOCK_ROWS = 256
 
 
 @dataclass(frozen=True)
@@ -164,13 +177,13 @@ def keystone(
     r"""Remove linear range walk for every velocity at once: :math:`t = \tau f_0/(f_0 + f)`.
 
     Substituting into :math:`(f_0 + f)\dot R_b t` leaves :math:`f_0 \dot R_b \tau`, the same at
-    every range frequency, so each echo stays in its pulse-0 range bin (Perry [1]_ §II). Each
+    every range frequency, so each echo stays in its pulse-0 range bin (Perry [1]_). Each
     frequency's slow time is rescaled by band-limited (DFT) interpolation, a chirp-z transform
-    (Zhu [2]_ §II), or by the baseline, a Hann-tapered sinc of eight pulses each side. DFT
+    (Zhu [2]_), or by the baseline, a Hann-tapered sinc of eight pulses each side. DFT
     interpolation treats the dwell as periodic: the low frequencies, stretched past the last
     pulse, read the first, so the closing pulses ring. Slow time sees only the alias of a
     Doppler beyond :math:`\pm\mathrm{PRF}/2`; the fold factor :math:`F`, the whole PRFs folded
-    away, is put back by :math:`e^{+j 2\pi F m f_0/(f_0 + f)}` (Huang [3]_ §III-A).
+    away, is put back by :math:`e^{+j 2\pi F m f_0/(f_0 + f)}` (Huang [3]_).
     """
     if method not in KEYSTONE_METHODS:
         msg = f"method must be one of {KEYSTONE_METHODS}; got {method!r}."
@@ -202,7 +215,7 @@ def second_order_keystone(
 
     Substituting into :math:`(f_0 + f)\ddot R_b t^2/2` leaves :math:`f_0 \ddot R_b \tau^2/2`,
     the same at every range frequency, so a target accelerating from rest at pulse 0 stays in
-    one range bin (Kirkland [4]_ §3). It rescales any linear walk too, so it suits a target
+    one range bin (Kirkland [4]_). It rescales any linear walk too, so it suits a target
     whose walk is removed or negligible; the quadratic phase is left for
     :func:`doppler_rate_compensation`. Interpolation as :func:`keystone`.
     """
@@ -228,7 +241,7 @@ def fold_factor_search(
 
     The rescaling is done once and each :math:`F` only multiplies by its phase. A wrong
     :math:`F` leaves a walk of :math:`\Delta F\,\lambda\,\mathrm{PRF}` metres a second, so the
-    integrated peak of the whole map is largest at the true one (Huang [3]_ §III-A). Each
+    integrated peak of the whole map is largest at the true one (Huang [3]_). Each
     hypothesis is scored on every :math:`\lfloor M/n_{range}\rfloor`-th range frequency: that
     undoes the zero padding, so the map's range circle is still the whole gate and nothing
     aliases. The Doppler at :math:`f_0 + f` is :math:`\nu (f_0 + f)/f_0` PRFs; when the band
@@ -253,13 +266,13 @@ def fold_factor_search(
         phase = phase * step
     best = int(np.argmax(peaks))
     fold_factor = int(fold_factors[best])
-    doppler_cycles = _signed_cycles(cycles[best]) + fold_factor
+    doppler_cycles = signed_cycles(cycles[best]) + fold_factor
     edges = doppler_cycles * (1.0 + np.array([-0.5, 0.5]) * bandwidth_hz / carrier_frequency_hz)
     if np.any(np.floor(edges + 0.5) != fold_factor):
         msg = (
             f"the target at {doppler_cycles:.4f} PRFs of Doppler spans fold factors "
             f"{np.floor(edges + 0.5).astype(int).tolist()} across the band: one fold factor "
-            "cannot keystone it, a case this implementation does not treat (Huang [3] §III-A)."
+            "cannot keystone it, a case this implementation does not treat (Huang [3])."
         )
         raise ValueError(msg)
     if fold_factor:
@@ -282,7 +295,7 @@ def doppler_rate_compensation(
 
     After the keystone :math:`(f_0 + f) R_b(t)` holds :math:`\ddot R_b \tau^2 f_0^2/(2(f_0 + f))`
     and :math:`\dddot R_b \tau^3 f_0^3/(6(f_0 + f)^2)`, so for a bistatic acceleration
-    :math:`a` and jerk :math:`j` the filter (Huang [3]_ §III-B)
+    :math:`a` and jerk :math:`j` the filter (Huang [3]_)
 
     .. math::
 
@@ -345,7 +358,8 @@ def integrated_peak(
     doppler_bin, range_bin = np.unravel_index(int(np.argmax(power)), power.shape)
     pulses = data[:, range_bin].reshape(n_pulses, -1)
     strongest = int(np.argmax(np.sum(np.abs(pulses) ** 2, axis=0)))
-    cycles = _refine_tone(pulses[:, strongest], float(doppler_bin)) / n_pulses
+    cycles = aboutanios_mulgrew(pulses[:, strongest], float(doppler_bin), _PEAK_ITERATIONS)
+    cycles /= n_pulses
     steering = np.exp(-2j * np.pi * cycles * np.arange(n_pulses))
     doppler = float(cycles * n_pulses % n_pulses)
     if not refine_range:
@@ -359,6 +373,95 @@ def integrated_peak(
     power_fine = np.sum(np.abs(fine) ** 2, axis=1)
     best = int(np.argmax(power_fine))
     return IntegratedPeak(float(power_fine[best]), doppler, float(offsets[best]))
+
+
+def pulse_compress(
+    cube: ArrayLike, radar: Radar, *, gate: RangeGate | None = None
+) -> NDArray[np.complex128]:
+    """Matched-filter a pulsed cube along fast time: ``data_rfst``, the same shape.
+
+    Without a gate, or with one recording the whole PRI, the rows are one stream, since the
+    receiver keeps listening: compressed as one and cut back into rows, an echo that runs into
+    the next row compresses whole and every cell holds the same noise. A gated cube's rows are
+    not contiguous, so each is compressed alone. Either way the reference's group delay,
+    ``n_reference - 1``, is cut, so the gate's first sample lands at bin 0 (Richards [7]_ §4.6).
+    """
+    samples = np.asarray(cube, dtype=np.complex128)
+    gate = RangeGate() if gate is None else gate
+    if samples.shape[1] != gate.n_samples(radar):
+        msg = (
+            f"the cube's {samples.shape[1]} samples a row are not the {gate.n_samples(radar)} "
+            "its range gate records; pass the gate it was synthesised through."
+        )
+        raise ValueError(msg)
+    transmitter, sample_rate_hz = radar.transmitter, radar.receiver.sample_rate_hz
+    reference = lfm_chirp(transmitter.bandwidth_hz, transmitter.chirp_duration_s, sample_rate_hz)
+    start = reference.size - 1
+    if gate.is_whole_pri(radar):
+        stream = matched_filter(samples.reshape(-1), reference)
+        return stream[start : start + samples.size].reshape(samples.shape)
+    return matched_filter(samples, reference, axis=1)[:, start : start + samples.shape[1]]
+
+
+@dataclass(frozen=True)
+class CompensatedPulses:
+    """``[migration]`` applied to ``data_rfst``: the result, and each step that ran or ``None``."""
+
+    data_rfst: NDArray[np.complex128]
+    keystone: KeystoneResult | None
+    fold: FoldFactorSearch | None
+    rate: DopplerRateCompensation | None
+
+    @property
+    def fold_factor(self) -> int:
+        """The fold factor the keystone used: searched, or 0."""
+        return 0 if self.fold is None else self.fold.fold_factor
+
+    @property
+    def acceleration_mps2(self) -> float:
+        """The bistatic acceleration the Doppler-rate filter removed, m/s²: searched, or 0."""
+        return 0.0 if self.rate is None else self.rate.acceleration_mps2
+
+
+def compensate_migration(
+    data_rfst: ArrayLike, radar: Radar, settings: MigrationSettings
+) -> CompensatedPulses:
+    """Apply ``[migration]``: keystone, its fold-factor search, then the Doppler-rate search."""
+    data = np.asarray(data_rfst, dtype=np.complex128)
+    if settings.method == "none":
+        return CompensatedPulses(data, None, None, None)
+    transmitter, sample_rate_hz = radar.transmitter, radar.receiver.sample_rate_hz
+    carrier_hz = transmitter.carrier_frequency_hz
+    keystoned, fold = None, None
+    if settings.fold_factor_max > 0:
+        fold = fold_factor_search(
+            data,
+            carrier_frequency_hz=carrier_hz,
+            sample_rate_hz=sample_rate_hz,
+            bandwidth_hz=transmitter.bandwidth_hz,
+            fold_factor_max=settings.fold_factor_max,
+            method=settings.keystone,
+        )
+        data = fold.data_rfst
+    else:
+        keystoned = keystone(
+            data,
+            carrier_frequency_hz=carrier_hz,
+            sample_rate_hz=sample_rate_hz,
+            method=settings.keystone,
+        )
+        data = keystoned.data_rfst
+    rate = None
+    if settings.method == "keystone_doppler_rate":
+        rate = doppler_rate_compensation(
+            data,
+            carrier_frequency_hz=carrier_hz,
+            sample_rate_hz=sample_rate_hz,
+            prf_hz=transmitter.prf_hz,
+            accelerations_mps2=settings.accelerations_mps2,
+        )
+        data = rate.data_rfst
+    return CompensatedPulses(data, keystoned, fold, rate)
 
 
 def _cube(data_rfst: ArrayLike) -> NDArray[np.complex128]:
@@ -409,7 +512,7 @@ def _scored_peak(by_frequency: NDArray[np.complex128]) -> tuple[float, float]:
     steering = np.exp(2j * np.pi * np.arange(n_rows) * range_bin / n_rows) / n_rows
     pulses = np.tensordot(steering, by_frequency, axes=(0, 0)).reshape(-1, n_pulses)
     strongest = int(np.argmax(np.sum(np.abs(pulses) ** 2, axis=1)))
-    cycles = _refine_tone(pulses[strongest], float(doppler_bin)) / n_pulses
+    cycles = aboutanios_mulgrew(pulses[strongest], float(doppler_bin), _PEAK_ITERATIONS) / n_pulses
     focused = pulses @ np.exp(-2j * np.pi * cycles * np.arange(n_pulses))
     return float(np.sum(np.abs(focused) ** 2)), float(cycles)
 
@@ -449,15 +552,17 @@ def _rescale_slow_time(
     half = n_pulses // 2
     # Multiplying by e^{j 2 pi h n / N} before the DFT shifts its output by h bins.
     work *= np.exp(2j * np.pi * half * np.arange(n_pulses) / n_pulses)
-    shifted = np.fft.fft(work, axis=-1)
-    shifted *= _rows(pre_chirp, work.ndim)
     n_fft = kernel_fft.shape[1]
-    convolved = np.fft.fft(shifted, n=n_fft, axis=-1)
-    convolved *= _rows(kernel_fft, work.ndim)
-    result: NDArray[np.complex128] = np.fft.ifft(convolved, axis=-1)[..., :n_pulses] * _rows(
-        post_chirp, work.ndim
-    )
-    return result
+    # A block of range frequencies at a time bounds the length-L work arrays; it is in place.
+    for start in range(0, work.shape[0], _PLAN_BLOCK_ROWS):
+        rows = slice(start, start + _PLAN_BLOCK_ROWS)
+        shifted = np.fft.fft(work[rows], axis=-1)
+        shifted *= _rows(pre_chirp[rows], work.ndim)
+        convolved = np.fft.fft(shifted, n=n_fft, axis=-1)
+        convolved *= _rows(kernel_fft[rows], work.ndim)
+        work[rows] = np.fft.ifft(convolved, axis=-1)[..., :n_pulses]
+        work[rows] *= _rows(post_chirp[rows], work.ndim)
+    return work
 
 
 def _rows(values: NDArray[np.complex128], ndim: int) -> NDArray[np.complex128]:
@@ -465,8 +570,9 @@ def _rows(values: NDArray[np.complex128], ndim: int) -> NDArray[np.complex128]:
     return values.reshape(values.shape[:1] + (1,) * (ndim - 2) + values.shape[1:])
 
 
-# One plan, 16 M (2N + L) bytes, 128 MiB for 1024 pulses and 2048 range frequencies, is kept:
-# every frame of a scenario keystones on one grid, and building the plan is most of the cost.
+# One plan is kept, 16 M (2N + L) bytes: 128 MiB for 1024 pulses and 2048 range frequencies.
+# Every frame of a scenario keystones on one grid, and building the plan is most of the cost;
+# a second grid (another scenario, or the second-order keystone) replaces it.
 @lru_cache(maxsize=1)
 def _chirp_z_plan(
     n_pulses: int, scale_bytes: bytes
@@ -476,19 +582,24 @@ def _chirp_z_plan(
     With :math:`nm = (n^2 + m^2 - (m - n)^2)/2`, :math:`X[m] = W^{m^2/2}\sum_n x[n] W^{n^2/2}
     W^{-(m-n)^2/2}`, a linear convolution done by FFTs of length :math:`L \ge 2N - 1` (Bluestein
     [5]_). The last chirp also carries the shift's :math:`e^{-j 2\pi s h m/N}` and the
-    :math:`1/N`.
+    :math:`1/N`. The kernel is built a block of rows at a time, to bound its temporaries.
     """
     scale = np.frombuffer(scale_bytes, dtype=np.float64)[:, None]
     index = np.arange(n_pulses, dtype=np.float64)
     pre_chirp = np.exp(1j * np.pi * scale * index**2 / n_pulses)
     n_fft = int(2 ** np.ceil(np.log2(2 * n_pulses - 1)))
     lag = np.arange(n_fft, dtype=np.float64)
-    lag = np.where(lag < n_pulses, lag, lag - n_fft)
-    kernel = np.exp(-1j * np.pi * scale * lag**2 / n_pulses)
-    kernel[:, n_pulses : n_fft - n_pulses + 1] = 0.0
+    lag_squared = np.where(lag < n_pulses, lag, lag - n_fft) ** 2
+    kernel_fft = np.empty((scale.size, n_fft), dtype=np.complex128)
+    # A block of rows at a time: the kernel's temporaries stay a block's size.
+    for start in range(0, scale.size, _PLAN_BLOCK_ROWS):
+        rows = slice(start, start + _PLAN_BLOCK_ROWS)
+        kernel = np.exp(-1j * np.pi * scale[rows] * lag_squared / n_pulses)
+        kernel[:, n_pulses : n_fft - n_pulses + 1] = 0.0
+        kernel_fft[rows] = np.fft.fft(kernel, axis=1)
     half = n_pulses // 2
     post_chirp = pre_chirp * np.exp(-2j * np.pi * scale * half * index / n_pulses) / n_pulses
-    return pre_chirp, np.fft.fft(kernel, axis=1), post_chirp
+    return pre_chirp, kernel_fft, post_chirp
 
 
 def _sinc_rescale(
@@ -516,27 +627,3 @@ def _doppler_spectrum(data: NDArray[np.complex128]) -> NDArray[np.complex128]:
     contiguous = np.ascontiguousarray(np.moveaxis(data, 0, -1))
     spectrum: NDArray[np.complex128] = np.moveaxis(np.fft.fft(contiguous, axis=-1), -1, 0)
     return spectrum
-
-
-def _refine_tone(samples: NDArray[np.complex128], peak_bin: float) -> float:
-    """Return a tone's frequency in DFT bins from its peak bin, by Aboutanios-Mulgrew."""
-    n_samples = samples.size
-    if n_samples < 2:
-        return peak_bin
-    index = np.arange(n_samples)
-    estimate = peak_bin
-    # A fixed few iterations; each shrinks the remaining error many times over.
-    for _ in range(_PEAK_ITERATIONS):
-        plus, minus = (
-            samples @ np.exp(-2j * np.pi * index * (estimate + half) / n_samples)
-            for half in (0.5, -0.5)
-        )
-        if plus == minus:
-            break
-        estimate += 0.5 * float(np.real((plus + minus) / (plus - minus)))
-    return estimate
-
-
-def _signed_cycles(cycles: float) -> float:
-    """Return a frequency in cycles per sample wrapped into ``[-0.5, 0.5)``."""
-    return float((cycles + 0.5) % 1.0 - 0.5)

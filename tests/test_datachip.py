@@ -26,8 +26,8 @@ from radar_forge.datachip import (
     estimate_tone,
 )
 from radar_forge.dsp import delay_bin_centers_m, doppler_bin_centers_mps, matched_filter
-from radar_forge.migration import integrated_peak
-from radar_forge.pipeline import compensate_migration, pulse_compress, synthesise
+from radar_forge.migration import compensate_migration, integrated_peak, pulse_compress
+from radar_forge.pipeline import synthesise
 from radar_forge.scenario import load_scenario, truth_geometry
 from radar_forge.signal import lfm_chirp
 
@@ -323,7 +323,7 @@ def scenario_chips() -> dict[str, tuple[DataChip, object]]:
         clean = pulse_compress(
             synthesise(radar, truth, [0.1], N_PULSES, rng=None, gate=gate),
             radar,
-            range_gate_start_m=gate.range_gate_start_m,
+            gate=gate,
         )
         compensated = compensate_migration(clean, radar, scenario.migration)
         peak = integrated_peak(compensated.data_rfst, refine_range=False)

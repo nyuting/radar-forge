@@ -22,7 +22,7 @@ from __future__ import annotations
 import csv
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any, Literal, get_args, get_origin, get_type_hints
 
@@ -150,12 +150,19 @@ class RangeGate:
     range_gate_start_m: float = 0.0
     n_gate_samples: int | None = None
 
+    def first_sample(self, radar: Radar) -> int:
+        """Return the fast-time sample the gate opens on."""
+        return range_gate_first_sample(self.range_gate_start_m, radar.receiver.sample_rate_hz)
+
     def n_samples(self, radar: Radar) -> int:
         """Return the fast-time samples the gate records in each pulse."""
         if self.n_gate_samples is not None:
             return self.n_gate_samples
-        first = range_gate_first_sample(self.range_gate_start_m, radar.receiver.sample_rate_hz)
-        return radar.n_samples_per_pri - first
+        return radar.n_samples_per_pri - self.first_sample(radar)
+
+    def is_whole_pri(self, radar: Radar) -> bool:
+        """Return whether the gate records every sample of the PRI, from zero delay."""
+        return self.first_sample(radar) == 0 and self.n_samples(radar) == radar.n_samples_per_pri
 
 
 @dataclass(frozen=True)
@@ -189,6 +196,13 @@ class MigrationSettings:
             raise ValueError(msg)
         if grid and not grid[2] > 0.0:
             msg = f"[migration] acceleration_search_mps2 step must be positive; got {grid[2]}."
+            raise ValueError(msg)
+        steps = (grid[1] - grid[0]) / grid[2] if grid else 0.0
+        if abs(steps - round(steps)) > 1e-9:
+            msg = (
+                f"[migration] acceleration_search_mps2 = {list(grid)}: high - low is {steps:g} "
+                "steps, not a whole number; set high to low plus a whole number of steps."
+            )
             raise ValueError(msg)
 
     @property
@@ -452,17 +466,22 @@ def _motion(target: Target, scenario: Scenario) -> tuple[NDArray[np.float64], ND
 def truth_geometry(scenario: Scenario) -> list[TargetGeometry]:
     """Return every frame's true geometry, one row per target, unfolded.
 
-    The route's acceleration is modelled once any target gives one, each other then at zero.
+    A target with ``acceleration_enu_mps2`` carries its route's whole second derivative, the
+    turning term included; every other target's is zero, as :class:`Target` says.
     """
     motions = [_motion(target, scenario) for target in scenario.targets]
     position_m = np.stack([m[0] for m in motions], axis=1)
     velocity_mps = np.stack([m[1] for m in motions], axis=1)
     given = [target.acceleration_enu_mps2 for target in scenario.targets]
-    acceleration_mps2 = (
-        None if all(a is None for a in given) else np.array([a or (0.0, 0.0, 0.0) for a in given])
-    )
+    modelled = np.array([a is not None for a in given])
+    acceleration_mps2 = np.array([a or (0.0, 0.0, 0.0) for a in given])
+    frames = []
     # One geometry per frame: TargetGeometry holds one frame's targets.
-    return [
-        scenario.radar.geometry(p, v, acceleration_enu_mps2=acceleration_mps2)
-        for p, v in zip(position_m, velocity_mps, strict=True)
-    ]
+    for p, v in zip(position_m, velocity_mps, strict=True):
+        if not modelled.any():
+            frames.append(scenario.radar.geometry(p, v))
+            continue
+        route = scenario.radar.geometry(p, v, acceleration_enu_mps2=acceleration_mps2)
+        kept = np.where(modelled, route.bistatic_range_acceleration_mps2, 0.0)
+        frames.append(replace(route, bistatic_range_acceleration_mps2=kept))
+    return frames

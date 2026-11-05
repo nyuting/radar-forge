@@ -25,15 +25,15 @@ from numpy.typing import NDArray
 
 from radar_forge import evaluate, plots
 from radar_forge.datachip import ChipProcessing, FineMethod, crop_slow_time, estimate_fine
-from radar_forge.migration import doppler_rate_compensation, integrated_peak, keystone
-from radar_forge.pipeline import (
+from radar_forge.migration import (
     CompensatedPulses,
     compensate_migration,
-    frames,
-    map_axes,
+    doppler_rate_compensation,
+    integrated_peak,
+    keystone,
     pulse_compress,
-    synthesise,
 )
+from radar_forge.pipeline import frames, map_axes, synthesise
 from radar_forge.radar import Radar
 
 __all__ = ["keystone_stage"]
@@ -65,19 +65,17 @@ def keystone_stage(ctx: evaluate.Context) -> evaluate.Context:
     ``[verify]``: ``walk_bins`` within ``walk_tolerance_bins``; ``residual_walk_max_bins``;
     ``uncompensated_loss_db``, ``keystone_only_loss_db`` and ``dechirp_only_loss_db`` within
     ``loss_tolerance_db`` (the keystone alone within ``keystone_only_loss_tolerance_db``);
-    ``compensated_loss_min_db``; the searched ``fold_factor``; the searched acceleration within
-    ``acceleration_tolerance_mps2`` of the truth; the fine rate within ``rate_error_max_crb``
-    of its bound.
+    ``compensated_loss_min_db`` (up to ``loss_tolerance_db``); the searched ``fold_factor``;
+    the searched acceleration within ``acceleration_tolerance_mps2`` of the truth; the fine
+    rate within ``rate_error_max_crb`` of its bound. ``dechirp_only_loss_db`` is measured for
+    any method it is asked of: with no acceleration the filter changes nothing.
     """
     scenario, verify = ctx.scenario, evaluate.thresholds(ctx, "keystone")
     radar, n_pulses, gate = scenario.radar, scenario.n_pulses[0], scenario.gates[0]
     truth = evaluate.truth(ctx)[0]
     rcs_m2 = [target.rcs_m2 for target in scenario.targets]
-    start_m = gate.range_gate_start_m
     clean = pulse_compress(
-        synthesise(radar, truth, rcs_m2, n_pulses, rng=None, gate=gate),
-        radar,
-        range_gate_start_m=start_m,
+        synthesise(radar, truth, rcs_m2, n_pulses, rng=None, gate=gate), radar, gate=gate
     )
     reference_w = integrated_peak(clean[:1]).power_linear * n_pulses**2
     row: dict[str, Any] = {"frame": 0}
@@ -100,7 +98,8 @@ def keystone_stage(ctx: evaluate.Context) -> evaluate.Context:
         clean, carrier_frequency_hz=carrier, sample_rate_hz=sample_rate_hz
     )
     loss("keystone_only_loss_db", keystoned.data_rfst)
-    if scenario.migration.method == "keystone_doppler_rate":
+    # Asked for by [verify] or the method: for a constant rate the filter is the identity.
+    if scenario.migration.method == "keystone_doppler_rate" or "dechirp_only_loss_db" in verify:
         dechirped = doppler_rate_compensation(
             clean,
             carrier_frequency_hz=carrier,
@@ -119,15 +118,15 @@ def keystone_stage(ctx: evaluate.Context) -> evaluate.Context:
     if ctx.render:
         centre = int(np.rint(track[0]))
         window = slice(max(0, centre - _PLOT_HALF_WIDTH), centre + _PLOT_HALF_WIDTH)
-        range_axis_m, _ = map_axes(
-            radar, n_pulses, range_gate_start_m=start_m, n_range_bins=clean.shape[1]
-        )
+        range_axis_m, _ = map_axes(radar, n_pulses, gate=gate)
+        panels = [("compressed", clean), ("keystone, F = 0", keystoned.data_rfst)]
+        if compensated.rate is not None:
+            label = f"keystone + Doppler rate, a = {compensated.acceleration_mps2:.0f} m/s$^2$"
+            panels.append((label, compensated.data_rfst))
+        elif compensated.fold_factor != 0:
+            panels.append((f"keystone, F = {compensated.fold_factor}", compensated.data_rfst))
         figure = plots.render_range_slow_time(
-            [
-                ("compressed", clean[:, window]),
-                ("keystone", keystoned.data_rfst[:, window]),
-                (scenario.migration.method, compensated.data_rfst[:, window]),
-            ],
+            [(label, data[:, window]) for label, data in panels],
             range_axis_m[window],
             radar,
             title=f"{scenario.name}, frame 0, noiseless",
@@ -162,11 +161,9 @@ def _estimates(ctx: evaluate.Context) -> dict[str, Any]:
     scenario = ctx.scenario
     radar, n_pulses, gate = scenario.radar, scenario.n_pulses[0], scenario.gates[0]
     frame = next(frames(scenario, n_frames=1))
-    noisy = pulse_compress(frame.cubes[0], radar, range_gate_start_m=gate.range_gate_start_m)
+    noisy = pulse_compress(frame.cubes[0], radar, gate=gate)
     compensated = compensate_migration(noisy, radar, scenario.migration)
-    range_axis_m, rate_axis_mps = map_axes(
-        radar, n_pulses, range_gate_start_m=gate.range_gate_start_m, n_range_bins=noisy.shape[1]
-    )
+    range_axis_m, rate_axis_mps = map_axes(radar, n_pulses, gate=gate)
     peak = integrated_peak(compensated.data_rfst, refine_range=False)
     chip = crop_slow_time(
         compensated.data_rfst,
@@ -252,8 +249,9 @@ def _check(ctx: evaluate.Context, verify: dict[str, Any], row: dict[str, Any]) -
             expected = verify[key]
             ctx.check("keystone", key, row[key], expected - within, expected + within)
     if "compensated_loss_min_db" in verify:
+        # Both peaks are read on a 1/16-bin grid, so a perfect correction can read above 0 dB.
         low = verify["compensated_loss_min_db"]
-        ctx.check("keystone", "compensated_loss_db", row["compensated_loss_db"], low, 0.0)
+        ctx.check("keystone", "compensated_loss_db", row["compensated_loss_db"], low, tolerance_db)
     if "fold_factor" in verify:
         expected = verify["fold_factor"]
         ctx.check("keystone", "fold_factor", row.get("fold_factor", 0), expected, expected)

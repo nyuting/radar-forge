@@ -48,7 +48,9 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.optimize import minimize, minimize_scalar
 
+from radar_forge._fourier import aboutanios_mulgrew, signed_cycles
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
+from radar_forge.propagation import bistatic_range_rate_from_doppler_mps
 
 __all__ = [
     "FINE_METHODS",
@@ -230,12 +232,12 @@ def estimate_tone(
 
     From the peak bin :math:`k` and its neighbours, the offset :math:`\delta` is
     ``"parabolic"``, the vertex through :math:`|X|`, biased by up to a quarter of a bin;
-    ``"quinn"``, Quinn's first estimator from :math:`\mathrm{Re}(X_{k\pm1}/X_k)` [2]_ eqs. (8)-(9);
+    ``"quinn"``, Quinn's first estimator from :math:`\mathrm{Re}(X_{k\pm1}/X_k)` [2]_;
     ``"jacobsen"``, :math:`\mathrm{Re}[(X_{k-1} - X_{k+1})/(2X_k - X_{k-1} - X_{k+1})]` [3]_;
-    ``"candan"``, that times :math:`\tan(\pi/n)/(\pi/n)` [4]_ eq. (9); or
+    ``"candan"``, that times :math:`\tan(\pi/n)/(\pi/n)` [4]_; or
     ``"aboutanios_mulgrew"``, ``n_iterations`` of
     :math:`\delta \mathrel{+}= \tfrac12\mathrm{Re}[(X_{+} + X_{-})/(X_{+} - X_{-})]` with
-    :math:`X_\pm` the DTFT half a bin either side [5]_ §III. Only the last is exact on a
+    :math:`X_\pm` the DTFT half a bin either side [5]_. Only the last is exact on a
     noiseless tone; all assume a rectangular window [1]_.
 
     Examples
@@ -253,7 +255,7 @@ def estimate_tone(
     k = int(np.argmax(np.abs(spectrum)))
     before, peak, after = spectrum[(k - 1) % n], spectrum[k], spectrum[(k + 1) % n]
     if method == "aboutanios_mulgrew":
-        return _aboutanios_mulgrew(x, float(k), n_iterations) % n
+        return aboutanios_mulgrew(x, float(k), n_iterations) % n
     if method == "parabolic":
         low, middle, high = np.abs(before), np.abs(peak), np.abs(after)
         offset = 0.5 * (low - high) / (low - 2.0 * middle + high)
@@ -283,9 +285,9 @@ def cramer_rao_bounds(
     band, :math:`R_b(t) = R_0 + \dot R t + \ddot R t^2/2 + \dddot R t^3/6` from pulse 0, in
     complex white noise; amplitude and phase are unknown. With :math:`\partial\mu/\partial
     \theta_i = j h_i \mu` the Fisher information is :math:`2\rho\,\overline{h_i h_j}`, the bar a
-    mean over pulses and the band (Kay [10]_ eq. (15.52); Peleg and Porat [7]_ eq. (3)),
+    mean over pulses and the band (Kay [10]_ ch. 15; Peleg and Porat [7]_),
     :math:`\rho` the integrated SNR. Without acceleration the rate's bound is the tone's,
-    :math:`\mathrm{var}(\hat\omega) \ge 6/(\rho (N^2 - 1))` (Rife and Boorstyn [1]_ eq. (25)).
+    :math:`\mathrm{var}(\hat\omega) \ge 6/(\rho (N^2 - 1))` (Rife and Boorstyn [1]_).
     """
     if polynomial_order not in (1, 2, 3) or not snr_linear > 0.0 or n_pulses < polynomial_order + 1:
         msg = "polynomial_order must be 1, 2 or 3, snr_linear positive, with enough pulses."
@@ -393,13 +395,13 @@ def _phase_polynomial(
     higher = np.zeros(3)
     if method in _TONE_METHODS:
         cycles = estimate_tone(slow_time, method=method) / n_pulses
-        return np.array([2.0 * np.pi * _signed(cycles), 0.0, 0.0])
+        return np.array([2.0 * np.pi * signed_cycles(cycles), 0.0, 0.0])
     if method == "haf":
         higher = _haf(slow_time, polynomial_order)
     else:
         higher = _cpf(slow_time, polynomial_order)
     residual = slow_time * np.exp(-1j * (higher[1] * pulse**2 + higher[2] * pulse**3))
-    linear = 2.0 * np.pi * _signed(estimate_tone(residual) / n_pulses)
+    linear = 2.0 * np.pi * signed_cycles(estimate_tone(residual) / n_pulses)
     coefficients = np.array([linear, higher[1], higher[2]])
     if method == "grft":
         coefficients = _maximum_likelihood(slow_time, coefficients, polynomial_order)
@@ -411,7 +413,7 @@ def _haf(slow_time: NDArray[np.complex128], polynomial_order: int) -> NDArray[np
 
     The order-3 product :math:`z_{m+2\tau} z^*_{m+\tau}{}^2 z_m` is a tone at
     :math:`6 c_3 \tau^2`; once :math:`c_3 m^3` is removed, :math:`z_{m+\tau} z^*_m` is one at
-    :math:`2 c_2 \tau`, with :math:`\tau = N/3` and :math:`N/2` (Peleg and Porat [6]_ §III).
+    :math:`2 c_2 \tau`, with :math:`\tau = N/3` and :math:`N/2` (Peleg and Porat [6]_).
     """
     n_pulses = slow_time.size
     pulse = np.arange(n_pulses, dtype=np.float64)
@@ -434,7 +436,7 @@ def _cpf(slow_time: NDArray[np.complex128], polynomial_order: int) -> NDArray[np
     r"""Return :math:`(0, c_2, c_3)` from the cubic phase function's peaks.
 
     :math:`CP(n, \Omega) = \sum_m z_{n+m} z_{n-m} e^{-j\Omega m^2}` peaks at the phase's
-    second derivative :math:`2c_2 + 6c_3 n` (O'Shea [8]_ eq. (3)), read at the centre and, for
+    second derivative :math:`2c_2 + 6c_3 n` (O'Shea [8]_), read at the centre and, for
     the cubic, a quarter of the dwell either side.
     """
     n_pulses = slow_time.size
@@ -466,7 +468,7 @@ def _cpf_peak(slow_time: NDArray[np.complex128], centre: int) -> float:
     plausible = np.abs(np.fft.fftfreq(n_fft)) <= 2.0 / n_pulses
     best = int(np.argmax(np.where(plausible, magnitude, -1.0)))
     grid_step = 2.0 * np.pi / n_fft
-    start = 2.0 * np.pi * _signed(best / n_fft)
+    start = 2.0 * np.pi * signed_cycles(best / n_fft)
 
     def negative_magnitude(rate: float) -> float:
         return -float(np.abs(products @ np.exp(-1j * rate * lag**2)))
@@ -487,7 +489,7 @@ def _maximum_likelihood(
 
     The local generalised Radon-Fourier transform: after the keystone the chip's trajectory is
     straight in range, so its sum along the trajectory is the range-focused sequence, and the
-    likelihood is maximised over the phase alone (Xu et al. [9]_ §III). The search runs in
+    likelihood is maximised over the phase alone (Xu et al. [9]_). The search runs in
     :math:`c_p N^p`, the phase each term adds over the dwell.
     """
     n_pulses = slow_time.size
@@ -523,21 +525,30 @@ def _in_parent_coordinates(
 ) -> FineEstimate:
     r"""Convert chip-local delay and phase coefficients to the parent's bistatic quantities.
 
-    :math:`c_1 = -2\pi\dot R T/\lambda` folded, :math:`c_2 = -\pi\ddot R T^2/\lambda`,
-    :math:`c_3 = -\pi\dddot R T^3/(3\lambda)`, :math:`T` the PRI; the fold factor adds back
-    :math:`-F\lambda\,\mathrm{PRF}` and the compensation what it removed.
+    The phase :math:`2\pi(f_D t + \dot f_D t^2/2 + \ddot f_D t^3/6)`, :math:`t = mT`, gives
+    :math:`f_D = c_1/(2\pi T)` (folded; the fold factor adds :math:`F\,\mathrm{PRF}`),
+    :math:`\dot f_D = c_2/(\pi T^2)` and :math:`\ddot f_D = 3c_3/(\pi T^3)`. Each becomes a
+    rate, acceleration or jerk through
+    :func:`~radar_forge.propagation.bistatic_range_rate_from_doppler_mps`, the inverse of
+    :func:`~radar_forge.propagation.doppler_shift_hz` and its derivatives, so the sign lives
+    there; the compensation adds back what it removed.
     """
     process = chip.processing
     wavelength_m = SPEED_OF_LIGHT_MPS / process.carrier_frequency_hz
     pri_s = 1.0 / process.prf_hz
     n_pulses = chip.data.shape[0]
     cycles = coefficients[0] / (2.0 * np.pi)
-    rate_mps = -wavelength_m * cycles / pri_s - process.fold_factor * wavelength_m * process.prf_hz
+    doppler_hz = (cycles + process.fold_factor) * process.prf_hz
+    rate_mps = bistatic_range_rate_from_doppler_mps(doppler_hz, wavelength_m)
     fitted = method not in _TONE_METHODS
-    acceleration = process.compensated_acceleration_mps2 - coefficients[1] * wavelength_m / (
-        np.pi * pri_s**2
+    doppler_rate_hzps = coefficients[1] / (np.pi * pri_s**2)
+    doppler_jerk_hzps2 = 3.0 * coefficients[2] / (np.pi * pri_s**3)
+    acceleration = process.compensated_acceleration_mps2 + bistatic_range_rate_from_doppler_mps(
+        doppler_rate_hzps, wavelength_m
     )
-    jerk = process.compensated_jerk_mps3 - 3.0 * coefficients[2] * wavelength_m / (np.pi * pri_s**3)
+    jerk = process.compensated_jerk_mps3 + bistatic_range_rate_from_doppler_mps(
+        doppler_jerk_hzps2, wavelength_m
+    )
     order = polynomial_order if fitted else 1
     crb = cramer_rao_bounds(
         snr_linear,
@@ -560,27 +571,6 @@ def _in_parent_coordinates(
     )
 
 
-def _aboutanios_mulgrew(
-    samples: NDArray[np.complex128], peak_bin: float, n_iterations: int
-) -> float:
-    """Return the frequency, DFT bins, after ``n_iterations`` of A&M's half-bin interpolation."""
-    n = samples.size
-    index = np.arange(n)
-    estimate = peak_bin
-    # Each iteration refines the last; two reach the noiseless tone to rounding [5].
-    for _ in range(n_iterations):
-        plus, minus = (
-            samples @ np.exp(-2j * np.pi * index * (estimate + half) / n) for half in (0.5, -0.5)
-        )
-        estimate += 0.5 * float(np.real((plus + minus) / (plus - minus)))
-    return estimate
-
-
 def _tone_rad(samples: NDArray[np.complex128]) -> float:
     """Return a tone's frequency in rad per sample, in ``[-pi, pi)``, by A&M."""
-    return 2.0 * np.pi * _signed(estimate_tone(samples) / samples.size)
-
-
-def _signed(cycles: float) -> float:
-    """Return cycles per sample wrapped into ``[-0.5, 0.5)``."""
-    return float((cycles + 0.5) % 1.0 - 0.5)
+    return 2.0 * np.pi * signed_cycles(estimate_tone(samples) / samples.size)

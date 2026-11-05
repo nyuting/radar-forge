@@ -15,18 +15,21 @@ import numpy as np
 import pytest
 from scipy.signal import czt
 
+from radar_forge import evaluate
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.detection import cfar_detect
 from radar_forge.dsp import doppler_fft, matched_filter
 from radar_forge.migration import (
+    compensate_migration,
     doppler_rate_compensation,
     fold_factor_search,
     integrated_peak,
     keystone,
+    pulse_compress,
     range_spectrum,
     second_order_keystone,
 )
-from radar_forge.pipeline import compensate_migration, pulse_compress, synthesise
+from radar_forge.pipeline import synthesise
 from radar_forge.scenario import RangeGate, load_scenario, truth_geometry
 from radar_forge.signal import lfm_chirp
 
@@ -319,7 +322,7 @@ def full_size(request: pytest.FixtureRequest) -> dict[str, object]:
         truth = truth_geometry(scenario)[0]
         radar, gate = scenario.radar, scenario.gates[0]
         cube = synthesise(radar, truth, [0.1], 1024, rng=None, gate=gate)
-        found[variant] = (scenario, truth, pulse_compress(cube, radar, range_gate_start_m=4800.0))
+        found[variant] = (scenario, truth, pulse_compress(cube, radar, gate=scenario.gates[0]))
     return found
 
 
@@ -390,14 +393,34 @@ def test_k3_fold_factor_is_found_in_every_noisy_trial(full_size):
     scenario, truth, _ = full_size["k3"]
     radar, rng = scenario.radar, np.random.default_rng(6)
     gate = RangeGate(5000.0 - 150 * SPEED_OF_LIGHT_MPS / 600.0e6, 256)
-    start_m = gate.range_gate_start_m
     cube = synthesise(radar, truth, [0.1], 1024, rng=None, gate=gate)
-    clean = pulse_compress(cube, radar, range_gate_start_m=start_m)
+    clean = pulse_compress(cube, radar, gate=gate)
     sigma = np.sqrt(radar.receiver.noise_power_per_sample_w / 2)
     found = []
     # One trial at a time: each searches seven fold factors over a whole cube.
     for _ in range(200):
         noise = rng.normal(0, sigma, (1024, 256, 2)) @ [1, 1j]
-        noisy = clean + pulse_compress(noise, radar, range_gate_start_m=start_m)
+        noisy = clean + pulse_compress(noise, radar, gate=gate)
         found.append(compensate_migration(noisy, radar, scenario.migration).fold_factor)
     assert found == [1] * 200
+
+
+# Slow: the keystone stage on a full 1024-pulse frame.
+@pytest.mark.slow
+def test_a_dechirp_only_loss_asked_of_a_constant_rate_config_is_measured(tmp_path):
+    """Regression: K1 asking for dechirp_only_loss_db once raised KeyError in the check.
+
+    With no acceleration the Doppler-rate filter changes nothing, so the dechirp-only loss is
+    the uncorrected one, -25.78 dB from the model, within K1's loss tolerance.
+    """
+    text = (REPO / "config" / "scenario_004_keystone_k1.toml").read_text(encoding="utf-8")
+    path = tmp_path / "k1.toml"
+    path.write_text(text + "dechirp_only_loss_db = -25.78\n", encoding="utf-8")
+    report = evaluate.run(
+        load_scenario(path), ["keystone"], n_frames=1, out_dir=tmp_path, render=False
+    )
+    assert not report.failures
+    # atol 1e-9 dB: the identity filter is one FFT round trip of the same cube.
+    np.testing.assert_allclose(
+        report.values["dechirp_only_loss_db"], report.values["uncompensated_loss_db"], atol=1e-9
+    )

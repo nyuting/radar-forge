@@ -3,7 +3,7 @@ r"""The chain from a scenario to tracks: frames of IQ, range-Doppler maps, plots
 :func:`frames` plays a :class:`~radar_forge.scenario.Scenario` back one frame at a time, each
 burst's cube synthesised from line-of-sight paths. :func:`range_doppler_product` makes each
 cube a :class:`RangeDopplerProduct`, a pulsed cube through its range gate and ``[migration]``
-(:func:`compensate_migration`); :func:`frame_plots` runs CFAR along range, clusters, and
+(:mod:`radar_forge.migration`); :func:`frame_plots` runs CFAR along range, clusters, and
 pairs two bursts by dual PRF into :class:`Plots`; :class:`ScanTracker` feeds the accepted plots
 to a :class:`~radar_forge.tracking.Tracker`. The map axes carry bistatic range
 :math:`R_T + R_R` and its rate, positive receding; nothing here halves them.
@@ -31,20 +31,12 @@ from radar_forge.dsp import (
     doppler_bin_centers_mps,
     doppler_fft,
     fold_velocity_mps,
-    matched_filter,
     range_bin_centers_m,
     range_doppler_map,
     unfold_doppler_dual_prf,
     unfold_range_dual_prf,
 )
-from radar_forge.migration import (
-    DopplerRateCompensation,
-    FoldFactorSearch,
-    KeystoneResult,
-    doppler_rate_compensation,
-    fold_factor_search,
-    keystone,
-)
+from radar_forge.migration import compensate_migration, pulse_compress
 from radar_forge.propagation import line_of_sight_paths
 from radar_forge.radar import Radar, TargetGeometry
 from radar_forge.scenario import (
@@ -54,12 +46,7 @@ from radar_forge.scenario import (
     Scenario,
     truth_geometry,
 )
-from radar_forge.signal import (
-    fmcw_deramp_baseband,
-    lfm_chirp,
-    pulsed_baseband,
-    range_gate_first_sample,
-)
+from radar_forge.signal import fmcw_deramp_baseband, pulsed_baseband
 from radar_forge.tracking.association import GlobalNearestNeighbour
 from radar_forge.tracking.filters import (
     TaylorLinearisation,
@@ -71,17 +58,14 @@ from radar_forge.tracking.models import LinearMeasurement, RadialConstantVelocit
 from radar_forge.tracking.tracker import DirectStateInitiator, LifecyclePolicy, Scan, Tracker
 
 __all__ = [
-    "CompensatedPulses",
     "Frame",
     "Plots",
     "RangeDopplerProduct",
     "ScanTracker",
-    "compensate_migration",
     "frame_plots",
     "frame_products",
     "frames",
     "map_axes",
-    "pulse_compress",
     "range_doppler_product",
     "synthesise",
 ]
@@ -148,26 +132,25 @@ def frames(scenario: Scenario, *, n_frames: int | None = None) -> Iterator[Frame
 
 
 def map_axes(
-    radar: Radar,
-    n_pulses: int,
-    *,
-    range_gate_start_m: float = 0.0,
-    n_range_bins: int | None = None,
+    radar: Radar, n_pulses: int, *, gate: RangeGate | None = None
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Return a burst's map axes: bistatic range of each range bin, and rate of each Doppler bin.
 
-    FMCW range is the beat axis; a pulsed bin is one sample of delay from the range gate,
-    :func:`~radar_forge.dsp.delay_bin_centers_m`, ``n_range_bins`` of them (default: a PRI).
+    FMCW range is the beat axis; a pulsed bin is one sample of delay from the range gate's
+    first, :func:`~radar_forge.dsp.delay_bin_centers_m` (no gate: the whole PRI from zero).
     """
     transmitter, sample_rate_hz = radar.transmitter, radar.receiver.sample_rate_hz
-    n_samples = radar.n_samples_per_pri if n_range_bins is None else n_range_bins
+    gate = RangeGate() if gate is None else gate
     if transmitter.waveform == "pulsed":
         range_axis_m = delay_bin_centers_m(
-            n_samples, sample_rate_hz, range_gate_start_m=range_gate_start_m
+            gate.n_samples(radar), sample_rate_hz, range_gate_start_m=gate.range_gate_start_m
         )
     else:
         range_axis_m = range_bin_centers_m(
-            n_samples, transmitter.bandwidth_hz, transmitter.chirp_duration_s, sample_rate_hz
+            radar.n_samples_per_pri,
+            transmitter.bandwidth_hz,
+            transmitter.chirp_duration_s,
+            sample_rate_hz,
         )
     pri_s = transmitter.pulse_repetition_interval_s
     return range_axis_m, doppler_bin_centers_mps(n_pulses, pri_s, radar.wavelength_m)
@@ -231,131 +214,35 @@ class RangeDopplerProduct:
         return range_index, np.mod(offset_mps / self.rate_bin_mps, self.rate_axis_mps.size)
 
 
-def pulse_compress(
-    cube: ArrayLike, radar: Radar, *, range_gate_start_m: float = 0.0
-) -> NDArray[np.complex128]:
-    """Matched-filter a pulsed cube along fast time: ``data_rfst``, the same shape.
-
-    Rows that are whole PRIs from zero delay are one stream, since the receiver keeps
-    listening: compressed as one and cut back into rows, an echo that runs into the next row
-    compresses whole and every cell holds the same noise. A gated cube's rows are not
-    contiguous, so each is compressed alone. Either way the reference's group delay,
-    ``n_reference - 1``, is cut, so the gate's first sample lands at bin 0 (Richards [1] §4.6).
-    """
-    samples = np.asarray(cube, dtype=np.complex128)
-    transmitter, sample_rate_hz = radar.transmitter, radar.receiver.sample_rate_hz
-    reference = lfm_chirp(transmitter.bandwidth_hz, transmitter.chirp_duration_s, sample_rate_hz)
-    start = reference.size - 1
-    first = range_gate_first_sample(range_gate_start_m, sample_rate_hz)
-    if first == 0 and samples.shape[1] == radar.n_samples_per_pri:
-        stream = matched_filter(samples.reshape(-1), reference)
-        return stream[start : start + samples.size].reshape(samples.shape)
-    return matched_filter(samples, reference, axis=1)[:, start : start + samples.shape[1]]
-
-
-@dataclass(frozen=True)
-class CompensatedPulses:
-    """``[migration]`` applied to ``data_rfst``: the result, and each step that ran or ``None``."""
-
-    data_rfst: NDArray[np.complex128]
-    keystone: KeystoneResult | None
-    fold: FoldFactorSearch | None
-    rate: DopplerRateCompensation | None
-
-    @property
-    def fold_factor(self) -> int:
-        """The fold factor the keystone used: searched, or 0."""
-        return 0 if self.fold is None else self.fold.fold_factor
-
-    @property
-    def acceleration_mps2(self) -> float:
-        """The bistatic acceleration the Doppler-rate filter removed, m/s²: searched, or 0."""
-        return 0.0 if self.rate is None else self.rate.acceleration_mps2
-
-
-def compensate_migration(
-    data_rfst: ArrayLike, radar: Radar, settings: MigrationSettings
-) -> CompensatedPulses:
-    """Apply ``[migration]``: keystone, its fold-factor search, then the Doppler-rate search."""
-    data = np.asarray(data_rfst, dtype=np.complex128)
-    if settings.method == "none":
-        return CompensatedPulses(data, None, None, None)
-    transmitter, sample_rate_hz = radar.transmitter, radar.receiver.sample_rate_hz
-    carrier_hz = transmitter.carrier_frequency_hz
-    keystoned, fold = None, None
-    if settings.fold_factor_max > 0:
-        fold = fold_factor_search(
-            data,
-            carrier_frequency_hz=carrier_hz,
-            sample_rate_hz=sample_rate_hz,
-            bandwidth_hz=transmitter.bandwidth_hz,
-            fold_factor_max=settings.fold_factor_max,
-            method=settings.keystone,
-        )
-        data = fold.data_rfst
-    else:
-        keystoned = keystone(
-            data,
-            carrier_frequency_hz=carrier_hz,
-            sample_rate_hz=sample_rate_hz,
-            method=settings.keystone,
-        )
-        data = keystoned.data_rfst
-    rate = None
-    if settings.method == "keystone_doppler_rate":
-        rate = doppler_rate_compensation(
-            data,
-            carrier_frequency_hz=carrier_hz,
-            sample_rate_hz=sample_rate_hz,
-            prf_hz=transmitter.prf_hz,
-            accelerations_mps2=settings.accelerations_mps2,
-        )
-        data = rate.data_rfst
-    return CompensatedPulses(data, keystoned, fold, rate)
-
-
 def range_doppler_product(
     cube: ArrayLike,
     radar: Radar,
     *,
-    range_gate_start_m: float = 0.0,
+    gate: RangeGate | None = None,
     migration: MigrationSettings | None = None,
 ) -> RangeDopplerProduct:
-    """Form one burst's map: FMCW, two FFTs; pulsed, :func:`pulse_compress`, then the Doppler FFT.
+    """Form one burst's map: FMCW, two FFTs; pulsed, compression, migration, the Doppler FFT.
 
     A pulsed chain applies ``migration`` between the two, so detection and tracking see the
-    compensated map. No window is applied on either axis.
+    compensated map. A gated map's range circle is the PRI's. No window on either axis.
     """
     samples = np.asarray(cube, dtype=np.complex128)
     if radar.transmitter.waveform == "pulsed":
-        data_rfst = pulse_compress(samples, radar, range_gate_start_m=range_gate_start_m)
+        data_rfst = pulse_compress(samples, radar, gate=gate)
         if migration is not None:
             data_rfst = compensate_migration(data_rfst, radar, migration).data_rfst
         rd_map = doppler_fft(data_rfst, axis=0)
     else:
         rd_map = range_doppler_map(samples)
-    gated = (
-        range_gate_first_sample(range_gate_start_m, radar.receiver.sample_rate_hz) != 0
-        or samples.shape[1] != radar.n_samples_per_pri
-    )
-    axes = map_axes(
-        radar,
-        samples.shape[0],
-        range_gate_start_m=range_gate_start_m,
-        n_range_bins=samples.shape[1],
-    )
-    return RangeDopplerProduct(rd_map, *axes, radar.unambiguous_bistatic_range_m if gated else None)
+    windowed = gate is not None and not gate.is_whole_pri(radar)
+    circle_m = radar.unambiguous_bistatic_range_m if windowed else None
+    return RangeDopplerProduct(rd_map, *map_axes(radar, samples.shape[0], gate=gate), circle_m)
 
 
 def frame_products(scenario: Scenario, frame: Frame) -> list[RangeDopplerProduct]:
     """Return each burst's map of one frame, through its range gate and ``[migration]``."""
     return [
-        range_doppler_product(
-            cube,
-            radar,
-            range_gate_start_m=gate.range_gate_start_m,
-            migration=scenario.migration,
-        )
+        range_doppler_product(cube, radar, gate=gate, migration=scenario.migration)
         for cube, radar, gate in zip(frame.cubes, scenario.radars, scenario.gates, strict=True)
     ]
 

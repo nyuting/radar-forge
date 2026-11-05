@@ -165,7 +165,9 @@ def _hits(
             if b == burst
         ]
     )
-    n_rate, n_range = product.rd_map.shape
+    n_rate = product.rd_map.shape[0]
+    # The range circle in bins: the map's width, or the PRI's when the map is a gated window.
+    n_range = round(product.range_period_m / product.range_bin_m)
     cells = cells.reshape(-1, 2)
     # Offsets in bins the short way round each axis, in [-n/2, n/2).
     rate_offset = fold_into_period(
@@ -235,13 +237,9 @@ def _false_alarm_ratio(scenario: Scenario, burst: int) -> float:
     rng = np.random.default_rng([scenario.seed, 2, burst])
     shape = (n_maps, n_pulses, gate.n_samples(radar))
     noise = thermal_noise(shape, radar.receiver.noise_power_per_sample_w, rng=rng)
-    start_m = gate.range_gate_start_m
     # One map at a time: the receive chain takes one cube.
     power_w = np.stack(
-        [
-            np.abs(range_doppler_product(cube, radar, range_gate_start_m=start_m).rd_map) ** 2
-            for cube in noise
-        ]
+        [np.abs(range_doppler_product(cube, radar, gate=gate).rd_map) ** 2 for cube in noise]
     )
     detected, _ = cfar_detect(
         power_w,
