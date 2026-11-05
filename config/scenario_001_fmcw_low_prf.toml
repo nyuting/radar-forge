@@ -1,22 +1,30 @@
 # Scenario 001 -- X-band radar at the Duke Receiver, Durham NC.
-# See spec/scenario-001-xband.md. The three variants share every
-# block below except [[burst]]; that is the whole point of the comparison.
+# The three variants share every block below except [[burst]]; that is the
+# whole point of the comparison. Every range and rate on the map is bistatic:
+# monostatic, twice the slant range and twice the radial velocity.
 
 [scenario]
 name = "scenario-001-fmcw-low-prf"
-description = "S1: FMCW at 1 kHz PRF. Range is unambiguous to 37.5 km; Doppler folds at +-7.65 m/s, so an 80 m/s aircraft aliases about five times."
+description = "S1: FMCW at 1 kHz PRF. Bistatic range is unambiguous to 75.0 km (37.5 km slant), so range never folds; the bistatic rate folds at +-15.3 m/s (+-7.65 m/s radial), so an 80 m/s aircraft aliases about five times."
 seed = 20260911
 
-[target]
+[[target]]
 name = "light-aircraft"
 rcs_dbsm = 10.0        # 10 m^2, Swerling 0 (non-fluctuating)
+trajectory_path = "../data/flight_coordinates.csv"
 altitude_m = 1500.0    # the CSV has no altitude column; held constant
 
-[trajectory]
-path = "../data/flight_coordinates.csv"
+[frames]
 start_time_s = 0.0
 duration_s = 120.0     # the full track is ~16,500 frames; this window is opt-out
 frame_rate_hz = 1.0
+
+[site.tx]
+# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna. With
+# no [site.rx] the receiver stands here too: monostatic.
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
 
 # One burst. 1 ms sweep at 2 GHz/s, deramped at 1 MHz -> 1000 samples/chirp.
 # 256 chirps = 256 ms of CPI inside each 1 s frame.
@@ -30,12 +38,6 @@ chirp_duration_s = 1.0e-3
 prf_hz = 1.0e3
 sample_rate_hz = 1.0e6
 n_pulses = 256
-
-[receiver_site]
-# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna.
-latitude_deg = 36.00250
-longitude_deg = -78.94100
-altitude_m = 60.0
 
 [receiver]
 gain_rx_dbi = 30.0

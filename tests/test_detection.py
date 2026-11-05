@@ -212,7 +212,7 @@ def test_scenario_003_calibration_matches_its_specification():
     unit floor the threshold is alpha itself.
     """
     scenario = tomllib.loads(
-        (Path(__file__).parents[1] / "scenarios" / "scenario_003_tracking.toml").read_text()
+        (Path(__file__).parents[1] / "config" / "scenario_003_tracking.toml").read_text()
     )
     window = scenario["detection"]
     burst = scenario["burst"][0]

@@ -1,26 +1,34 @@
 # Scenario 001 -- X-band radar at the Duke Receiver, Durham NC.
-# See spec/scenario-001-xband.md. The three variants share every
-# block below except [[burst]]; that is the whole point of the comparison.
+# The three variants share every block below except [[burst]]; that is the
+# whole point of the comparison. Every range and rate on the map is bistatic:
+# monostatic, twice the slant range and twice the radial velocity.
 
 [scenario]
 name = "scenario-001-fmcw-dual-prf"
-description = "S3: two FMCW bursts at 5 kHz and 6 kHz. Neither resolves the velocity alone, but the coprime 5:6 pair does, reaching +-229 m/s, beyond S2's +-191 m/s, by a completely different mechanism."
+description = "S3: two FMCW bursts at 5 kHz and 6 kHz. Neither resolves the rate alone, but the coprime 5:6 pair does, to +-459 m/s of bistatic rate (+-229 m/s radial), beyond S2's, by a completely different mechanism."
 seed = 20260911
 
-[target]
+[[target]]
 name = "light-aircraft"
 rcs_dbsm = 10.0        # 10 m^2, Swerling 0 (non-fluctuating)
+trajectory_path = "../data/flight_coordinates.csv"
 altitude_m = 1500.0    # the CSV has no altitude column; held constant
 
-[trajectory]
-path = "../data/flight_coordinates.csv"
+[frames]
 start_time_s = 0.0
 duration_s = 120.0     # the full track is ~16,500 frames; this window is opt-out
 frame_rate_hz = 1.0
 
+[site.tx]
+# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna. With
+# no [site.rx] the receiver stands here too: monostatic.
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
+
 # Two bursts, 128 pulses each, alternating. Both cover the track in range;
-# their per-burst unambiguous velocities of +-38.24 and +-45.89 m/s are
-# combined by core.ambiguity_resolution.unfold_doppler_dual_prf.
+# their bistatic rate intervals of +-76.48 and +-91.77 m/s are combined by
+# radar_forge.dsp.unfold_doppler_dual_prf.
 #
 # Burst A: 200 us sweep at 10 GHz/s, 4 MHz -> 800 samples. PRF 5.0 kHz.
 [[burst]]
@@ -35,9 +43,9 @@ sample_rate_hz = 4.0e6
 n_pulses = 128
 
 # Burst B: PRF 6.0 kHz at 100 % duty, so the chirp time is exactly 1/6000 s
-# = 166.667 us -> 667 samples. The specification's rounded 166.7 us is a duty
-# cycle of 1.0002 and Transmitter rejects it: the next chirp would start
-# before this one finished.
+# = 166.667 us -> 667 samples. The rounded 166.7 us is a duty cycle of 1.0002
+# and Transmitter rejects it: the next chirp would start before this one
+# finished.
 [[burst]]
 waveform = "fmcw"
 carrier_frequency_hz = 9.8e9
@@ -48,12 +56,6 @@ chirp_duration_s = 1.6666666666666667e-4
 prf_hz = 6.0e3
 sample_rate_hz = 4.0e6
 n_pulses = 128
-
-[receiver_site]
-# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna.
-latitude_deg = 36.00250
-longitude_deg = -78.94100
-altitude_m = 60.0
 
 [receiver]
 gain_rx_dbi = 30.0

@@ -1,0 +1,89 @@
+# Scenario 003, dual-PRF variant -- the same tracker over scenario 001's S3.
+#
+# Everything above [detection] is scenario_001_fmcw_dual_prf.toml verbatim but
+# for the window, which is scenario_003_tracking.toml's 663 s so that the pair
+# is compared over the same frames.
+# The point of the pair is the contrast. On S1 one fold spans 30.6 m/s of
+# bistatic rate, and the simulated target's rate moves by up to 22 m/s between
+# frames, so track-aided unfolding mis-selects in a few per cent of frames no
+# matter how good the tracker is. Here the coprime 5:6 kHz pair resolves the
+# rate in the *waveform*, to +-459 m/s, and the bootstrap disappears: the
+# measurement arrives already unfolded.
+
+[scenario]
+name = "scenario-003-tracking-dual-prf"
+description = "The scenario 003 tracker over the S3 dual-PRF waveform, where the coprime 5:6 kHz pair resolves the bistatic rate to +-459 m/s and no track-aided unfolding is needed."
+seed = 20260911
+
+[[target]]
+name = "light-aircraft"
+rcs_dbsm = 10.0
+trajectory_path = "../data/flight_coordinates.csv"
+altitude_m = 1500.0
+
+[frames]
+start_time_s = 663.0
+duration_s = 120.0
+frame_rate_hz = 1.0
+
+[site.tx]
+# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna.
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
+
+# Burst A: 200 us sweep at 10 GHz/s, 4 MHz -> 800 samples. PRF 5.0 kHz.
+[[burst]]
+waveform = "fmcw"
+carrier_frequency_hz = 9.8e9
+bandwidth_hz = 2.0e6
+transmit_power_w = 100.0
+gain_tx_dbi = 30.0
+chirp_duration_s = 200.0e-6
+prf_hz = 5.0e3
+sample_rate_hz = 4.0e6
+n_pulses = 128
+
+# Burst B: PRF 6.0 kHz at 100 % duty, so the chirp time is exactly 1/6000 s
+# = 166.667 us -> 667 samples.
+[[burst]]
+waveform = "fmcw"
+carrier_frequency_hz = 9.8e9
+bandwidth_hz = 2.0e6
+transmit_power_w = 100.0
+gain_tx_dbi = 30.0
+chirp_duration_s = 1.6666666666666667e-4
+prf_hz = 6.0e3
+sample_rate_hz = 4.0e6
+n_pulses = 128
+
+[receiver]
+gain_rx_dbi = 30.0
+noise_figure_db = 3.0
+
+# As scenario_003_tracking.toml.
+[detection]
+pfa = 1e-5
+n_train = 16
+n_guard = 4
+variant = "ca"
+merge_range_bins = 1.0
+max_bistatic_range_rate_mps = 400.0
+
+# As scenario_003_tracking.toml, but the pair arrives unfolded, so a new track
+# is seeded from both components and nothing unfolds by track.
+[tracking]
+linearisation = "taylor"
+process_noise = "dwna"
+sigma_acceleration_mps2 = 10.0
+initiator = "direct"
+range_only_retry = true
+cost = "negative_log_likelihood_ratio"
+assignment = "joint"
+gate_probability = 0.99
+n_confirm_hits = 4
+n_confirm_scans = 5
+n_delete_misses = 3
+n_reacquire_misses = 5
+reacquire_reset = ["bistatic_range_rate_mps"]
+rate_unfolding = "none"

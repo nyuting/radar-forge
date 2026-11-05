@@ -1,22 +1,30 @@
 # Scenario 001 -- X-band radar at the Duke Receiver, Durham NC.
-# See spec/scenario-001-xband.md. The three variants share every
-# block below except [[burst]]; that is the whole point of the comparison.
+# The three variants share every block below except [[burst]]; that is the
+# whole point of the comparison. Every range and rate on the map is bistatic:
+# monostatic, twice the slant range and twice the radial velocity.
 
 [scenario]
 name = "scenario-001-pulsed-medium-prf"
-description = "S2: LFM pulses at 25 kHz PRF. Velocity is unambiguous to +-191 m/s; range folds at 5.996 km, so the target at 16.6-18.4 km wraps two or three times. The exact mirror of S1."
+description = "S2: LFM pulses at 25 kHz PRF. The bistatic rate is unambiguous to +-382 m/s (+-191 m/s radial); bistatic range folds at 11.99 km (5.996 km slant), so the target at 33-37 km bistatic wraps twice or three times. The exact mirror of S1."
 seed = 20260911
 
-[target]
+[[target]]
 name = "light-aircraft"
 rcs_dbsm = 10.0        # 10 m^2, Swerling 0 (non-fluctuating)
+trajectory_path = "../data/flight_coordinates.csv"
 altitude_m = 1500.0    # the CSV has no altitude column; held constant
 
-[trajectory]
-path = "../data/flight_coordinates.csv"
+[frames]
 start_time_s = 0.0
 duration_s = 120.0     # the full track is ~16,500 frames; this window is opt-out
 frame_rate_hz = 1.0
+
+[site.tx]
+# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna. With
+# no [site.rx] the receiver stands here too: monostatic.
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
 
 # One burst. 10 us LFM pulse, B = 2 MHz (time-bandwidth 20), matched-filtered.
 # PRI 40 us at 2.5 MHz -> 100 samples/PRI. 256 pulses = 10.24 ms of CPI.
@@ -30,12 +38,6 @@ chirp_duration_s = 10.0e-6
 prf_hz = 25.0e3
 sample_rate_hz = 2.5e6
 n_pulses = 256
-
-[receiver_site]
-# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna.
-latitude_deg = 36.00250
-longitude_deg = -78.94100
-altitude_m = 60.0
 
 [receiver]
 gain_rx_dbi = 30.0
