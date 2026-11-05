@@ -45,8 +45,8 @@ N_PULSES = 32
 # Long enough that Harris's asymptotic sidelobe and loss figures are reached.
 N_LONG = 4096
 FIXED_WINDOWS = [name for name in WINDOW_NAMES if name not in ("taylor", "chebyshev")]
-# Scenario 001 S3's two bursts: half-intervals in about 5:6, maps of 60 and 50 km.
-V_UA_A, V_UA_B = 38.24, 45.89
+# Scenario 001 S3's two bursts: rate spans in about 5:6, maps of 60 and 50 km.
+SPAN_A_MPS, SPAN_B_MPS = 76.48, 91.78
 SPAN_A_M, SPAN_B_M, REPEAT_M = 60_000.0, 50_000.0, 300_000.0
 
 
@@ -471,20 +471,24 @@ class TestFold:
 
     def test_fold_velocity_is_closed_at_the_top_as_the_map_is(self) -> None:
         """Both edges read +v_ua, since rate bin 0 is +v_ua: catches the closing-positive edge."""
-        np.testing.assert_allclose(fold_velocity_mps([7.65, -7.65], 7.65), [7.65, 7.65])
-        folded_mps = fold_velocity_mps(np.linspace(-500.0, 500.0, 2001), 7.65)
+        np.testing.assert_allclose(fold_velocity_mps([7.65, -7.65], 15.3), [7.65, 7.65])
+        folded_mps = fold_velocity_mps(np.linspace(-500.0, 500.0, 2001), 15.3)
         assert np.all((folded_mps > -7.65) & (folded_mps <= 7.65))
+
+    def test_fold_velocity_takes_the_span_the_map_wraps_at(self) -> None:
+        """One whole span past a rate is the same rate: the argument is the span, not half."""
+        np.testing.assert_allclose(fold_velocity_mps(15.3 + 1.0, 15.3), 1.0, rtol=1e-12)
 
     @pytest.mark.parametrize("n_folds", [-3, 2])
     def test_a_folded_target_lands_where_fold_velocity_says(self, n_folds: int) -> None:
         """Synthesise a target n_folds intervals off bin 7; the FFT and the fold must agree."""
         rate_mps = doppler_bin_centers_mps(N_PULSES, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)
-        v_ua_mps = WAVELENGTH_M / (2.0 * PULSE_REPETITION_INTERVAL_S)
-        true_mps = rate_mps[7] + n_folds * 2.0 * v_ua_mps
+        span_mps = WAVELENGTH_M / PULSE_REPETITION_INTERVAL_S
+        true_mps = rate_mps[7] + n_folds * span_mps
         slow_time_s = np.arange(N_PULSES) * PULSE_REPETITION_INTERVAL_S
         echo = np.exp(-2j * np.pi * true_mps / WAVELENGTH_M * slow_time_s)
         peak = int(np.argmax(np.abs(doppler_fft(echo))))
-        np.testing.assert_allclose(rate_mps[peak], fold_velocity_mps(true_mps, v_ua_mps), rtol=1e-9)
+        np.testing.assert_allclose(rate_mps[peak], fold_velocity_mps(true_mps, span_mps), rtol=1e-9)
 
     @pytest.mark.parametrize("fold", [fold_into_period, fold_velocity_mps])
     def test_rejects_a_zero_period(self, fold) -> None:
@@ -509,10 +513,10 @@ class TestUnfold:
         max_velocity_mps = 0.999 * p * q * base_mps / 2.0
         true_mps = fraction * max_velocity_mps
         velocity_mps, residual_mps = unfold_doppler_dual_prf(
-            fold_velocity_mps(true_mps, p * base_mps / 2.0),
-            fold_velocity_mps(true_mps, q * base_mps / 2.0),
-            p * base_mps / 2.0,
-            q * base_mps / 2.0,
+            fold_velocity_mps(true_mps, p * base_mps),
+            fold_velocity_mps(true_mps, q * base_mps),
+            p * base_mps,
+            q * base_mps,
             max_velocity_mps=max_velocity_mps,
             tolerance_mps=base_mps / 4.0,
         )
@@ -536,26 +540,26 @@ class TestUnfold:
         np.testing.assert_allclose(range_m, true_m, atol=1e-9 * max_range_m)
 
     def test_a_target_outside_the_bound_aliases_to_a_confident_wrong_answer(self) -> None:
-        """300 m/s on S3's bursts reads as 300 - 6 x 2 x 38.24 m/s, with no warning."""
+        """300 m/s on S3's bursts reads as 300 - 6 x 76.48 m/s, with no warning."""
         velocity_mps, residual_mps = unfold_doppler_dual_prf(
-            fold_velocity_mps(300.0, V_UA_A),
-            fold_velocity_mps(300.0, V_UA_B),
-            V_UA_A,
-            V_UA_B,
+            fold_velocity_mps(300.0, SPAN_A_MPS),
+            fold_velocity_mps(300.0, SPAN_B_MPS),
+            SPAN_A_MPS,
+            SPAN_B_MPS,
             max_velocity_mps=191.0,
             tolerance_mps=1.0,
         )
-        np.testing.assert_allclose(velocity_mps, 300.0 - 12.0 * V_UA_A, atol=1e-9)
+        np.testing.assert_allclose(velocity_mps, 300.0 - 6.0 * SPAN_A_MPS, atol=1e-9)
         assert residual_mps < 1.0
 
     def test_pairs_every_a_reading_with_every_b_reading(self) -> None:
         """A column against a row: only the diagonal pairs a target with itself."""
         true_mps = np.array([10.0, 80.0, -120.0])
         velocity_mps, _ = unfold_doppler_dual_prf(
-            fold_velocity_mps(true_mps, V_UA_A)[:, None],
-            fold_velocity_mps(true_mps, V_UA_B)[None, :],
-            V_UA_A,
-            V_UA_B,
+            fold_velocity_mps(true_mps, SPAN_A_MPS)[:, None],
+            fold_velocity_mps(true_mps, SPAN_B_MPS)[None, :],
+            SPAN_A_MPS,
+            SPAN_B_MPS,
             max_velocity_mps=191.0,
             tolerance_mps=1.0,
         )
@@ -571,7 +575,7 @@ class TestUnfold:
 
     def test_an_inconsistent_pair_is_reported_unresolved(self) -> None:
         velocity_mps, residual_mps = unfold_doppler_dual_prf(
-            3.52, -11.78 + 5.0, V_UA_A, V_UA_B, max_velocity_mps=191.0, tolerance_mps=1.0
+            3.52, -11.78 + 5.0, SPAN_A_MPS, SPAN_B_MPS, max_velocity_mps=191.0, tolerance_mps=1.0
         )
         assert np.isnan(velocity_mps)
         assert residual_mps > 1.0
@@ -591,7 +595,7 @@ class TestUnfold:
                 0.0, 0.0, 6.0, 5.0, lower_bound=0.0, upper_bound=np.nan, tolerance=0.1
             ),
             lambda: unfold_doppler_dual_prf(
-                0.0, 0.0, V_UA_A, V_UA_B, max_velocity_mps=np.nan, tolerance_mps=1.0
+                0.0, 0.0, SPAN_A_MPS, SPAN_B_MPS, max_velocity_mps=np.nan, tolerance_mps=1.0
             ),
             lambda: range_bin_centers_m(8, np.nan, 40e-6, 1e6),
             lambda: doppler_bin_centers_mps(8, np.nan, WAVELENGTH_M),
@@ -635,17 +639,17 @@ class TestUnfold:
             )
 
     @pytest.mark.parametrize(
-        ("v_ua_a", "v_ua_b", "max_mps", "match"),
+        ("span_a_mps", "span_b_mps", "max_mps", "match"),
         [
-            (0.0, V_UA_B, 191.0, "positive and different"),
-            (V_UA_A, V_UA_A, 191.0, "positive and different"),
-            (V_UA_A, V_UA_B, 10.0, "nothing is folded"),
+            (0.0, SPAN_B_MPS, 191.0, "positive and different"),
+            (SPAN_A_MPS, SPAN_A_MPS, 191.0, "positive and different"),
+            (SPAN_A_MPS, SPAN_B_MPS, 10.0, "nothing is folded"),
         ],
     )
-    def test_unfold_doppler_rejects_invalid_arguments(self, v_ua_a, v_ua_b, max_mps, match):
+    def test_unfold_doppler_rejects_invalid_arguments(self, span_a_mps, span_b_mps, max_mps, match):
         with pytest.raises(ValueError, match=match):
             unfold_doppler_dual_prf(
-                0.0, 0.0, v_ua_a, v_ua_b, max_velocity_mps=max_mps, tolerance_mps=1.0
+                0.0, 0.0, span_a_mps, span_b_mps, max_velocity_mps=max_mps, tolerance_mps=1.0
             )
 
     def test_unfold_range_rejects_a_negative_bound(self) -> None:

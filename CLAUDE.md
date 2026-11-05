@@ -53,7 +53,7 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 | :--- | :--- |
 | wavelength; PRI, duty cycle, sweep rate | `Transmitter.wavelength_m`; `.pulse_repetition_interval_s`, `.duty_cycle_linear`, `.sweep_rate_hzps` (radar.py) |
 | range resolution c/2B | `Radar.range_resolution_m` (radar.py); `range_resolution_m` (signal.py) |
-| unambiguous delay, range, rate | `Radar.unambiguous_delay_s`, `.unambiguous_bistatic_range_m` (cτ), `.unambiguous_bistatic_range_rate_mps` (λ PRF, the whole span) (radar.py) |
+| unambiguous delay, range, rate | `Radar.unambiguous_delay_s`, `.unambiguous_bistatic_range_m` (c τ, the map's range span), `.unambiguous_bistatic_range_rate_mps` (λ PRF, the whole span) (radar.py) |
 | route geometry, baseline, bistatic angle | `Radar.geometry` -> `TargetGeometry`, `Radar.baseline_m`, `TargetGeometry.bistatic_angle_rad` (radar.py) |
 | beat frequency ↔ bistatic range | `beat_frequency_hz`, `bistatic_range_from_beat_frequency_m` (signal.py) |
 | delay, phase, Doppler; stop-and-hop | `propagation_delay_s`, `propagation_phase_rad`, `doppler_shift_hz`; `PropagationPaths.bistatic_range_at_m` (propagation.py) |
@@ -64,7 +64,7 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 | windows, coherent gain, processing loss | `window`, `apply_window`, `coherent_gain_linear`, `processing_loss_db` (dsp.py) |
 | matched filter, range/Doppler FFT, map | `matched_filter`, `range_fft`, `doppler_fft`, `range_doppler_map` (dsp.py); `range_doppler_product` (pipeline.py) |
 | bin axes, Doppler resolution; MTI | `range_bin_centers_m`, `doppler_bin_centers_mps` (its spacing λ/(N T)); `mti_filter` (dsp.py) |
-| fold, dual-PRF unfold | `fold_velocity_mps`, `unfold_doppler_dual_prf`, `unfold_range_dual_prf` (dsp.py) |
+| fold, dual-PRF unfold | `fold_velocity_mps`, `unfold_doppler_dual_prf`, `unfold_range_dual_prf` (dsp.py; all take the span) |
 | CFAR Pfa, threshold, detect; clustering | `cfar_probability_of_false_alarm`, `cfar_threshold_factor`, `cfar_detect`, `cfar_detect_2d`; `cluster_detections` (detection.py) |
 | geodesy | `geodetic_to_enu_m`, `enu_to_range_azimuth_elevation_rad` (radar.py) |
 | predict, innovate, update; NEES | `predict`, `innovate`, `update`, `TaylorLinearisation`, `UnscentedTransform` (tracking/filters.py); `nees` (tracking/metrics.py) |

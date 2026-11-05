@@ -130,7 +130,8 @@ class RangeDopplerProduct:
     """One burst's map ``(n_doppler_bins, n_range_bins)`` and its axes (:func:`map_axes`).
 
     Both axes are circles: a fractional index converts by the axis's own uniform formula, so an
-    index past the last bin lies across the wrap, and a rate folds into ``(-v_ua, +v_ua]``.
+    index past the last bin lies across the wrap, and a rate folds into ``(-span/2, +span/2]``,
+    span = :attr:`rate_period_mps`.
     The rate axis falls with index, its sign from :func:`~radar_forge.dsp.doppler_bin_centers_mps`.
     """
 
@@ -164,9 +165,9 @@ class RangeDopplerProduct:
         return result
 
     def rate_at_index_mps(self, index: ArrayLike) -> NDArray[np.float64]:
-        """Return the folded rate at fractional Doppler indices, in ``(-v_ua, +v_ua]``."""
+        """Return the folded rate at fractional Doppler indices, in ``(-span/2, +span/2]``."""
         rate_mps = self.rate_axis_mps[0] + np.asarray(index) * self.rate_bin_mps
-        return fold_velocity_mps(rate_mps, self.rate_period_mps / 2.0)
+        return fold_velocity_mps(rate_mps, self.rate_period_mps)
 
     def index_of(
         self, bistatic_range_m: ArrayLike, rate_mps: ArrayLike
@@ -311,8 +312,8 @@ def _pair(
     rate_mps, _ = unfold_doppler_dual_prf(
         first.folded_rate_mps[i],
         second.folded_rate_mps[j],
-        a.rate_period_mps / 2.0,
-        b.rate_period_mps / 2.0,
+        a.rate_period_mps,
+        b.rate_period_mps,
         max_velocity_mps=max_rate_mps,
         tolerance_mps=2.0 * max(abs(a.rate_bin_mps), abs(b.rate_bin_mps)),
     )

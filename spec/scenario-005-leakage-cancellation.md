@@ -410,7 +410,8 @@ gives the amplifier model of P3 closed-form moments. `signal.py` gains
      `prf_hz` its reciprocal, so `unambiguous_bistatic_range_rate_mps`, `n_samples_per_pri` and
      `doppler_bin_centers_mps` apply unchanged. That is D7 working again.
    - `Radar.unambiguous_delay_s` gains a `"noise"` branch, `n_range_lags/f_s`, so
-     `unambiguous_bistatic_range_m` is `n_range_lags·c/f_s`, one-way `n_range_lags·c/(2f_s)`.
+     `unambiguous_bistatic_range_m` is `n_range_lags·c/f_s` (the map's span, as for FMCW),
+     one-way `n_range_lags·c/(2f_s)`.
    - The correlation receiver gets its own range axis, `m·c/(2f_s)`, beside the deramp
      `range_bin_centers_m`.
 

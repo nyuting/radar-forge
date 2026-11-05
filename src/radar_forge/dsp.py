@@ -445,57 +445,53 @@ def unfold_dual_period(
     return np.where(residual <= tolerance, value, np.nan), residual
 
 
-def fold_velocity_mps(
-    velocity_mps: ArrayLike, unambiguous_velocity_mps: ArrayLike
-) -> NDArray[np.float64]:
-    r"""Wrap a range rate, positive receding, into ``(-v_ua, +v_ua]``, as the map shows it.
+def fold_velocity_mps(velocity_mps: ArrayLike, span_mps: ArrayLike) -> NDArray[np.float64]:
+    r"""Wrap a range rate, positive receding, into ``(-span/2, +span/2]``, as the map shows it.
 
     Closed at the top, unlike :func:`fold_into_period`: rate is :math:`-\lambda f_d` and the
     shifted Doppler axis is :math:`[-\mathrm{PRF}/2, +\mathrm{PRF}/2)`. For
-    :func:`doppler_bin_centers_mps` the half-interval is :math:`\lambda / (2 T_{\mathrm{PRI}})`,
+    :func:`doppler_bin_centers_mps` the span is :math:`\lambda / T_{\mathrm{PRI}}`,
     and its map has a bin on the closed edge only for an even number of bins.
 
     References
     ----------
     Richards [1]_, §5.5.4.
     """
-    half_interval = np.asarray(unambiguous_velocity_mps, dtype=np.float64)
+    span = np.asarray(span_mps, dtype=np.float64)
     flipped = -np.asarray(velocity_mps, dtype=np.float64)
-    return -fold_into_period(flipped, 2.0 * half_interval, lower=-half_interval)
+    return -fold_into_period(flipped, span, lower=-span / 2.0)
 
 
 def unfold_doppler_dual_prf(
     folded_velocity_a_mps: ArrayLike,
     folded_velocity_b_mps: ArrayLike,
-    unambiguous_velocity_a_mps: float,
-    unambiguous_velocity_b_mps: float,
+    span_a_mps: float,
+    span_b_mps: float,
     *,
     max_velocity_mps: float,
     tolerance_mps: float,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     r"""Recover a range rate from two bursts by :func:`unfold_dual_period`.
 
-    Periods :math:`2 v_{ua}`, bounds :math:`\pm` ``max_velocity_mps``; returns
+    Periods are the two rate spans, bounds :math:`\pm` ``max_velocity_mps``; returns
     ``(velocity_mps, residual_mps)``.
 
     References
     ----------
     Richards [1]_, §5.5.4.
     """
-    smaller_mps = min(unambiguous_velocity_a_mps, unambiguous_velocity_b_mps)
-    halves = (unambiguous_velocity_a_mps, unambiguous_velocity_b_mps)
-    if not all(x > 0.0 for x in halves) or halves[0] == halves[1]:
-        msg = "the two unambiguous velocities must be positive and different."
+    if not (span_a_mps > 0.0 and span_b_mps > 0.0) or span_a_mps == span_b_mps:
+        msg = "the two rate spans must be positive and different."
         raise ValueError(msg)
     # `not >` so a NaN bound is rejected here rather than inside np.arange.
-    if not max_velocity_mps > smaller_mps:
-        msg = "max_velocity_mps must exceed the smaller half-interval, or nothing is folded."
+    if not max_velocity_mps > min(span_a_mps, span_b_mps) / 2.0:
+        msg = "max_velocity_mps must exceed half the smaller span, or nothing is folded."
         raise ValueError(msg)
     return unfold_dual_period(
         folded_velocity_a_mps,
         folded_velocity_b_mps,
-        2.0 * unambiguous_velocity_a_mps,
-        2.0 * unambiguous_velocity_b_mps,
+        span_a_mps,
+        span_b_mps,
         lower_bound=-max_velocity_mps,
         upper_bound=max_velocity_mps,
         tolerance=tolerance_mps,

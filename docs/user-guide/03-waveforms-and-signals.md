@@ -58,7 +58,7 @@ generator for you; `pipeline.frames` does that for every frame of a scenario.
 | Beat frequency | $f_b$ | $f_b = \alpha \tau = \alpha R_b / c$ | `signal.beat_frequency_hz` | 234304.7 Hz |
 | Bistatic range from beat | $R_b$ | $R_b = c f_b / \alpha$ | `signal.bistatic_range_from_beat_frequency_m` | 35121.4 m |
 | Samples per chirp | $N_s$ | $N_s = T_c f_s$ | `Radar.n_samples_per_chirp`, `Radar.n_samples_per_pri` | 1000 |
-| Span of the FMCW range axis | $R_{\mathrm{span}}$ | $R_{\mathrm{span}} = c f_s / \alpha$ | `pipeline.map_axes`, `RangeDopplerProduct.range_period_m` | 149896.2 m (74948.1 m slant) |
+| Span of the FMCW range axis | $R_{\mathrm{span}}$ | $R_{\mathrm{span}} = c f_s / \alpha$ | `pipeline.map_axes`, `RangeDopplerProduct.range_period_m`, `Radar.unambiguous_bistatic_range_m` | 149896.2 m (74948.1 m slant) |
 | Motion during one chirp | $\delta R_b$ | $\delta R_b = \lvert \dot R_b \rvert T_c$ | checked in both generators | 0.0562 m (warns above $\Delta R_b/4$ = 37.4741 m) |
 | Noise density | $N_0$ | $N_0 = k T_0 F$ | `Receiver.noise_density_w_per_hz` | 7.9888e-21 W/Hz |
 | Noise power per sample | $P_n$ | $P_n = N_0 f_s$ | `Receiver.noise_power_per_sample_w` | 7.9888e-15 W |
@@ -191,7 +191,7 @@ rate +56.16 m/s, Doppler -1835.9 Hz
 delay 117.15 us, beat 234304.7 Hz, back to 35121.4 m
 FFT peak of the cube 234000.0 Hz
 map span 149896.2 m
-unambiguous_bistatic_range_m 74948.1 m
+unambiguous_bistatic_range_m 149896.2 m
 motion in one chirp 0.0562 m, warning above 37.4741 m
 noise per sample 7.9888e-15 W
 ```
@@ -219,7 +219,7 @@ What changes:
 
 - The range axis of `rd_00000.png` shrinks from 0–75 km to 0–15 km: $R_{\mathrm{span}}$ goes from
   149896.2 m to 29979.2 m of bistatic range. `[geometry]` prints
-  `unambiguous_bistatic_range_m = 14989.6`, half the span (see below).
+  `unambiguous_bistatic_range_m = 29979.2`, the span.
 - The target's beat, 234.3 kHz, is now above $f_s$ = 200 kHz, so it wraps. `[rd]` prints
   `rd_peak_range_index = 34` instead of 234, and in `rd_00000.png` and `detections.csv` the
   target sits near 2.57 km instead of 17.56 km: 35121.4 − 29979.2 = 5142.2 m of route, 2571.1 m
@@ -254,11 +254,6 @@ phase from chirp to chirp advances at the mid-sweep frequency $f_c$.
 receiver samples the beat tone, not the chirp. The beat is at most a few hundred kilohertz for
 S1's ranges. A pulsed receiver records the chirp itself, so `Radar` rejects a pulsed radar with
 $f_s < B$.
-
-**The map reaches 149.9 km of bistatic range, but `unambiguous_bistatic_range_m` says 74.9 km.**
-The property uses the real-sampling limit $f_s/2$; the complex samples tell apart a band $f_s$
-wide, so the map spans twice that. Correcting the property is a follow-up.
-
 
 ## Limits
 
