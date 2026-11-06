@@ -9,7 +9,8 @@ dimensions [4]. Global nearest neighbour solves the scan's assignment with
 first. Probabilistic association weights every gated measurement instead: PDA per track [7],
 IPDA with a probability of existence [8], and JPDA over each cluster of tracks sharing
 measurements, enumerated exactly [9], with JIPDA [10] and the coalescence fixes JPDA* [5] and
-the set relabelling [6]. Every function takes ``(n_tracks, n_meas)`` arrays.
+the set relabelling [6]; Murty's method ranks the k best assignments [11] [12], for MHT
+and PMBM. Every function takes ``(n_tracks, n_meas)`` arrays.
 
 References
 ----------
@@ -35,10 +36,18 @@ References
        pp. 173-184, 1983.
 .. [10] D. Mušicki and R. Evans, "Joint integrated probabilistic data association: JIPDA,"
         *IEEE Trans. Aerosp. Electron. Syst.*, vol. 40, no. 3, pp. 1093-1099, 2004.
+.. [11] K. G. Murty, "An algorithm for ranking all the assignments in order of increasing
+        cost," *Operations Research*, vol. 16, no. 3, pp. 682-687, 1968.
+.. [12] I. J. Cox and M. L. Miller, "On finding ranked assignments with application to
+        multitarget tracking and motion correspondence," *IEEE Trans. Aerosp. Electron.
+        Syst.*, vol. 31, no. 1, pp. 486-489, 1995.
 """
 
 from __future__ import annotations
 
+import heapq
+import itertools
+import math
 from dataclasses import dataclass
 from functools import cache
 from typing import Literal, Protocol
@@ -65,6 +74,7 @@ __all__ = [
     "global_nearest_neighbour",
     "greedy_nearest_neighbour",
     "joint_probabilistic_data_association",
+    "murty_k_best",
     "probabilistic_data_association",
 ]
 
@@ -160,6 +170,17 @@ def greedy_nearest_neighbour(cost: ArrayLike, in_gate: ArrayLike) -> Assignment:
     return assigned, np.flatnonzero(~taken)
 
 
+def _augment(
+    costs: NDArray[np.float64], mask: NDArray[np.bool_], non_assignment_cost: float
+) -> NDArray[np.float64]:
+    """Return the cost matrix with each row's private "none" column; gated-out pairs are inf."""
+    n_rows, n_meas = costs.shape
+    augmented = np.full((n_rows, n_meas + n_rows), np.inf)
+    augmented[:, :n_meas] = np.where(mask, costs, np.inf)
+    augmented[np.arange(n_rows), n_meas + np.arange(n_rows)] = non_assignment_cost
+    return augmented
+
+
 def global_nearest_neighbour(
     cost: ArrayLike, in_gate: ArrayLike, *, non_assignment_cost: float = np.inf
 ) -> Assignment:
@@ -190,15 +211,79 @@ def global_nearest_neighbour(
         if np.isinf(non_assignment_cost):
             span = gated.max() - gated.min()
             non_assignment_cost = min(n_tracks, n_meas) * span + abs(gated.max()) + 1.0
-        augmented = np.full((n_tracks, n_meas + n_tracks), np.inf)
-        augmented[:, :n_meas] = np.where(mask, costs, np.inf)
-        augmented[np.arange(n_tracks), n_meas + np.arange(n_tracks)] = non_assignment_cost
-        rows, cols = linear_sum_assignment(augmented)
+        rows, cols = linear_sum_assignment(_augment(costs, mask, non_assignment_cost))
         real = cols < n_meas
         assigned[rows[real]] = cols[real]
     taken = np.zeros(n_meas, dtype=bool)
     taken[assigned[assigned >= 0]] = True
     return assigned, np.flatnonzero(~taken)
+
+
+def murty_k_best(
+    cost: ArrayLike,
+    k: int,
+    *,
+    in_gate: ArrayLike,
+    non_assignment_cost: float,
+    max_gap: float = np.inf,
+) -> tuple[NDArray[np.intp], NDArray[np.float64]]:
+    r"""Return the k cheapest assignments of a scan, cheapest first: Murty's ranking.
+
+    Each row takes one gated column or its private "none" at the finite
+    ``non_assignment_cost``, as in :func:`global_nearest_neighbour`, whose answer is the first.
+    The pairs of a solution partition what is left: the i-th subproblem forbids its i-th pair
+    and fixes the pairs before it, and the next solution is the cheapest subproblem's, each
+    solved by ``linear_sum_assignment`` [3]. Returns ``(k', n_rows)`` measurements (-1 none)
+    and their total costs; k' < k when fewer assignments exist, or fewer cost at most
+    ``max_gap`` more than the first.
+
+    >>> murty_k_best([[1.0, 2.0]], 3, in_gate=[[True, True]], non_assignment_cost=1.5)[0]
+    array([[ 0],
+           [-1],
+           [ 1]])
+
+    References
+    ----------
+    Murty [11], the partition of the assignment space; Cox and Miller [12].
+    """
+    costs, mask = _check(cost, in_gate)
+    if not (math.isfinite(non_assignment_cost) and type(k) is int and k >= 1):
+        msg = f"need a finite non_assignment_cost and int k >= 1; got {non_assignment_cost}, {k}."
+        raise ValueError(msg)
+    n_rows, n_meas = costs.shape
+    found: list[tuple[float, NDArray[np.intp]]] = []
+    queue: list[tuple[float, int, NDArray[np.intp], NDArray[np.float64], int]] = []
+    counter = itertools.count()
+
+    def push(matrix: NDArray[np.float64], fixed: int) -> None:
+        """Solve one subproblem and queue its answer, unless it has none."""
+        try:
+            rows, cols = linear_sum_assignment(matrix)
+        except ValueError:  # every choice of some row is barred: this part is empty
+            return
+        total = float(matrix[rows, cols].sum())
+        heapq.heappush(queue, (total, next(counter), cols, matrix, fixed))
+
+    push(_augment(costs, mask, non_assignment_cost), 0)
+    # Murty's partition is sequential: each answer taken defines the next subproblems.
+    while queue and len(found) < k:
+        total, _, cols, matrix, fixed = heapq.heappop(queue)
+        if found and total > found[0][0] + max_gap:
+            break
+        found.append((total, np.where(cols < n_meas, cols, -1).astype(np.intp)))
+        if len(found) == k:
+            break
+        for row in range(fixed, n_rows):
+            child = matrix.copy()
+            child[row, cols[row]] = np.inf
+            # Rows before this one keep their columns: every other entry of theirs is barred.
+            kept, taken = np.arange(fixed, row), cols[fixed:row]
+            child[kept] = np.inf
+            child[:, taken] = np.inf
+            child[kept, taken] = matrix[kept, taken]
+            push(child, row)
+    assignments = np.array([a for _, a in found], dtype=np.intp).reshape(len(found), n_rows)
+    return assignments, np.array([c for c, _ in found], dtype=np.float64)
 
 
 class Associator(Protocol):

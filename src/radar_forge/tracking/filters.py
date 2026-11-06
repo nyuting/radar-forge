@@ -226,9 +226,21 @@ class TrackBank:
 
     def compact(self, keep: ArrayLike) -> TrackBank:
         """Return the rows where ``keep``, ``(n_tracks,)`` bool, is True, in order."""
-        rows = np.asarray(keep, dtype=bool)
+        return self.take(np.flatnonzero(np.asarray(keep, dtype=bool)))
+
+    def take(self, rows: ArrayLike) -> TrackBank:
+        """Return the rows at the indices ``rows``, in that order; a row may repeat."""
+        index = np.asarray(rows, dtype=np.intp)
         columns: dict[str, NDArray[Any]] = {
-            f.name: getattr(self, f.name)[rows] for f in fields(self)[1:]
+            f.name: getattr(self, f.name)[index] for f in fields(self)[1:]
+        }
+        return TrackBank(self.layout, **columns)
+
+    def join(self, *others: TrackBank) -> TrackBank:
+        """Return this bank's rows followed by each other bank's, all of one layout."""
+        columns: dict[str, NDArray[Any]] = {
+            f.name: np.concatenate([getattr(b, f.name) for b in (self, *others)])
+            for f in fields(self)[1:]
         }
         return TrackBank(self.layout, **columns)
 
@@ -460,6 +472,25 @@ class Innovation:
     log_likelihood: NDArray[np.float64]
     moments: MeasurementMoments
     measurement_noise: NDArray[np.float64]
+
+    def take(self, rows: ArrayLike) -> Innovation:
+        """Return the scoring of the bank rows at the indices ``rows``, in that order."""
+        index = np.asarray(rows, dtype=np.intp)
+        m = self.moments
+        moments = MeasurementMoments(
+            m.predicted_measurement[index],
+            m.cross_covariance[index],
+            m.predicted_measurement_covariance[index],
+            None if m.measurement_matrix is None else m.measurement_matrix[index],
+        )
+        return Innovation(
+            self.innovation[index],
+            self.innovation_covariance[index],
+            self.nis[index],
+            self.log_likelihood[index],
+            moments,
+            self.measurement_noise,
+        )
 
 
 def innovate(

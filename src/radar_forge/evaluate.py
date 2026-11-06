@@ -27,7 +27,8 @@ with ``cancellation_tolerance_db``, ``floor_rise_db`` with ``floor_rise_toleranc
 
 :mod:`radar_forge.stages.tracking` holds ``multitarget`` (scenario 011): ``gospa_mean_max_m``,
 ``swap_fraction_max``, ``mode_latency_max_scans``, ``nees_fraction_min``, ``pd_min`` and
-``false_alarm_rate_max``.
+``false_alarm_rate_max``; 011b's ``leaf_count_max``, ``pmbm_cardinality_error_max``,
+``mht_resolved_lead_min`` and ``pmbm_resolved_lead_min``.
 """
 
 from __future__ import annotations

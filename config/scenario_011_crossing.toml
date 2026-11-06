@@ -51,9 +51,14 @@ initial_speed_sigma_mps = 150.0
 # A track whose position sigma passes 300 m after its update is deleted
 # (tracker-001 §5.4): a gate that wide holds 85 rain plots at 20 km.
 max_position_sigma_m = 300.0
+# Spec 011b: the same plots also scored by GNN, JPDA*, Set-JPDA, JIPDA, MHT and
+# PMBM, each score prefixed by its name; the checks below are JPDA's.
+trackers = ["gnn", "jpda_star", "set", "jipda", "mht", "pmbm"]
 
 [verify]
 stages = ["multitarget"]
+# Spec 011b D29: an MHT tree holds at most k_best = 10 leaves, one per hypothesis.
+leaf_count_max = 10
 # Mean GOSPA over the 62 rotations; pins the run (323 m measured): until 41 every aircraft is
 # alone, then the crossings and the clutter discs.
 gospa_mean_max_m = 400.0

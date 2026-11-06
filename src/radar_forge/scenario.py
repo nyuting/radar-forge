@@ -37,6 +37,7 @@ from radar_forge.detection import CfarVariant
 from radar_forge.propagation import dbsm_to_m2
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter, geodetic_to_enu_m
 from radar_forge.signal import RangeGate
+from radar_forge.tracking.hypotheses import CONFIRM_SCORE, DELETE_DROP
 from radar_forge.tracking.scene import Arc, ClutterComponent, FixedDiscretes, Leg
 
 __all__ = [
@@ -146,7 +147,7 @@ class TrackingSettings:
     n_slope_scans: int = 5
     # Plot-level tracking (scenario 011): ENU ground-plane states, z = (range, azimuth).
     motion: Literal["cv", "imm"] = "cv"
-    association: Literal["gnn", "jpda"] = "gnn"
+    association: Literal["gnn", "jpda", "mht"] = "gnn"
     coalescence: Literal["none", "jpda_star", "set"] = "none"
     existence: bool = False
     mode_sigma_acceleration_mps2: tuple[float, ...] = (0.5, 0.5, 3.1623)
@@ -158,9 +159,25 @@ class TrackingSettings:
     max_birth_clutter_intensity_per_m_rad: float = 0.01
     initial_speed_sigma_mps: float = 150.0
     max_position_sigma_m: float = np.inf
+    # Scenario 011b: MHT's tree, PMBM's births and pruning, cues at the truth, and further
+    # trackers to score beside the configured one (tracking.scans.VARIANTS, or "pmbm").
+    k_best: int = 10
+    n_scan: int = 3
+    confirm_score: float = CONFIRM_SCORE
+    delete_drop: float = DELETE_DROP
+    birth_intensity_per_scan: float = 0.05
+    survival_probability: float = 0.995
+    prune_existence: float = 1e-5
+    prune_weight: float = 1e-4
+    seed_truth: bool = False
+    trackers: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Refuse track-aided unfolding behind a folded seed, and existence without JPDA."""
+        names = ("gnn", "jpda", "jpda_star", "set", "jipda", "mht", "pmbm")
+        if not set(self.trackers) <= set(names) or len(set(self.trackers)) < len(self.trackers):
+            msg = f"[tracking] trackers must be distinct names among {list(names)}."
+            raise ValueError(msg)
         if self.rate_unfolding == "track_aided" and self.initiator != "range_only":
             msg = (
                 '[tracking] rate_unfolding = "track_aided" needs initiator = "range_only": a '

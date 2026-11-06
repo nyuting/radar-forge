@@ -79,9 +79,16 @@ initial_speed_sigma_mps = 150.0
 # A track whose position sigma passes 300 m after its update is deleted
 # (tracker-001 §5.4): a gate that wide holds 85 rain plots at 20 km.
 max_position_sigma_m = 300.0
+# Spec 011b: the same plots also scored by the IMM under GNN and under MHT, and
+# by PMBM, whose one CV model takes the agile mode's noise (3.1623 m/s^2): it
+# carries the turns without the IMM, a caveat on the comparison. Each score is
+# prefixed by its tracker's name; the checks below are JIPDA's.
+trackers = ["gnn", "mht", "pmbm"]
 
 [verify]
 stages = ["multitarget"]
+# Spec 011b D29: an MHT tree holds at most k_best = 10 leaves, one per hypothesis.
+leaf_count_max = 10
 # Mean GOSPA over the 125 rotations; pins the run (618 m measured), mostly missed aircraft:
 # births wait for the clutter map, the ground residue hides HE until it leaves 6 km, and the
 # stack loses tracks in the rain.

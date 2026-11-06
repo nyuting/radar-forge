@@ -25,6 +25,7 @@ from radar_forge.tracking.association import (
     global_nearest_neighbour,
     greedy_nearest_neighbour,
     joint_probabilistic_data_association,
+    murty_k_best,
     probabilistic_data_association,
 )
 from radar_forge.tracking.filters import (
@@ -34,12 +35,14 @@ from radar_forge.tracking.filters import (
     update,
     update_weighted,
 )
+from radar_forge.tracking.hypotheses import TrackOrientedMHT
 from radar_forge.tracking.initiation import DebiasedSphericalInitiator
 from radar_forge.tracking.models import (
     CartesianMotion,
     LinearMeasurement,
     RangeAzimuthElevationRangeRate,
 )
+from radar_forge.tracking.rfs import PmbmTracker
 from radar_forge.tracking.scene import (
     ClutterComponent,
     detect,
@@ -378,6 +381,53 @@ def test_nearest_neighbour_associators_return_no_weights() -> None:
         assert associator.weights(np.zeros((1, 1)), [[True]], clutter_intensity=[1.0]) is None
 
 
+def _every_assignment(
+    cost: NDArray[np.float64], gated: NDArray[np.bool_], none: float
+) -> list[float]:
+    """Return the cost of every feasible assignment by enumeration, cheapest first."""
+    n_rows = cost.shape[0]
+    options = [[-1, *np.flatnonzero(gated[i]).tolist()] for i in range(n_rows)]
+    totals = []
+    # Enumeration is the reference: every combination of choices, a few hundred at most.
+    for choice in itertools.product(*options):
+        taken = [j for j in choice if j >= 0]
+        if len(taken) == len(set(taken)):
+            totals.append(sum(cost[i, j] if j >= 0 else none for i, j in enumerate(choice)))
+    return sorted(totals)
+
+
+def test_murty_ranks_every_assignment_by_cost_as_enumeration_does(rng: np.random.Generator) -> None:
+    """Murty's k best, with k past their number, are every feasible assignment in cost order.
+
+    rtol 1e-12: sums of a few costs in another order.
+    """
+    for _ in range(50):
+        n_rows, n_meas = rng.integers(0, 5), rng.integers(0, 5)
+        cost = rng.normal(size=(n_rows, n_meas))
+        gated = rng.random((n_rows, n_meas)) < 0.7
+        assignments, totals = murty_k_best(cost, 10_000, in_gate=gated, non_assignment_cost=0.3)
+        np.testing.assert_allclose(totals, _every_assignment(cost, gated, 0.3), rtol=1e-12)
+        assert len({tuple(a) for a in assignments}) == len(assignments)
+
+
+def test_murty_first_assignment_is_gnn_with_the_same_non_assignment_cost(
+    rng: np.random.Generator,
+) -> None:
+    """k = 1 is global_nearest_neighbour bit for bit: one solve of the same matrix (A4)."""
+    for _ in range(50):
+        cost = rng.normal(size=(4, 6))
+        gated = rng.random((4, 6)) < 0.5
+        first = murty_k_best(cost, 1, in_gate=gated, non_assignment_cost=0.7)[0][0]
+        nearest = global_nearest_neighbour(cost, gated, non_assignment_cost=0.7)[0]
+        np.testing.assert_array_equal(first, nearest)
+
+
+def test_murty_stops_where_the_next_assignment_costs_more_than_the_gap() -> None:
+    """One row and two columns: 1.0, then none at 1.5, then 2.0; a gap of 0.6 keeps two."""
+    _, totals = murty_k_best([[1.0, 2.0]], 3, in_gate=ALL[:1], non_assignment_cost=1.5, max_gap=0.6)
+    np.testing.assert_array_equal(totals, [1.0, 1.5])
+
+
 # --- spec 011 A16: coalescence shown, and fixed (the V3 pair at d = 1 across range) ---
 
 ALPHA_RANGE_M, ALPHA_AZIMUTH_RAD = 115.75, np.radians(1.4)
@@ -391,7 +441,8 @@ def _coalescence_ratio(coalescence: str, trials: int, seed: int) -> NDArray[np.f
     flying out along their own bearings at 72 m/s so d holds, 40 scans at 4.8 s. Plots merge
     with P_u(1) = 0.61 (scene.resolve), are detected at Pd 0.9 and measured with spec 011's
     noise, in a window of clutter at n_gate = 1 (range 5 km by azimuth 10 deg about the pair).
-    Each trial seeds both tracks at the truth, confirmed, and runs JPDA jointly on them.
+    Each trial seeds both tracks at the truth, confirmed, and runs JPDA jointly on them, or
+    (``"mht"``, ``"pmbm"``, spec 011b) MHT or PMBM, neither deleting.
     """
     rng = np.random.default_rng(seed)
     motion = CartesianMotion("xy", sigma_acceleration_mps2=0.5)
@@ -403,18 +454,37 @@ def _coalescence_ratio(coalescence: str, trials: int, seed: int) -> NDArray[np.f
     azimuths = np.radians(45.0) + np.array([-0.5, 0.5]) * ALPHA_AZIMUTH_RAD
     ratios = []
     # One scene per trial: each is a 40-scan run of its own tracker.
+    initiator = DebiasedSphericalInitiator(np.zeros(4), np.diag([1.0, 150.0**2, 1.0, 150.0**2]))
     for _ in range(trials):
-        tracker = Tracker(
-            {"plots": model},
-            motion,
-            TaylorLinearisation(),
-            0.99,
-            JointProbabilisticDataAssociation(0.9, 0.99, coalescence),
-            DebiasedSphericalInitiator(np.zeros(4), np.diag([1.0, 150.0**2, 1.0, 150.0**2])),
-            LifecyclePolicy(1, 1, 40, max_coast_time_s=1e3),
-            assignment="joint",
-            max_birth_clutter_intensity=0.01,
-        )
+        tracker: Tracker | PmbmTracker
+        if coalescence == "pmbm":
+            tracker = PmbmTracker(
+                motion,
+                model,
+                initiator,
+                detection_probability=0.9,
+                gate_probability=0.99,
+                coverage_volume=2 * np.pi * 39e3,
+                survival_probability=1.0,
+                max_birth_clutter_intensity=0.01,
+            )
+        else:
+            associator: TrackOrientedMHT | JointProbabilisticDataAssociation = (
+                TrackOrientedMHT(0.9, 0.99, delete_drop=np.inf)
+                if coalescence == "mht"
+                else JointProbabilisticDataAssociation(0.9, 0.99, coalescence)  # type: ignore[arg-type]
+            )
+            tracker = Tracker(
+                {"plots": model},
+                motion,
+                TaylorLinearisation(),
+                0.99,
+                associator,
+                initiator,
+                LifecyclePolicy(1, 1, 40, max_coast_time_s=1e3),
+                assignment="joint",
+                max_birth_clutter_intensity=0.01,
+            )
         position = 20e3 * np.column_stack([np.sin(azimuths), np.cos(azimuths)])
         velocity = 72.0 * np.column_stack([np.sin(azimuths), np.cos(azimuths)])
         seed_mean = np.column_stack(
@@ -462,22 +532,24 @@ def _coalescence_ratio(coalescence: str, trials: int, seed: int) -> NDArray[np.f
     return np.array(ratios)
 
 
-# Slow: 200 trials of 40 scans for each of three coalescence settings, about three minutes.
+# Slow: 200 trials of 40 scans for each of five trackers, about eight minutes.
 @pytest.mark.slow
-def test_jpda_pulls_a_close_pair_together_more_than_jpda_star_and_set() -> None:
-    """A16 (JPDA part, as measured): at d = 1 across range, n_gate = 1, JPDA coalesces most.
+def test_jpda_pulls_a_close_pair_together_more_than_jpda_star_set_mht_and_pmbm() -> None:
+    """A16 (as measured): at d = 1 across range, n_gate = 1, JPDA coalesces most.
 
     The coalescence ratio is each trial's mean estimated over true separation over the last
     20 of 40 scans. Its spread is wide: in n_gate = 1 clutter a quiet CV track loses the pair
     in some trials and wanders off (ratios over 2), so the median over the 200 trials is the
-    statistic, and JPDA's must lie below both fixes'. Spec 011's bounds, JPDA at most 0.8 and
-    the fixes at least 0.9, do not hold here: the medians measured 1.14 (JPDA), 1.40 (JPDA*)
-    and 1.24 (set), the means 1.35, 1.53 and 1.42.
+    statistic, and JPDA's must lie below both fixes' and MHT's and PMBM's (spec 011b), which
+    commit to one plot a track rather than pull both to the merged one. Spec 011's bounds,
+    JPDA at most 0.8 and the fixes at least 0.9, do not hold here: the medians measured 1.14
+    (JPDA), 1.40 (JPDA*), 1.24 (set), 1.89 (MHT) and 1.56 (PMBM), the means 1.35, 1.53,
+    1.42, 2.10 and 1.73.
     """
     median = {
         c: float(np.median(_coalescence_ratio(c, 200, 20261106)))
-        for c in ("none", "jpda_star", "set")
+        for c in ("none", "jpda_star", "set", "mht", "pmbm")
     }
     print(median)
-    assert median["none"] < median["jpda_star"]
-    assert median["none"] < median["set"]
+    for other in ("jpda_star", "set", "mht", "pmbm"):
+        assert median["none"] < median[other], other
