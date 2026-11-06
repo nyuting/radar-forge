@@ -62,4 +62,4 @@ acceptance numbers in a `[verify]` table and its spec is deleted. Run one with
 | [009, receiver chain](../spec/scenario-009-receiver-chain.md): front end, DDC, impairments | none | Specified, not built |
 | [010, self-calibration](../spec/scenario-010-self-calibration.md): array perturbations | none | Specified, not built |
 | 011a, terminal-area tracking: turns, crossings, clutter; IMM, JPDA, JIPDA, the plot model | `scenario_011_manoeuvre.toml`, `scenario_011_crossing.toml`, `scenario_011_terminal_dense.toml`, `scenario_011_iq_check.toml` | Runs; checked by `[verify]` |
-| [011b, MHT and PMBM](../spec/scenario-011b-mht-pmbm.md): the separation sweep | none | Specified, not built |
+| 011b, track-oriented MHT and PMBM: the separation sweep | `scenario_011_cst_sweep.toml`; MHT and PMBM also score `scenario_011_crossing.toml` and `scenario_011_terminal_dense.toml` | Runs; checked by `[verify]` |
