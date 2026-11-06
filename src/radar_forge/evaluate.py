@@ -8,13 +8,22 @@ Each prints its intermediate quantities and wall time, checks the thresholds the
 ``truth_in_map_fraction = [low, high]``, ``expected_snr_db`` with ``snr_tolerance_db``,
 ``noise_tolerance_db``, ``peak_tolerance_db``, ``truth_within_bins`` with
 ``detection_fraction``, ``pfa_tolerance_factor``, ``rate_tolerance_mps``, ``range_rmse_max_m``,
-``range_rate_rmse_max_mps``, ``nees_fraction_min``, ``confirmation_latency_max_scans``; and
-``leakage``'s ``cancellation_depth_db``, ``floor_rise_db``, ``sinr_loss_db``, each with a
-``cancellation_``, ``floor_rise_`` or ``sinr_loss_tolerance_db``, ``detections_per_frame``,
-``uncancelled_detections_per_frame``, ``acceptance_frames``. A stage not listed does not run, a
-threshold not given is not checked, :func:`run` raises :class:`VerificationError` naming every
-failure. CSVs halve a monostatic radar's range and rate (``plots.display_axes``); all else is
-bistatic. The helpers below are what a stage module shares.
+``range_rate_rmse_max_mps``, ``nees_fraction_min`` and ``confirmation_latency_max_scans``. A
+stage not listed does not run, a threshold not given is not checked, and :func:`run` raises
+:class:`VerificationError` naming every failure. CSVs show a monostatic radar's range and rate
+halved (:func:`~radar_forge.plots.display_axes`); everything else is bistatic. The helpers
+below are what a stage module shares.
+
+:mod:`radar_forge.stages.migration` holds ``keystone`` (scenario 004): ``walk_bins`` with
+``walk_tolerance_bins``, ``residual_walk_max_bins``, ``uncompensated_loss_db``,
+``keystone_only_loss_db`` and ``dechirp_only_loss_db`` with ``loss_tolerance_db`` (the
+keystone's own ``keystone_only_loss_tolerance_db``), ``compensated_loss_min_db``,
+``fold_factor``, ``acceleration_tolerance_mps2`` and ``rate_error_max_crb``.
+
+:mod:`radar_forge.stages.clutter` holds ``leakage`` (scenario 005): ``cancellation_depth_db``
+with ``cancellation_tolerance_db``, ``floor_rise_db`` with ``floor_rise_tolerance_db``,
+``sinr_loss_db`` with ``sinr_loss_tolerance_db``, ``detections_per_frame``,
+``uncancelled_detections_per_frame`` and ``acceptance_frames``.
 """
 
 from __future__ import annotations

@@ -3,12 +3,12 @@ r"""The chain from a scenario to tracks: frames of IQ, range-Doppler maps, plots
 :func:`frames` plays a :class:`~radar_forge.scenario.Scenario` back one frame at a time, each
 burst's cube synthesised from line-of-sight paths; a noise burst's stream also carries its
 leakage and near clutter, beside the code it sent. :func:`range_doppler_product` makes each
-cube a :class:`RangeDopplerProduct`, a noise stream once :func:`~radar_forge.clutter.cancel`
-has cleaned it;
-:func:`frame_plots` runs CFAR along range, clusters, and pairs two bursts by dual PRF into
-:class:`Plots`; :class:`ScanTracker` feeds the accepted plots
-to a :class:`~radar_forge.tracking.Tracker`. The map axes carry bistatic range
-:math:`R_T + R_R` and its rate, positive receding; nothing here halves them.
+cube a :class:`RangeDopplerProduct`, a pulsed cube through its range gate and ``[migration]``
+(:mod:`radar_forge.migration`), a noise stream once :func:`~radar_forge.clutter.cancel` has
+cleaned it; :func:`frame_plots` runs CFAR along range, clusters, and pairs two bursts by dual
+PRF into :class:`Plots`; :class:`ScanTracker` feeds the accepted plots to a
+:class:`~radar_forge.tracking.Tracker`. The map axes carry bistatic range :math:`R_T + R_R`
+and its rate, positive receding; nothing here halves them.
 
 References
 ----------
@@ -35,22 +35,28 @@ from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.detection import Detection, cfar_detect, cluster_detections
 from radar_forge.dsp import (
     batched_correlation,
+    delay_bin_centers_m,
     doppler_bin_centers_mps,
     doppler_fft,
     fold_velocity_mps,
-    matched_filter,
     range_bin_centers_m,
     range_doppler_map,
     unfold_doppler_dual_prf,
     unfold_range_dual_prf,
 )
+from radar_forge.migration import compensate_migration, pulse_compress
 from radar_forge.propagation import PropagationPaths, disturbance_paths, line_of_sight_paths
 from radar_forge.radar import Radar, TargetGeometry
-from radar_forge.scenario import DetectionSettings, Scenario, truth_geometry
+from radar_forge.scenario import (
+    DetectionSettings,
+    MigrationSettings,
+    Scenario,
+    truth_geometry,
+)
 from radar_forge.signal import (
+    RangeGate,
     cubic_amplifier,
     fmcw_deramp_baseband,
-    lfm_chirp,
     noise_waveform,
     pulsed_baseband,
     stream_baseband,
@@ -89,14 +95,16 @@ def synthesise(
     n_pulses: int,
     *,
     rng: np.random.Generator | None,
+    gate: RangeGate | None = None,
     reference: ArrayLike | None = None,
     disturbance: PropagationPaths | None = None,
     amplifier: Callable[[NDArray[np.complex128]], NDArray[np.complex128]] | None = None,
 ) -> NDArray[np.complex128]:
-    """Return one burst's cube ``(n_pulses, n_samples_per_pri)`` for line-of-sight targets.
+    """Return one burst's cube ``(n_pulses, n_samples)`` for line-of-sight targets.
 
-    A noise burst's cube is its stream cut into batches: the targets and any ``disturbance``
-    paths on the code ``reference`` (noiseless and none given, the one ``default_rng(0)`` draws),
+    A pulsed burst records its ``gate`` (default: the whole PRI); FMCW records every sample. A
+    noise burst's cube is its stream cut into batches: the targets and any ``disturbance`` paths
+    on the code ``reference`` (noiseless and none given, the one ``default_rng(0)`` draws),
     through ``amplifier``.
     """
     paths = line_of_sight_paths(radar, geometry, rcs_m2)
@@ -110,8 +118,17 @@ def synthesise(
             paths, radar, n_pulses, rng=rng, reference=reference, amplifier=amplifier
         )
         return stream.reshape(n_pulses, -1)
-    generate = pulsed_baseband if radar.transmitter.waveform == "pulsed" else fmcw_deramp_baseband
-    return generate(paths, radar, n_pulses, rng=rng)
+    if radar.transmitter.waveform == "fmcw":
+        return fmcw_deramp_baseband(paths, radar, n_pulses, rng=rng)
+    gate = RangeGate() if gate is None else gate
+    return pulsed_baseband(
+        paths,
+        radar,
+        n_pulses,
+        rng=rng,
+        range_gate_start_m=gate.range_gate_start_m,
+        n_gate_samples=gate.n_gate_samples,
+    )
 
 
 @dataclass(frozen=True)
@@ -160,23 +177,26 @@ def frames(scenario: Scenario, *, n_frames: int | None = None) -> Iterator[Frame
             yield Frame(index, float(scenario.frame_times_s[index]), truth, (stream,), references)
             continue
         cubes = tuple(
-            synthesise(radar, truth, rcs_m2, n_pulses, rng=rng)
-            for radar, n_pulses in zip(scenario.radars, scenario.n_pulses, strict=True)
+            synthesise(radar, truth, rcs_m2, n_pulses, rng=rng, gate=gate)
+            for radar, n_pulses, gate in zip(
+                scenario.radars, scenario.n_pulses, scenario.gates, strict=True
+            )
         )
         yield Frame(index, float(scenario.frame_times_s[index]), truth, cubes)
 
 
 def map_axes(
-    radar: Radar, n_pulses: int, *, n_range_lags: int = 0
+    radar: Radar, n_pulses: int, *, gate: RangeGate | None = None, n_range_lags: int = 0
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Return a burst's map axes: bistatic range of each range bin, and rate of each Doppler bin.
 
-    FMCW range is the beat axis; a pulsed bin is one sample of delay, :math:`c n / f_s`; a noise
-    burst's is one lag of its correlation, :math:`c m / f_s` for ``m < n_range_lags``, a
+    FMCW range is the beat axis; a pulsed bin is one sample of delay from the range gate's
+    first, :func:`~radar_forge.dsp.delay_bin_centers_m` (no gate: the whole PRI from zero); a
+    noise burst's is one lag of its correlation, :math:`c m / f_s` for ``m < n_range_lags``, a
     window that does not wrap (:attr:`~radar_forge.radar.Radar.unambiguous_delay_s`).
     """
     transmitter, sample_rate_hz = radar.transmitter, radar.receiver.sample_rate_hz
-    n_samples = radar.n_samples_per_pri
+    gate = RangeGate() if gate is None else gate
     if transmitter.waveform == "noise":
         if n_range_lags < 1:
             msg = "a noise burst's map needs n_range_lags, its count of correlation lags."
@@ -185,10 +205,15 @@ def map_axes(
         lags = np.arange(n_range_lags, dtype=np.float64)
         range_axis_m = SPEED_OF_LIGHT_MPS * lags / sample_rate_hz
     elif transmitter.waveform == "pulsed":
-        range_axis_m = SPEED_OF_LIGHT_MPS * np.arange(n_samples, dtype=np.float64) / sample_rate_hz
+        range_axis_m = delay_bin_centers_m(
+            gate.n_samples(radar), sample_rate_hz, range_gate_start_m=gate.range_gate_start_m
+        )
     else:
         range_axis_m = range_bin_centers_m(
-            n_samples, transmitter.bandwidth_hz, transmitter.chirp_duration_s, sample_rate_hz
+            radar.n_samples_per_pri,
+            transmitter.bandwidth_hz,
+            transmitter.chirp_duration_s,
+            sample_rate_hz,
         )
     pri_s = transmitter.pulse_repetition_interval_s
     return range_axis_m, doppler_bin_centers_mps(n_pulses, pri_s, radar.wavelength_m)
@@ -203,11 +228,13 @@ class RangeDopplerProduct:
     span = :attr:`rate_period_mps`. A noise burst's range axis is a window of lags instead, which
     does not wrap: ``range_wraps`` is ``False``.
     The rate axis falls with index, its sign from :func:`~radar_forge.dsp.doppler_bin_centers_mps`.
+    A range-gated map is a window on its range circle, ``unambiguous_range_m`` round.
     """
 
     rd_map: NDArray[np.complex128]
     range_axis_m: NDArray[np.float64]
     rate_axis_mps: NDArray[np.float64]
+    unambiguous_range_m: float | None = None
     range_wraps: bool = True
 
     @property
@@ -222,7 +249,9 @@ class RangeDopplerProduct:
 
     @property
     def range_period_m(self) -> float:
-        """Span of the range axis, m."""
+        """Circumference of the range circle, m: the axis's span unless the map is gated."""
+        if self.unambiguous_range_m is not None:
+            return self.unambiguous_range_m
         return self.range_axis_m.size * self.range_bin_m
 
     @property
@@ -247,11 +276,11 @@ class RangeDopplerProduct:
 
         A range off a window that does not wrap has no cell: its index is ``nan``.
         """
-        range_m = np.asarray(bistatic_range_m, dtype=np.float64)
+        range_offset_m = np.asarray(bistatic_range_m, dtype=np.float64) - self.range_axis_m[0]
         if self.range_wraps:
-            range_index = np.mod(range_m, self.range_period_m) / self.range_bin_m
+            range_index = np.mod(range_offset_m, self.range_period_m) / self.range_bin_m
         else:
-            range_index = (range_m - self.range_axis_m[0]) / self.range_bin_m
+            range_index = range_offset_m / self.range_bin_m
             inside = (range_index >= 0.0) & (range_index < self.range_axis_m.size)
             range_index = np.where(inside, range_index, np.nan)
         offset_mps = np.asarray(rate_mps) - self.rate_axis_mps[0]
@@ -262,21 +291,20 @@ def range_doppler_product(
     cube: ArrayLike,
     radar: Radar,
     *,
+    gate: RangeGate | None = None,
+    migration: MigrationSettings | None = None,
     reference: ArrayLike | None = None,
     n_range_lags: int = 0,
 ) -> RangeDopplerProduct:
-    """Form one burst's map: FMCW, two FFTs; pulsed, matched filter then the Doppler FFT.
+    """Form one burst's map: FMCW, two FFTs; pulsed, compression, migration, the Doppler FFT.
 
-    The receiver keeps listening, so the pulsed chain compresses the rows as one stream and
-    cuts it back into rows from the reference's group delay, ``n_reference - 1``: zero delay
-    lands at bin 0 (Richards [1] §4.6), an echo that runs into the next row compresses whole,
-    and every cell holds the same noise. A noise burst's stream is correlated with its code,
-    ``reference``, batch by batch over ``n_range_lags`` lags, then Doppler-transformed (Kulpa
-    [3] ch. 3). No window is applied on either axis.
+    A pulsed chain applies ``migration`` between the two, so detection and tracking see the
+    compensated map. A gated map's range circle is the PRI's. A noise burst's stream is
+    correlated with its code, ``reference``, batch by batch over ``n_range_lags`` lags, then
+    Doppler-transformed (Kulpa [3] ch. 3). No window on either axis.
     """
     samples = np.asarray(cube, dtype=np.complex128)
-    transmitter = radar.transmitter
-    if transmitter.waveform == "noise":
+    if radar.transmitter.waveform == "noise":
         if reference is None:
             msg = "a noise burst's map needs its code: pass reference."
             raise ValueError(msg)
@@ -288,16 +316,48 @@ def range_doppler_product(
         rd_map = doppler_fft(correlation, axis=0)
         axes = map_axes(radar, n_pulses, n_range_lags=n_range_lags)
         return RangeDopplerProduct(rd_map, *axes, range_wraps=False)
-    if transmitter.waveform == "pulsed":
-        reference = lfm_chirp(
-            transmitter.bandwidth_hz, transmitter.chirp_duration_s, radar.receiver.sample_rate_hz
-        )
-        stream = matched_filter(samples.reshape(-1), reference)
-        start = reference.size - 1
-        rd_map = doppler_fft(stream[start : start + samples.size].reshape(samples.shape), axis=0)
+    if radar.transmitter.waveform == "pulsed":
+        data_rfst = pulse_compress(samples, radar, gate=gate)
+        if migration is not None:
+            data_rfst = compensate_migration(
+                data_rfst,
+                radar,
+                method=migration.method,
+                keystone=migration.keystone,
+                fold_factor_max=migration.fold_factor_max,
+                accelerations_mps2=migration.accelerations_mps2,
+            ).data_rfst
+        rd_map = doppler_fft(data_rfst, axis=0)
     else:
         rd_map = range_doppler_map(samples)
-    return RangeDopplerProduct(rd_map, *map_axes(radar, samples.shape[0]))
+    windowed = gate is not None and not gate.is_whole_pri(radar)
+    circle_m = radar.unambiguous_bistatic_range_m if windowed else None
+    return RangeDopplerProduct(rd_map, *map_axes(radar, samples.shape[0], gate=gate), circle_m)
+
+
+def frame_products(
+    scenario: Scenario, frame: Frame, *, cancellation: CancellationResult | None = None
+) -> list[RangeDopplerProduct]:
+    """Return each burst's map of one frame, through its range gate and ``[migration]``.
+
+    A noise stream is cancelled first, by ``[cancellation]`` unless ``cancellation`` is given,
+    and the canceller's notch, exactly empty, is set to the map's noise level before CFAR sees
+    it (:func:`~radar_forge.clutter.fill_notch`).
+    """
+    if not frame.references:
+        return [
+            range_doppler_product(cube, radar, gate=gate, migration=scenario.migration)
+            for cube, radar, gate in zip(frame.cubes, scenario.radars, scenario.gates, strict=True)
+        ]
+    code, stream = frame.references[0], frame.cubes[0]
+    result = cancellation or cancel(code, stream, scenario.cancellation)
+    residual = result.residual.reshape(stream.shape)
+    radar, n_range_lags = scenario.radar, scenario.n_range_lags[0]
+    product = range_doppler_product(residual, radar, reference=code, n_range_lags=n_range_lags)
+    settings = scenario.cancellation
+    if settings is not None and settings.method != "none":
+        product = dataclasses.replace(product, rd_map=fill_notch(product.rd_map, settings.n_taps))
+    return [product]
 
 
 @dataclass(frozen=True)
@@ -431,28 +491,6 @@ def _pair(
     columns["bistatic_range_rate_mps"][members] = both_mps
     columns["unfolded_range_m"][members] = np.concatenate([unfolded_m[i, j]] * 2)
     return Plots(detections=first.detections + second.detections, status=tuple(status), **columns)
-
-
-def frame_products(
-    frame: Frame, scenario: Scenario, *, cancellation: CancellationResult | None = None
-) -> list[RangeDopplerProduct]:
-    """Return each burst's map of a frame; a noise stream is cancelled first, or ``cancellation``.
-
-    The canceller's notch, exactly empty, is set to the map's noise level before CFAR sees it
-    (:func:`~radar_forge.clutter.fill_notch`).
-    """
-    if not frame.references:
-        cubes = zip(frame.cubes, scenario.radars, strict=True)
-        return [range_doppler_product(c, r) for c, r in cubes]
-    code, stream = frame.references[0], frame.cubes[0]
-    result = cancellation or cancel(code, stream, scenario.cancellation)
-    residual = result.residual.reshape(stream.shape)
-    radar, n_range_lags = scenario.radar, scenario.n_range_lags[0]
-    product = range_doppler_product(residual, radar, reference=code, n_range_lags=n_range_lags)
-    settings = scenario.cancellation
-    if settings is not None and settings.method != "none":
-        product = dataclasses.replace(product, rd_map=fill_notch(product.rd_map, settings.n_taps))
-    return [product]
 
 
 def frame_plots(products: Sequence[RangeDopplerProduct], settings: DetectionSettings) -> Plots:

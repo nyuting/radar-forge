@@ -8,6 +8,8 @@ the Swerling models.
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import pytest
 from scipy import stats
@@ -18,6 +20,7 @@ from radar_forge.propagation import (
     PropagationPaths,
     bistatic_range_rate_from_doppler_mps,
     dbsm_to_m2,
+    doppler_rate_hzps,
     doppler_shift_hz,
     leakage_paths,
     line_of_sight_paths,
@@ -235,6 +238,46 @@ class TestBistaticRangeAt:
         np.testing.assert_allclose(
             paths.bistatic_range_at_m(slow_time_s, WAVELENGTH_M)[:, 0], expected_m, rtol=1e-12
         )
+
+    def test_a_doppler_jerk_adds_the_cubic_term(self) -> None:
+        """R_b(t) gains -lambda fddot t^3 / 6: the third term of the same series."""
+        base = line_of_sight_paths(S1_RADAR, TargetGeometry.monostatic(10.0e3, -40.0), 10.0)
+        paths = dataclasses.replace(base, doppler_jerk_hzps2=np.array([50.0]))
+        slow_time_s = np.array([0.0, 0.5, 1.0, 3.0])
+        expected_m = 20.0e3 - WAVELENGTH_M * (
+            base.doppler_hz[0] * slow_time_s + 50.0 * slow_time_s**3 / 6.0
+        )
+        np.testing.assert_allclose(
+            paths.bistatic_range_at_m(slow_time_s, WAVELENGTH_M)[:, 0], expected_m, rtol=1e-12
+        )
+
+    def test_zero_jerk_leaves_the_quadratic_history_bit_for_bit(self) -> None:
+        """A15's root: the cubic term is added last, so a zero jerk adds exactly nothing."""
+        base = line_of_sight_paths(S1_RADAR, TargetGeometry.monostatic(10.0e3, -40.0), 10.0)
+        paths = dataclasses.replace(base, doppler_rate_hzps=np.array([300.0]))
+        slow_time_s = np.linspace(0.0, 3.0, 7)[:, None]
+        rate_mps = -WAVELENGTH_M * paths.doppler_hz
+        acceleration_mps2 = -WAVELENGTH_M * paths.doppler_rate_hzps
+        quadratic_m = (
+            paths.bistatic_range_m
+            + rate_mps * slow_time_s
+            + 0.5 * acceleration_mps2 * slow_time_s**2
+        )
+        np.testing.assert_array_equal(
+            paths.bistatic_range_at_m(slow_time_s[:, 0], WAVELENGTH_M), quadratic_m
+        )
+
+
+class TestDopplerRate:
+    def test_a_closing_target_gaining_speed_has_a_positive_doppler_rate(self) -> None:
+        """f_D' = -R_b''/lambda, the sign of doppler_shift_hz: closing faster raises f_D."""
+        np.testing.assert_allclose(doppler_rate_hzps(-294.0, 0.0294), 10000.0, rtol=1e-12)
+
+    def test_line_of_sight_paths_carry_the_routes_acceleration(self) -> None:
+        geometry = TargetGeometry.monostatic(2500.0, -340.0, radial_acceleration_mps2=-147.1)
+        paths = line_of_sight_paths(S1_RADAR, geometry, 0.1)
+        np.testing.assert_allclose(paths.doppler_rate_hzps, 294.2 / WAVELENGTH_M, rtol=1e-12)
+        np.testing.assert_array_equal(paths.doppler_jerk_hzps2, [0.0])
 
 
 class TestLineOfSightPaths:

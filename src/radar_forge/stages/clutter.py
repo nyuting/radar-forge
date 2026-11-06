@@ -147,7 +147,7 @@ def _cancelled_frames(
     for frame in pipeline.frames(ctx.scenario, n_frames=n_frames):
         code, stream = frame.references[0], frame.cubes[0]
         result = clutter.cancel(code, stream, ctx.scenario.cancellation)
-        yield frame, result, pipeline.frame_products(frame, ctx.scenario, cancellation=result)[0]
+        yield frame, result, pipeline.frame_products(ctx.scenario, frame, cancellation=result)[0]
 
 
 def _fit_size(scenario: Scenario, n_samples: int) -> tuple[int, int]:

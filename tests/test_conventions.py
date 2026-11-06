@@ -79,7 +79,9 @@ def test_the_core_stages_register_in_their_run_order(first_import: str) -> None:
     """
     code = (
         f"import {first_import}; from radar_forge.evaluate import STAGES; "
-        "assert list(STAGES)[:5] == ['geometry', 'iq', 'rd', 'detect', 'track'], list(STAGES)"
+        "assert list(STAGES)[:5] == ['geometry', 'iq', 'rd', 'detect', 'track'], list(STAGES); "
+        "assert list(STAGES).index('keystone') > 4, list(STAGES); "
+        "assert list(STAGES).index('leakage') > 4, list(STAGES)"
     )
     result = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True, check=False

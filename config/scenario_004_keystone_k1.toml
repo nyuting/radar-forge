@@ -1,0 +1,92 @@
+# Scenario 004 K1 -- a coasting sounding rocket closing at 340 m/s radial, seen by a wideband
+# X-band tracking radar downrange of the pad. The three variants share every block but
+# [[target]], [migration] and [verify]. Every range and rate on the map is bistatic, positive
+# receding: monostatic, twice the slant range and twice the radial velocity. Slow time starts
+# at pulse 0, the frame's truth time and the keystone's reference.
+
+[scenario]
+name = "scenario-004-keystone-k1"
+description = "K1: linear range walk. 500 MHz LFM pulses walk 27.9 range bins in one 20.48 ms dwell; the map loses 25.8 dB until the keystone straightens the walk."
+seed = 20261106
+
+[[target]]
+name = "sounding-rocket"
+rcs_dbsm = -10.0                        # 0.1 m^2, Swerling 0
+position_enu_m = [0.0, 2500.0, 0.0]     # due north, 2500 m slant: 5000 m bistatic
+velocity_enu_mps = [0.0, -340.0, 0.0]   # closing along the line of sight: -680 m/s bistatic
+
+[frames]
+start_time_s = 0.0
+duration_s = 0.075   # three frames; a fixed gate holds the target no longer
+frame_rate_hz = 40.0 # one 20.48 ms dwell every 25 ms
+
+[site.tx]
+# A tracking radar downrange of a sounding-rocket pad; no [site.rx]: monostatic.
+latitude_deg = 37.85
+longitude_deg = -75.47
+altitude_m = 10.0
+
+# One burst. 0.5 us LFM pulse, B = 500 MHz (time-bandwidth 250), f_s = 600 MHz: one bin is
+# c/f_s = 0.49965 m bistatic. PRI 20 us; 1024 pulses = 20.48 ms. Rate span lambda PRF =
+# 1529.55 m/s bistatic, a rate bin 1.49370 m/s.
+[[burst]]
+waveform = "pulsed"
+carrier_frequency_hz = 9.8e9
+bandwidth_hz = 500.0e6
+transmit_power_w = 100.0
+gain_tx_dbi = 25.0
+chirp_duration_s = 0.5e-6
+prf_hz = 50.0e3
+sample_rate_hz = 600.0e6
+n_pulses = 1024
+# The range gate, bistatic: it opens on sample round(4800 f_s / c) = 9607, 4800.18 m, and
+# records 1024 samples (511.6 m) instead of the PRI's 12000. The target sits at bin 399.9.
+range_gate_start_m = 4800.0
+n_gate_samples = 1024
+
+[receiver]
+gain_rx_dbi = 25.0
+noise_figure_db = 3.0
+
+# Spec A3/A4's CA-CFAR along range at Pfa 1e-6: about one false alarm in the 1024 x 1024 map.
+[detection]
+pfa = 1.0e-6
+n_train = 16
+n_guard = 4
+variant = "ca"
+merge_range_bins = 1.0
+max_bistatic_range_rate_mps = 760.0   # under half the span: one burst reads the rate unfolded
+
+[migration]
+method = "keystone"
+keystone = "czt"
+
+# What the stepper checks. Losses compare the map's peak, off the bin grid, with N^2 times
+# pulse 0's compressed peak; the expected values come from the range-frequency model
+# |P(f)|^2 exp(-j 2 pi (f0 + f) R(t) / c) with the chirp's own spectrum, not from this chain.
+[verify]
+stages = ["geometry", "iq", "rd", "detect", "keystone"]
+# P_r = -139.182 dBW at 5000 m bistatic; P_r T N / (k T0 F) = -1.217 dB per pulse + 30.103.
+expected_snr_db = 28.886
+snr_tolerance_db = 0.01
+# Rate -680 m/s within the +-764.78 m/s span, range within the 5995.85 m circle: unfolded.
+truth_in_map_fraction = [1.0, 1.0]
+# Five standard errors of a mean over 1024 x 1024 samples: 5 x 4.343 / 1024 dB.
+noise_tolerance_db = 0.03
+peak_tolerance_db = 0.01
+# A detection within one bin of the truth, every frame, on the keystoned map.
+truth_within_bins = 1.0
+detection_fraction = 1.0
+rate_tolerance_mps = 1.49370
+# A1: 680 m/s x 20.48 ms / 0.49965 m = 27.872 bins, +-1 bin.
+walk_bins = 27.872
+walk_tolerance_bins = 1.0
+# A2: the keystoned peak track over pulses 1 ... N-2 stays within half a bin.
+residual_walk_max_bins = 0.5
+# A3: uncorrected, the model gives -25.78 dB (-26.56 for a flat band); +-1.0 dB.
+uncompensated_loss_db = -25.78
+loss_tolerance_db = 1.0
+# A4: the keystone recovers all but 0.3 dB of ideal integration.
+compensated_loss_min_db = -0.3
+# A19 for K1: the fine rate (A&M on the chip) within three of its Cramer-Rao bounds.
+rate_error_max_crb = 3.0
