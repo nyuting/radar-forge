@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
@@ -29,12 +30,14 @@ from radar_forge.propagation import PropagationPaths, propagation_delay_s, propa
 from radar_forge.radar import Radar, Transmitter
 
 __all__ = [
+    "RangeGate",
     "ambiguity_function",
     "beat_frequency_hz",
     "bistatic_range_from_beat_frequency_m",
     "fmcw_deramp_baseband",
     "lfm_chirp",
     "pulsed_baseband",
+    "range_gate_first_sample",
     "range_resolution_m",
     "sweep_rate_hzps",
     "thermal_noise",
@@ -162,7 +165,7 @@ def fmcw_deramp_baseband(
     range bin within one chirp (Charvat [2] ch. 3; Richards [1] §4.6.5).
     """
     _check_dwell(radar, n_pulses, "fmcw")
-    return _synthesise(paths, radar, n_pulses, _deramp_kernel, rng, max_bytes)
+    return _synthesise(paths, radar, n_pulses, _deramp_kernel, rng, max_bytes, _fast_time_s(radar))
 
 
 def pulsed_baseband(
@@ -172,17 +175,66 @@ def pulsed_baseband(
     *,
     rng: np.random.Generator | None,
     max_bytes: int = 256 * 2**20,
+    range_gate_start_m: float = 0.0,
+    n_gate_samples: int | None = None,
 ) -> NDArray[np.complex128]:
-    """Synthesise a pulsed cube before compression, ``(n_pulses, n_samples_per_pri)``.
+    """Synthesise a pulsed cube before compression, ``(n_pulses, n_gate_samples)``.
 
     Each path is ``lfm_chirp(B, T, f_s)`` at its delay folded modulo the PRI (how
     range folds) with the carrier phase of the true delay (which keeps Doppler
     right). An echo that runs past the end of its PRI goes on at the start of the
     next row, because the receiver keeps listening; the last row's overrun is
-    lost. No eclipsing. Chunking, ``rng`` and the warning as :func:`fmcw_deramp_baseband`.
+    lost. No eclipsing. The range gate records ``n_gate_samples`` from the sample
+    nearest the delay of ``range_gate_start_m`` (bistatic),
+    :func:`range_gate_first_sample`; the default records the whole PRI, so a gated
+    cube is these columns of the whole one. Chunking, ``rng`` and the warning as
+    :func:`fmcw_deramp_baseband`.
     """
     _check_dwell(radar, n_pulses, "pulsed")
-    return _synthesise(paths, radar, n_pulses, _pulse_kernel, rng, max_bytes)
+    first = range_gate_first_sample(range_gate_start_m, radar.receiver.sample_rate_hz)
+    n_samples = radar.n_samples_per_pri - first if n_gate_samples is None else n_gate_samples
+    if first < 0 or n_samples < 1 or first + n_samples > radar.n_samples_per_pri:
+        msg = (
+            f"the range gate, samples {first} to {first + n_samples - 1}, must lie within "
+            f"the {radar.n_samples_per_pri} samples of one PRI."
+        )
+        raise ValueError(msg)
+    fast_time_s = _fast_time_s(radar)[first : first + n_samples]
+    return _synthesise(paths, radar, n_pulses, _pulse_kernel, rng, max_bytes, fast_time_s)
+
+
+def range_gate_first_sample(range_gate_start_m: float, sample_rate_hz: float) -> int:
+    r"""Return the fast-time sample a range gate opens on, :math:`\mathrm{round}(R_g f_s / c)`.
+
+    ``range_gate_start_m`` is bistatic, :math:`c\tau`; the gate opens on the nearest sample.
+    """
+    return round(range_gate_start_m * sample_rate_hz / SPEED_OF_LIGHT_MPS)
+
+
+@dataclass(frozen=True)
+class RangeGate:
+    """A burst's receive window: ``[[burst]] range_gate_start_m`` (bistatic) and ``n_gate_samples``.
+
+    Pulsed only. The gate opens on the sample nearest the start's delay; ``None`` samples to the
+    end of the PRI, so the default records the whole PRI.
+    """
+
+    range_gate_start_m: float = 0.0
+    n_gate_samples: int | None = None
+
+    def first_sample(self, radar: Radar) -> int:
+        """Return the fast-time sample the gate opens on."""
+        return range_gate_first_sample(self.range_gate_start_m, radar.receiver.sample_rate_hz)
+
+    def n_samples(self, radar: Radar) -> int:
+        """Return the fast-time samples the gate records in each pulse."""
+        if self.n_gate_samples is not None:
+            return self.n_gate_samples
+        return radar.n_samples_per_pri - self.first_sample(radar)
+
+    def is_whole_pri(self, radar: Radar) -> bool:
+        """Return whether the gate records every sample of the PRI, from zero delay."""
+        return self.first_sample(radar) == 0 and self.n_samples(radar) == radar.n_samples_per_pri
 
 
 def _synthesise(
@@ -192,21 +244,19 @@ def _synthesise(
     kernel: Callable[[NDArray[np.float64], NDArray[np.float64], Radar], NDArray[np.complex128]],
     rng: np.random.Generator | None,
     max_bytes: int,
+    fast_time_s: NDArray[np.float64],
 ) -> NDArray[np.complex128]:
     """Sum ``|a_p|`` times each path's unit-amplitude ``kernel`` echo over paths, then add noise."""
     _warn_if_stop_and_hop_is_strained(paths, radar)
     bistatic_range_m = paths.bistatic_range_at_m(_slow_time_s(n_pulses, radar), radar.wavelength_m)
     magnitude = np.abs(paths.amplitude_linear)
-    fast_time_s = _fast_time_s(radar)
 
     def chunk_signal(chunk: slice) -> NDArray[np.complex128]:
         signal = kernel(bistatic_range_m[:, chunk], fast_time_s, radar)
         signal *= magnitude[None, chunk, None]
         return signal
 
-    cube = _sum_over_paths(
-        chunk_signal, paths.n_paths, (n_pulses, radar.n_samples_per_pri), max_bytes
-    )
+    cube = _sum_over_paths(chunk_signal, paths.n_paths, (n_pulses, fast_time_s.size), max_bytes)
     return _add_noise(cube, radar, rng)
 
 

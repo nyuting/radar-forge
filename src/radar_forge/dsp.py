@@ -36,12 +36,14 @@ from scipy.signal import fftconvolve, get_window
 
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.propagation import bistatic_range_rate_from_doppler_mps
+from radar_forge.signal import range_gate_first_sample
 
 __all__ = [
     "WINDOW_NAMES",
     "WindowName",
     "apply_window",
     "coherent_gain_linear",
+    "delay_bin_centers_m",
     "doppler_bin_centers_mps",
     "doppler_fft",
     "fold_into_period",
@@ -312,6 +314,25 @@ def range_bin_centers_m(
     beat_hz = np.arange(n_bins, dtype=np.float64) * sample_rate_hz / n_bins
     delay_s = beat_hz * chirp_duration_s / bandwidth_hz
     result: NDArray[np.float64] = SPEED_OF_LIGHT_MPS * delay_s
+    return result
+
+
+def delay_bin_centers_m(
+    n_bins: int, sample_rate_hz: float, *, range_gate_start_m: float = 0.0
+) -> NDArray[np.float64]:
+    r"""Return the **bistatic range** :math:`c (n_0 + n)/f_s` of each compressed pulsed bin, m.
+
+    One bin is one sample of delay. :math:`n_0` is the sample the range gate opens on,
+    :func:`~radar_forge.signal.range_gate_first_sample` of ``range_gate_start_m``, so the
+    axis lands on the samples :func:`~radar_forge.signal.pulsed_baseband` recorded; with no
+    gate it is the whole PRI from zero delay (Richards [1]_, §4.6).
+    """
+    if n_bins < 1 or not sample_rate_hz > 0.0:
+        msg = f"n_bins must be >= 1 and sample_rate_hz positive; got {n_bins}, {sample_rate_hz}."
+        raise ValueError(msg)
+    first = range_gate_first_sample(range_gate_start_m, sample_rate_hz)
+    sample_index = np.arange(n_bins, dtype=np.float64) + first
+    result: NDArray[np.float64] = SPEED_OF_LIGHT_MPS * sample_index / sample_rate_hz
     return result
 
 

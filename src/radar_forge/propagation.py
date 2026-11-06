@@ -31,6 +31,7 @@ __all__ = [
     "PropagationPaths",
     "bistatic_range_rate_from_doppler_mps",
     "dbsm_to_m2",
+    "doppler_rate_hzps",
     "doppler_shift_hz",
     "line_of_sight_paths",
     "m2_to_dbsm",
@@ -54,7 +55,8 @@ class PropagationPaths:
     ``doppler_hz`` is positive for a shortening path. ``amplitude_linear`` is a
     complex voltage, √W; the generators use its magnitude and rebuild the phase
     from the delay. ``aoa_rad`` and ``aod_rad`` are ``(n_paths, 2)`` (azimuth,
-    elevation). ``doppler_rate_hzps`` defaults to zero and is stored per path.
+    elevation). ``doppler_rate_hzps`` and ``doppler_jerk_hzps2``, the first and
+    second time derivatives of ``doppler_hz``, default to zero and are stored per path.
     """
 
     delay_s: NDArray[np.float64]
@@ -64,6 +66,7 @@ class PropagationPaths:
     aod_rad: NDArray[np.float64]
     n_bounces: NDArray[np.int_]
     doppler_rate_hzps: NDArray[np.float64] = field(default_factory=lambda: np.zeros(()))
+    doppler_jerk_hzps2: NDArray[np.float64] = field(default_factory=lambda: np.zeros(()))
 
     def __post_init__(self) -> None:
         """Reject per-path arrays that disagree on the number of paths."""
@@ -80,11 +83,12 @@ class PropagationPaths:
                     f"{name} must have shape ({n_paths}, 2) for (azimuth, elevation); got {shape}."
                 )
                 raise ValueError(msg)
-        if np.shape(self.doppler_rate_hzps) not in ((), (n_paths,)):
-            msg = f"doppler_rate_hzps must be a scalar or have shape ({n_paths},)."
-            raise ValueError(msg)
-        # Store one value per path, so every per-path field indexes alike.
-        object.__setattr__(self, "doppler_rate_hzps", np.zeros(n_paths) + self.doppler_rate_hzps)
+        for name in ("doppler_rate_hzps", "doppler_jerk_hzps2"):
+            if np.shape(getattr(self, name)) not in ((), (n_paths,)):
+                msg = f"{name} must be a scalar or have shape ({n_paths},)."
+                raise ValueError(msg)
+            # Store one value per path, so every per-path field indexes alike.
+            object.__setattr__(self, name, np.zeros(n_paths) + getattr(self, name))
 
     @property
     def n_paths(self) -> int:
@@ -103,13 +107,13 @@ class PropagationPaths:
         r"""Return each route's length at slow-time instants, ``slow_time_s.shape + (n_paths,)``.
 
         Integrate the rate, which :func:`doppler_shift_hz` defines through
-        :math:`f_D = -\dot R_b/\lambda`, so :math:`\dot R_b = -\lambda f_D` and
-        :math:`\ddot R_b = -\lambda \dot f_D`:
+        :math:`f_D = -\dot R_b/\lambda`, so each derivative of :math:`R_b` is
+        :math:`-\lambda` times one of :math:`f_D`:
 
         .. math::
 
-            R_b(t) = R_b(0) + \dot R_b t + \tfrac{1}{2}\ddot R_b t^2
-                   = R_b(0) - \lambda\left(f_D t + \tfrac{1}{2}\dot f_D t^2\right)
+            R_b(t) = R_b(0) - \lambda\left(f_D t + \tfrac{1}{2}\dot f_D t^2
+                     + \tfrac{1}{6}\ddot f_D t^3\right)
 
         A closing path (:math:`f_D > 0`) shortens. The generators evaluate this
         at each pulse start and hold it across the pulse: stop-and-hop (Richards
@@ -120,9 +124,12 @@ class PropagationPaths:
         acceleration_mps2 = bistatic_range_rate_from_doppler_mps(
             self.doppler_rate_hzps, wavelength_m
         )
+        jerk_mps3 = bistatic_range_rate_from_doppler_mps(self.doppler_jerk_hzps2, wavelength_m)
         result: NDArray[np.float64] = (
             self.bistatic_range_m + rate_mps * time_s + 0.5 * acceleration_mps2 * time_s**2
         )
+        # Added last, so zero jerk leaves the quadratic history bit for bit.
+        result += jerk_mps3 * time_s**3 / 6.0
         return result
 
 
@@ -159,6 +166,17 @@ def doppler_shift_hz(
     rate_arr = np.asarray(bistatic_range_rate_mps, dtype=np.float64)
     result: NDArray[np.float64] = -rate_arr / np.asarray(wavelength_m)
     return result
+
+
+def doppler_rate_hzps(
+    bistatic_range_acceleration_mps2: ArrayLike, wavelength_m: ArrayLike
+) -> NDArray[np.float64]:
+    r"""Return the Doppler rate :math:`\dot f_D = -\ddot R_b/\lambda`, Hz/s.
+
+    The derivative of :func:`doppler_shift_hz`, which it calls, so the sign lives there:
+    a closing target whose closing speed grows has a positive rate (Willis [2] §6.1).
+    """
+    return doppler_shift_hz(bistatic_range_acceleration_mps2, wavelength_m)
 
 
 def bistatic_range_rate_from_doppler_mps(
@@ -246,6 +264,9 @@ def line_of_sight_paths(
         aoa_rad=geometry.aoa_rad,
         aod_rad=geometry.aod_rad,
         n_bounces=np.ones(geometry.bistatic_range_m.shape[0], dtype=np.int_),
+        doppler_rate_hzps=doppler_rate_hzps(
+            geometry.bistatic_range_acceleration_mps2, radar.wavelength_m
+        ),
     )
 
 

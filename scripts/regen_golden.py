@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Write tests/data/golden/fingerprints.csv: a dozen scalars per config/*.toml, three frames.
 
+A config listed in ``FAST_FRAMES`` is fingerprinted over its fast frames instead.
+
     uv run python scripts/regen_golden.py
 
 Each row is one scenario's three-frame run through every stage its ``[verify]`` table names
@@ -39,12 +41,25 @@ FINGERPRINT = (
     "range_rmse_m",
     "nees_fraction",
 )
+# Frames a config runs in the fast suite and its fingerprint, where three would cost too much:
+# its three-frame run moves to the slow tier, and 0 runs it there only, fingerprint included.
+FAST_FRAMES: dict[str, int] = {
+    "scenario_004_keystone_k1": 1,
+    "scenario_004_keystone_k2": 1,
+    "scenario_004_keystone_k3": 1,
+}
+
+
+def fingerprint_frames(stem: str) -> int:
+    """Return the frames a config's fingerprint is taken over: its fast frames, else three."""
+    return FAST_FRAMES.get(stem) or N_FRAMES
 
 
 def fingerprint(path: Path) -> dict[str, float]:
     """Return the fingerprint scalars of a scenario's three-frame run; nan where none."""
     with tempfile.TemporaryDirectory() as out_dir:
-        report = run(load_scenario(path), n_frames=N_FRAMES, out_dir=out_dir, render=False)
+        n_frames = fingerprint_frames(path.stem)
+        report = run(load_scenario(path), n_frames=n_frames, out_dir=out_dir, render=False)
     return {name: report.values.get(name, math.nan) for name in FINGERPRINT}
 
 
