@@ -31,6 +31,7 @@ __all__ = [
     "display_axes",
     "magnitude_db",
     "render_cancellation",
+    "render_doa_spectra",
     "render_range_doppler",
     "render_range_slow_time",
     "render_range_time_history",
@@ -378,4 +379,47 @@ def render_cancellation(
     figure.colorbar(image, ax=panels, label="Power over the clean noise floor (dB)")
     if title is not None:
         figure.suptitle(title)
+    return figure
+
+
+def render_doa_spectra(
+    grid: ArrayLike,
+    spectra: Sequence[tuple[str, ArrayLike]],
+    *,
+    estimates: Sequence[tuple[str, ArrayLike]] = (),
+    truth_direction_cosine: ArrayLike = (),
+    title: str | None = None,
+    dynamic_range_db: float = 50.0,
+) -> Any:
+    """Draw DOA spectra over direction cosine, each relative to its own peak, truths dashed.
+
+    ``spectra`` are ``(label, values)`` on ``grid``; ``estimates`` are ``(label, directions)``
+    from methods without a spectrum (root-MUSIC, ESPRIT, ML), drawn as markers at 0 dB. The
+    view spans the truths and four Rayleigh widths of a 16-element half-wavelength array.
+    """
+    plt = _pyplot()
+    u = np.asarray(grid, dtype=np.float64)
+    truths = np.atleast_1d(np.asarray(truth_direction_cosine, dtype=np.float64))
+    figure, axes = plt.subplots(figsize=(8.0, 4.5), layout="constrained")
+    # One curve per method: a handful.
+    for label, values in spectra:
+        power = np.maximum(np.asarray(values, dtype=np.float64), 1e-300)
+        axes.plot(u, 10.0 * np.log10(power / power.max()), label=label, linewidth=1.0)
+    markers = "ov^sD"
+    for k, (label, found) in enumerate(estimates):
+        found_u = np.atleast_1d(np.asarray(found, dtype=np.float64))
+        offset_db = -1.5 * (k + 1)
+        axes.plot(found_u, np.full(found_u.shape, offset_db), markers[k % 5], label=label)
+    for k, value in enumerate(truths):
+        axes.axvline(
+            value, color="black", linestyle="--", linewidth=0.8, label="truth" if k == 0 else "_"
+        )
+    centre = float(truths.mean()) if truths.size else 0.0
+    axes.set_xlim(centre - 0.25, centre + 0.25)
+    axes.set_ylim(-dynamic_range_db, 3.0)
+    axes.set_xlabel("Direction cosine $u$ along the array (positive right of boresight)")
+    axes.set_ylabel("Spectrum relative to its peak (dB)")
+    axes.legend(loc="lower right", fontsize="small", framealpha=0.85, ncol=2)
+    if title is not None:
+        axes.set_title(title)
     return figure
