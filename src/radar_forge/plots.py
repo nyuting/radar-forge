@@ -30,7 +30,9 @@ __all__ = [
     "DisplayAxes",
     "display_axes",
     "magnitude_db",
+    "render_cancellation",
     "render_range_doppler",
+    "render_range_slow_time",
     "render_range_time_history",
     "render_scene",
     "save_figure",
@@ -202,6 +204,46 @@ def render_range_doppler(
     return figure
 
 
+def render_range_slow_time(
+    panels: Sequence[tuple[str, ArrayLike]],
+    range_axis_m: ArrayLike,
+    radar: Radar,
+    *,
+    title: str | None = None,
+    dynamic_range_db: float = 40.0,
+) -> Any:
+    """Draw compressed pulses ``(n_pulses, n_range_bins)`` side by side, range against pulse.
+
+    Each panel is ``(label, data_rfst)``, in dB relative to its own peak: a walking echo is a
+    slanted line, a corrected one a vertical line (Richards [1] §4.6).
+    """
+    plt = _pyplot()
+    show = display_axes(radar)
+    range_m = np.asarray(range_axis_m, dtype=np.float64) * show.scale
+    figure, axes = plt.subplots(1, len(panels), sharey=True, figsize=(4.0 * len(panels), 5.0))
+    axes = np.atleast_1d(axes)
+    # One panel per stage of the correction: two or three.
+    for ax, (label, data) in zip(axes, panels, strict=True):
+        values = np.asarray(data)
+        image = ax.imshow(
+            magnitude_db(values, floor_db=-dynamic_range_db),
+            aspect="auto",
+            origin="lower",
+            extent=(range_m[0], range_m[-1], 0, values.shape[0]),
+            cmap="viridis",
+            vmin=-dynamic_range_db,
+            vmax=0.0,
+            interpolation="nearest",
+        )
+        ax.set_title(label)
+        ax.set_xlabel(show.range_label.replace("(km)", "(m)"))
+    axes[0].set_ylabel("Pulse")
+    figure.colorbar(image, ax=axes.tolist(), label="Magnitude relative to peak (dB)")
+    if title is not None:
+        figure.suptitle(title)
+    return figure
+
+
 def _break_at_wraps(values: NDArray[np.float64], period: float | None) -> NDArray[np.float64]:
     """Return ``values`` with nan where consecutive samples jump over half a period."""
     if period is None or values.size < 2:
@@ -269,6 +311,74 @@ def render_range_time_history(
     range_axes.legend(loc="upper right", fontsize="small", framealpha=0.85)
     if title is not None:
         range_axes.set_title(title)
+    return figure
+
+
+def render_cancellation(
+    before: ArrayLike,
+    after: ArrayLike,
+    range_axis_m: ArrayLike,
+    rate_axis_mps: ArrayLike,
+    radar: Radar,
+    *,
+    floor_w: float,
+    truth_range_m: ArrayLike = (),
+    truth_rate_mps: ArrayLike = (),
+    title: str | None = None,
+    dynamic_range_db: float = 60.0,
+) -> Any:
+    """Draw a map before and after cancellation, side by side, on one scale over the noise.
+
+    Both panels are power over ``floor_w``, the clean map's floor, from 0 to
+    ``dynamic_range_db`` dB: what cancellation removed reads straight off the colour. Maps are
+    ``(n_doppler_bins, n_range_bins)`` on bistatic axes, rate falling with row; truth is crossed.
+    """
+    plt = _pyplot()
+    range_m = np.asarray(range_axis_m, dtype=np.float64)
+    rate_mps = np.asarray(rate_axis_mps, dtype=np.float64)
+    if not floor_w > 0.0 or dynamic_range_db <= 0.0:
+        msg = "floor_w and dynamic_range_db must be strictly positive."
+        raise ValueError(msg)
+    show = display_axes(radar)
+    km = show.scale * 1.0e-3
+    range_bin_m, rate_bin_mps = range_m[1] - range_m[0], abs(rate_mps[1] - rate_mps[0])
+    extent = (
+        (range_m[0] - range_bin_m / 2) * km,
+        (range_m[-1] + range_bin_m / 2) * km,
+        (rate_mps.min() - rate_bin_mps / 2) * show.scale,
+        (rate_mps.max() + rate_bin_mps / 2) * show.scale,
+    )
+    figure, panels = plt.subplots(1, 2, sharey=True, figsize=(11.0, 4.5), layout="constrained")
+    image = None
+    # Two panels, the same drawing: before cancellation, then after.
+    for axes, values, label in zip(panels, (before, after), ("before", "after"), strict=True):
+        power_db = 10.0 * np.log10(np.maximum(np.abs(np.asarray(values)) ** 2 / floor_w, 1e-30))
+        image = axes.imshow(
+            power_db,
+            aspect="auto",
+            origin="upper",
+            extent=extent,
+            cmap="viridis",
+            vmin=0.0,
+            vmax=dynamic_range_db,
+            interpolation="nearest",
+        )
+        truth = zip(np.atleast_1d(truth_range_m), np.atleast_1d(truth_rate_mps), strict=True)
+        # A crosshair per target, which leaves its own cell in view; one legend entry for all.
+        for k, (range_value_m, rate_value_mps) in enumerate(truth):
+            style = {"color": "white", "linestyle": "--", "linewidth": 0.8}
+            axes.axvline(range_value_m * km, label="truth" if k == 0 else "_truth", **style)
+            axes.axhline(rate_value_mps * show.scale, **style)
+        axes.set_title(f"{label} cancellation")
+        axes.set_xlabel(show.range_label)
+        axes.set_xlim(extent[0], extent[1])
+        axes.set_ylim(extent[2], extent[3])
+    panels[0].set_ylabel(show.rate_label)
+    if np.size(truth_range_m):
+        panels[1].legend(loc="upper right", fontsize="small", framealpha=0.85)
+    figure.colorbar(image, ax=panels, label="Power over the clean noise floor (dB)")
+    if title is not None:
+        figure.suptitle(title)
     return figure
 
 

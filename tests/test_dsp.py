@@ -19,7 +19,9 @@ from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.dsp import (
     WINDOW_NAMES,
     apply_window,
+    batched_correlation,
     coherent_gain_linear,
+    delay_bin_centers_m,
     doppler_bin_centers_mps,
     doppler_fft,
     fold_into_period,
@@ -655,3 +657,62 @@ class TestUnfold:
     def test_unfold_range_rejects_a_negative_bound(self) -> None:
         with pytest.raises(ValueError, match="max_range_m"):
             unfold_range_dual_prf(0.0, 0.0, SPAN_A_M, SPAN_B_M, max_range_m=-1.0, tolerance_m=50.0)
+
+
+# --- Scenario 005: batched correlation of a continuous stream ---
+
+
+def _constant_modulus_code(n_samples: int, rng: np.random.Generator) -> np.ndarray:
+    """A code of unit magnitude, so a batch's energy is exactly its length."""
+    return np.exp(2j * np.pi * rng.random(n_samples))
+
+
+def test_batched_correlation_reads_a_path_at_its_lag_in_every_batch(rng):
+    """A path a x[(n - m) mod N] gives exactly a at lag m in every batch, the last ones wrapped."""
+    code = _constant_modulus_code(8 * 32, rng)
+    stream = (0.5 - 0.25j) * np.roll(code, 37)
+    correlation = batched_correlation(stream, code, 64, 32)
+    assert correlation.shape == (8, 64)
+    # A sum of 32 unit products divided by 32: rtol 1e-12.
+    np.testing.assert_allclose(correlation[:, 37], 0.5 - 0.25j, rtol=1e-12)
+
+
+def test_batched_correlation_is_the_direct_sum_however_it_is_chunked(rng):
+    """y_b[m] = (1/L) sum_n s[bL + n + m] x*[bL + n], by FFT, in chunks or whole."""
+    code = _constant_modulus_code(6 * 20, rng)
+    stream = rng.standard_normal(120) + 1j * rng.standard_normal(120)
+    direct = (
+        np.array(
+            [
+                [
+                    np.sum(
+                        np.roll(stream, -(b * 20 + m))[:20] * np.conj(code[b * 20 : b * 20 + 20])
+                    )
+                    for m in range(30)
+                ]
+                for b in range(6)
+            ]
+        )
+        / 20
+    )
+    # FFT round-off on 20-term sums: 1e-12 of their size.
+    np.testing.assert_allclose(batched_correlation(stream, code, 30, 20), direct, atol=1e-12)
+    np.testing.assert_allclose(
+        batched_correlation(stream, code, 30, 20, max_bytes=1), direct, atol=1e-12
+    )
+
+
+class TestDelayBins:
+    def test_without_a_gate_a_bin_is_one_sample_of_delay_from_zero(self) -> None:
+        """Bit for bit the pipeline's former inline axis, c n / f_s."""
+        np.testing.assert_array_equal(
+            delay_bin_centers_m(100, 2.5e6),
+            SPEED_OF_LIGHT_MPS * np.arange(100, dtype=np.float64) / 2.5e6,
+        )
+
+    def test_a_gated_axis_starts_on_the_sample_the_gate_opens_on(self) -> None:
+        """4800 m opens on sample 9607 at 600 MHz: 4800.18 m, not 4800, so the axis is on grid."""
+        axis_m = delay_bin_centers_m(3, 600.0e6, range_gate_start_m=4800.0)
+        np.testing.assert_allclose(
+            axis_m, SPEED_OF_LIGHT_MPS * (9607 + np.arange(3)) / 600.0e6, rtol=1e-15
+        )

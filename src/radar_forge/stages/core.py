@@ -23,6 +23,7 @@ import numpy as np
 from scipy.stats import chi2
 
 from radar_forge import evaluate, plots
+from radar_forge.clutter import cancel
 from radar_forge.detection import cfar_detect
 from radar_forge.dsp import fold_into_period
 from radar_forge.pipeline import (
@@ -30,6 +31,7 @@ from radar_forge.pipeline import (
     RangeDopplerProduct,
     ScanTracker,
     frame_plots,
+    frame_products,
     frames,
     range_doppler_product,
     synthesise,
@@ -119,12 +121,14 @@ def iq(ctx: evaluate.Context) -> evaluate.Context:
     noise_errors_db, peak_errors_db = [], []
     for k, (radar, n_pulses) in enumerate(zip(scenario.radars, scenario.n_pulses, strict=True)):
         # A generator of its own, so the frames' noise does not depend on whether this ran.
-        rng = np.random.default_rng([scenario.seed, 1, k])
+        rng, gate = np.random.default_rng([scenario.seed, 1, k]), scenario.gates[k]
         noise_db = evaluate.to_db(
-            np.mean(np.abs(synthesise(radar, first, 0.0 * rcs_m2, n_pulses, rng=rng)) ** 2)
+            np.mean(
+                np.abs(synthesise(radar, first, 0.0 * rcs_m2, n_pulses, rng=rng, gate=gate)) ** 2
+            )
         )
         peak_db = evaluate.to_db(
-            np.max(np.abs(synthesise(radar, first, rcs_m2, n_pulses, rng=None)) ** 2)
+            np.max(np.abs(synthesise(radar, first, rcs_m2, n_pulses, rng=None, gate=gate)) ** 2)
         )
         noise_errors_db.append(
             abs(noise_db - evaluate.to_db(radar.receiver.noise_power_per_sample_w))
@@ -162,15 +166,17 @@ def _hits(
             if b == burst
         ]
     )
-    n_rate, n_range = product.rd_map.shape
+    n_rate = product.rd_map.shape[0]
+    # The range circle in bins: the map's width, or the PRI's when the map is a gated window.
+    n_range = round(product.range_period_m / product.range_bin_m)
     cells = cells.reshape(-1, 2)
     # Offsets in bins the short way round each axis, in [-n/2, n/2).
     rate_offset = fold_into_period(
         cells[None, :, 0] - rate_index[:, None], n_rate, lower=-n_rate / 2
     )
-    range_offset = fold_into_period(
-        cells[None, :, 1] - range_index[:, None], n_range, lower=-n_range / 2
-    )
+    range_offset = cells[None, :, 1] - range_index[:, None]
+    if product.range_wraps:
+        range_offset = fold_into_period(range_offset, n_range, lower=-n_range / 2)
     near_rate, near_range = np.abs(rate_offset) <= bins, np.abs(range_offset) <= bins
     return list(np.any(near_rate & near_range, axis=1))
 
@@ -181,9 +187,15 @@ def rd(ctx: evaluate.Context) -> evaluate.Context:
     scenario, verify = ctx.scenario, evaluate.thresholds(ctx, "rd")
     bins, hits = float(verify.get("truth_within_bins", 1.0)), []
     for frame in frames(scenario, n_frames=ctx.n_frames):
-        products = [
-            range_doppler_product(c, r) for c, r in zip(frame.cubes, scenario.radars, strict=True)
-        ]
+        # A noise frame is cancelled once, here; the map and the leakage stage both use it.
+        cancellation = (
+            cancel(frame.references[0], frame.cubes[0], scenario.cancellation)
+            if frame.references
+            else None
+        )
+        products = frame_products(scenario, frame, cancellation=cancellation)
+        if cancellation is not None and frame.index < evaluate.cached_frames(ctx):
+            ctx.cancelled.append((frame, cancellation, products[0]))
         found = frame_plots(products, scenario.detection)
         ctx.plots.append(found)
         for k, product in enumerate(products):
@@ -228,13 +240,16 @@ def rd(ctx: evaluate.Context) -> evaluate.Context:
 def _false_alarm_ratio(scenario: Scenario, burst: int) -> float:
     """Return measured over design Pfa on one burst's noise-only maps (Richards [1] §6.5)."""
     settings, radar, n_pulses = scenario.detection, scenario.radars[burst], scenario.n_pulses[burst]
-    n_cells = n_pulses * radar.n_samples_per_pri
+    gate = scenario.gates[burst]
+    n_cells = n_pulses * gate.n_samples(radar)
     n_maps = max(1, min(math.ceil(_FALSE_ALARMS / (settings.pfa * n_cells)), _MAX_CELLS // n_cells))
     rng = np.random.default_rng([scenario.seed, 2, burst])
-    shape = (n_maps, n_pulses, radar.n_samples_per_pri)
+    shape = (n_maps, n_pulses, gate.n_samples(radar))
     noise = thermal_noise(shape, radar.receiver.noise_power_per_sample_w, rng=rng)
     # One map at a time: the receive chain takes one cube.
-    power_w = np.stack([np.abs(range_doppler_product(cube, radar).rd_map) ** 2 for cube in noise])
+    power_w = np.stack(
+        [np.abs(range_doppler_product(cube, radar, gate=gate).rd_map) ** 2 for cube in noise]
+    )
     detected, _ = cfar_detect(
         power_w,
         settings.pfa,
@@ -256,17 +271,16 @@ def detect(ctx: evaluate.Context) -> evaluate.Context:
     range_span_m, rate_span_mps, range_bin_m = evaluate.spans(scenario, 0)
     within_m = float(verify.get("truth_within_bins", 1.0)) * range_bin_m
     errors_mps, show, rows = [], plots.display_axes(scenario.radar), []
+    # A noise burst's lags are a window: a gap in range is not taken the short way round.
+    wraps = math.isfinite(scenario.radar.unambiguous_bistatic_range_m)
     # A frame's plots against its targets: a handful of each.
     for index, (found, frame) in enumerate(zip(ctx.plots, truth, strict=True)):
         accepted = found.accepted
         for k, rate_mps in enumerate(frame.bistatic_range_rate_mps):
-            gap_m = np.abs(
-                fold_into_period(
-                    found.bistatic_range_m[accepted] - frame.bistatic_range_m[k],
-                    range_span_m,
-                    lower=-range_span_m / 2.0,
-                )
-            )
+            gap_m = found.bistatic_range_m[accepted] - frame.bistatic_range_m[k]
+            if wraps:
+                gap_m = fold_into_period(gap_m, range_span_m, lower=-range_span_m / 2.0)
+            gap_m = np.abs(gap_m)
             if np.any(gap_m <= within_m):
                 plot = accepted[np.argmin(gap_m)]
                 unfolded_mps = found.bistatic_range_rate_mps[plot]

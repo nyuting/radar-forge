@@ -1,8 +1,10 @@
 """Performance budgets: one frame's memory, and each stage's wall time.
 
 Regressions, not correctness (``benchmark``). Memory is measured with ``tracemalloc`` over one
-frame of the largest shipped scenario, from synthesis to plots: the chain may hold the cube,
-its map and their working copies, but nothing that grows with the frame count or the paths.
+frame, from synthesis to plots, of the largest shipped scenario and of every one that corrects
+range migration: the chain may hold the cube (as its range gate records it), its map and their
+working copies, and a keystone its chirp-z plan and a few range spectra, but nothing that grows
+with the frame count or the paths.
 """
 
 from __future__ import annotations
@@ -14,9 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from radar_forge import evaluate
+from radar_forge import evaluate, migration
 from radar_forge.detection import cluster_detections
-from radar_forge.pipeline import frame_plots, frames, range_doppler_product
+from radar_forge.pipeline import frame_plots, frame_products, frames
 from radar_forge.scenario import load_scenario
 
 REPO = Path(__file__).resolve().parents[1]
@@ -25,29 +27,62 @@ CONFIGS = sorted((REPO / "config").glob("*.toml"))
 
 def _cube_bytes(path: Path) -> int:
     scenario = load_scenario(path)
-    # complex128: 16 bytes a sample.
+    # complex128: 16 bytes a sample, of the samples each burst's gate records. A noise burst
+    # holds its code beside its stream, and its map is n_range_lags wide, not a batch: those
+    # count with the cube.
     return sum(
-        16 * n * r.n_samples_per_pri
-        for r, n in zip(scenario.radars, scenario.n_pulses, strict=True)
+        16 * n * (gate.n_samples(r) * (2 if lags else 1) + lags)
+        for r, n, gate, lags in zip(
+            scenario.radars, scenario.n_pulses, scenario.gates, scenario.n_range_lags, strict=True
+        )
     )
 
 
+def _migration_bytes(path: Path) -> int:
+    """A keystone's working set: its chirp-z plan, 16 M (2N + L) bytes, and six range spectra.
+
+    The spectra, (N, M) complex each: the range spectrum, its frequency-major copy, a search's
+    trial and its return to range, the corrected cube and its map. M is the padded range
+    length, L the chirp-z convolution length.
+    """
+    scenario = load_scenario(path)
+    if scenario.migration.method == "none":
+        return 0
+    total = 0
+    for radar, n_pulses, gate in zip(
+        scenario.radars, scenario.n_pulses, scenario.gates, strict=True
+    ):
+        n_range_fft = 2 ** math.ceil(math.log2(2 * gate.n_samples(radar)))
+        n_convolution = 2 ** math.ceil(math.log2(2 * n_pulses - 1))
+        spectrum_bytes = 16 * n_pulses * n_range_fft
+        total += 16 * n_range_fft * (2 * n_pulses + n_convolution) + 6 * spectrum_bytes
+    return total
+
+
+MEASURED = sorted(
+    {max(CONFIGS, key=_cube_bytes)}
+    | {path for path in CONFIGS if load_scenario(path).migration.method != "none"}
+)
+
+
 @pytest.mark.benchmark
-def test_one_frame_of_the_largest_scenario_holds_at_most_two_cubes_and_64_mib():
-    """Synthesis to plots in one frame stays within twice the cube plus a fixed 64 MiB."""
-    largest = max(CONFIGS, key=_cube_bytes)
-    scenario = load_scenario(largest)
+@pytest.mark.parametrize("path", MEASURED, ids=[path.stem for path in MEASURED])
+def test_one_frame_holds_at_most_two_cubes_a_keystones_working_set_and_64_mib(path):
+    """Synthesis to plots in one frame, through the gate and [migration], within budget.
+
+    The chirp-z plan cache (one plan, migration.py) is emptied first, so building the plan is
+    measured too.
+    """
+    scenario = load_scenario(path)
+    migration._chirp_z_plan.cache_clear()
     tracemalloc.start()
     try:
         frame = next(frames(scenario, n_frames=1))
-        products = [
-            range_doppler_product(c, r) for c, r in zip(frame.cubes, scenario.radars, strict=True)
-        ]
-        frame_plots(products, scenario.detection)
+        frame_plots(frame_products(scenario, frame), scenario.detection)
         _, peak_bytes = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
-    assert peak_bytes <= 2 * _cube_bytes(largest) + 64 * 2**20
+    assert peak_bytes <= 2 * _cube_bytes(path) + _migration_bytes(path) + 64 * 2**20
 
 
 # Budgets, s, for three frames of S1 without figures: about four times this machine's time.

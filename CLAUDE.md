@@ -54,25 +54,26 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 | wavelength; PRI, duty cycle, sweep rate | `Transmitter.wavelength_m`; `.pulse_repetition_interval_s`, `.duty_cycle_linear`, `.sweep_rate_hzps` (radar.py) |
 | range resolution c/2B | `Radar.range_resolution_m` (radar.py); `range_resolution_m` (signal.py) |
 | unambiguous delay, range, rate | `Radar.unambiguous_delay_s`, `.unambiguous_bistatic_range_m` (c τ, the map's range span), `.unambiguous_bistatic_range_rate_mps` (λ PRF, the whole span) (radar.py) |
-| route geometry, baseline, bistatic angle | `Radar.geometry` -> `TargetGeometry`, `Radar.baseline_m`, `TargetGeometry.bistatic_angle_rad` (radar.py) |
+| route geometry, baseline, bistatic angle; geodesy | `Radar.geometry` -> `TargetGeometry`, `Radar.baseline_m`, `TargetGeometry.bistatic_angle_rad`; `geodetic_to_enu_m`, `enu_to_range_azimuth_elevation_rad`, `range_azimuth_elevation_to_enu_m` (radar.py) |
 | beat frequency ↔ bistatic range | `beat_frequency_hz`, `bistatic_range_from_beat_frequency_m` (signal.py) |
 | delay, phase, Doppler; stop-and-hop | `propagation_delay_s`, `propagation_phase_rad`, `doppler_shift_hz`; `PropagationPaths.bistatic_range_at_m` (propagation.py) |
 | radar equation; RCS, Swerling 0-4 | `received_power_w` (R_T² R_R²); `dbsm_to_m2`, `swerling_rcs_m2` (propagation.py) |
 | noise N0 = kT0F, per sample, in band | `Receiver.noise_density_w_per_hz`, `.noise_power_per_sample_w`, `Radar.noise_power_matched_w` (radar.py) |
 | SNR, single pulse and integrated | `received_power_w / Radar.noise_power_matched_w`; times B T N on the map (stages/core.py geometry stage) |
-| thermal noise; synthesis; LFM chirp; ambiguity | `thermal_noise`; `fmcw_deramp_baseband`, `pulsed_baseband`; `lfm_chirp`; `ambiguity_function` (signal.py) |
+| thermal noise; synthesis; LFM chirp, noise code, amplifier; ambiguity | `thermal_noise`; `fmcw_deramp_baseband`, `pulsed_baseband`, `stream_baseband`; `lfm_chirp`, `noise_waveform`, `cubic_amplifier`; `ambiguity_function` (signal.py) |
+| leakage, near clutter; LS / Wiener-SMI cancellation; CA bound, notch | `leakage_paths`, `static_clutter_paths` (propagation.py); `least_squares_cancel`, `wiener_smi`, `delay_basis_gram`; `expected_cancellation_depth_db`, `doppler_notch_response_linear` (clutter.py) |
 | windows, coherent gain, processing loss | `window`, `apply_window`, `coherent_gain_linear`, `processing_loss_db` (dsp.py) |
-| matched filter, range/Doppler FFT, map | `matched_filter`, `range_fft`, `doppler_fft`, `range_doppler_map` (dsp.py); `range_doppler_product` (pipeline.py) |
+| matched filter, batched correlation, range/Doppler FFT, map | `matched_filter`, `batched_correlation`, `range_fft`, `doppler_fft`, `range_doppler_map` (dsp.py); `range_doppler_product` (pipeline.py) |
 | bin axes, Doppler resolution; MTI | `range_bin_centers_m`, `doppler_bin_centers_mps` (its spacing λ/(N T)); `mti_filter` (dsp.py) |
 | fold, dual-PRF unfold | `fold_velocity_mps`, `unfold_doppler_dual_prf`, `unfold_range_dual_prf` (dsp.py; all take the span) |
 | CFAR Pfa, threshold, detect; clustering | `cfar_probability_of_false_alarm`, `cfar_threshold_factor`, `cfar_detect`, `cfar_detect_2d`; `cluster_detections` (detection.py) |
-| geodesy | `geodetic_to_enu_m`, `enu_to_range_azimuth_elevation_rad` (radar.py) |
-| predict, innovate, update; NEES | `predict`, `innovate`, `update`, `TaylorLinearisation`, `UnscentedTransform` (tracking/filters.py); `nees` (tracking/metrics.py) |
-| CWNA/DWNA process noise | `CartesianMotion`, `RadialConstantVelocity` (tracking/models.py) |
-| χ² gate, GNN; M-of-N | `chi_square_gate_threshold`, `GlobalNearestNeighbour` (tracking/association.py); `LifecyclePolicy` (tracking/tracker.py) |
-| coordinated turn; IMM mixing, Π = expm(ΛT) | `CoordinatedTurn` (tracking/models.py); `InteractingMultipleModel`, `imm_mix`, `imm_predict`, `imm_update` (tracking/imm.py) |
-| PDA/JPDA/JPDA*/set weights, JIPDA existence; weighted update | `probabilistic_data_association`, `joint_probabilistic_data_association` (tracking/association.py); `update_weighted` (tracking/filters.py); `ExistencePolicy` (tracking/tracker.py) |
-| GOSPA, trajectory GOSPA | `gospa`, `trajectory_gospa` (tracking/metrics.py) |
+| predict, innovate, update, weighted update; NEES, GOSPA, trajectory GOSPA | `predict`, `innovate`, `update`, `update_weighted`, `TaylorLinearisation`, `UnscentedTransform` (tracking/filters.py); `nees`, `gospa`, `trajectory_gospa` (tracking/metrics.py) |
+| CWNA/DWNA process noise, coordinated turn; IMM, Π = expm(ΛT) | `CartesianMotion`, `RadialConstantVelocity`, `CoordinatedTurn` (tracking/models.py); `InteractingMultipleModel`, `imm_mix`, `imm_predict`, `imm_update` (tracking/imm.py) |
+| χ² gate, GNN, PDA/JPDA/JPDA*/set weights; M-of-N, JIPDA existence | `chi_square_gate_threshold`, `GlobalNearestNeighbour`, `probabilistic_data_association`, `joint_probabilistic_data_association` (tracking/association.py); `LifecyclePolicy`, `ExistencePolicy` (tracking/tracker.py) |
+| route acceleration R̈_b; Doppler rate | `Radar.geometry(acceleration_enu_mps2=)` (radar.py); `doppler_rate_hzps` (propagation.py) |
+| range gate; its delay axis | `pulsed_baseband(range_gate_start_m=, n_gate_samples=)`, `range_gate_first_sample` (signal.py); `delay_bin_centers_m` (dsp.py) |
+| compression through a gate; keystone, fold factor, Doppler-rate filter | `pulse_compress`; `keystone`, `second_order_keystone`, `fold_factor_search`, `doppler_rate_compensation`, `compensate_migration` (migration.py) |
+| data chip; sub-bin and polynomial-phase estimates; CRB | `crop_slow_time`, `crop_range_doppler`, `estimate_tone`, `estimate_fine`, `cramer_rao_bounds` (datachip.py) |
 | arcs; plot merge P_u = exp(-d²/2), Pd, clutter per m·rad, clutter map; rotations, sector batches | `Arc`, `resolve`, `detect`, `measure`, `ClutterComponent`, `ClutterMap` (tracking/scene.py); `scans`, `PlotTracker` (tracking/scans.py) |
 
 No function yet: Pd (Swerling detection curves).

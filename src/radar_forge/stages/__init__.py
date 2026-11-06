@@ -11,6 +11,12 @@ locals named ``truth`` and ``spans``, which would shadow a bare import and raise
 ``UnboundLocalError``.
 """
 
-from radar_forge.stages import core, tracking
+from radar_forge.stages import core, migration
 
-__all__ = ["core", "tracking"]
+# isort: split
+from radar_forge.stages import clutter
+
+# isort: split
+from radar_forge.stages import tracking
+
+__all__ = ["clutter", "core", "migration", "tracking"]

@@ -7,6 +7,8 @@ the exact equatorial and cardinal cases for the WGS-84 transforms.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
@@ -446,3 +448,71 @@ class TestSphericalCoordinates:
         )
         recovered_m = range_azimuth_elevation_to_enu_m(*enu_to_range_azimuth_elevation_rad(enu_m))
         np.testing.assert_allclose(recovered_m, enu_m, rtol=1e-12, atol=1e-12)
+
+
+# --- Scenario 005: a continuous noise code ---
+
+NOISE_TRANSMITTER = Transmitter(9.8e9, 8.0e6, 1.0, 30.0, 50.0e-6, 20.0e3, waveform="noise")
+DUKE = Site(36.0025, -78.941, 60.0)
+
+
+def test_a_noise_codes_batch_is_its_pulse_at_duty_one():
+    """The correlation batch stands in for the pulse: PRF is the batch rate, 400 samples a batch."""
+    radar = Radar(NOISE_TRANSMITTER, Receiver(8.0e6, 30.0, 3.0), DUKE)
+    assert NOISE_TRANSMITTER.duty_cycle_linear == 1.0
+    assert radar.n_samples_per_chirp == radar.n_samples_per_pri == 400
+
+
+def test_a_noise_code_fills_the_sampled_band():
+    """A white code over f_s has bandwidth f_s; any other bandwidth labels a band not sent."""
+    with pytest.raises(ValueError, match="fills the sampled band"):
+        Radar(NOISE_TRANSMITTER, Receiver(16.0e6, 30.0, 3.0), DUKE)
+
+
+def test_a_noise_code_folds_no_delay():
+    """Batched correlation reads each lag whole: no delay period, so no range folds."""
+    radar = Radar(NOISE_TRANSMITTER, Receiver(8.0e6, 30.0, 3.0), DUKE)
+    assert math.isinf(radar.unambiguous_delay_s)
+    assert math.isinf(radar.unambiguous_bistatic_range_m)
+
+
+def test_a_noise_codes_batch_must_fill_its_pri():
+    """A continuous code has no gap: a batch shorter than the PRI would drop samples unseen."""
+    gapped = Transmitter(9.8e9, 8.0e6, 1.0, 30.0, 50.0e-6, 10.0e3, waveform="noise")
+    with pytest.raises(ValueError, match="fills its PRI"):
+        Radar(gapped, Receiver(8.0e6, 30.0, 3.0), DUKE)
+
+
+class TestRouteAcceleration:
+    def test_acceleration_is_the_second_difference_of_the_route_over_a_short_arc(self) -> None:
+        """Catches a dropped turning term: R'' = u.a + (|v|^2 - R'^2)/R on each leg.
+
+        A bistatic target with velocity across both lines of sight and its own acceleration;
+        the central second difference of R_b over +-1 ms agrees to rtol 1e-6 (its truncation
+        error is of order jerk-free h^2 R'''' / 12, far smaller).
+        """
+        position_m = np.array([[4000.0, 9000.0, 1500.0], [-2000.0, 6000.0, 800.0]])
+        velocity_mps = np.array([[150.0, -80.0, 20.0], [-60.0, 200.0, -5.0]])
+        acceleration_mps2 = np.array([[3.0, -9.0, 1.0], [0.0, 25.0, -4.0]])
+        step_s = 1.0e-3
+
+        def route_m(time_s: float) -> np.ndarray:
+            moved_m = position_m + velocity_mps * time_s + acceleration_mps2 * time_s**2 / 2
+            return S1_PAIR.geometry(moved_m, velocity_mps).bistatic_range_m
+
+        second_difference = (route_m(step_s) - 2 * route_m(0.0) + route_m(-step_s)) / step_s**2
+        geometry = S1_PAIR.geometry(
+            position_m, velocity_mps, acceleration_enu_mps2=acceleration_mps2
+        )
+        np.testing.assert_allclose(
+            geometry.bistatic_range_acceleration_mps2, second_difference, rtol=1e-6
+        )
+
+    def test_without_an_acceleration_the_route_holds_its_rate(self) -> None:
+        """No acceleration given is zero, not the turning term: trajectory scenarios stay put."""
+        geometry = S1_PAIR.geometry([[4000.0, 9000.0, 1500.0]], [[150.0, -80.0, 20.0]])
+        np.testing.assert_array_equal(geometry.bistatic_range_acceleration_mps2, [0.0])
+
+    def test_monostatic_acceleration_is_twice_the_radial(self) -> None:
+        geometry = TargetGeometry.monostatic(2500.0, -340.0, radial_acceleration_mps2=-147.1)
+        np.testing.assert_array_equal(geometry.bistatic_range_acceleration_mps2, [-294.2])

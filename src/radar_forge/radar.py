@@ -22,7 +22,8 @@ References
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
 from typing import Literal
 
 import numpy as np
@@ -53,13 +54,17 @@ __all__ = [
 # First eccentricity squared, e^2 = f(2 - f), derived rather than stored.
 _ECCENTRICITY_SQUARED = WGS84_FLATTENING * (2.0 - WGS84_FLATTENING)
 
-WaveformKind = Literal["fmcw", "pulsed"]
-"""Which waveform family a transmitter emits: deramped FMCW or a pulse train."""
+WaveformKind = Literal["fmcw", "pulsed", "noise"]
+"""Which waveform family a transmitter emits: deramped FMCW, a pulse train or a noise code."""
 
 
 @dataclass(frozen=True)
 class Transmitter:
-    """A radar transmitter; when pulsed, its power is peak power and its chirp is the pulse."""
+    """A radar transmitter; when pulsed, its power is peak power and its chirp is the pulse.
+
+    A continuous noise code has no chirp: ``chirp_duration_s`` is its correlation batch, the
+    slow-time interval, and ``prf_hz`` the batch rate, so the duty cycle is one.
+    """
 
     carrier_frequency_hz: float
     bandwidth_hz: float
@@ -76,8 +81,8 @@ class Transmitter:
             if getattr(self, name) <= 0.0:
                 msg = f"{name} must be strictly positive; got {getattr(self, name)!r}."
                 raise ValueError(msg)
-        if self.waveform not in ("fmcw", "pulsed"):
-            msg = f"waveform must be 'fmcw' or 'pulsed'; got {self.waveform!r}."
+        if self.waveform not in ("fmcw", "pulsed", "noise"):
+            msg = f"waveform must be 'noise', 'fmcw' or 'pulsed'; got {self.waveform!r}."
             raise ValueError(msg)
         if self.duty_cycle_linear > 1.0:
             msg = f"chirp_duration_s * prf_hz = {self.duty_cycle_linear:.4f} exceeds 1.0."
@@ -167,7 +172,8 @@ class TargetGeometry:
     receiver site; the rate is positive receding; :math:`\beta` is the angle at
     the target, 0 monostatic and :math:`\pi` on the baseline; ``aod_rad`` and
     ``aoa_rad`` are ``(n_targets, 2)`` (azimuth, elevation), each in its own
-    site's frame (Willis [2] §1.2).
+    site's frame (Willis [2] §1.2). ``bistatic_range_acceleration_mps2`` is
+    :math:`\ddot R_b`, positive when the rate grows; it defaults to zero.
     """
 
     range_tx_m: NDArray[np.float64]
@@ -177,10 +183,16 @@ class TargetGeometry:
     bistatic_angle_rad: NDArray[np.float64]
     aod_rad: NDArray[np.float64]
     aoa_rad: NDArray[np.float64]
+    bistatic_range_acceleration_mps2: NDArray[np.float64] = field(
+        default_factory=lambda: np.zeros(())
+    )
 
     def __post_init__(self) -> None:
-        """Reject fields that disagree on the number of targets."""
+        """Reject fields that disagree on the number of targets; store one acceleration each."""
         n_targets = np.size(self.range_tx_m)
+        if np.shape(self.bistatic_range_acceleration_mps2) == ():
+            acceleration_mps2 = np.zeros(n_targets) + self.bistatic_range_acceleration_mps2
+            object.__setattr__(self, "bistatic_range_acceleration_mps2", acceleration_mps2)
         for name, value in vars(self).items():
             expected = (n_targets, 2) if name in ("aod_rad", "aoa_rad") else (n_targets,)
             if np.shape(value) != expected:
@@ -195,13 +207,15 @@ class TargetGeometry:
         *,
         azimuth_rad: ArrayLike = 0.0,
         elevation_rad: ArrayLike = 0.0,
+        radial_acceleration_mps2: ArrayLike = 0.0,
     ) -> TargetGeometry:
-        """Return one site's geometry: twice the range and rate (positive receding), beta 0."""
-        range_arr, rate_arr, azimuth_arr, elevation_arr = np.broadcast_arrays(
+        """Return one site's geometry: twice the range and its derivatives (receding), beta 0."""
+        range_arr, rate_arr, azimuth_arr, elevation_arr, acceleration_arr = np.broadcast_arrays(
             np.atleast_1d(np.asarray(range_m, dtype=np.float64)),
             np.asarray(radial_velocity_mps, dtype=np.float64),
             np.asarray(azimuth_rad, dtype=np.float64),
             np.asarray(elevation_rad, dtype=np.float64),
+            np.asarray(radial_acceleration_mps2, dtype=np.float64),
         )
         angles_rad = np.stack([azimuth_arr, elevation_arr], axis=-1)
         return cls(
@@ -212,6 +226,7 @@ class TargetGeometry:
             bistatic_angle_rad=np.zeros(range_arr.shape),
             aod_rad=angles_rad,
             aoa_rad=angles_rad.copy(),
+            bistatic_range_acceleration_mps2=2.0 * acceleration_arr,
         )
 
 
@@ -233,12 +248,23 @@ class Radar:
     rx_site: Site | None = None
 
     def __post_init__(self) -> None:
-        """Reject a pulsed receiver sampling below the bandwidth (FMCW may: it deramps)."""
-        if (
-            self.transmitter.waveform == "pulsed"
-            and self.receiver.sample_rate_hz < self.transmitter.bandwidth_hz
-        ):
+        """Reject a pulsed receiver sampling below the bandwidth (FMCW may: it deramps).
+
+        A noise code is white across the sampled band, so its bandwidth is the sample rate, and
+        continuous, so its batch is its PRI.
+        """
+        waveform, sample_rate_hz = self.transmitter.waveform, self.receiver.sample_rate_hz
+        if waveform == "pulsed" and sample_rate_hz < self.transmitter.bandwidth_hz:
             msg = "a pulsed receiver's sample_rate_hz is below bandwidth_hz; the pulse would alias."
+            raise ValueError(msg)
+        if waveform == "noise" and sample_rate_hz != self.transmitter.bandwidth_hz:
+            msg = "a noise code fills the sampled band: bandwidth_hz must equal sample_rate_hz."
+            raise ValueError(msg)
+        if waveform == "noise" and self.n_samples_per_pri != self.n_samples_per_chirp:
+            msg = (
+                "a noise code is continuous: its correlation batch fills its PRI, "
+                "chirp_duration_s * prf_hz = 1."
+            )
             raise ValueError(msg)
 
     @property
@@ -272,8 +298,13 @@ class Radar:
         Pulsed, the map holds ``round(PRI f_s)`` samples, equal whenever the PRI is a whole number
         of samples (every config is). FMCW, it mirrors :func:`~radar_forge.dsp.range_bin_centers_m`
         and can exceed the chirp (S3: :math:`2T_c` at :math:`f_s = 2B`), though a sawtooth deramp
-        caps the physical reach at :math:`T_c` (Charvat [6]_, ch. 3).
+        caps the physical reach at :math:`T_c` (Charvat [6]_, ch. 3). A noise code folds nothing,
+        so it is infinite: batched correlation reads each lag whole, past its own batch, and the
+        map is a window of lags, :math:`c\,m/f_s` for ``m < n_range_lags``
+        (:func:`~radar_forge.pipeline.map_axes`), which an echo beyond it misses.
         """
+        if self.transmitter.waveform == "noise":
+            return math.inf
         if self.transmitter.waveform == "pulsed":
             return self.transmitter.pulse_repetition_interval_s
         return self.receiver.sample_rate_hz / self.transmitter.sweep_rate_hzps
@@ -295,7 +326,7 @@ class Radar:
 
     @property
     def n_samples_per_chirp(self) -> int:
-        """Fast-time samples spanning one chirp or pulse."""
+        """Fast-time samples spanning one chirp or pulse; a noise code's correlation batch."""
         return round(self.transmitter.chirp_duration_s * self.receiver.sample_rate_hz)
 
     @property
@@ -313,15 +344,26 @@ class Radar:
         position_enu_m: ArrayLike,
         velocity_enu_mps: ArrayLike,
         *,
+        acceleration_enu_mps2: ArrayLike | None = None,
         origin: Site | None = None,
     ) -> TargetGeometry:
-        r"""Return the route geometry of targets at given positions and velocities.
+        r"""Return the route geometry of targets at given positions, velocities, accelerations.
 
-        Both are ``(n_targets, 3)`` in ``origin``'s ENU frame, by default the
+        Each is ``(n_targets, 3)`` in ``origin``'s ENU frame, by default the
         receiver's. The rate is :math:`\vec v\cdot(\hat u_T + \hat u_R)`; the law of
         cosines gives :math:`\beta`, clipped to be exactly 0 at zero baseline and
         :math:`\pi`, not NaN, on it. The departure vector is rotated into the
         transmitter's own axes, so each angle is in its site's frame (Willis [2] ch. 3).
+        A leg :math:`R = |\vec p - \vec s|` has :math:`\dot R = \hat u\cdot\vec v`, and
+        :math:`\dot{\hat u} = (\vec v - \hat u\dot R)/R` gives its acceleration
+
+        .. math::
+
+            \ddot R = \hat u\cdot\vec a + \left(|\vec v|^2 - \dot R^2\right)/R,
+
+        the second term the velocity across the line of sight turning it;
+        :math:`\ddot R_b` sums both legs. Without ``acceleration_enu_mps2`` it is
+        zero, not this with :math:`\vec a = 0`: the paths then keep a constant rate.
 
         Examples
         --------
@@ -344,15 +386,27 @@ class Radar:
         unit_rx, aoa_rad = _look(offset_rx_m, range_rx_m, self._receive_site, origin_site)
         baseline_m = np.sqrt(np.sum((rx_enu_m - tx_enu_m) ** 2))
         cosine = (range_tx_m**2 + range_rx_m**2 - baseline_m**2) / (2.0 * range_tx_m * range_rx_m)
+        rate_tx_mps = np.sum(velocity_mps * unit_tx, axis=-1)
+        rate_rx_mps = np.sum(velocity_mps * unit_rx, axis=-1)
+        acceleration_mps2: ArrayLike = 0.0
+        if acceleration_enu_mps2 is not None:
+            accel_mps2 = np.asarray(acceleration_enu_mps2, dtype=np.float64)
+            speed_squared = np.sum(velocity_mps**2, axis=-1)
+            acceleration_mps2 = (
+                np.sum(accel_mps2 * unit_tx, axis=-1)
+                + (speed_squared - rate_tx_mps**2) / range_tx_m
+                + np.sum(accel_mps2 * unit_rx, axis=-1)
+                + (speed_squared - rate_rx_mps**2) / range_rx_m
+            )
         return TargetGeometry(
             range_tx_m=range_tx_m,
             range_rx_m=range_rx_m,
             bistatic_range_m=range_tx_m + range_rx_m,
-            bistatic_range_rate_mps=np.sum(velocity_mps * unit_tx, axis=-1)
-            + np.sum(velocity_mps * unit_rx, axis=-1),
+            bistatic_range_rate_mps=rate_tx_mps + rate_rx_mps,
             bistatic_angle_rad=np.arccos(np.clip(cosine, -1.0, 1.0)),
             aod_rad=aod_rad,
             aoa_rad=aoa_rad,
+            bistatic_range_acceleration_mps2=np.asarray(acceleration_mps2, dtype=np.float64),
         )
 
 

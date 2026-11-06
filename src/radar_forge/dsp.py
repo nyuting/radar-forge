@@ -1,7 +1,8 @@
 r"""Range-Doppler processing: windows, pulse compression, the two FFTs, MTI and unfolding.
 
 Turns a baseband cube ``(n_pulses, n_samples)`` (slow time on axis 0, fast time on
-axis 1) into a range-Doppler map, and undoes the folding of its two circular axes.
+axis 1) into a range-Doppler map, and undoes the folding of its two circular axes. A
+continuous noise code is correlated batch by batch instead (:func:`batched_correlation`).
 
 Both axes are **bistatic**. Range is the range sum :math:`R_T + R_R = c\tau`, twice the
 monostatic range for collocated sites; rate is its time derivative, **positive
@@ -24,6 +25,8 @@ References
        range-sum ellipse), §6.1 (target Doppler).
 .. [6] A. V. Oppenheim and R. W. Schafer, *Discrete-Time Signal Processing*,
        3rd ed., Pearson, 2010, ch. 8 (the DFT and Parseval's relation).
+.. [7] K. Kulpa, *Signal Processing in Noise Waveform Radar*, Artech House, 2013,
+       ch. 3 (the noise radar correlation receiver, batch by batch).
 """
 
 from __future__ import annotations
@@ -36,12 +39,15 @@ from scipy.signal import fftconvolve, get_window
 
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.propagation import bistatic_range_rate_from_doppler_mps
+from radar_forge.signal import range_gate_first_sample
 
 __all__ = [
     "WINDOW_NAMES",
     "WindowName",
     "apply_window",
+    "batched_correlation",
     "coherent_gain_linear",
+    "delay_bin_centers_m",
     "doppler_bin_centers_mps",
     "doppler_fft",
     "fold_into_period",
@@ -70,6 +76,7 @@ _SCIPY_NAME = {"rectangular": "boxcar"}
 _PARAMETRIC = ("taylor", "chebyshev")
 # Shallower Chebyshev designs grow end spikes taller than the centre; SciPy only warns.
 _MIN_CHEBYSHEV_DEPTH_DB = 45.0
+_BYTES_PER_COMPLEX = 16
 
 
 def window(
@@ -260,6 +267,47 @@ def doppler_fft(
     return result
 
 
+def batched_correlation(
+    surveillance: ArrayLike,
+    reference: ArrayLike,
+    n_range_lags: int,
+    n_samples_per_batch: int,
+    *,
+    max_bytes: int = 16 * 2**20,
+) -> NDArray[np.complex128]:
+    r"""Correlate a stream with the code it carries, batch by batch: ``(n_batches, n_range_lags)``.
+
+    :math:`y_b[m] = \frac{1}{L}\sum_{n=0}^{L-1} s[bL + n + m]\,x^*[bL + n]`, the batches
+    algorithm (Kulpa [7]_, ch. 3): each batch of the reference against the stream from that
+    batch on, so a lag past the batch is read whole. The stream is circular, one code period,
+    so the last batches read on from its start. Scaled by :math:`1/L`: a unit-power code under
+    a path :math:`a\,x[n - m]` gives :math:`a` at lag :math:`m`, and noise of :math:`\sigma^2`
+    per sample :math:`\sigma^2/L` per cell. :func:`doppler_fft` across batches makes the map,
+    valid while :math:`|f_D| T_B < 1/2`, at a batch loss :math:`\mathrm{sinc}^2(f_D T_B)`.
+    One :func:`scipy.signal.fftconvolve` per chunk of batches, about ``max_bytes`` of FFT.
+    """
+    stream = np.asarray(surveillance, dtype=np.complex128)
+    code = np.asarray(reference, dtype=np.complex128)
+    n_samples, n_batch = stream.size, n_samples_per_batch
+    if stream.ndim != 1 or code.shape != stream.shape:
+        msg = f"surveillance and reference must be one stream each, (n,); got {stream.shape}."
+        raise ValueError(msg)
+    if n_batch < 1 or n_samples % n_batch or not 1 <= n_range_lags <= n_samples:
+        msg = "n_samples_per_batch must divide the stream, and 1 <= n_range_lags <= its length."
+        raise ValueError(msg)
+    n_window = n_batch + n_range_lags - 1
+    wrapped = np.concatenate([stream, stream[: n_range_lags - 1]])
+    windows = np.lib.stride_tricks.sliding_window_view(wrapped, n_window)[::n_batch]
+    template = np.conjugate(code.reshape(-1, n_batch)[:, ::-1])
+    per_chunk = max(1, max_bytes // (_BYTES_PER_COMPLEX * 4 * (n_window + n_batch)))
+    result = np.empty((windows.shape[0], n_range_lags), dtype=np.complex128)
+    # A loop over chunks of batches bounds the FFT buffers; the count depends on shapes.
+    for k in range(0, windows.shape[0], per_chunk):
+        chunk = slice(k, k + per_chunk)
+        result[chunk] = fftconvolve(windows[chunk], template[chunk], "valid", axes=-1) / n_batch
+    return result
+
+
 def range_doppler_map(
     samples: ArrayLike,
     *,
@@ -312,6 +360,25 @@ def range_bin_centers_m(
     beat_hz = np.arange(n_bins, dtype=np.float64) * sample_rate_hz / n_bins
     delay_s = beat_hz * chirp_duration_s / bandwidth_hz
     result: NDArray[np.float64] = SPEED_OF_LIGHT_MPS * delay_s
+    return result
+
+
+def delay_bin_centers_m(
+    n_bins: int, sample_rate_hz: float, *, range_gate_start_m: float = 0.0
+) -> NDArray[np.float64]:
+    r"""Return the **bistatic range** :math:`c (n_0 + n)/f_s` of each compressed pulsed bin, m.
+
+    One bin is one sample of delay. :math:`n_0` is the sample the range gate opens on,
+    :func:`~radar_forge.signal.range_gate_first_sample` of ``range_gate_start_m``, so the
+    axis lands on the samples :func:`~radar_forge.signal.pulsed_baseband` recorded; with no
+    gate it is the whole PRI from zero delay (Richards [1]_, §4.6).
+    """
+    if n_bins < 1 or not sample_rate_hz > 0.0:
+        msg = f"n_bins must be >= 1 and sample_rate_hz positive; got {n_bins}, {sample_rate_hz}."
+        raise ValueError(msg)
+    first = range_gate_first_sample(range_gate_start_m, sample_rate_hz)
+    sample_index = np.arange(n_bins, dtype=np.float64) + first
+    result: NDArray[np.float64] = SPEED_OF_LIGHT_MPS * sample_index / sample_rate_hz
     return result
 
 

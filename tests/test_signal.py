@@ -9,6 +9,8 @@ NumPy and SciPy, independent of the library's processing modules.
 
 from __future__ import annotations
 
+import functools
+
 import numpy as np
 import pytest
 from scipy import stats
@@ -21,10 +23,14 @@ from radar_forge.signal import (
     ambiguity_function,
     beat_frequency_hz,
     bistatic_range_from_beat_frequency_m,
+    cubic_amplifier,
     fmcw_deramp_baseband,
     lfm_chirp,
+    noise_waveform,
     pulsed_baseband,
+    range_gate_first_sample,
     range_resolution_m,
+    stream_baseband,
     sweep_rate_hzps,
     thermal_noise,
 )
@@ -614,3 +620,136 @@ class TestThermalNoise:
         lower_w, upper_w = _power_interval_w(radar.receiver.noise_power_per_sample_w, clean.size)
         assert lower_w < float(np.mean(np.abs(noisy - clean) ** 2)) < upper_w
         assert not lower_w < radar.noise_power_matched_w < upper_w
+
+
+# --- Scenario 005: the noise code and its continuous stream ---
+
+
+def _noise_radar(n_batch: int = 16) -> Radar:
+    sample_rate_hz = 8.0e6
+    transmitter = Transmitter(
+        9.8e9,
+        sample_rate_hz,
+        1.0,
+        30.0,
+        n_batch / sample_rate_hz,
+        sample_rate_hz / n_batch,
+        waveform="noise",
+    )
+    return Radar(transmitter, Receiver(sample_rate_hz, 30.0, 3.0), Site(36.0, -78.9, 60.0))
+
+
+def _path(radar: Radar, lag: float, doppler_hz: float = 0.0, power_w: float = 1.0):
+    route_m = lag * SPEED_OF_LIGHT_MPS / radar.receiver.sample_rate_hz
+    return PropagationPaths(
+        delay_s=np.array([route_m / SPEED_OF_LIGHT_MPS]),
+        doppler_hz=np.array([doppler_hz]),
+        amplitude_linear=np.array([np.sqrt(power_w) + 0j]),
+        aoa_rad=np.zeros((1, 2)),
+        aod_rad=np.zeros((1, 2)),
+        n_bounces=np.ones(1, dtype=np.int_),
+    ), route_m
+
+
+def test_noise_code_has_unit_power(rng):
+    """Mean |x|^2 of 2^16 samples within five standard errors (1/sqrt(N)) of one."""
+    code = noise_waveform(65_536, rng=rng)
+    assert abs(np.mean(np.abs(code) ** 2) - 1.0) < 5.0 / np.sqrt(code.size)
+
+
+def test_cubic_amplifier_keeps_unit_power_on_a_gaussian_code(rng):
+    """E|f(x)|^2 = 1 by the normalisation; a3 = 0 is the identity."""
+    code = noise_waveform(1_000_000, rng=rng)
+    # |x|^6 moments: a million draws scatter about 0.3 %; 1 % is over three sigma.
+    np.testing.assert_allclose(np.mean(np.abs(cubic_amplifier(code, -0.07)) ** 2), 1.0, rtol=0.01)
+    np.testing.assert_array_equal(cubic_amplifier(code[:8], 0.0), code[:8])
+
+
+def test_a_static_whole_lag_path_is_the_code_shifted(rng):
+    """Noiseless: the echo is |a| e^{-j 2 pi R/lambda} x[(n - m) mod N], exactly."""
+    radar = _noise_radar()
+    paths, route_m = _path(radar, 5, power_w=4.0)
+    code = noise_waveform(64 * 16, rng=rng)
+    stream, reference = stream_baseband(paths, radar, 64, rng=None, reference=code)
+    phase = np.exp(-2j * np.pi * route_m / radar.wavelength_m)
+    np.testing.assert_array_equal(reference, code)
+    # One complex multiply each: rtol 1e-12.
+    np.testing.assert_allclose(stream, 2.0 * phase * np.roll(code, 5), rtol=1e-12)
+
+
+def test_a_moving_path_is_the_code_delayed_batch_by_batch(rng):
+    """Each batch holds the code delayed by its own route, a phase ramp on its spectrum; the
+    carrier phase follows the route sample by sample.
+    """
+    radar, n_pulses = _noise_radar(), 32
+    paths, _ = _path(radar, 7.3, doppler_hz=-90_000.0)
+    code = noise_waveform(n_pulses * 16, rng=rng)
+    stream, _ = stream_baseband(paths, radar, n_pulses, rng=None, reference=code)
+    frequency = np.fft.fftfreq(code.size)
+    time_s = np.arange(code.size) / radar.receiver.sample_rate_hz
+    route_now_m = paths.bistatic_range_at_m(time_s, radar.wavelength_m)[:, 0]
+    carrier = np.exp(-2j * np.pi * route_now_m / radar.wavelength_m)
+    for batch in range(n_pulses):
+        delay = route_now_m[batch * 16] * radar.receiver.sample_rate_hz / SPEED_OF_LIGHT_MPS
+        delayed = np.fft.ifft(np.fft.fft(code) * np.exp(-2j * np.pi * frequency * delay))
+        rows = slice(batch * 16, batch * 16 + 16)
+        # The Taylor series stops at 1e-10 of the path; one FFT round trip on top.
+        np.testing.assert_allclose(stream[rows], (delayed * carrier)[rows], rtol=0, atol=1e-9)
+
+
+def test_the_amplifier_shapes_the_paths_not_the_reference(rng):
+    """Every path carries f(x); the reference handed back is the digital code x."""
+    radar = _noise_radar()
+    paths, _ = _path(radar, 0)
+    code = noise_waveform(16 * 16, rng=rng)
+    amplifier = functools.partial(cubic_amplifier, a3=-0.07)
+    stream, reference = stream_baseband(
+        paths, radar, 16, rng=None, reference=code, amplifier=amplifier
+    )
+    np.testing.assert_array_equal(reference, code)
+    np.testing.assert_allclose(stream, cubic_amplifier(code, -0.07), rtol=1e-12)
+
+
+def test_stream_noise_is_the_noise_in_one_sample(rng):
+    """With rng, the code is drawn and noise added at k T0 F f_s a sample (five standard errors)."""
+    radar = _noise_radar()
+    paths, _ = _path(radar, 0, power_w=0.0)
+    stream, reference = stream_baseband(paths, radar, 4096, rng=rng)
+    assert reference.shape == stream.shape == (4096 * 16,)
+    measured = np.mean(np.abs(stream) ** 2) / radar.receiver.noise_power_per_sample_w
+    assert abs(measured - 1.0) < 5.0 / np.sqrt(stream.size)
+
+
+def test_stream_needs_a_noise_radar_and_a_code(rng, monostatic_radar):
+    radar = _noise_radar()
+    paths, _ = _path(radar, 0)
+    with pytest.raises(ValueError, match="noise transmitter"):
+        stream_baseband(paths, monostatic_radar, 4, rng=rng)
+    with pytest.raises(ValueError, match="code"):
+        stream_baseband(paths, radar, 4, rng=None)
+
+
+class TestRangeGate:
+    """The pulsed receiver records a window of each PRI: a gated cube is columns of the whole."""
+
+    def test_a_gated_cube_is_those_columns_of_the_whole_one(self) -> None:
+        """Bit for bit, with a closing echo that runs into the next row: one sample grid."""
+        geometry = TargetGeometry.monostatic(5_400.0, -60.0)
+        paths = line_of_sight_paths(S2_RADAR, geometry, 10.0)
+        whole = pulsed_baseband(paths, S2_RADAR, 8, rng=None)
+        gate_m = 36 * SPEED_OF_LIGHT_MPS / S2_RADAR.receiver.sample_rate_hz
+        gated = pulsed_baseband(
+            paths, S2_RADAR, 8, rng=None, range_gate_start_m=gate_m, n_gate_samples=50
+        )
+        assert range_gate_first_sample(gate_m, S2_RADAR.receiver.sample_rate_hz) == 36
+        np.testing.assert_array_equal(gated, whole[:, 36:86])
+
+    def test_the_gate_opens_on_the_nearest_sample(self) -> None:
+        bin_m = SPEED_OF_LIGHT_MPS / 600.0e6
+        assert range_gate_first_sample(4800.0, 600.0e6) == 9607
+        assert range_gate_first_sample(9606.6 * bin_m, 600.0e6) == 9607
+
+    def test_a_gate_past_the_repetition_interval_is_refused(self) -> None:
+        paths = line_of_sight_paths(S2_RADAR, TargetGeometry.monostatic(4_000.0, 0.0), 10.0)
+        with pytest.raises(ValueError, match="within"):
+            pulsed_baseband(paths, S2_RADAR, 2, rng=None, n_gate_samples=101)

@@ -1,18 +1,33 @@
 r"""The stepper: a scenario run as named stages, each printing, checking and writing one step.
 
-The stages live in :mod:`radar_forge.stages` and run in that package's import order: ``core``
-holds ``geometry``, ``iq``, ``rd``, ``detect`` and ``track``; ``tracking`` holds ``multitarget``.
+The stages live in :mod:`radar_forge.stages` and run in that package's import order;
+:mod:`radar_forge.stages.core` holds ``geometry``, ``iq``, ``rd``, ``detect`` and ``track``.
 Each prints its intermediate quantities and wall time, checks the thresholds the scenario's
-``[verify]`` table gives, and writes its files under the run (``spec/data-001-formats.md``).
-``[verify]`` holds ``stages`` and thresholds: ``truth_in_map_fraction = [low, high]``,
-``expected_snr_db`` with ``snr_tolerance_db``, ``noise_tolerance_db``, ``peak_tolerance_db``,
-``truth_within_bins`` with ``detection_fraction``, ``pfa_tolerance_factor``, ``rate_tolerance_mps``,
-``range_rmse_max_m``, ``range_rate_rmse_max_mps``, ``nees_fraction_min``, ``gospa_mean_max_m``,
-``confirmation_latency_max_scans``, ``swap_fraction_max``, ``mode_latency_max_scans``, ``pd_min``,
-``false_alarm_rate_max``. A stage not listed does not run, a threshold not given is not checked,
-and :func:`run` raises :class:`VerificationError` naming every failure. CSVs show a monostatic
-radar's range and rate halved (:func:`~radar_forge.plots.display_axes`); everything else is
-bistatic. The helpers below are what a stage module shares.
+``[verify]`` table gives, and writes its files under the run directory
+(``spec/data-001-formats.md``). ``[verify]`` holds ``stages`` and thresholds:
+``truth_in_map_fraction = [low, high]``, ``expected_snr_db`` with ``snr_tolerance_db``,
+``noise_tolerance_db``, ``peak_tolerance_db``, ``truth_within_bins`` with
+``detection_fraction``, ``pfa_tolerance_factor``, ``rate_tolerance_mps``, ``range_rmse_max_m``,
+``range_rate_rmse_max_mps``, ``nees_fraction_min`` and ``confirmation_latency_max_scans``. A
+stage not listed does not run, a threshold not given is not checked, and :func:`run` raises
+:class:`VerificationError` naming every failure. CSVs show a monostatic radar's range and rate
+halved (:func:`~radar_forge.plots.display_axes`); everything else is bistatic. The helpers
+below are what a stage module shares.
+
+:mod:`radar_forge.stages.migration` holds ``keystone`` (scenario 004): ``walk_bins`` with
+``walk_tolerance_bins``, ``residual_walk_max_bins``, ``uncompensated_loss_db``,
+``keystone_only_loss_db`` and ``dechirp_only_loss_db`` with ``loss_tolerance_db`` (the
+keystone's own ``keystone_only_loss_tolerance_db``), ``compensated_loss_min_db``,
+``fold_factor``, ``acceleration_tolerance_mps2`` and ``rate_error_max_crb``.
+
+:mod:`radar_forge.stages.clutter` holds ``leakage`` (scenario 005): ``cancellation_depth_db``
+with ``cancellation_tolerance_db``, ``floor_rise_db`` with ``floor_rise_tolerance_db``,
+``sinr_loss_db`` with ``sinr_loss_tolerance_db``, ``detections_per_frame``,
+``uncancelled_detections_per_frame`` and ``acceptance_frames``.
+
+:mod:`radar_forge.stages.tracking` holds ``multitarget`` (scenario 011): ``gospa_mean_max_m``,
+``swap_fraction_max``, ``mode_latency_max_scans``, ``nees_fraction_min``, ``pd_min`` and
+``false_alarm_rate_max``.
 """
 
 from __future__ import annotations
@@ -28,7 +43,8 @@ from typing import Any
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from radar_forge.pipeline import Plots, map_axes
+from radar_forge.clutter import CancellationResult
+from radar_forge.pipeline import Frame, Plots, RangeDopplerProduct, map_axes
 from radar_forge.propagation import received_power_w
 from radar_forge.radar import Radar, TargetGeometry
 from radar_forge.scenario import Scenario, truth_geometry
@@ -41,6 +57,7 @@ __all__ = [
     "Context",
     "Report",
     "VerificationError",
+    "cached_frames",
     "run",
     "spans",
     "stage",
@@ -109,6 +126,10 @@ class Context:
     truth: list[TargetGeometry] = field(default_factory=list)
     plots: list[Plots] = field(default_factory=list)
     banks: list[tuple[TrackBank, NDArray[np.intp]]] = field(default_factory=list)
+    stages: tuple[str, ...] = ()
+    cancelled: list[tuple[Frame, CancellationResult, RangeDopplerProduct]] = field(
+        default_factory=list
+    )
 
     def record(self, name: str, value: float) -> float:
         """Print a measured scalar, keep it in the report, and return it."""
@@ -180,10 +201,23 @@ def target_power_w(radar: Radar, truth: TargetGeometry, rcs_m2: ArrayLike) -> ND
 
 def spans(scenario: Scenario, burst: int) -> tuple[float, float, float]:
     """Return a burst's range span, rate span and range bin, m and m/s."""
-    range_axis_m, rate_axis_mps = map_axes(scenario.radars[burst], scenario.n_pulses[burst])
+    range_axis_m, rate_axis_mps = map_axes(
+        scenario.radars[burst], scenario.n_pulses[burst], n_range_lags=scenario.n_range_lags[burst]
+    )
     range_bin_m = float(range_axis_m[1] - range_axis_m[0])
     rate_span_mps = float(rate_axis_mps.size * (rate_axis_mps[0] - rate_axis_mps[1]))
     return range_axis_m.size * range_bin_m, rate_span_mps, range_bin_m
+
+
+def cached_frames(ctx: Context) -> int:
+    """Return how many noise frames ``rd`` keeps, cancelled, for ``leakage``: its acceptance frames.
+
+    Each holds a stream, its code, the residual and the map, about 72 MB at 005's size; none is
+    kept unless ``leakage`` runs.
+    """
+    if "leakage" not in ctx.stages:
+        return 0
+    return min(ctx.n_frames, int(ctx.scenario.verify.get("acceptance_frames", ctx.n_frames)))
 
 
 def truth(ctx: Context) -> list[TargetGeometry]:
@@ -216,7 +250,7 @@ def run(
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     count = scenario.n_frames if n_frames is None else min(n_frames, scenario.n_frames)
-    ctx = Context(scenario, out, count, save_iq, Report(scenario.name), render)
+    ctx = Context(scenario, out, count, save_iq, Report(scenario.name), render, stages=tuple(names))
     print(f"{scenario.name}: {count} frame(s), {len(scenario.radars)} burst(s) -> {out}")
     for name, function in STAGES.items():
         if name in names:

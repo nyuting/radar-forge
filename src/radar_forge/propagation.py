@@ -5,7 +5,8 @@ Every propagation model produces a :class:`PropagationPaths` for
 whole route, transmitter to receiver; its delay :math:`R_b/c`, phase
 :math:`-2\pi R_b/\lambda` and Doppler :math:`-\dot R_b/\lambda` follow from its
 length :math:`R_b = R_T + R_R` and rate, positive receding. Free space only.
-Per-frame inputs are not validated: zero cross-section gives zero power.
+Per-frame inputs are not validated: zero cross-section gives zero power. Leakage and near
+clutter are specified as levels at the ADC rather than derived from a cross-section.
 
 References
 ----------
@@ -14,11 +15,16 @@ References
 .. [3] P. Swerling, "Probability of detection for fluctuating targets," *IRE
        Transactions on Information Theory*, vol. IT-6, no. 2, pp. 269-308, 1960.
 .. [4] M. I. Skolnik, *Introduction to Radar Systems*, 3rd ed., McGraw-Hill, 2001.
+.. [5] A. Sabharwal, P. Schniter, D. Guo, D. W. Bliss, S. Rangarajan and R. Wichman, "In-band
+       full-duplex wireless: challenges and opportunities," *IEEE J. Sel. Areas Commun.*,
+       vol. 32, no. 9, pp. 1637-1652, 2014 (arXiv:1311.0456).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import dataclass, field, fields
+from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -26,18 +32,25 @@ from numpy.typing import ArrayLike, NDArray
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.radar import Radar, TargetGeometry
 
+if TYPE_CHECKING:
+    from radar_forge.scenario import ClutterSettings, LeakageSettings
+
 __all__ = [
     "PointTarget",
     "PropagationPaths",
     "bistatic_range_rate_from_doppler_mps",
     "dbsm_to_m2",
+    "disturbance_paths",
+    "doppler_rate_hzps",
     "doppler_shift_hz",
+    "leakage_paths",
     "line_of_sight_paths",
     "m2_to_dbsm",
     "path_amplitude_linear",
     "propagation_delay_s",
     "propagation_phase_rad",
     "received_power_w",
+    "static_clutter_paths",
     "swerling_rcs_m2",
 ]
 
@@ -54,7 +67,8 @@ class PropagationPaths:
     ``doppler_hz`` is positive for a shortening path. ``amplitude_linear`` is a
     complex voltage, √W; the generators use its magnitude and rebuild the phase
     from the delay. ``aoa_rad`` and ``aod_rad`` are ``(n_paths, 2)`` (azimuth,
-    elevation). ``doppler_rate_hzps`` defaults to zero and is stored per path.
+    elevation). ``doppler_rate_hzps`` and ``doppler_jerk_hzps2``, the first and
+    second time derivatives of ``doppler_hz``, default to zero and are stored per path.
     """
 
     delay_s: NDArray[np.float64]
@@ -64,6 +78,7 @@ class PropagationPaths:
     aod_rad: NDArray[np.float64]
     n_bounces: NDArray[np.int_]
     doppler_rate_hzps: NDArray[np.float64] = field(default_factory=lambda: np.zeros(()))
+    doppler_jerk_hzps2: NDArray[np.float64] = field(default_factory=lambda: np.zeros(()))
 
     def __post_init__(self) -> None:
         """Reject per-path arrays that disagree on the number of paths."""
@@ -80,11 +95,21 @@ class PropagationPaths:
                     f"{name} must have shape ({n_paths}, 2) for (azimuth, elevation); got {shape}."
                 )
                 raise ValueError(msg)
-        if np.shape(self.doppler_rate_hzps) not in ((), (n_paths,)):
-            msg = f"doppler_rate_hzps must be a scalar or have shape ({n_paths},)."
+        for name in ("doppler_rate_hzps", "doppler_jerk_hzps2"):
+            if np.shape(getattr(self, name)) not in ((), (n_paths,)):
+                msg = f"{name} must be a scalar or have shape ({n_paths},)."
+                raise ValueError(msg)
+            # Store one value per path, so every per-path field indexes alike.
+            object.__setattr__(self, name, np.zeros(n_paths) + getattr(self, name))
+
+    @classmethod
+    def concatenate(cls, *path_sets: PropagationPaths) -> PropagationPaths:
+        """Join path sets into one, their paths in the order given."""
+        if not path_sets:
+            msg = "concatenate needs at least one PropagationPaths."
             raise ValueError(msg)
-        # Store one value per path, so every per-path field indexes alike.
-        object.__setattr__(self, "doppler_rate_hzps", np.zeros(n_paths) + self.doppler_rate_hzps)
+        columns = {f.name: [getattr(p, f.name) for p in path_sets] for f in fields(cls)}
+        return cls(**{name: np.concatenate(values) for name, values in columns.items()})
 
     @property
     def n_paths(self) -> int:
@@ -103,13 +128,13 @@ class PropagationPaths:
         r"""Return each route's length at slow-time instants, ``slow_time_s.shape + (n_paths,)``.
 
         Integrate the rate, which :func:`doppler_shift_hz` defines through
-        :math:`f_D = -\dot R_b/\lambda`, so :math:`\dot R_b = -\lambda f_D` and
-        :math:`\ddot R_b = -\lambda \dot f_D`:
+        :math:`f_D = -\dot R_b/\lambda`, so each derivative of :math:`R_b` is
+        :math:`-\lambda` times one of :math:`f_D`:
 
         .. math::
 
-            R_b(t) = R_b(0) + \dot R_b t + \tfrac{1}{2}\ddot R_b t^2
-                   = R_b(0) - \lambda\left(f_D t + \tfrac{1}{2}\dot f_D t^2\right)
+            R_b(t) = R_b(0) - \lambda\left(f_D t + \tfrac{1}{2}\dot f_D t^2
+                     + \tfrac{1}{6}\ddot f_D t^3\right)
 
         A closing path (:math:`f_D > 0`) shortens. The generators evaluate this
         at each pulse start and hold it across the pulse: stop-and-hop (Richards
@@ -120,9 +145,12 @@ class PropagationPaths:
         acceleration_mps2 = bistatic_range_rate_from_doppler_mps(
             self.doppler_rate_hzps, wavelength_m
         )
+        jerk_mps3 = bistatic_range_rate_from_doppler_mps(self.doppler_jerk_hzps2, wavelength_m)
         result: NDArray[np.float64] = (
             self.bistatic_range_m + rate_mps * time_s + 0.5 * acceleration_mps2 * time_s**2
         )
+        # Added last, so zero jerk leaves the quadratic history bit for bit.
+        result += jerk_mps3 * time_s**3 / 6.0
         return result
 
 
@@ -159,6 +187,17 @@ def doppler_shift_hz(
     rate_arr = np.asarray(bistatic_range_rate_mps, dtype=np.float64)
     result: NDArray[np.float64] = -rate_arr / np.asarray(wavelength_m)
     return result
+
+
+def doppler_rate_hzps(
+    bistatic_range_acceleration_mps2: ArrayLike, wavelength_m: ArrayLike
+) -> NDArray[np.float64]:
+    r"""Return the Doppler rate :math:`\dot f_D = -\ddot R_b/\lambda`, Hz/s.
+
+    The derivative of :func:`doppler_shift_hz`, which it calls, so the sign lives there:
+    a closing target whose closing speed grows has a positive rate (Willis [2] §6.1).
+    """
+    return doppler_shift_hz(bistatic_range_acceleration_mps2, wavelength_m)
 
 
 def bistatic_range_rate_from_doppler_mps(
@@ -246,6 +285,73 @@ def line_of_sight_paths(
         aoa_rad=geometry.aoa_rad,
         aod_rad=geometry.aod_rad,
         n_bounces=np.ones(geometry.bistatic_range_m.shape[0], dtype=np.int_),
+        doppler_rate_hzps=doppler_rate_hzps(
+            geometry.bistatic_range_acceleration_mps2, radar.wavelength_m
+        ),
+    )
+
+
+def leakage_paths(radar: Radar, lags: ArrayLike, inr_db: ArrayLike) -> PropagationPaths:
+    r"""Build the transmitter's leakage into the receiver, one path per whole-sample lag.
+
+    Leakage is specified at the ADC, not derived (Sabharwal [5] §IV-B to IV-D): what antenna
+    isolation and an analog canceller leave. Lag :math:`m` is the route :math:`c\,m/f_s`, at
+    zero Doppler; ``inr_db`` is each path's power over the noise in one sample,
+    :attr:`~radar_forge.radar.Receiver.noise_power_per_sample_w`, not over the matched band.
+    """
+    lags_arr = np.atleast_1d(np.asarray(lags, dtype=np.float64))
+    range_m = SPEED_OF_LIGHT_MPS * lags_arr / radar.receiver.sample_rate_hz
+    return _specified_paths(radar, range_m, inr_db, 0.0)
+
+
+def static_clutter_paths(
+    radar: Radar, bistatic_range_m: ArrayLike, cnr_db: ArrayLike, *, doppler_hz: ArrayLike = 0.0
+) -> PropagationPaths:
+    """Build near clutter as fixed scatterers, one path per route, at a set Doppler (default 0).
+
+    ``cnr_db`` is a per-sample ratio, as :func:`leakage_paths`: a level at the ADC, not a
+    cross-section. A Doppler stands for a slowly moving scatterer, a tree or a mast in wind.
+    """
+    return _specified_paths(radar, bistatic_range_m, cnr_db, doppler_hz)
+
+
+def disturbance_paths(
+    radar: Radar, leakage: LeakageSettings | None, clutter: Sequence[ClutterSettings]
+) -> PropagationPaths:
+    """Join a scenario's ``[leakage]`` and ``[[clutter]]`` into one path set, leakage first."""
+    lags, inr_db = (leakage.lags, leakage.inr_db) if leakage is not None else ((), ())
+    return PropagationPaths.concatenate(
+        leakage_paths(radar, lags, inr_db),
+        static_clutter_paths(
+            radar,
+            [c.range_m for c in clutter],
+            [c.relative_power_db for c in clutter],
+            doppler_hz=[c.doppler_hz for c in clutter],
+        ),
+    )
+
+
+def _specified_paths(
+    radar: Radar, bistatic_range_m: ArrayLike, ratio_db: ArrayLike, doppler_hz: ArrayLike
+) -> PropagationPaths:
+    """Return paths at given routes and per-sample power ratios over noise, one bounce each."""
+    range_m, ratio, doppler = np.broadcast_arrays(
+        np.atleast_1d(np.asarray(bistatic_range_m, dtype=np.float64)),
+        np.asarray(ratio_db, dtype=np.float64),
+        np.asarray(doppler_hz, dtype=np.float64),
+    )
+    if not np.all(range_m >= 0.0):
+        msg = "a leakage or clutter route must be non-negative."
+        raise ValueError(msg)
+    power_w = radar.receiver.noise_power_per_sample_w * 10.0 ** (ratio / 10.0)
+    phase_rad = propagation_phase_rad(range_m, radar.wavelength_m)
+    return PropagationPaths(
+        delay_s=propagation_delay_s(range_m),
+        doppler_hz=doppler.astype(np.float64),
+        amplitude_linear=path_amplitude_linear(power_w, phase_rad),
+        aoa_rad=np.zeros((range_m.size, 2)),
+        aod_rad=np.zeros((range_m.size, 2)),
+        n_bounces=np.ones(range_m.size, dtype=np.int_),
     )
 
 

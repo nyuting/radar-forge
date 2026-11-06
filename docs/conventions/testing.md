@@ -54,7 +54,10 @@ sensible values.
 Only where no analytic truth exists, only in `tests/data/golden/` (the pre-commit hook blocks
 binary arrays elsewhere), kilobytes not megabytes, with a script that recreates it from a seed
 (`scripts/regen_golden.py` writes `fingerprints.csv`). Regenerating it is a behaviour change with
-its own commit. Prefer derived statistics (peak position, detection count) over a raw array.
+its own commit. Prefer derived statistics (peak position, detection count) over a raw array. A
+config too costly for three frames in the fast suite is listed in that script's `FAST_FRAMES`,
+which sets the frames it runs unmarked and is fingerprinted over (0: slow tier only); its three
+frames then run under `slow`.
 
 ## 7. Markers
 

@@ -17,19 +17,32 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from radar_forge import evaluate
+from radar_forge import evaluate, plots
+from radar_forge import pipeline as pipeline_module
+from radar_forge.clutter import cancel
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
+from radar_forge.detection import Detection
+from radar_forge.migration import pulse_compress
 from radar_forge.pipeline import (
     Plots,
+    RangeDopplerProduct,
     ScanTracker,
     frame_plots,
+    frame_products,
+    frames,
     map_axes,
     range_doppler_product,
     synthesise,
 )
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter
-from radar_forge.scenario import Target, load_scenario, truth_geometry
-from radar_forge.signal import thermal_noise
+from radar_forge.scenario import (
+    CancellationSettings,
+    RangeGate,
+    Target,
+    load_scenario,
+    truth_geometry,
+)
+from radar_forge.signal import noise_waveform, thermal_noise
 from radar_forge.stages import core
 
 REPO = Path(__file__).resolve().parents[1]
@@ -193,14 +206,21 @@ def test_a_dual_prf_pair_unfolds_a_rate_neither_burst_resolves(rng):
 
 @pytest.mark.parametrize("path", sorted((REPO / "config").glob("*.toml")), ids=lambda p: p.stem)
 def test_the_radars_unambiguous_limits_are_the_maps_periods(path: Path) -> None:
-    """Each burst's unambiguous range and rate are the spans its map wraps at, both waveforms."""
+    """Each burst's unambiguous range and rate are the spans its map wraps at, every waveform.
+
+    A noise burst's lags are a window that folds nothing: its delay period is infinite.
+    """
     scenario = load_scenario(path)
-    for radar, n_pulses in zip(scenario.radars, scenario.n_pulses, strict=True):
-        range_m, rate_mps = map_axes(radar, n_pulses)
+    bursts = zip(scenario.radars, scenario.n_pulses, scenario.n_range_lags, strict=True)
+    for radar, n_pulses, n_range_lags in bursts:
+        range_m, rate_mps = map_axes(radar, n_pulses, n_range_lags=n_range_lags)
         assert min(range_m.size, rate_mps.size) > 1, f"{path.stem}: an axis of one bin has no step"
-        np.testing.assert_allclose(
-            range_m.size * (range_m[1] - range_m[0]), radar.unambiguous_bistatic_range_m, rtol=1e-12
-        )
+        if radar.transmitter.waveform != "noise":
+            np.testing.assert_allclose(
+                range_m.size * (range_m[1] - range_m[0]),
+                radar.unambiguous_bistatic_range_m,
+                rtol=1e-12,
+            )
         np.testing.assert_allclose(
             rate_mps.size * abs(rate_mps[1] - rate_mps[0]),
             radar.unambiguous_bistatic_range_rate_mps,
@@ -371,3 +391,283 @@ def test_trajectory_files_share_one_time_base(one_frame_scenario, tmp_path):
     np.testing.assert_allclose(
         truth.bistatic_range_rate_mps[1], truth.bistatic_range_rate_mps[0], rtol=1e-9
     )
+
+
+# --- Scenario 005: a noise burst's map, and the tables that describe it ---
+
+NOISE_CONFIG = REPO / "config" / "scenario_005_static_leakage.toml"
+
+
+def test_a_noise_maps_range_axis_is_one_lag_a_bin():
+    """Lag m is the route c m / f_s, a window that does not wrap; it needs a lag count."""
+    radar = load_scenario(NOISE_CONFIG).radar
+    range_axis_m, rate_axis_mps = map_axes(radar, 2048, n_range_lags=1024)
+    np.testing.assert_allclose(range_axis_m, SPEED_OF_LIGHT_MPS * np.arange(1024) / 8.0e6)
+    assert rate_axis_mps.size == 2048
+    with pytest.raises(ValueError, match="n_range_lags"):
+        map_axes(radar, 2048)
+
+
+def test_a_noise_target_lands_on_its_lag_and_doppler_bin():
+    """A noiseless echo at lag 500, closing at 30 Doppler bins, peaks in that cell."""
+    radar = load_scenario(NOISE_CONFIG).radar
+    doppler_hz = 30 * 9.765625
+    route_m = 500 * SPEED_OF_LIGHT_MPS / 8.0e6
+    geometry = TargetGeometry.monostatic(route_m / 2.0, -doppler_hz * radar.wavelength_m / 2.0)
+    cube = synthesise(radar, geometry, [10.0], 2048, rng=None)
+    code = noise_waveform(cube.size, rng=np.random.default_rng(0))  # synthesise's noiseless code
+    product = range_doppler_product(cube, radar, reference=code, n_range_lags=1024)
+    power_w = np.abs(product.rd_map) ** 2
+    assert np.unravel_index(np.argmax(power_w), power_w.shape) == (1024 + 30, 500)
+    with pytest.raises(ValueError, match="reference"):
+        range_doppler_product(cube, radar, n_range_lags=1024)
+
+
+def test_noise_tables_need_a_noise_burst(tmp_path):
+    """[leakage] and the rest describe a noise burst; a scenario without one refuses them."""
+    text = (REPO / "config" / "scenario_001_fmcw_low_prf.toml").read_text(encoding="utf-8")
+    path = tmp_path / "fmcw_with_leakage.toml"
+    path.write_text(text + "\n[leakage]\nlags = [0]\ninr_db = [40.0]\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="noise burst"):
+        load_scenario(path)
+
+
+def test_cancellation_settings_refuse_what_wiener_smi_cannot_do():
+    """Wiener-SMI fits the whole CPI on the linear basis; an extension needs a batch."""
+    with pytest.raises(ValueError, match="wiener"):
+        CancellationSettings("wiener", 192, n_samples_per_batch=400)
+    with pytest.raises(ValueError, match="extension"):
+        CancellationSettings("least_squares", 192, n_samples_extension=400)
+
+
+def test_each_noise_frame_carries_its_code_beside_the_stream():
+    """frames() hands a noise burst's stream with the code it sent, the same shape."""
+    scenario = load_scenario(NOISE_CONFIG)
+    frame = next(frames(scenario, n_frames=1))
+    assert len(frame.cubes) == len(frame.references) == 1
+    assert frame.cubes[0].shape == frame.references[0].shape == (2048, 400)
+    product = frame_products(scenario, frame)[0]
+    assert product.rd_map.shape == (2048, 1024)
+
+
+def _short_noise_scenario():
+    """P1 cut to 64 batches and 64 lags: the same chain, 25 600 samples a frame."""
+    scenario = load_scenario(NOISE_CONFIG)
+    return dataclasses.replace(scenario, n_pulses=(64,), n_range_lags=(64,))
+
+
+def test_a_noise_maps_lags_do_not_wrap():
+    """A route past the lag window has no index; inside it, the unwrapped lag."""
+    scenario = _short_noise_scenario()
+    frame = next(frames(scenario, n_frames=1))
+    product = frame_products(scenario, frame)[0]
+    lag_m = SPEED_OF_LIGHT_MPS / 8.0e6
+    range_index, _ = product.index_of([10.5 * lag_m, 64.2 * lag_m, 130.0 * lag_m], 0.0)
+    np.testing.assert_allclose(range_index[0], 10.5, rtol=1e-12)
+    assert np.isnan(range_index[1:]).all()
+    assert not product.range_wraps
+
+
+def test_the_cancellers_notch_holds_the_maps_noise_level_not_round_off():
+    """Zero Doppler below lag K is exactly emptied by the fit; frame_products floors it to the
+    map's noise power, so CFAR finds no round-off there.
+    """
+    scenario = _short_noise_scenario()
+    frame = next(frames(scenario, n_frames=1))
+    code, stream = frame.references[0], frame.cubes[0]
+    residual = cancel(code, stream, scenario.cancellation).residual.reshape(stream.shape)
+    raw = range_doppler_product(residual, scenario.radar, reference=code, n_range_lags=64).rd_map
+    noise_w = np.median(np.abs(raw) ** 2) / np.log(2.0)
+    # The projection's null: round-off, far under the noise.
+    assert np.max(np.abs(raw[32, :64]) ** 2) < 1e-20 * noise_w
+    product = frame_products(scenario, frame)[0]
+    np.testing.assert_allclose(np.abs(product.rd_map[32, :64]) ** 2, noise_w, rtol=1e-12)
+    found = frame_plots([product], scenario.detection)
+    rows = np.array([d.centroid_index[0] for d in found.detections])
+    assert not np.any(np.abs(rows - 32) < 0.5)
+
+
+def test_cancellation_settings_refuse_a_loaded_wiener_fit():
+    """Wiener-SMI solves the sample statistics as they are: a loading would be dropped."""
+    with pytest.raises(ValueError, match="unloaded"):
+        CancellationSettings("wiener", 192, diagonal_loading=0.01)
+
+
+@pytest.mark.parametrize(
+    ("table", "message"),
+    [
+        ('method = "least_squares"\nn_taps = 192\nn_samples_per_batch = 3000\n', "divide"),
+        (
+            'method = "least_squares"\nn_taps = 192\nn_samples_per_batch = 400\n'
+            "n_samples_extension = 200\n",
+            "whole batches",
+        ),
+        ('method = "least_squares"\nn_taps = 500\nn_samples_per_batch = 400\n', "basis"),
+    ],
+    ids=["batch", "extension", "window"],
+)
+def test_a_cancellation_that_cannot_tile_the_cpi_fails_at_load(tmp_path, table, message):
+    """A batch that does not divide the CPI, a ragged extension or a window short of the basis."""
+    text = NOISE_CONFIG.read_text(encoding="utf-8")
+    head, tail = text.split("[cancellation]\n")
+    tail = tail.split("\n\n", 1)[1]
+    path = tmp_path / "bad_cancellation.toml"
+    path.write_text(head + "[cancellation]\n" + table + "\n" + tail, encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        load_scenario(path)
+
+
+def test_the_cancellation_figure_labels_truth_once_and_draws_without_it():
+    """One legend entry for two targets; no truth, no legend (an empty legend warns)."""
+    pytest.importorskip("matplotlib")
+    radar = load_scenario(NOISE_CONFIG).radar
+    rd_map = np.ones((8, 16), dtype=complex)
+    range_m = SPEED_OF_LIGHT_MPS * np.arange(16) / 8.0e6
+    rate_mps = np.linspace(10.0, -10.0, 8, endpoint=False)
+    figure = plots.render_cancellation(
+        rd_map,
+        rd_map,
+        range_m,
+        rate_mps,
+        radar,
+        floor_w=1.0,
+        truth_range_m=[400.0, 500.0],
+        truth_rate_mps=[0.0, 2.0],
+    )
+    labels = [t.get_text() for t in figure.axes[1].get_legend().get_texts()]
+    assert labels == ["truth"]
+    bare = plots.render_cancellation(rd_map, rd_map, range_m, rate_mps, radar, floor_w=1.0)
+    assert bare.axes[1].get_legend() is None
+    pyplot = pytest.importorskip("matplotlib.pyplot")
+    pyplot.close(figure)
+    pyplot.close(bare)
+
+
+# Slow: one frame of P1 through rd and leakage, about five seconds.
+@pytest.mark.slow
+def test_the_leakage_stage_reuses_rds_frames(tmp_path, monkeypatch):
+    """After rd, leakage measures rd's frames and cancellations; alone, it makes its own."""
+    calls = []
+    original = pipeline_module.frames
+
+    def counted(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline_module, "frames", counted)
+    scenario = load_scenario(NOISE_CONFIG)
+    together = evaluate.run(scenario, ["rd", "leakage"], n_frames=1, out_dir=tmp_path, render=False)
+    assert calls == []
+    alone = evaluate.run(scenario, ["leakage"], n_frames=1, out_dir=tmp_path, render=False)
+    assert calls == [1]
+    # The same seed, the same frame: the same numbers either way.
+    for key in ("cancellation_depth_db[0]", "floor_rise_db[0]", "sinr_loss_db[0]"):
+        assert together.values[key] == alone.values[key]
+
+
+def _k_variant(variant: str) -> str:
+    return (REPO / "config" / f"scenario_004_keystone_{variant}.toml").read_text(encoding="utf-8")
+
+
+def test_a_gated_map_labels_its_window_of_the_range_circle():
+    """A gated map's axis starts at the gate and its range circle is still c times the PRI.
+
+    The noiseless K1 echo at frame 0 peaks in the bin index_of predicts, within one.
+    """
+    scenario = load_scenario(REPO / "config" / "scenario_004_keystone_k1.toml")
+    radar, gate, truth = scenario.radar, scenario.gates[0], truth_geometry(scenario)[0]
+    cube = synthesise(radar, truth, [0.1], 1024, rng=None, gate=gate)
+    product = range_doppler_product(cube, radar, gate=gate)
+    assert product.rd_map.shape == (1024, 1024)
+    np.testing.assert_allclose(product.range_axis_m[0], 9607 * SPEED_OF_LIGHT_MPS / 600e6)
+    assert product.range_period_m == radar.unambiguous_bistatic_range_m
+    range_index, _ = product.index_of(truth.bistatic_range_m, truth.bistatic_range_rate_mps)
+    peak = np.unravel_index(int(np.argmax(np.abs(product.rd_map))), product.rd_map.shape)
+    # Uncompensated, the walk smears the peak over 28 bins below the pulse-0 range.
+    assert -29.0 <= peak[1] - range_index[0] <= 1.0
+
+
+def test_a_gated_cube_compresses_as_the_whole_stream_does_inside_the_gate():
+    """Row by row inside the gate equals the whole PRI's stream compression, rtol 1e-9 (FFTs)."""
+    radar = load_scenario(REPO / "config" / "scenario_001_pulsed_medium_prf.toml").radar
+    geometry = TargetGeometry.monostatic(1_500.0, -30.0)
+    whole = synthesise(radar, geometry, [10.0], 4, rng=None)
+    gate_m = 20 * SPEED_OF_LIGHT_MPS / radar.receiver.sample_rate_hz
+    gated = synthesise(radar, geometry, [10.0], 4, rng=None, gate=RangeGate(gate_m, 60))
+    full = pulse_compress(whole, radar)
+    rows = pulse_compress(gated, radar, gate=RangeGate(gate_m, 60))
+    inside = 60 - radar.n_samples_per_chirp
+    np.testing.assert_allclose(rows[:, :inside], full[:, 20 : 20 + inside], rtol=1e-9, atol=1e-18)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        ('method = "keystone"\n', 'method = "keystone_doppler_rate"\n', "acceleration_search"),
+        ('method = "keystone"\n', 'method = "none"\nfold_factor_max = 1\n', "fold_factor_max"),
+        ("n_gate_samples = 1024\n", "n_gate_samples = 1024.0\n", "positive integer"),
+        (
+            'method = "keystone"\n',
+            'method = "keystone_doppler_rate"\nacceleration_search_mps2 = [-400.0, -200.0, 30.0]\n',
+            "whole number",
+        ),
+    ],
+)
+def test_a_migration_or_gate_setting_that_cannot_run_is_refused(tmp_path, old, new, message):
+    """A search the method does not run, a method without its grid, a fractional gate."""
+    text = _k_variant("k1")
+    assert old in text
+    path = tmp_path / "wrong.toml"
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+    with pytest.raises((ValueError, TypeError), match=message):
+        load_scenario(path)
+
+
+def test_an_accelerating_target_carries_its_route_acceleration():
+    """K2's 15 g along the line of sight is -294.1995 m/s^2 bistatic at every frame."""
+    scenario = load_scenario(REPO / "config" / "scenario_004_keystone_k2.toml")
+    for frame in truth_geometry(scenario):
+        np.testing.assert_allclose(frame.bistatic_range_acceleration_mps2, [-294.1995], rtol=1e-12)
+    np.testing.assert_allclose(scenario.migration.accelerations_mps2[[0, -1]], [-400.0, -200.0])
+    assert scenario.migration.accelerations_mps2.size == 21
+
+
+def test_a_detection_across_a_gated_window_is_not_a_hit_on_its_far_side():
+    """A gated window is not circular: the far end is 99 bins from the near end, not 1.
+
+    A 100-bin window of a 12000-bin range circle; the truth at index 0.3, a detection at 99.6
+    misses, one at 0.5 hits.
+    """
+    product = RangeDopplerProduct(
+        np.zeros((8, 100), complex),
+        1000.0 + 0.5 * np.arange(100),
+        np.arange(8.0)[::-1],
+        unambiguous_range_m=6000.0,
+    )
+    truth = TargetGeometry.monostatic(500.075, 1.5)  # bistatic 1000.15 m, 3 m/s: Doppler bin 4
+    for range_index, expected in ((99.6, False), (0.5, True)):
+        detection = Detection((4, int(range_index)), (4.0, range_index), 1.0, 1.0, 1)
+        found = dataclasses.replace(_one_plot(1000.0, 0.0), detections=(detection,))
+        assert core._hits(found, 0, product, truth, 1.0) == [expected]
+
+
+def test_only_a_target_given_an_acceleration_carries_its_routes_acceleration(tmp_path):
+    """The accelerating target gets u.a plus the turning term; a crossing one beside it, zero.
+
+    K2's rocket with 30 m/s across the line of sight: 2 (-147.09975 + 30^2 / 2500) m/s^2. A
+    second target crossing at 50 m/s has no acceleration given, so none is modelled for it.
+    """
+    text = _k_variant("k2").replace(
+        "velocity_enu_mps = [0.0, -340.0, 0.0]", "velocity_enu_mps = [30.0, -340.0, 0.0]"
+    )
+    text += (
+        '\n[[target]]\nname = "crossing"\nrcs_dbsm = -10.0\n'
+        "position_enu_m = [1000.0, 3000.0, 0.0]\nvelocity_enu_mps = [50.0, 0.0, 0.0]\n"
+    )
+    path = tmp_path / "two.toml"
+    path.write_text(text, encoding="utf-8")
+    first = truth_geometry(load_scenario(path))[0]
+    np.testing.assert_allclose(
+        first.bistatic_range_acceleration_mps2[0], 2 * (-147.09975 + 30.0**2 / 2500.0), rtol=1e-12
+    )
+    assert first.bistatic_range_acceleration_mps2[1] == 0.0
