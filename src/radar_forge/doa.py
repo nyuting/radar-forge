@@ -595,8 +595,10 @@ def estimate_doa(
     crb_std = np.full(n_sources, np.nan)
     if math.isfinite(noise_power_w) and np.linalg.cond(a_hat.conj().T @ a_hat) < _MAX_CONDITION:
         derivative = _derivative(geometry, a_hat, wavelength_m)
-        bound = crb_deterministic(a_hat, derivative, amplitude, noise_power_w)
-        crb_std = np.sqrt(np.diag(bound))
+        variance = np.diag(crb_deterministic(a_hat, derivative, amplitude, noise_power_w))
+        # Nearly coincident estimates leave the Fisher matrix singular to round-off, and its
+        # inverse can lose its sign: the bound there is undefined, nan.
+        crb_std = np.sqrt(np.where(variance > 0.0, variance, np.nan))
     return DoaEstimate(
         method,
         covariance,
