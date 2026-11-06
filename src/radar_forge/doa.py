@@ -517,7 +517,7 @@ def is_resolved(estimates: ArrayLike, truths: ArrayLike, separation: float) -> b
     Examples
     --------
     >>> truths = [0.1, 0.1625]
-    >>> is_resolved([0.10, 0.16], truths, 0.0625), is_resolved([0.13, 0.14], truths, 0.0625)
+    >>> is_resolved([0.10, 0.16], truths, 0.0625), is_resolved([0.10, 0.25], truths, 0.0625)
     (True, False)
     """
     found = np.sort(np.asarray(estimates, dtype=np.float64))
