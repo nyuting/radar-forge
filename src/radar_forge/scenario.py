@@ -6,7 +6,8 @@ A scenario is data. ``[site.tx]`` and an optional ``[site.rx]`` (absent: monosta
 ``[detection]`` and ``[tracking]`` set the processing (:mod:`radar_forge.pipeline`); ``[verify]``
 is read by :mod:`radar_forge.evaluate`. A pulsed ``[[burst]]`` may record a range gate, and
 ``[migration]`` corrects range migration (:mod:`radar_forge.migration`). A noise burst adds
-``[leakage]``, ``[[clutter]]``, ``[transmitter_distortion]`` and ``[cancellation]``.
+``[leakage]``, ``[[clutter]]``, ``[transmitter_distortion]`` and ``[cancellation]``. An FMCW
+radar may receive on ``[receive_array]``, with scenario 006's ``[second_aircraft]`` and ``[doa]``.
 :func:`load_scenario` refuses an unknown table, key or value type, so a typo is never silently
 ignored. :func:`truth_geometry` gives the unfolded truth: bistatic range :math:`R_T + R_R` and
 its rate, positive receding.
@@ -30,7 +31,14 @@ from typing import Any, Literal, get_args, get_origin, get_type_hints
 import numpy as np
 from numpy.typing import NDArray
 
+from radar_forge.array import (
+    ArrayGeometry,
+    offset_direction_cosine,
+    rayleigh_width,
+    uniform_linear_array,
+)
 from radar_forge.detection import CfarVariant
+from radar_forge.doa import label_parts
 from radar_forge.propagation import dbsm_to_m2
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter, geodetic_to_enu_m
 from radar_forge.signal import RangeGate
@@ -40,13 +48,17 @@ __all__ = [
     "ClutterSettings",
     "DetectionSettings",
     "DistortionSettings",
+    "DoaSettings",
     "LeakageSettings",
     "MigrationSettings",
     "RangeGate",
+    "ReceiveArraySettings",
     "Scenario",
+    "SecondAircraftSettings",
     "Target",
     "TrackingSettings",
     "load_scenario",
+    "scattering_phase_rad",
     "truth_geometry",
 ]
 
@@ -59,6 +71,8 @@ _OPTIONAL_TABLES = {"detection", "tracking", "verify", "migration"}
 _BURST_KEYS |= {"n_range_lags"}
 _NOISE_TABLES = {"leakage", "clutter", "transmitter_distortion", "cancellation"}
 _OPTIONAL_TABLES |= _NOISE_TABLES
+# Scenario 006's receive array: three tables of its own.
+_OPTIONAL_TABLES |= {"receive_array", "second_aircraft", "doa"}
 
 
 @dataclass(frozen=True)
@@ -295,6 +309,70 @@ class MigrationSettings:
 
 
 @dataclass(frozen=True)
+class ReceiveArraySettings:
+    """``[receive_array]``: a ULA of ``n_rx`` channels, each with ``[receiver]``'s gain and NF."""
+
+    n_rx: int = 16
+    element_spacing_wavelengths: float = 0.5
+    boresight_azimuth_deg: float = 0.0
+    boresight_elevation_deg: float = 0.0
+
+    def __post_init__(self) -> None:
+        """Refuse fewer than two channels or a spacing that is not positive."""
+        if self.n_rx < 2 or not self.element_spacing_wavelengths > 0.0:
+            msg = "[receive_array] needs n_rx >= 2 and element_spacing_wavelengths > 0."
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True)
+class SecondAircraftSettings:
+    """``[second_aircraft]``: aircraft B, the first target moved in the array's coordinates.
+
+    B keeps the first target's ranges, rate and array-frame elevation; its direction cosine moves
+    ``separation_rayleigh`` Rayleigh widths towards +x. ``scattering_phase``: ``"uniform"`` or rad.
+    """
+
+    separation_rayleigh: float = 1.0
+    rcs_dbsm: float = 10.0
+    scattering_phase: str | float = "uniform"
+
+    def __post_init__(self) -> None:
+        """Refuse a scattering phase that is neither ``"uniform"`` nor a number."""
+        phase = self.scattering_phase
+        if type(phase) is int:
+            object.__setattr__(self, "scattering_phase", float(phase))
+        elif phase != "uniform" and type(phase) is not float:
+            msg = f'[second_aircraft] scattering_phase is "uniform" or radians; got {phase!r}.'
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True)
+class DoaSettings:
+    """``[doa]``: what the ``doa`` stage estimates on each detection (:mod:`radar_forge.doa`).
+
+    ``methods`` are :data:`~radar_forge.doa.DOA_LABELS`. Covariance methods train on the chip's
+    ``(2 half_width_bins + 1)^2`` cells, snapshot methods take its peak cell.
+    """
+
+    methods: tuple[str, ...] = ("bartlett", "music", "fbss_music", "iaa", "deterministic_ml")
+    n_sources: int = 2
+    n_subarray_elements: int = 12
+    n_iaa_iterations: int = 15
+    n_spice_iterations: int = 60
+    n_grid: int = 4096
+    half_width_bins: int = 2
+
+    def __post_init__(self) -> None:
+        """Refuse an unknown method or a count below its floor."""
+        for label in self.methods:
+            label_parts(label)
+        counts = (self.n_sources, self.n_iaa_iterations, self.n_spice_iterations)
+        if min(counts) < 1 or self.n_grid < 3 or self.half_width_bins < 1:
+            msg = "[doa] needs counts >= 1, n_grid >= 3 and half_width_bins >= 1."
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True)
 class Scenario:
     """Everything a run needs, resolved from its TOML; ``radars`` holds one per burst.
 
@@ -320,6 +398,9 @@ class Scenario:
     clutter: tuple[ClutterSettings, ...] = ()
     transmitter_distortion: DistortionSettings | None = None
     cancellation: CancellationSettings | None = None
+    receive_array: ReceiveArraySettings | None = None
+    second_aircraft: SecondAircraftSettings | None = None
+    doa: DoaSettings | None = None
 
     def __post_init__(self) -> None:
         """Reject a scenario that could not run."""
@@ -350,6 +431,7 @@ class Scenario:
             )
             raise ValueError(msg)
         self._check_noise_bursts()
+        self._check_array()
 
     def _check_noise_bursts(self) -> None:
         """Give each burst its lag count; refuse noise tables without a noise burst to read them."""
@@ -370,6 +452,45 @@ class Scenario:
             raise ValueError(msg)
         if self.cancellation is not None:
             self.cancellation.check_fits(span[0])
+
+    def _check_array(self) -> None:
+        """Refuse an array off FMCW, aircraft B or ``[doa]`` without one, B on two sites."""
+        if self.receive_array is None:
+            if self.second_aircraft is not None or self.doa is not None:
+                msg = "[second_aircraft] and [doa] need a [receive_array]."
+                raise ValueError(msg)
+            return
+        # migration.pulse_compress streams a whole-PRI cube as one row: it has no channel axis.
+        if any(radar.transmitter.waveform != "fmcw" for radar in self.radars):
+            msg = "[receive_array] needs FMCW bursts: the pulsed and noise chains are one channel."
+            raise ValueError(msg)
+        if self.second_aircraft is not None and not self.radar.is_monostatic:
+            msg = "[second_aircraft] is placed at the first target's range: monostatic only."
+            raise ValueError(msg)
+        doa, n_rx = self.doa, self.receive_array.n_rx
+        if doa is not None and not doa.n_sources < doa.n_subarray_elements <= n_rx:
+            msg = f"[doa] needs n_sources < n_subarray_elements <= n_rx = {n_rx}."
+            raise ValueError(msg)
+
+    @property
+    def array(self) -> ArrayGeometry | None:
+        """The receive array's geometry, or ``None`` for one channel."""
+        settings = self.receive_array
+        if settings is None:
+            return None
+        return uniform_linear_array(
+            settings.n_rx,
+            settings.element_spacing_wavelengths,
+            self.radar.wavelength_m,
+            boresight_azimuth_deg=settings.boresight_azimuth_deg,
+            boresight_elevation_deg=settings.boresight_elevation_deg,
+        )
+
+    @property
+    def rcs_m2(self) -> tuple[float, ...]:
+        """Each truth row's cross-section, m²: the targets', then aircraft B's."""
+        second = () if self.second_aircraft is None else (self.second_aircraft.rcs_dbsm,)
+        return tuple(t.rcs_m2 for t in self.targets) + tuple(float(dbsm_to_m2(s)) for s in second)
 
     @property
     def radar(self) -> Radar:
@@ -501,7 +622,20 @@ def load_scenario(path: Path | str) -> Scenario:
         ),
         transmitter_distortion=_optional(DistortionSettings, document, "transmitter_distortion"),
         cancellation=_optional(CancellationSettings, document, "cancellation"),
+        receive_array=_optional(ReceiveArraySettings, document, "receive_array"),
+        second_aircraft=_second_aircraft(document),
+        doa=_optional(DoaSettings, document, "doa"),
     )
+
+
+def _second_aircraft(document: Mapping[str, Any]) -> SecondAircraftSettings | None:
+    """Build ``[second_aircraft]``, whose scattering phase is a word or a number."""
+    if "second_aircraft" not in document:
+        return None
+    table = dict(document["second_aircraft"])
+    phase = table.pop("scattering_phase", "uniform")
+    settings: SecondAircraftSettings = _settings(SecondAircraftSettings, table, "second_aircraft")
+    return replace(settings, scattering_phase=phase)
 
 
 def _optional(kind: Any, document: Mapping[str, Any], name: str) -> Any:
@@ -600,4 +734,39 @@ def truth_geometry(scenario: Scenario) -> list[TargetGeometry]:
         route = scenario.radar.geometry(p, v, acceleration_enu_mps2=acceleration_mps2)
         kept = np.where(modelled, route.bistatic_range_acceleration_mps2, 0.0)
         frames.append(replace(route, bistatic_range_acceleration_mps2=kept))
+    if scenario.second_aircraft is not None:
+        return [_with_second_aircraft(scenario, route) for route in frames]
     return frames
+
+
+def _with_second_aircraft(scenario: Scenario, route: TargetGeometry) -> TargetGeometry:
+    """Append aircraft B's row: the first target's, its arrival moved in direction cosine."""
+    array, settings = scenario.array, scenario.second_aircraft
+    if array is None or settings is None:
+        msg = "aircraft B needs [receive_array] and [second_aircraft]."
+        raise ValueError(msg)
+    offset = settings.separation_rayleigh * rayleigh_width(array, scenario.radar.wavelength_m)
+    arrival_rad = offset_direction_cosine(array, route.aoa_rad[:1], offset)
+    second = {f.name: getattr(route, f.name)[:1] for f in fields(TargetGeometry)}
+    # Monostatic: B departs along the direction it arrives from.
+    second["aoa_rad"] = second["aod_rad"] = arrival_rad
+    return TargetGeometry(
+        **{name: np.concatenate([getattr(route, name), row]) for name, row in second.items()}
+    )
+
+
+def scattering_phase_rad(scenario: Scenario) -> NDArray[np.float64]:
+    """Return each truth row's scattering phase at every frame, ``(n_frames, n_rows)``, rad.
+
+    Zero for every target; aircraft B's is its fixed phase, or uniform on [0, 2 pi) per frame
+    from ``default_rng([seed, 6])``, a generator of its own, so the noise does not move it.
+    """
+    n_rows = len(scenario.rcs_m2)
+    phase_rad = np.zeros((scenario.n_frames, n_rows))
+    settings = scenario.second_aircraft
+    if settings is not None and settings.scattering_phase == "uniform":
+        rng = np.random.default_rng([scenario.seed, 6])
+        phase_rad[:, -1] = rng.uniform(0.0, 2.0 * np.pi, scenario.n_frames)
+    elif settings is not None:
+        phase_rad[:, -1] = float(settings.scattering_phase)
+    return phase_rad
