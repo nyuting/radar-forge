@@ -28,6 +28,11 @@ with ``cancellation_tolerance_db``, ``floor_rise_db`` with ``floor_rise_toleranc
 :mod:`radar_forge.stages.tracking` holds ``multitarget`` (scenario 011): ``gospa_mean_max_m``,
 ``swap_fraction_max``, ``mode_latency_max_scans``, ``nees_fraction_min``, ``pd_min`` and
 ``false_alarm_rate_max``.
+
+:mod:`radar_forge.stages.array` holds ``doa`` (scenario 006): ``direction_cosine_tolerance``,
+``resolved_fraction_min`` with ``resolved_methods``, ``baseline_resolved_fraction_max`` with
+``baseline_methods``, ``<method>_rmse_crb_max`` for each :data:`~radar_forge.doa.DOA_LABELS`
+name, ``rank_ratio_max``, ``snapshot_model_tolerance`` and ``parent_coordinates_tolerance``.
 """
 
 from __future__ import annotations

@@ -51,8 +51,7 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 
 | Relation | Function (file under `src/radar_forge/`) |
 | :--- | :--- |
-| wavelength; PRI, duty cycle, sweep rate | `Transmitter.wavelength_m`; `.pulse_repetition_interval_s`, `.duty_cycle_linear`, `.sweep_rate_hzps` (radar.py) |
-| range resolution c/2B | `Radar.range_resolution_m` (radar.py); `range_resolution_m` (signal.py) |
+| wavelength; PRI, duty cycle, sweep rate; range resolution c/2B | `Transmitter.wavelength_m`; `.pulse_repetition_interval_s`, `.duty_cycle_linear`, `.sweep_rate_hzps`; `Radar.range_resolution_m` (radar.py); `range_resolution_m` (signal.py) |
 | unambiguous delay, range, rate | `Radar.unambiguous_delay_s`, `.unambiguous_bistatic_range_m` (c τ, the map's range span), `.unambiguous_bistatic_range_rate_mps` (λ PRF, the whole span) (radar.py) |
 | route geometry, baseline, bistatic angle; geodesy | `Radar.geometry` -> `TargetGeometry`, `Radar.baseline_m`, `TargetGeometry.bistatic_angle_rad`; `geodetic_to_enu_m`, `enu_to_range_azimuth_elevation_rad`, `range_azimuth_elevation_to_enu_m` (radar.py) |
 | beat frequency ↔ bistatic range | `beat_frequency_hz`, `bistatic_range_from_beat_frequency_m` (signal.py) |
@@ -71,9 +70,10 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 | CWNA/DWNA process noise, coordinated turn; IMM, Π = expm(ΛT) | `CartesianMotion`, `RadialConstantVelocity`, `CoordinatedTurn` (tracking/models.py); `InteractingMultipleModel`, `imm_mix`, `imm_predict`, `imm_update` (tracking/imm.py) |
 | χ² gate, GNN, PDA/JPDA/JPDA*/set weights; M-of-N, JIPDA existence | `chi_square_gate_threshold`, `GlobalNearestNeighbour`, `probabilistic_data_association`, `joint_probabilistic_data_association` (tracking/association.py); `LifecyclePolicy`, `ExistencePolicy` (tracking/tracker.py) |
 | route acceleration R̈_b; Doppler rate | `Radar.geometry(acceleration_enu_mps2=)` (radar.py); `doppler_rate_hzps` (propagation.py) |
-| range gate; its delay axis | `pulsed_baseband(range_gate_start_m=, n_gate_samples=)`, `range_gate_first_sample` (signal.py); `delay_bin_centers_m` (dsp.py) |
-| compression through a gate; keystone, fold factor, Doppler-rate filter | `pulse_compress`; `keystone`, `second_order_keystone`, `fold_factor_search`, `doppler_rate_compensation`, `compensate_migration` (migration.py) |
+| range gate, its delay axis; compression through it; keystone, fold factor, Doppler-rate filter | `pulsed_baseband(range_gate_start_m=, n_gate_samples=)`, `range_gate_first_sample` (signal.py); `delay_bin_centers_m` (dsp.py); `pulse_compress`; `keystone`, `second_order_keystone`, `fold_factor_search`, `doppler_rate_compensation`, `compensate_migration` (migration.py) |
 | data chip; sub-bin and polynomial-phase estimates; CRB | `crop_slow_time`, `crop_range_doppler`, `estimate_tone`, `estimate_fine`, `cramer_rao_bounds` (datachip.py) |
+| receive array: ENU to array frame, steering e^{+j2π p·u/λ}, per-channel synthesis; weights w^H x; covariance, smoothing, FB | `enu_to_array_frame`, `steering_vectors`; `fmcw_deramp_baseband(rx_response_linear=)` (signal.py); `conventional_weights`, `mvdr_weights`, `apply_weights`; `sample_covariance`, `spatial_smoothing`, `forward_backward_average` (array.py) |
+| DOA: Bartlett, Capon, MUSIC, root-MUSIC, ESPRIT, IAA, SPICE, ML; deterministic CRB, Smith's limit, monopulse | `estimate_doa`, `bartlett_spectrum` ... `deterministic_ml`; `crb_deterministic`, `resolution_snr_db`, `monopulse_ratio` (doa.py) |
 | arcs; plot merge P_u = exp(-d²/2), Pd, clutter per m·rad, clutter map; rotations, sector batches | `Arc`, `resolve`, `detect`, `measure`, `ClutterComponent`, `ClutterMap` (tracking/scene.py); `scans`, `PlotTracker` (tracking/scans.py) |
 
 No function yet: Pd (Swerling detection curves).

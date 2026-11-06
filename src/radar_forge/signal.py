@@ -5,7 +5,8 @@ resolve, and the FMCW relations map a bistatic range to its beat tone. The
 generators turn a :class:`~radar_forge.propagation.PropagationPaths` into a
 ``(n_pulses, n_samples)`` cube, monostatic and bistatic alike, under
 stop-and-hop: range as a beat frequency (:func:`fmcw_deramp_baseband`) or as a
-delay folded modulo the PRI (:func:`pulsed_baseband`). A closing target
+delay folded modulo the PRI (:func:`pulsed_baseband`); given each path's response at each
+receive channel, the cube gains a trailing channel axis. A closing target
 advances in slow-time phase. A continuous noise radar has no cube:
 :func:`stream_baseband` returns its received stream beside the code it sent.
 
@@ -168,6 +169,7 @@ def fmcw_deramp_baseband(
     *,
     rng: np.random.Generator | None,
     max_bytes: int = 256 * 2**20,
+    rx_response_linear: ArrayLike | None = None,
 ) -> NDArray[np.complex128]:
     """Synthesise a deramped FMCW cube, ``(n_pulses, n_samples_per_pri)``; noiseless if rng=None.
 
@@ -178,9 +180,25 @@ def fmcw_deramp_baseband(
     running sum, so memory does not grow with the path count and the cube is
     bit-identical however it is chunked. Warns if a path moves a quarter of a
     range bin within one chirp (Charvat [2] ch. 3; Richards [1] §4.6.5).
+
+    ``rx_response_linear``, ``(n_paths, n_rx)``, is each path's complex response at each
+    receive channel, a steering vector per path: the cube is then ``(n_pulses, n_samples,
+    n_rx)``, each channel's echo the path's times its response, with independent noise of
+    ``noise_power_per_sample_w`` per channel. A phase-only response is narrowband, valid while
+    the time a wave takes to cross the array is small against :math:`1/B`: 0.765 ns against
+    500 ns, :math:`1.53	imes10^{-3}`, for scenario 006's 16 elements at half a wavelength.
     """
     _check_dwell(radar, n_pulses, "fmcw")
-    return _synthesise(paths, radar, n_pulses, _deramp_kernel, rng, max_bytes, _fast_time_s(radar))
+    return _synthesise(
+        paths,
+        radar,
+        n_pulses,
+        _deramp_kernel,
+        rng,
+        max_bytes,
+        _fast_time_s(radar),
+        rx_response_linear,
+    )
 
 
 def pulsed_baseband(
@@ -192,6 +210,7 @@ def pulsed_baseband(
     max_bytes: int = 256 * 2**20,
     range_gate_start_m: float = 0.0,
     n_gate_samples: int | None = None,
+    rx_response_linear: ArrayLike | None = None,
 ) -> NDArray[np.complex128]:
     """Synthesise a pulsed cube before compression, ``(n_pulses, n_gate_samples)``.
 
@@ -202,8 +221,8 @@ def pulsed_baseband(
     lost. No eclipsing. The range gate records ``n_gate_samples`` from the sample
     nearest the delay of ``range_gate_start_m`` (bistatic),
     :func:`range_gate_first_sample`; the default records the whole PRI, so a gated
-    cube is these columns of the whole one. Chunking, ``rng`` and the warning as
-    :func:`fmcw_deramp_baseband`.
+    cube is these columns of the whole one. Chunking, ``rng``, the warning and
+    ``rx_response_linear`` as :func:`fmcw_deramp_baseband`.
     """
     _check_dwell(radar, n_pulses, "pulsed")
     first = range_gate_first_sample(range_gate_start_m, radar.receiver.sample_rate_hz)
@@ -215,7 +234,9 @@ def pulsed_baseband(
         )
         raise ValueError(msg)
     fast_time_s = _fast_time_s(radar)[first : first + n_samples]
-    return _synthesise(paths, radar, n_pulses, _pulse_kernel, rng, max_bytes, fast_time_s)
+    return _synthesise(
+        paths, radar, n_pulses, _pulse_kernel, rng, max_bytes, fast_time_s, rx_response_linear
+    )
 
 
 def range_gate_first_sample(range_gate_start_m: float, sample_rate_hz: float) -> int:
@@ -256,27 +277,43 @@ def _synthesise(
     paths: PropagationPaths,
     radar: Radar,
     n_pulses: int,
-    kernel: Callable[[NDArray[np.float64], NDArray[np.float64], Radar], NDArray[np.complex128]],
+    kernel: Callable[
+        [NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], Radar],
+        NDArray[np.complex128],
+    ],
     rng: np.random.Generator | None,
     max_bytes: int,
     fast_time_s: NDArray[np.float64],
+    rx_response_linear: ArrayLike | None = None,
 ) -> NDArray[np.complex128]:
     """Sum ``|a_p|`` times each path's unit-amplitude ``kernel`` echo over paths, then add noise."""
+    response = None
+    if rx_response_linear is not None:
+        response = np.asarray(rx_response_linear, dtype=np.complex128)
+        if response.ndim != 2 or response.shape[0] != paths.n_paths or response.shape[1] < 1:
+            msg = f"rx_response_linear must be ({paths.n_paths}, n_rx); got {response.shape}."
+            raise ValueError(msg)
     _warn_if_stop_and_hop_is_strained(paths, radar)
     bistatic_range_m = paths.bistatic_range_at_m(_slow_time_s(n_pulses, radar), radar.wavelength_m)
     magnitude = np.abs(paths.amplitude_linear)
 
     def chunk_signal(chunk: slice) -> NDArray[np.complex128]:
-        signal = kernel(bistatic_range_m[:, chunk], fast_time_s, radar)
+        signal = kernel(
+            bistatic_range_m[:, chunk], paths.scattering_phase_rad[chunk], fast_time_s, radar
+        )
         signal *= magnitude[None, chunk, None]
         return signal
 
-    cube = _sum_over_paths(chunk_signal, paths.n_paths, (n_pulses, fast_time_s.size), max_bytes)
+    shape = (n_pulses, fast_time_s.size)
+    cube = _sum_over_paths(chunk_signal, paths.n_paths, shape, max_bytes, response)
     return _add_noise(cube, radar, rng)
 
 
 def _deramp_kernel(
-    bistatic_range_m: NDArray[np.float64], fast_time_s: NDArray[np.float64], radar: Radar
+    bistatic_range_m: NDArray[np.float64],
+    scattering_phase_rad: NDArray[np.float64],
+    fast_time_s: NDArray[np.float64],
+    radar: Radar,
 ) -> NDArray[np.complex128]:
     """Return each route's deramped echo, ``(n_pulses, n_paths, n_samples)``: residual and beat."""
     transmitter = radar.transmitter
@@ -285,20 +322,28 @@ def _deramp_kernel(
     sweep_start_wavelength_m = SPEED_OF_LIGHT_MPS / (
         transmitter.carrier_frequency_hz + transmitter.bandwidth_hz / 2.0
     )
-    residual_phase_rad = propagation_phase_rad(bistatic_range_m, sweep_start_wavelength_m)
+    # The scattering phase is added second, so zero leaves the residual bit for bit.
+    residual_phase_rad = (
+        propagation_phase_rad(bistatic_range_m, sweep_start_wavelength_m) + scattering_phase_rad
+    )
     beat_phase_rad = 2.0 * np.pi * transmitter.sweep_rate_hzps * delay_s[..., None] * fast_time_s
     echo: NDArray[np.complex128] = np.exp(1j * (residual_phase_rad[..., None] + beat_phase_rad))
     return echo
 
 
 def _pulse_kernel(
-    bistatic_range_m: NDArray[np.float64], fast_time_s: NDArray[np.float64], radar: Radar
+    bistatic_range_m: NDArray[np.float64],
+    scattering_phase_rad: NDArray[np.float64],
+    fast_time_s: NDArray[np.float64],
+    radar: Radar,
 ) -> NDArray[np.complex128]:
     """Return each route's pulse echo, ``(n_pulses, n_paths, n_samples)``, plus the last overrun."""
     transmitter = radar.transmitter
     pri_s = transmitter.pulse_repetition_interval_s
     folded_delay_s = np.mod(propagation_delay_s(bistatic_range_m), pri_s)
-    residual_phase_rad = propagation_phase_rad(bistatic_range_m, radar.wavelength_m)
+    residual_phase_rad = (
+        propagation_phase_rad(bistatic_range_m, radar.wavelength_m) + scattering_phase_rad
+    )
     echo = _pulse_echo(fast_time_s - folded_delay_s[..., None], residual_phase_rad, transmitter)
     # Row m also hears the end of row m - 1's echo. Row 0 has none: a zero delay puts
     # its predecessor a whole PRI back, at least one pulse length out of reach.
@@ -467,7 +512,9 @@ def stream_baseband(
         / SPEED_OF_LIGHT_MPS
     )
     magnitude = np.abs(paths.amplitude_linear)
-    start_phase_rad = propagation_phase_rad(paths.bistatic_range_m, wavelength_m)
+    start_phase_rad = (
+        propagation_phase_rad(paths.bistatic_range_m, wavelength_m) + paths.scattering_phase_rad
+    )
     moving = (paths.doppler_hz != 0.0) | (paths.doppler_rate_hzps != 0.0)
     time_s = np.arange(n_samples, dtype=np.float64) / sample_rate_hz
     stream = np.zeros(n_samples, dtype=np.complex128)
@@ -534,11 +581,16 @@ def _sum_over_paths(
     n_paths: int,
     shape: tuple[int, int],
     max_bytes: int,
+    response: NDArray[np.complex128] | None = None,
 ) -> NDArray[np.complex128]:
-    """Sum the per-path signal over paths, a chunk of paths at a time, ``shape`` out."""
+    """Sum the per-path signal over paths, a chunk of paths at a time, ``shape`` out.
+
+    With ``response`` ``(n_paths, n_rx)``, each path enters every channel times its response,
+    and ``shape + (n_rx,)`` comes out.
+    """
     n_pulses, n_samples = shape
     paths_per_chunk = max(1, max_bytes // (_BYTES_PER_COMPLEX * n_pulses * n_samples))
-    cube = np.zeros(shape, dtype=np.complex128)
+    cube = np.zeros(shape if response is None else (*shape, response.shape[1]), np.complex128)
     # A loop over chunks bounds memory; the chunk count depends only on the shapes.
     for start in range(0, n_paths, paths_per_chunk):
         chunk = chunk_signal(slice(start, start + paths_per_chunk))
@@ -547,7 +599,10 @@ def _sum_over_paths(
         # unchunked sum over the path axis, so the cube is bit-identical however it
         # is chunked, and nothing is allocated beyond the chunk.
         for path in range(chunk.shape[1]):
-            cube += chunk[:, path]
+            if response is None:
+                cube += chunk[:, path]
+            else:
+                cube += chunk[:, path, :, None] * response[start + path]
     return cube
 
 

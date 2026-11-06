@@ -56,7 +56,7 @@ acceptance numbers in a `[verify]` table and its spec is deleted. Run one with
 | 003, tracking: CFAR, association and tracking on 001 | `scenario_003_tracking.toml`, `scenario_003_tracking_dual_prf.toml`, `scenario_003_ukf_*.toml` | Runs; checked by `[verify]` |
 | 004, keystone: a fast sounding rocket; range walk, Doppler spread and fold, corrected and estimated on a data chip | `scenario_004_keystone_k1.toml`, `scenario_004_keystone_k2.toml`, `scenario_004_keystone_k3.toml` | Runs; checked by `[verify]` |
 | 005, leakage cancellation: a noise radar cancels its own leakage and near clutter | `scenario_005_static_leakage.toml`, `scenario_005_varying_clutter.toml`, `scenario_005_distorted_transmitter.toml` | Runs; checked by `[verify]` |
-| [006, parallel-approach DoA](../spec/scenario-006-parallel-approach-doa.md): two aircraft in one cell | none | Specified, not built |
+| 006, parallel-approach DoA: two aircraft in one range-Doppler cell, a 16-channel receive array, coherent-pair DOA | `scenario_006_parallel_resolved.toml`, `scenario_006_parallel_subrayleigh.toml`, `scenario_006_parallel_sweep.toml` | Runs; checked by `[verify]` |
 | [007, interference](../spec/scenario-007-interference.md): strong interferers against a weak target | none | Specified, not built |
 | [008, STAP](../spec/scenario-008-stap.md): airborne clutter ridge | none | Specified, not built |
 | [009, receiver chain](../spec/scenario-009-receiver-chain.md): front end, DDC, impairments | none | Specified, not built |

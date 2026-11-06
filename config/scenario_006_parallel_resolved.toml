@@ -1,0 +1,106 @@
+# Scenario 006 F1 -- two aircraft on closely spaced parallel approaches, in one range-Doppler cell,
+# received on a 16-channel array at the Duke Receiver. The variants share every block but
+# [second_aircraft], F3 also its cross-sections, and [verify]. Every range and rate on the map is
+# bistatic, positive receding: monostatic, twice the slant range and twice the radial velocity.
+# Aircraft B is built in the array's coordinates (spec section 4.3): aircraft A's ranges, rate and
+# elevation, its direction cosine u moved right by separation_rayleigh Rayleigh widths, 0.125 in u.
+
+[scenario]
+name = "scenario-006-parallel-resolved"
+description = "F1: aircraft B two Rayleigh widths (0.25 in u) right of aircraft A, co-range and co-Doppler by construction. Every method resolves the pair; the conventional beam and raw MUSIC carry a coherent bias of a hundred bounds and more."
+seed = 20261106
+
+[[target]]
+name = "aircraft-a"
+rcs_dbsm = 10.0        # 10 m^2, Swerling 0
+trajectory_path = "../data/flight_coordinates.csv"
+altitude_m = 1500.0    # the CSV has no altitude column; held constant
+
+[second_aircraft]
+separation_rayleigh = 2.0
+rcs_dbsm = 10.0
+scattering_phase = "uniform"   # a new phase each frame, from default_rng([seed, 6])
+
+[frames]
+start_time_s = 0.0
+duration_s = 120.0     # 120 frames, t = 0 ... 119 s
+frame_rate_hz = 1.0
+
+[site.tx]
+# The Duke Receiver. With no [site.rx] the array stands here too: monostatic.
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
+
+# S1, as scenario 001: 1 ms sweep at 2 GHz/s, deramped at 1 MHz, 256 chirps.
+[[burst]]
+waveform = "fmcw"
+carrier_frequency_hz = 9.8e9
+bandwidth_hz = 2.0e6
+transmit_power_w = 100.0
+gain_tx_dbi = 30.0
+chirp_duration_s = 1.0e-3
+prf_hz = 1.0e3
+sample_rate_hz = 1.0e6
+n_pulses = 256
+
+# 16 channels half a wavelength apart (15.2955 mm; aperture 0.24473 m), centred on the phase
+# centre. Boresight: the circular mean of aircraft A's bearing over the window's 120 frames.
+[receive_array]
+n_rx = 16
+element_spacing_wavelengths = 0.5
+boresight_azimuth_deg = 235.795
+boresight_elevation_deg = 0.0
+
+# Per channel: a lambda/2 x 0.4869 m column is 20 dBi; 16 combine to 32.04 dBi.
+[receiver]
+gain_rx_dbi = 20.0
+noise_figure_db = 3.0
+
+# Scenario 001's CA-CFAR along range, which wraps, on the boresight beam's map.
+[detection]
+pfa = 1e-5
+n_train = 16
+n_guard = 4
+variant = "ca"
+merge_range_bins = 1.0
+max_bistatic_range_rate_mps = 400.0
+
+# Covariance methods train on the chip's 5 x 5 cells; the rest take its peak cell (D14).
+[doa]
+methods = ["bartlett", "capon", "music", "esprit", "fb_music", "fbss_music", "fbss_esprit", "iaa", "spice", "deterministic_ml"]
+n_sources = 2
+n_subarray_elements = 12     # K = 5 subarrays; their Rayleigh width 0.1667 in u
+n_iaa_iterations = 15
+n_spice_iterations = 60
+n_grid = 4096                # u in [-1, 1): every direction once at half a wavelength
+half_width_bins = 2
+
+[verify]
+stages = ["geometry", "iq", "rd", "detect", "doa"]
+# Per channel: P_r T N / (k T0 F) on an exact bin at frame 0 (17,560.7 m slant), 20 dBi: S1's
+# 52.01 dB less 10 dB. The window spans 41.24 to 42.95 dB (spec section 3.3).
+expected_snr_db = 42.01
+snr_tolerance_db = 0.01
+# S1 folds the rate at +-15.3 m/s: 20 of 120 frames lie inside.
+truth_in_map_fraction = [0.0, 0.25]
+# Five standard errors of a mean over 256,000 complex samples of one channel's noise.
+noise_tolerance_db = 0.05
+# Both aircraft share the beam map's one detection, within one bin, every frame.
+truth_within_bins = 1.0
+detection_fraction = 1.0
+rate_tolerance_mps = 0.119496
+# F1's sanity: at two Rayleigh widths every method that keeps the pair's rank, and the beam and
+# raw MUSIC with their coherent bias, resolve it; P = 1.000 for each over 200 snapshot-model
+# trials at 41.24 dB. Judged, as every fraction, from 50 frames on.
+resolved_methods = ["bartlett", "music", "fb_music", "fbss_music", "fbss_esprit", "iaa", "spice", "deterministic_ml"]
+resolved_fraction_min = 0.95
+# ESPRIT needs a rank-two signal subspace, which a coherent pair never gives: it fails at any
+# separation (P = 0.05 over the same trials). Capon's signal cancellation is partial here, 0.67.
+baseline_methods = ["esprit"]
+baseline_resolved_fraction_max = 0.25
+# ML within this of both truths every frame: six deviations of the bound at its worst in the
+# window, 41.24 dB less 7.84 dB of scalloping, at the worst relative phase, 0.000276 each.
+direction_cosine_tolerance = 0.0017
+# A16: the chip's cell, bins and estimates equal the uncropped map's.
+parent_coordinates_tolerance = 1e-12

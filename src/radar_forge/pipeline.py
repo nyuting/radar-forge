@@ -8,7 +8,9 @@ cube a :class:`RangeDopplerProduct`, a pulsed cube through its range gate and ``
 cleaned it; :func:`frame_plots` runs CFAR along range, clusters, and pairs two bursts by dual
 PRF into :class:`Plots`; :class:`ScanTracker` feeds the accepted plots to a
 :class:`~radar_forge.tracking.Tracker`. The map axes carry bistatic range :math:`R_T + R_R`
-and its rate, positive receding; nothing here halves them.
+and its rate, positive receding; nothing here halves them. An FMCW scenario with a receive array
+synthesises a channel axis; its map keeps each channel's beside the boresight beam's, which
+detection sees.
 
 References
 ----------
@@ -30,6 +32,14 @@ from typing import Any
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from radar_forge.array import (
+    ArrayGeometry,
+    apply_weights,
+    conventional_weights,
+    directions_unit,
+    enu_to_array_frame,
+    steering_vectors,
+)
 from radar_forge.clutter import CancellationResult, cancel, fill_notch
 from radar_forge.detection import Detection, cfar_detect, cluster_detections
 from radar_forge.dsp import (
@@ -46,12 +56,8 @@ from radar_forge.dsp import (
 from radar_forge.migration import compensate_migration, pulse_compress
 from radar_forge.propagation import PropagationPaths, disturbance_paths, line_of_sight_paths
 from radar_forge.radar import Radar, TargetGeometry
-from radar_forge.scenario import (
-    DetectionSettings,
-    MigrationSettings,
-    Scenario,
-    truth_geometry,
-)
+from radar_forge.scenario import Scenario, scattering_phase_rad, truth_geometry
+from radar_forge.settings import DetectionSettings, MigrationSettings
 from radar_forge.signal import (
     RangeGate,
     cubic_amplifier,
@@ -99,15 +105,23 @@ def synthesise(
     reference: ArrayLike | None = None,
     disturbance: PropagationPaths | None = None,
     amplifier: Callable[[NDArray[np.complex128]], NDArray[np.complex128]] | None = None,
+    array: ArrayGeometry | None = None,
+    scattering_phase_rad: ArrayLike = 0.0,
 ) -> NDArray[np.complex128]:
     """Return one burst's cube ``(n_pulses, n_samples)`` for line-of-sight targets.
 
     A pulsed burst records its ``gate`` (default: the whole PRI); FMCW records every sample. A
     noise burst's cube is its stream cut into batches: the targets and any ``disturbance`` paths
     on the code ``reference`` (noiseless and none given, the one ``default_rng(0)`` draws),
-    through ``amplifier``.
+    through ``amplifier``. An ``array`` receives each path on its steering vector towards the
+    path's ``aoa_rad``, and the cube gains a trailing channel axis.
     """
-    paths = line_of_sight_paths(radar, geometry, rcs_m2)
+    paths = line_of_sight_paths(radar, geometry, rcs_m2, scattering_phase_rad=scattering_phase_rad)
+    response = None
+    if array is not None:
+        directions = directions_unit(paths.aoa_rad[:, 0], paths.aoa_rad[:, 1])
+        in_array = enu_to_array_frame(array, directions)
+        response = steering_vectors(array, in_array, radar.wavelength_m).T
     if radar.transmitter.waveform == "noise":
         n_samples = n_pulses * radar.n_samples_per_chirp
         if reference is None:
@@ -119,7 +133,7 @@ def synthesise(
         )
         return stream.reshape(n_pulses, -1)
     if radar.transmitter.waveform == "fmcw":
-        return fmcw_deramp_baseband(paths, radar, n_pulses, rng=rng)
+        return fmcw_deramp_baseband(paths, radar, n_pulses, rng=rng, rx_response_linear=response)
     gate = RangeGate() if gate is None else gate
     return pulsed_baseband(
         paths,
@@ -128,6 +142,7 @@ def synthesise(
         rng=rng,
         range_gate_start_m=gate.range_gate_start_m,
         n_gate_samples=gate.n_gate_samples,
+        rx_response_linear=response,
     )
 
 
@@ -154,7 +169,8 @@ def frames(scenario: Scenario, *, n_frames: int | None = None) -> Iterator[Frame
     """
     truths = truth_geometry(scenario)[:n_frames]
     rng = np.random.default_rng(scenario.seed)
-    rcs_m2 = [target.rcs_m2 for target in scenario.targets]
+    rcs_m2 = list(scenario.rcs_m2)
+    array, phase_rad = scenario.array, scattering_phase_rad(scenario)
     radar, distortion = scenario.radar, scenario.transmitter_distortion
     disturbance = disturbance_paths(radar, scenario.leakage, scenario.clutter)
     amplifier = None if distortion is None else functools.partial(cubic_amplifier, a3=distortion.a3)
@@ -177,7 +193,16 @@ def frames(scenario: Scenario, *, n_frames: int | None = None) -> Iterator[Frame
             yield Frame(index, float(scenario.frame_times_s[index]), truth, (stream,), references)
             continue
         cubes = tuple(
-            synthesise(radar, truth, rcs_m2, n_pulses, rng=rng, gate=gate)
+            synthesise(
+                radar,
+                truth,
+                rcs_m2,
+                n_pulses,
+                rng=rng,
+                gate=gate,
+                array=array,
+                scattering_phase_rad=phase_rad[index],
+            )
             for radar, n_pulses, gate in zip(
                 scenario.radars, scenario.n_pulses, scenario.gates, strict=True
             )
@@ -227,7 +252,9 @@ class RangeDopplerProduct:
     span = :attr:`rate_period_mps`. A noise burst's range axis is a window of lags instead, which
     does not wrap: ``range_wraps`` is ``False``.
     The rate axis falls with index, its sign from :func:`~radar_forge.dsp.doppler_bin_centers_mps`.
-    A range-gated map is a window on its range circle, ``unambiguous_range_m`` round.
+    A range-gated map is a window on its range circle, ``unambiguous_range_m`` round. A cube
+    with a channel axis keeps each channel's map, ``channels`` ``(n_doppler_bins, n_range_bins,
+    n_rx)``, and ``rd_map`` is their conventional beam at boresight.
     """
 
     rd_map: NDArray[np.complex128]
@@ -235,6 +262,7 @@ class RangeDopplerProduct:
     rate_axis_mps: NDArray[np.float64]
     unambiguous_range_m: float | None = None
     range_wraps: bool = True
+    channels: NDArray[np.complex128] | None = None
 
     @property
     def range_bin_m(self) -> float:
@@ -328,10 +356,16 @@ def range_doppler_product(
             ).data_rfst
         rd_map = doppler_fft(data_rfst, axis=0)
     else:
-        rd_map = range_doppler_map(samples)
+        # Explicit axes: a channel axis is last, where the transform's default fast time is.
+        rd_map = range_doppler_map(samples, fast_time_axis=1, slow_time_axis=0)
     windowed = gate is not None and not gate.is_whole_pri(radar)
     circle_m = radar.unambiguous_bistatic_range_m if windowed else None
-    return RangeDopplerProduct(rd_map, *map_axes(radar, samples.shape[0], gate=gate), circle_m)
+    axes = map_axes(radar, samples.shape[0], gate=gate)
+    if rd_map.ndim == 3:
+        # Broadside every steering element is 1: the boresight beam is the channels' mean.
+        beam = apply_weights(conventional_weights(np.ones(rd_map.shape[-1])), rd_map)
+        return RangeDopplerProduct(beam, *axes, circle_m, channels=rd_map)
+    return RangeDopplerProduct(rd_map, *axes, circle_m)
 
 
 def frame_products(

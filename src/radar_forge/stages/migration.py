@@ -35,7 +35,7 @@ from radar_forge.migration import (
 )
 from radar_forge.pipeline import frames, map_axes, synthesise
 from radar_forge.radar import Radar
-from radar_forge.scenario import MigrationSettings
+from radar_forge.settings import MigrationSettings
 
 __all__ = ["keystone_stage"]
 

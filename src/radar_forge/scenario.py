@@ -8,10 +8,11 @@ is read by :mod:`radar_forge.evaluate`. A pulsed ``[[burst]]`` may record a rang
 ``[migration]`` corrects range migration (:mod:`radar_forge.migration`). A noise burst adds
 ``[leakage]``, ``[[clutter]]``, ``[transmitter_distortion]`` and ``[cancellation]``. A
 plot-level scenario (scenario 011) has a ``[sensor]`` instead of the site, bursts and
-receiver, ``[[target]] kind = "arc"`` trajectories and ``[clutter_plots]``.
-:func:`load_scenario` refuses an unknown table, key or value type, so a typo is never silently
-ignored. :func:`truth_geometry` gives the unfolded truth: bistatic range :math:`R_T + R_R` and
-its rate, positive receding.
+receiver, ``[[target]] kind = "arc"`` trajectories and ``[clutter_plots]``. An FMCW radar may
+receive on ``[receive_array]``, with scenario 006's ``[second_aircraft]`` and ``[doa]``. Each
+table's settings class lives in :mod:`radar_forge.settings`. :func:`load_scenario` refuses an
+unknown table, key or value type, so a typo is never silently ignored. :func:`truth_geometry`
+gives the unfolded truth: bistatic range :math:`R_T + R_R` and its rate, positive receding.
 
 References
 ----------
@@ -33,27 +34,38 @@ from typing import Any, Literal, get_args, get_origin, get_type_hints
 import numpy as np
 from numpy.typing import NDArray
 
-from radar_forge.detection import CfarVariant
+from radar_forge.array import (
+    ArrayGeometry,
+    offset_direction_cosine,
+    rayleigh_width,
+    uniform_linear_array,
+)
 from radar_forge.propagation import dbsm_to_m2
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter, geodetic_to_enu_m
+from radar_forge.settings import (
+    ArcTarget,
+    CancellationSettings,
+    ClutterPlotSettings,
+    ClutterSettings,
+    DetectionSettings,
+    DistortionSettings,
+    DoaSettings,
+    LeakageSettings,
+    MigrationSettings,
+    ReceiveArraySettings,
+    SecondAircraftSettings,
+    SensorSettings,
+    Target,
+    TrackingSettings,
+)
 from radar_forge.signal import RangeGate
 from radar_forge.tracking.scene import Arc, ClutterComponent, FixedDiscretes, Leg
 
 __all__ = [
-    "ArcTarget",
-    "CancellationSettings",
-    "ClutterPlotSettings",
-    "ClutterSettings",
-    "DetectionSettings",
-    "DistortionSettings",
-    "LeakageSettings",
-    "MigrationSettings",
     "RangeGate",
     "Scenario",
-    "SensorSettings",
-    "Target",
-    "TrackingSettings",
     "load_scenario",
+    "scattering_phase_rad",
     "truth_geometry",
 ]
 
@@ -66,300 +78,8 @@ _OPTIONAL_TABLES = {"detection", "tracking", "verify", "migration"}
 _BURST_KEYS |= {"n_range_lags"}
 _NOISE_TABLES = {"leakage", "clutter", "transmitter_distortion", "cancellation"}
 _OPTIONAL_TABLES |= _NOISE_TABLES
-
-
-@dataclass(frozen=True)
-class Target:
-    r"""One point target: a trajectory CSV at a fixed altitude, or a constant ENU motion.
-
-    ``position_enu_m`` is at the first frame, in the receiver site's east, north, up frame; the
-    target then follows :math:`p + v t + a t^2/2`. Without ``acceleration_enu_mps2`` its
-    route's :math:`\ddot R_b` is not modelled (zero), as for a trajectory.
-    """
-
-    name: str
-    rcs_dbsm: float
-    trajectory_path: Path | None = None
-    altitude_m: float = 0.0
-    position_enu_m: tuple[float, float, float] | None = None
-    velocity_enu_mps: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    acceleration_enu_mps2: tuple[float, float, float] | None = None
-
-    def __post_init__(self) -> None:
-        """Require exactly one way of moving; an acceleration only with a position."""
-        if (self.trajectory_path is None) == (self.position_enu_m is None):
-            msg = f"target {self.name!r} needs one of trajectory_path and position_enu_m."
-            raise ValueError(msg)
-        if self.acceleration_enu_mps2 is not None and self.position_enu_m is None:
-            msg = f"target {self.name!r}: acceleration_enu_mps2 needs position_enu_m."
-            raise ValueError(msg)
-
-    @property
-    def rcs_m2(self) -> float:
-        """Cross-section, m² (Swerling 0)."""
-        return float(dbsm_to_m2(self.rcs_dbsm))
-
-
-@dataclass(frozen=True)
-class DetectionSettings:
-    """``[detection]``: CFAR along each map's range axis, which wraps, then sidelobe merging.
-
-    A cluster within ``merge_range_bins`` range bins of a stronger one is taken for its Doppler
-    sidelobe and dropped, a single-target simplification for an untapered map; 0 keeps every
-    cluster. ``max_bistatic_range_rate_mps`` is the fastest a target may open or close: the
-    dual-PRF search bound and a new track's prior rate spread.
-    """
-
-    pfa: float = 1e-5
-    n_train: int = 16
-    n_guard: int = 4
-    variant: CfarVariant = "ca"
-    merge_range_bins: float = 1.0
-    max_bistatic_range_rate_mps: float = 400.0
-
-
-@dataclass(frozen=True)
-class TrackingSettings:
-    """``[tracking]``: the filter, assignment, lifecycle and rate-unfolding policy.
-
-    Every rate and acceleration is of bistatic range, twice the radial value when monostatic.
-    ``range_only_retry`` offers each track range alone when range and rate fail the gate; it
-    mixes measurement dimensions, so it needs ``cost = "negative_log_likelihood_ratio"``.
-    """
-
-    linearisation: Literal["taylor", "unscented"] = "unscented"
-    process_noise: Literal["cwna", "dwna"] = "cwna"
-    sigma_acceleration_mps2: float = 8.0
-    acceleration_correlation_time_s: float = 1.0
-    initiator: Literal["direct", "range_only"] = "direct"
-    cost: Literal["nis", "negative_log_likelihood_ratio"] = "nis"
-    assignment: Literal["confirmed_first", "joint"] = "confirmed_first"
-    range_only_retry: bool = False
-    gate_probability: float = 0.997
-    n_confirm_hits: int = 3
-    n_confirm_scans: int = 5
-    n_delete_misses: int = 5
-    n_reacquire_misses: int = 0
-    reacquire_reset: tuple[str, ...] = ()
-    rate_unfolding: Literal["none", "track_aided"] = "none"
-    unfold_sigma_gate: float = 6.0
-    n_slope_scans: int = 5
-    # Plot-level tracking (scenario 011): ENU ground-plane states, z = (range, azimuth).
-    motion: Literal["cv", "imm"] = "cv"
-    association: Literal["gnn", "jpda"] = "gnn"
-    coalescence: Literal["none", "jpda_star", "set"] = "none"
-    existence: bool = False
-    mode_sigma_acceleration_mps2: tuple[float, ...] = (0.5, 0.5, 3.1623)
-    turn_rate_noise_density_rad2ps3: float = 1.6e-5
-    sojourn_time_s: tuple[float, ...] = (120.0, 30.0, 20.0)
-    turn_rate_sigma_degps: float = 3.0
-    clutter_intensity: Literal["oracle", "map"] = "oracle"
-    detection_probability: float = 0.9
-    max_birth_clutter_intensity_per_m_rad: float = 0.01
-    initial_speed_sigma_mps: float = 150.0
-    max_position_sigma_m: float = np.inf
-
-    def __post_init__(self) -> None:
-        """Refuse track-aided unfolding behind a folded seed, and existence without JPDA."""
-        if self.rate_unfolding == "track_aided" and self.initiator != "range_only":
-            msg = (
-                '[tracking] rate_unfolding = "track_aided" needs initiator = "range_only": a '
-                f"{self.initiator!r} seed takes the folded rate, at a bin of variance."
-            )
-            raise ValueError(msg)
-        if self.existence and self.association != "jpda":
-            msg = '[tracking] existence = true is JIPDA: it needs association = "jpda".'
-            raise ValueError(msg)
-        if len(self.mode_sigma_acceleration_mps2) != 3 or len(self.sojourn_time_s) != 3:
-            msg = "[tracking] the IMM's modes are quiet, turn and agile: give three values each."
-            raise ValueError(msg)
-
-
-@dataclass(frozen=True)
-class SensorSettings:
-    """``[sensor]``: a rotating surveillance radar's plots, z = (horizontal range, azimuth).
-
-    The beam crosses azimuth a at ``scan start + a / (2π) scan_period_s``; a rotation reaches
-    the tracker in ``n_sectors`` batches, each at its centre time. Echoes merge within the
-    resolution cell ``range_cell_m`` by ``beamwidth_azimuth_deg``.
-    """
-
-    carrier_frequency_hz: float = 2.8e9
-    scan_period_s: float = 4.8
-    beamwidth_azimuth_deg: float = 1.4
-    range_cell_m: float = 115.75
-    range_min_m: float = 1000.0
-    range_max_m: float = 40000.0
-    sigma_range_m: float = 33.414
-    sigma_azimuth_deg: float = 0.15
-    pd_aircraft: float = 0.9
-    pd_bird: float = 0.3
-    mti_notch_mps: float = 4.0
-    pd_notch: float = 0.3
-    n_sectors: int = 16
-
-
-@dataclass(frozen=True)
-class ArcTarget:
-    """One ``[[target]] kind = "arc"``: its class (``aircraft`` or ``bird``) and trajectory."""
-
-    name: str
-    target_class: Literal["aircraft", "bird"]
-    arc: Arc
-
-
-@dataclass(frozen=True)
-class ClutterPlotSettings:
-    """``[clutter_plots]``: Poisson components and fixed discretes, in plots per (m rad)."""
-
-    components: tuple[ClutterComponent, ...] = ()
-    discretes: FixedDiscretes | None = None
-
-
-@dataclass(frozen=True)
-class LeakageSettings:
-    """``[leakage]``: the transmitter's leakage at the ADC, one whole-sample lag per path.
-
-    ``inr_db`` is each path's power over the noise in one sample, not over the matched band.
-    """
-
-    lags: tuple[int, ...] = ()
-    inr_db: tuple[float, ...] = ()
-
-    def __post_init__(self) -> None:
-        """Require one non-negative whole lag per level."""
-        lags_ok = all(type(lag) is int and lag >= 0 for lag in self.lags)
-        if not (self.lags and lags_ok and len(self.lags) == len(self.inr_db)):
-            msg = "[leakage] needs lags, non-negative integers, and one inr_db for each."
-            raise ValueError(msg)
-        object.__setattr__(self, "inr_db", tuple(float(value) for value in self.inr_db))
-
-
-@dataclass(frozen=True)
-class ClutterSettings:
-    """One ``[[clutter]]`` scatterer: its bistatic route, power over noise per sample, Doppler."""
-
-    range_m: float = 0.0
-    relative_power_db: float = 0.0
-    doppler_hz: float = 0.0
-
-    def __post_init__(self) -> None:
-        """Require a route: a scatterer at zero range is leakage."""
-        if not self.range_m > 0.0:
-            msg = f"[[clutter]] range_m must be strictly positive; got {self.range_m!r}."
-            raise ValueError(msg)
-
-
-@dataclass(frozen=True)
-class DistortionSettings:
-    """``[transmitter_distortion]``: the third-order term of the transmit amplifier."""
-
-    a3: float = 0.0
-
-
-@dataclass(frozen=True)
-class CancellationSettings:
-    """``[cancellation]``: the canceller a noise burst's stream passes before correlation.
-
-    ``least_squares`` fits the CPI, or each ``n_samples_per_batch`` block, on the block widened
-    by ``n_samples_extension`` a side (:func:`~radar_forge.clutter.least_squares_cancel`);
-    ``wiener`` is Wiener-SMI on the CPI, linear; ``none`` passes the stream through.
-    """
-
-    method: Literal["none", "least_squares", "wiener"] = "least_squares"
-    n_taps: int = 1
-    n_samples_per_batch: int = 0
-    n_samples_extension: int = 0
-    odd_orders: tuple[int, ...] = (1,)
-    diagonal_loading: float = 0.0
-
-    def __post_init__(self) -> None:
-        """Refuse a count below its floor, or a Wiener fit asked to batch or to go nonlinear."""
-        counts = (self.n_taps - 1, self.n_samples_per_batch, self.n_samples_extension)
-        if min(counts) < 0 or (self.n_samples_extension and not self.n_samples_per_batch):
-            msg = "[cancellation] needs n_taps >= 1, and an extension only around a batch."
-            raise ValueError(msg)
-        if not self.diagonal_loading >= 0.0:
-            msg = "[cancellation] diagonal_loading is a fraction of the mean diagonal, >= 0."
-            raise ValueError(msg)
-        orders = self.odd_orders
-        if not orders or len(set(orders)) < len(orders) or any(p < 1 or p % 2 == 0 for p in orders):
-            msg = (
-                f"[cancellation] odd_orders must be distinct odd orders, such as [1, 3]; {orders}."
-            )
-            raise ValueError(msg)
-        tuned = self.n_samples_per_batch or orders != (1,) or self.diagonal_loading
-        if self.method == "wiener" and tuned:
-            msg = '[cancellation] "wiener" fits the CPI on the linear basis, unloaded.'
-            raise ValueError(msg)
-
-    def check_fits(self, n_samples: int) -> None:
-        """Refuse blocks that do not tile a CPI of ``n_samples``, or a window short of the basis."""
-        if self.method == "none":
-            return
-        block = self.n_samples_per_batch or n_samples
-        if n_samples % block or self.n_samples_extension % block:
-            msg = (
-                f"[cancellation] n_samples_per_batch must divide the CPI's {n_samples} samples, "
-                "and n_samples_extension be whole batches."
-            )
-            raise ValueError(msg)
-        n_blocks, reach = n_samples // block, self.n_samples_extension // block
-        smallest = min(n_blocks, reach + 1) * block
-        if smallest < self.n_taps * len(self.odd_orders):
-            msg = f"[cancellation] a {smallest}-sample window holds fewer samples than its basis."
-            raise ValueError(msg)
-
-
-@dataclass(frozen=True)
-class MigrationSettings:
-    """``[migration]``: range-migration correction between pulse compression and Doppler FFT.
-
-    ``"keystone"`` removes linear walk (:func:`~radar_forge.migration.keystone`, interpolating
-    by ``keystone``); ``"keystone_doppler_rate"`` then searches ``acceleration_search_mps2 =
-    [low, high, step]``, bistatic and inclusive, with the Doppler-rate filter. A positive
-    ``fold_factor_max`` searches the keystone's fold factor over ``[-max, max]``.
-    """
-
-    method: Literal["none", "keystone", "keystone_doppler_rate"] = "none"
-    keystone: Literal["czt", "sinc"] = "czt"
-    fold_factor_max: int = 0
-    acceleration_search_mps2: tuple[float, ...] = ()
-
-    def __post_init__(self) -> None:
-        """Refuse a search the method does not run, or a grid that is not ``[low, high, step]``."""
-        grid = tuple(float(value) for value in self.acceleration_search_mps2)
-        object.__setattr__(self, "acceleration_search_mps2", grid)
-        searches = self.method == "keystone_doppler_rate"
-        if self.fold_factor_max < 0 or (self.method == "none" and self.fold_factor_max):
-            msg = "[migration] fold_factor_max must be >= 0, and needs a keystone method."
-            raise ValueError(msg)
-        if searches != bool(grid) or (grid and not (len(grid) == 3 and grid[0] <= grid[1])):
-            msg = (
-                "[migration] acceleration_search_mps2 = [low, high, step], low <= high, goes "
-                'with method = "keystone_doppler_rate" and only with it.'
-            )
-            raise ValueError(msg)
-        if grid and not grid[2] > 0.0:
-            msg = f"[migration] acceleration_search_mps2 step must be positive; got {grid[2]}."
-            raise ValueError(msg)
-        steps = (grid[1] - grid[0]) / grid[2] if grid else 0.0
-        if abs(steps - round(steps)) > 1e-9:
-            msg = (
-                f"[migration] acceleration_search_mps2 = {list(grid)}: high - low is {steps:g} "
-                "steps, not a whole number; set high to low plus a whole number of steps."
-            )
-            raise ValueError(msg)
-
-    @property
-    def accelerations_mps2(self) -> NDArray[np.float64]:
-        """The acceleration grid, ``low`` to ``high`` inclusive; empty without a search."""
-        if not self.acceleration_search_mps2:
-            return np.zeros(0)
-        low, high, step = self.acceleration_search_mps2
-        steps = np.arange(round((high - low) / step) + 1, dtype=np.float64)
-        result: NDArray[np.float64] = low + step * steps
-        return result
+# Scenario 006's receive array: three tables of its own.
+_OPTIONAL_TABLES |= {"receive_array", "second_aircraft", "doa"}
 
 
 @dataclass(frozen=True)
@@ -378,11 +98,11 @@ class Scenario:
     start_time_s: float
     duration_s: float
     frame_rate_hz: float
-    detection: DetectionSettings = DetectionSettings()
+    detection: DetectionSettings = field(default_factory=DetectionSettings)
     tracking: TrackingSettings | None = None
     verify: Mapping[str, Any] = field(default_factory=dict)
     gates: tuple[RangeGate, ...] = ()
-    migration: MigrationSettings = MigrationSettings()
+    migration: MigrationSettings = field(default_factory=MigrationSettings)
     n_range_lags: tuple[int, ...] = ()
     leakage: LeakageSettings | None = None
     clutter: tuple[ClutterSettings, ...] = ()
@@ -390,7 +110,10 @@ class Scenario:
     cancellation: CancellationSettings | None = None
     sensor: SensorSettings | None = None
     arcs: tuple[ArcTarget, ...] = ()
-    clutter_plots: ClutterPlotSettings = ClutterPlotSettings()
+    clutter_plots: ClutterPlotSettings = field(default_factory=ClutterPlotSettings)
+    receive_array: ReceiveArraySettings | None = None
+    second_aircraft: SecondAircraftSettings | None = None
+    doa: DoaSettings | None = None
 
     def __post_init__(self) -> None:
         """Reject a scenario that could not run."""
@@ -426,6 +149,7 @@ class Scenario:
             )
             raise ValueError(msg)
         self._check_noise_bursts()
+        self._check_array()
 
     def _check_noise_bursts(self) -> None:
         """Give each burst its lag count; refuse noise tables without a noise burst to read them."""
@@ -446,6 +170,45 @@ class Scenario:
             raise ValueError(msg)
         if self.cancellation is not None:
             self.cancellation.check_fits(span[0])
+
+    def _check_array(self) -> None:
+        """Refuse an array off FMCW, aircraft B or ``[doa]`` without one, B on two sites."""
+        if self.receive_array is None:
+            if self.second_aircraft is not None or self.doa is not None:
+                msg = "[second_aircraft] and [doa] need a [receive_array]."
+                raise ValueError(msg)
+            return
+        # migration.pulse_compress streams a whole-PRI cube as one row: it has no channel axis.
+        if any(radar.transmitter.waveform != "fmcw" for radar in self.radars):
+            msg = "[receive_array] needs FMCW bursts: the pulsed and noise chains are one channel."
+            raise ValueError(msg)
+        if self.second_aircraft is not None and not self.radar.is_monostatic:
+            msg = "[second_aircraft] is placed at the first target's range: monostatic only."
+            raise ValueError(msg)
+        doa, n_rx = self.doa, self.receive_array.n_rx
+        if doa is not None and not doa.n_sources < doa.n_subarray_elements <= n_rx:
+            msg = f"[doa] needs n_sources < n_subarray_elements <= n_rx = {n_rx}."
+            raise ValueError(msg)
+
+    @property
+    def array(self) -> ArrayGeometry | None:
+        """The receive array's geometry, or ``None`` for one channel."""
+        settings = self.receive_array
+        if settings is None:
+            return None
+        return uniform_linear_array(
+            settings.n_rx,
+            settings.element_spacing_wavelengths,
+            self.radar.wavelength_m,
+            boresight_azimuth_deg=settings.boresight_azimuth_deg,
+            boresight_elevation_deg=settings.boresight_elevation_deg,
+        )
+
+    @property
+    def rcs_m2(self) -> tuple[float, ...]:
+        """Each truth row's cross-section, m²: the targets', then aircraft B's."""
+        second = () if self.second_aircraft is None else (self.second_aircraft.rcs_dbsm,)
+        return tuple(t.rcs_m2 for t in self.targets) + tuple(float(dbsm_to_m2(s)) for s in second)
 
     @property
     def radar(self) -> Radar:
@@ -645,7 +408,20 @@ def load_scenario(path: Path | str) -> Scenario:
         ),
         transmitter_distortion=_optional(DistortionSettings, document, "transmitter_distortion"),
         cancellation=_optional(CancellationSettings, document, "cancellation"),
+        receive_array=_optional(ReceiveArraySettings, document, "receive_array"),
+        second_aircraft=_second_aircraft(document),
+        doa=_optional(DoaSettings, document, "doa"),
     )
+
+
+def _second_aircraft(document: Mapping[str, Any]) -> SecondAircraftSettings | None:
+    """Build ``[second_aircraft]``, whose scattering phase is a word or a number."""
+    if "second_aircraft" not in document:
+        return None
+    table = dict(document["second_aircraft"])
+    phase = table.pop("scattering_phase", "uniform")
+    settings: SecondAircraftSettings = _settings(SecondAircraftSettings, table, "second_aircraft")
+    return replace(settings, scattering_phase=phase)
 
 
 def _optional(kind: Any, document: Mapping[str, Any], name: str) -> Any:
@@ -744,4 +520,39 @@ def truth_geometry(scenario: Scenario) -> list[TargetGeometry]:
         route = scenario.radar.geometry(p, v, acceleration_enu_mps2=acceleration_mps2)
         kept = np.where(modelled, route.bistatic_range_acceleration_mps2, 0.0)
         frames.append(replace(route, bistatic_range_acceleration_mps2=kept))
+    if scenario.second_aircraft is not None:
+        return [_with_second_aircraft(scenario, route) for route in frames]
     return frames
+
+
+def _with_second_aircraft(scenario: Scenario, route: TargetGeometry) -> TargetGeometry:
+    """Append aircraft B's row: the first target's, its arrival moved in direction cosine."""
+    array, settings = scenario.array, scenario.second_aircraft
+    if array is None or settings is None:
+        msg = "aircraft B needs [receive_array] and [second_aircraft]."
+        raise ValueError(msg)
+    offset = settings.separation_rayleigh * rayleigh_width(array, scenario.radar.wavelength_m)
+    arrival_rad = offset_direction_cosine(array, route.aoa_rad[:1], offset)
+    second = {f.name: getattr(route, f.name)[:1] for f in fields(TargetGeometry)}
+    # Monostatic: B departs along the direction it arrives from.
+    second["aoa_rad"] = second["aod_rad"] = arrival_rad
+    return TargetGeometry(
+        **{name: np.concatenate([getattr(route, name), row]) for name, row in second.items()}
+    )
+
+
+def scattering_phase_rad(scenario: Scenario) -> NDArray[np.float64]:
+    """Return each truth row's scattering phase at every frame, ``(n_frames, n_rows)``, rad.
+
+    Zero for every target; aircraft B's is its fixed phase, or uniform on [0, 2 pi) per frame
+    from ``default_rng([seed, 6])``, a generator of its own, so the noise does not move it.
+    """
+    n_rows = len(scenario.rcs_m2)
+    phase_rad = np.zeros((scenario.n_frames, n_rows))
+    settings = scenario.second_aircraft
+    if settings is not None and settings.scattering_phase == "uniform":
+        rng = np.random.default_rng([scenario.seed, 6])
+        phase_rad[:, -1] = rng.uniform(0.0, 2.0 * np.pi, scenario.n_frames)
+    elif settings is not None:
+        phase_rad[:, -1] = float(settings.scattering_phase)
+    return phase_rad

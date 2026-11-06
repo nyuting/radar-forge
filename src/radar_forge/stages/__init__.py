@@ -19,4 +19,7 @@ from radar_forge.stages import clutter
 # isort: split
 from radar_forge.stages import tracking
 
-__all__ = ["clutter", "core", "migration", "tracking"]
+# isort: split
+from radar_forge.stages import array
+
+__all__ = ["array", "clutter", "core", "migration", "tracking"]
