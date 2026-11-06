@@ -63,7 +63,11 @@ MHT defers association; `Tracker` decides once per scan. The tree is the estimat
   keeps the `k_best` with the highest summed score, and prunes by N-scan [9]: a hypothesis
   that disagrees with the best one on any tree's branch `n_scan` scans back is dropped, and a
   leaf in no hypothesis goes. A tree whose one leaf is in every hypothesis of its cluster
-  leaves it as a cluster of its own.
+  leaves it as a cluster of its own. Under `assignment = "confirmed_first"` (V2, V4) only
+  confirmed branches' gates join clusters and block births, as GNN's confirmed tracks do; a
+  tentative tree takes the plots in no confirmed gate alone, and a plot no best hypothesis
+  took starts a tree. Without it, V4's tentative trees, born with 150 m/s of velocity spread,
+  chain through shared clutter plots into one cluster of 1787 leaves in three rotations.
 - The cost matrix is GNN's: −ln(g/λ) per gated pair and the finite non-assignment cost
   ln(P_D / (1 − P_D P_G)), the score's break-even, so a hypothesis's cost is its score's
   negative up to a constant per row. `murty_k_best` lives in `tracking/association.py` beside
@@ -92,7 +96,9 @@ its Poisson undetected component, Bernoulli tracks and global hypotheses [13]:
   JIPDA survival of `ExistencePolicy`), its density by the motion model; the undetected
   intensity is uniform over coverage at the fixed point of `λ_u ← p_S (1 − P_D) λ_u + λ_b`,
   λ_b the birth intensity 0.05 a scan over the coverage volume (2.04e-7 per m rad at 1-40 km),
-  so every sector batch sees it alike.
+  so every sector batch sees it alike, and zero where the clutter passes the birth limit
+  every tracker shares (V4's clutter map starts at 0.02 per m rad, where every plot would
+  open a track of existence 1.02e-5, just over the pruning threshold).
 - Update: a track's detection hypothesis weighs `r P_D g` and has existence 1 ((30)); its
   misdetection weighs `1 − r P_D P_G` and keeps `r (1 − P_D P_G) / (1 − r P_D P_G)` ((31),
   gated); each measurement opens a new track weighing `λ(z) + e(z)`, `e(z) = P_D λ_u`, with
@@ -101,8 +107,15 @@ its Poisson undetected component, Bernoulli tracks and global hypotheses [13]:
   `−[ln W_ot, ln W_nt]` of §V-C3, ⌈`k_best` w_j⌉ from each prior hypothesis of weight w_j.
 - Pruning (Algorithm 1): global hypotheses below weight 1e-4, then the `k_best` = 100 best per
   cluster; Bernoullis below existence 1e-5 or in no hypothesis.
-- Report (estimator 1, §VI-A): the Bernoullis of each cluster's best global hypothesis with
-  existence above 0.5 are tracks in `tracks.csv`, labelled by the measurement that opened them.
+- Report: each track's marginal Bernoulli, its hypotheses' mixture weighted by their global
+  hypotheses' weights and moment-matched (the track-oriented projection of Williams [14]
+  §IV-A, (65)), is a track in `tracks.csv` where its existence passes 0.5, labelled by the
+  measurement that opened it. The paper's estimators (§VI) report one global hypothesis's
+  Bernoullis; A17 compares posteriors, and the marginal is the posterior's own mean, as
+  JPDA's moment matching is. Measured at `d = 2` across range, `n_gate = 1`, 60 trials:
+  P(resolved) 0.30 with estimator 1, 0.38 with the marginal, JPDA 0.42.
+- Under `confirmed_first`, as for MHT, only Bernoullis of existence 0.5 or more join
+  clusters.
 
 Motion: one CV model, the configured `sigma_acceleration_mps2` (CV quiet, 0.5 m/s², on V2 and
 V3); under `motion = "imm"` (V4) the agile mode's noise, M3's σ = 3.1623 m/s², since one model
@@ -130,7 +143,7 @@ another's carry its name as a prefix. `tracks.csv` gains `score` (MHT) and `trac
 | A4 | **MHT reduces to GNN.** `n_scan = 1`, `k_best = 1`: MHT's assignments and states equal GNN's with the finite non-assignment cost, on V2's two 30° crossings, both seeded at the truth with deletion off and one clutter intensity per scan | identical assignments; states `rtol = 1e-10` | Murty's first solution is the assignment | unit |
 | A10 | **PMBM reduces to the KF.** One target, Pd = 1, no clutter, no birth after scan 0 | `rtol = 1e-9` | The single-Bernoulli case | unit |
 | A15 | **GNN swaps; MHT does not.** V2, 10° across-range crossing, 200 trials, both seeded at the truth before the crossing with deletion off: swap rate GNN ≥ 0.2; MHT ≤ 0.05; JPDA's reported, not bounded | as stated, the bounds checked against a prototype first | A 10° pair closing across the beam spends sixteen scans inside one resolution cell (2 × 488.7 m at 12.55 m/s is 16.2 scans) | V2, `slow` |
-| A16 (MHT) | **MHT resolves where JPDA coalesces.** V3, `d` = 1 across range, `n_gate` = 1: P(resolved) for MHT ≥ P(resolved) for JPDA | as stated | JPDA coalesces where hypotheses are deferred | V3, `slow` |
+| A16 (MHT) | **MHT resolves where JPDA coalesces.** V3, `d` = 1 across range, `n_gate` = 1: P(resolved) for MHT ≥ P(resolved) for JPDA | as stated | JPDA coalesces where hypotheses are deferred. Measured, 60 trials: every tracker 0.00, since 61 % of scans merge the pair into one plot 244 m from each aircraft, outside both 99 % gates, and n_gate = 1 clutter draws both tracks off; the clause holds and says little | V3, `slow` |
 | A17 | **The reference line.** V3, every point: PMBM's P(resolved) ≥ every other tracker's, less 0.05 | as stated | [14]: the others approximate PMBM's posterior; a tracker beating it materially is a bug in one of them | V3, `slow` |
 | A19 | **Causal output.** For MHT, the `tracks.csv` row at scan k equals the tracker's state at scan k, recorded live | identical | D29 | V4 |
 
