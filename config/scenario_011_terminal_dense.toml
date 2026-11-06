@@ -1,0 +1,348 @@
+# Scenario 011, V4 "terminal_dense": the whole terminal area of spec 011 §3.3 at
+# once, fourteen aircraft and a flock of twelve birds, in layered clutter:
+# a light background, ground-clutter residue inside 6 km, a rain cell drifting
+# over the holding stack, and 25 fixed discretes. Tracked by an IMM under JIPDA,
+# with the clutter intensity at each plot estimated by a clutter map.
+
+[scenario]
+name = "scenario-011-terminal-dense"
+description = "V4: fourteen aircraft and twelve birds around Raleigh-Durham in background, ground and rain clutter with fixed discretes, tracked by an IMM under JIPDA with a clutter map."
+seed = 20261108
+
+[frames]
+start_time_s = 0.0
+duration_s = 600.0     # 125 rotations of 4.8 s
+
+[sensor]
+carrier_frequency_hz = 2.8e9
+scan_period_s = 4.8
+beamwidth_azimuth_deg = 1.4
+range_cell_m = 115.75
+range_min_m = 1000.0
+range_max_m = 40000.0
+sigma_range_m = 33.414
+sigma_azimuth_deg = 0.15
+pd_aircraft = 0.90
+pd_bird = 0.30
+mti_notch_mps = 4.0
+pd_notch = 0.30
+n_sectors = 16
+
+# Spec 011 §3.2, n_gate per 4.6123 m rad reference gate.
+[[clutter_plots.component]]
+name = "background"             # n_gate 0.01: 531 plots a rotation
+intensity_per_m_rad = 0.0021683
+range_min_m = 1000.0
+range_max_m = 40000.0
+
+[[clutter_plots.component]]
+name = "ground residue"         # n_gate 0.3 inside 6 km: 2044 plots a rotation
+intensity_per_m_rad = 0.065048
+range_min_m = 1000.0
+range_max_m = 6000.0
+
+[[clutter_plots.component]]
+name = "rain cell"              # n_gate 3; 1611 plots at the start, 1337 at 600 s
+intensity_per_m_rad = 0.65048
+range_min_m = 1000.0
+range_max_m = 40000.0
+centre_enu_m = [20000.0, 4000.0]
+radius_m = 4000.0
+drift_enu_mps = [5.6569, 5.6569]   # 8 m/s towards 045 deg
+
+[clutter_plots.discretes]
+count = 25                      # uniform in 1-15 km, each reported half the scans
+range_min_m = 1000.0
+range_max_m = 15000.0
+report_probability = 0.5
+seed = 20261108
+
+[tracking]
+linearisation = "taylor"
+motion = "imm"
+mode_sigma_acceleration_mps2 = [0.5, 0.5, 3.1623]
+turn_rate_noise_density_rad2ps3 = 1.6e-5
+sojourn_time_s = [120.0, 30.0, 20.0]
+turn_rate_sigma_degps = 3.0
+association = "jpda"
+coalescence = "none"
+existence = true                # JIPDA: confirm at 0.95, delete under 0.05
+gate_probability = 0.99
+detection_probability = 0.90
+n_confirm_hits = 4
+n_confirm_scans = 5
+n_delete_misses = 3
+assignment = "confirmed_first"
+clutter_intensity = "map"
+max_birth_clutter_intensity_per_m_rad = 0.01
+initial_speed_sigma_mps = 150.0
+# A track whose position sigma passes 300 m after its update is deleted
+# (tracker-001 §5.4): a gate that wide holds 85 rain plots at 20 km.
+max_position_sigma_m = 300.0
+
+[verify]
+stages = ["multitarget"]
+# Mean GOSPA over the 125 rotations; pins the run (618 m measured), mostly missed aircraft:
+# births wait for the clutter map, the ground residue hides HE until it leaves 6 km, and the
+# stack loses tracks in the rain.
+gospa_mean_max_m = 700.0
+nees_fraction_min = 0.9           # 0.95 measured
+pd_min = 0.8795                 # Pd 0.9: 99 % binomial lower bound over 1469 echoes
+false_alarm_rate_max = 1.1        # three scans expect about 12 590 false plots
+
+# Arrival on 23R, 22 km out on final at 0 s; straight at 230 deg, 72 m/s.
+[[target]]
+name = "A1"
+kind = "arc"
+class = "aircraft"
+position_enu_m = [31542.2, 1629.6]
+heading_deg = 230.0
+speed_mps = 72.0
+
+# Arrival on 23L, 20 km out on final at 0 s.
+[[target]]
+name = "A2"
+kind = "arc"
+class = "aircraft"
+position_enu_m = [30652.8, -422.0]
+heading_deg = 230.0
+speed_mps = 72.0
+
+# Go-around on 23L: from 12 km out at 100 s, final to 2 km out (138.9 s), +1 m/s^2 for 13 s to 85 m/s, 27 s straight, left 3 deg/s for 30 s to 140 deg.
+[[target]]
+name = "A3"
+kind = "arc"
+class = "aircraft"
+start_time_s = 100.0
+position_enu_m = [24524.5, -5564.3]
+heading_deg = 230.0
+speed_mps = 72.0
+legs = [{ duration_s = 138.8889 }, { duration_s = 13, acceleration_mps2 = 1.0 }, { duration_s = 27 }, { duration_s = 30, turn_rate_degps = -3.0 }]
+
+# Right downwind for 23R, 4.75 km NW of the final, from abeam 2 km past the threshold: 050 deg for 12 km, right 90 deg at 3 deg/s, base 2 km, right 90 deg onto final.
+[[target]]
+name = "A4"
+kind = "arc"
+class = "aircraft"
+position_enu_m = [13168.0, -7587.4]
+heading_deg = 50.0
+speed_mps = 72.0
+legs = [{ duration_s = 166.6667 }, { duration_s = 30, turn_rate_degps = 3.0 }, { duration_s = 27.7778 }, { duration_s = 30, turn_rate_degps = 3.0 }]
+
+# Left downwind for 23L from 150 s: A4 mirrored about the runway axis, left turns.
+[[target]]
+name = "A5"
+kind = "arc"
+class = "aircraft"
+start_time_s = 150.0
+position_enu_m = [19917.3, -15630.9]
+heading_deg = 50.0
+speed_mps = 72.0
+legs = [{ duration_s = 166.6667 }, { duration_s = 30, turn_rate_degps = -3.0 }, { duration_s = 27.7778 }, { duration_s = 30, turn_rate_degps = -3.0 }]
+
+# Holding stack at the fix (25.0, 10.0) km, inbound 230 deg, 110 m/s; right turns at 3 deg/s (radius 2101 m), 60 s legs, 240 s a lap; 0 s into the lap at 0 s.
+[[target]]
+name = "H1"
+kind = "arc"
+class = "aircraft"
+position_enu_m = [25000.0, 10000.0]
+heading_deg = 230.0
+speed_mps = 110.0
+legs = [{ duration_s = 60, turn_rate_degps = 3.0 }, { duration_s = 60 }, { duration_s = 60, turn_rate_degps = 3.0 }, { duration_s = 60 }]
+repeat = 4
+
+# Holding stack at the fix (25.0, 10.0) km, inbound 230 deg, 110 m/s; right turns at 3 deg/s (radius 2101 m), 60 s legs, 240 s a lap; 4 s into the lap at 0 s.
+[[target]]
+name = "H2"
+kind = "arc"
+class = "aircraft"
+start_time_s = -4.0
+position_enu_m = [25000.0, 10000.0]
+heading_deg = 230.0
+speed_mps = 110.0
+legs = [{ duration_s = 60, turn_rate_degps = 3.0 }, { duration_s = 60 }, { duration_s = 60, turn_rate_degps = 3.0 }, { duration_s = 60 }]
+repeat = 4
+
+# Holding stack at the fix (25.0, 10.0) km, inbound 230 deg, 110 m/s; right turns at 3 deg/s (radius 2101 m), 60 s legs, 240 s a lap; 120 s into the lap at 0 s.
+[[target]]
+name = "H3"
+kind = "arc"
+class = "aircraft"
+start_time_s = -120.0
+position_enu_m = [25000.0, 10000.0]
+heading_deg = 230.0
+speed_mps = 110.0
+legs = [{ duration_s = 60, turn_rate_degps = 3.0 }, { duration_s = 60 }, { duration_s = 60, turn_rate_degps = 3.0 }, { duration_s = 60 }]
+repeat = 4
+
+# Holding stack at the fix (25.0, 10.0) km, inbound 230 deg, 110 m/s; right turns at 3 deg/s (radius 2101 m), 60 s legs, 240 s a lap; 128 s into the lap at 0 s.
+[[target]]
+name = "H4"
+kind = "arc"
+class = "aircraft"
+start_time_s = -128.0
+position_enu_m = [25000.0, 10000.0]
+heading_deg = 230.0
+speed_mps = 110.0
+legs = [{ duration_s = 60, turn_rate_degps = 3.0 }, { duration_s = 60 }, { duration_s = 60, turn_rate_degps = 3.0 }, { duration_s = 60 }]
+repeat = 4
+
+# Overflight at 230 m/s, 090 deg; crosses H2 at the fix at 236 s.
+[[target]]
+name = "T1"
+kind = "arc"
+class = "aircraft"
+position_enu_m = [-29280.0, 10000.0]
+heading_deg = 90.0
+speed_mps = 230.0
+
+# Overflight at 200 m/s, 200 deg; crosses A1 at 200 s, 30 deg apart.
+[[target]]
+name = "T2"
+kind = "arc"
+class = "aircraft"
+position_enu_m = [34191.9, 29961.2]
+heading_deg = 200.0
+speed_mps = 200.0
+
+# Light aircraft in the left-hand circuit of runway 05 at (-9.0, 12.0) km: a 3 km by 1.5 km rectangle, rate-2 turns (6 deg/s, radius 477 m) inside its corners, 50 m/s, 163.6 s a lap; from the field at 0 s.
+[[target]]
+name = "L1"
+kind = "arc"
+class = "aircraft"
+position_enu_m = [-9000.0, 12000.0]
+heading_deg = 50.0
+speed_mps = 50.0
+legs = [{ duration_s = 40.9014 }, { duration_s = 15, turn_rate_degps = -6.0 }, { duration_s = 10.9014 }, { duration_s = 15, turn_rate_degps = -6.0 }, { duration_s = 40.9014 }, { duration_s = 15, turn_rate_degps = -6.0 }, { duration_s = 10.9014 }, { duration_s = 15, turn_rate_degps = -6.0 }]
+repeat = 4
+
+# Light aircraft in the left-hand circuit of runway 05 at (-9.0, 12.0) km: a 3 km by 1.5 km rectangle, rate-2 turns (6 deg/s, radius 477 m) inside its corners, 50 m/s, 163.6 s a lap; from the field at 60 s.
+[[target]]
+name = "L2"
+kind = "arc"
+class = "aircraft"
+start_time_s = 60.0
+position_enu_m = [-9000.0, 12000.0]
+heading_deg = 50.0
+speed_mps = 50.0
+legs = [{ duration_s = 40.9014 }, { duration_s = 15, turn_rate_degps = -6.0 }, { duration_s = 10.9014 }, { duration_s = 15, turn_rate_degps = -6.0 }, { duration_s = 40.9014 }, { duration_s = 15, turn_rate_degps = -6.0 }, { duration_s = 10.9014 }, { duration_s = 15, turn_rate_degps = -6.0 }]
+repeat = 4
+
+# Air-ambulance helicopter at (1.6, 0.8) km: hovers 90 s, +2 m/s^2 for 30 s along 120 deg, then 60 m/s.
+[[target]]
+name = "HE"
+kind = "arc"
+class = "aircraft"
+position_enu_m = [1600.0, 800.0]
+heading_deg = 120.0
+speed_mps = 0.0
+legs = [{ duration_s = 90 }, { duration_s = 30, acceleration_mps2 = 2.0 }]
+
+# Bird 0 of the flock centred (6.0, 15.0) km, 12 m/s towards 200 deg; offset N(0, 60 m) per axis, rng 20261106.
+[[target]]
+name = "B00"
+kind = "arc"
+class = "bird"
+position_enu_m = [6094.5, 15083.5]
+heading_deg = 200.0
+speed_mps = 12.0
+
+# Bird 1 of the flock centred (6.0, 15.0) km, 12 m/s towards 200 deg; offset N(0, 60 m) per axis, rng 20261106.
+[[target]]
+name = "B01"
+kind = "arc"
+class = "bird"
+position_enu_m = [5957.1, 15089.0]
+heading_deg = 200.0
+speed_mps = 12.0
+
+# Bird 2 of the flock centred (6.0, 15.0) km, 12 m/s towards 200 deg; offset N(0, 60 m) per axis, rng 20261106.
+[[target]]
+name = "B02"
+kind = "arc"
+class = "bird"
+position_enu_m = [5996.9, 14964.1]
+heading_deg = 200.0
+speed_mps = 12.0
+
+# Bird 3 of the flock centred (6.0, 15.0) km, 12 m/s towards 200 deg; offset N(0, 60 m) per axis, rng 20261106.
+[[target]]
+name = "B03"
+kind = "arc"
+class = "bird"
+position_enu_m = [6034.8, 15052.4]
+heading_deg = 200.0
+speed_mps = 12.0
+
+# Bird 4 of the flock centred (6.0, 15.0) km, 12 m/s towards 200 deg; offset N(0, 60 m) per axis, rng 20261106.
+[[target]]
+name = "B04"
+kind = "arc"
+class = "bird"
+position_enu_m = [5848.3, 15000.9]
+heading_deg = 200.0
+speed_mps = 12.0
+
+# Bird 5 of the flock centred (6.0, 15.0) km, 12 m/s towards 200 deg; offset N(0, 60 m) per axis, rng 20261106.
+[[target]]
+name = "B05"
+kind = "arc"
+class = "bird"
+position_enu_m = [5960.5, 14992.7]
+heading_deg = 200.0
+speed_mps = 12.0
+
+# Bird 6 of the flock centred (6.0, 15.0) km, 12 m/s towards 200 deg; offset N(0, 60 m) per axis, rng 20261106.
+[[target]]
+name = "B06"
+kind = "arc"
+class = "bird"
+position_enu_m = [6022.6, 15017.4]
+heading_deg = 200.0
+speed_mps = 12.0
+
+# Bird 7 of the flock centred (6.0, 15.0) km, 12 m/s towards 200 deg; offset N(0, 60 m) per axis, rng 20261106.
+[[target]]
+name = "B07"
+kind = "arc"
+class = "bird"
+position_enu_m = [5954.7, 15043.0]
+heading_deg = 200.0
+speed_mps = 12.0
+
+# Bird 8 of the flock centred (6.0, 15.0) km, 12 m/s towards 200 deg; offset N(0, 60 m) per axis, rng 20261106.
+[[target]]
+name = "B08"
+kind = "arc"
+class = "bird"
+position_enu_m = [5964.8, 15065.0]
+heading_deg = 200.0
+speed_mps = 12.0
+
+# Bird 9 of the flock centred (6.0, 15.0) km, 12 m/s towards 200 deg; offset N(0, 60 m) per axis, rng 20261106.
+[[target]]
+name = "B09"
+kind = "arc"
+class = "bird"
+position_enu_m = [5980.7, 15003.2]
+heading_deg = 200.0
+speed_mps = 12.0
+
+# Bird 10 of the flock centred (6.0, 15.0) km, 12 m/s towards 200 deg; offset N(0, 60 m) per axis, rng 20261106.
+[[target]]
+name = "B10"
+kind = "arc"
+class = "bird"
+position_enu_m = [5889.7, 14940.5]
+heading_deg = 200.0
+speed_mps = 12.0
+
+# Bird 11 of the flock centred (6.0, 15.0) km, 12 m/s towards 200 deg; offset N(0, 60 m) per axis, rng 20261106.
+[[target]]
+name = "B11"
+kind = "arc"
+class = "bird"
+position_enu_m = [6069.8, 15011.9]
+heading_deg = 200.0
+speed_mps = 12.0
+

@@ -44,7 +44,7 @@ from scipy.linalg import cho_factor, cho_solve, lapack
 from scipy.signal import fftconvolve
 
 if TYPE_CHECKING:
-    from radar_forge.scenario import CancellationSettings
+    from radar_forge.settings import CancellationSettings
 
 # Lag sums run over units of at most this many taps' length: an FFT a few K long, not the CPI.
 _UNIT_TAPS = 16

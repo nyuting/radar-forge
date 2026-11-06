@@ -1,0 +1,143 @@
+# Scenario 011, V1 "manoeuvre": IMM against single motion models through turns,
+# accelerations and the Doppler-blind notch, at plot level (no IQ).
+#
+# Five aircraft of the terminal-area scene, each a closed-form arc in the Duke
+# Receiver's ENU frame (metres, headings clockwise from north, turns positive to
+# the right): the go-around A3, the downwind-base-final A4, the holding aircraft
+# H1, the circuit aircraft L1 and the helicopter HE. They are kilometres apart,
+# so no gate ever holds two of them: each is tracked as if alone. Clutter is the
+# light background, n_gate = 0.01 expected plots in a quiet track's 99 % gate.
+
+[scenario]
+name = "scenario-011-manoeuvre"
+description = "V1: five manoeuvring aircraft (go-around, downwind-base-final, holding, circuit, helicopter) tracked from plots by an IMM of CV quiet, coordinated turn and CV agile, at a 4.8 s revisit."
+seed = 20261106
+
+[frames]
+start_time_s = 0.0
+duration_s = 600.0     # 125 rotations of 4.8 s
+
+# An S-band airport-surveillance-class radar at the Duke Receiver (spec 011 §3.1):
+# 12.5 rpm, a 1.4 deg beam, a 1/16 nmi range cell; plots report horizontal range
+# and azimuth, timed when the beam crosses them.
+[sensor]
+carrier_frequency_hz = 2.8e9
+scan_period_s = 4.8
+beamwidth_azimuth_deg = 1.4
+range_cell_m = 115.75
+range_min_m = 1000.0
+range_max_m = 40000.0
+sigma_range_m = 33.414           # 115.75 / sqrt(12), quantisation-limited
+sigma_azimuth_deg = 0.15
+pd_aircraft = 0.90
+pd_bird = 0.30
+mti_notch_mps = 4.0              # |range rate| under this is detected at pd_notch
+pd_notch = 0.30
+n_sectors = 16                   # 22.5 deg, 0.3 s batches
+
+# n_gate = 0.01 over the whole coverage: 0.01 / 4.6123 m rad = 0.0021683 plots
+# per (m rad) per scan, 531 a rotation over 1-40 km (spec 011 §3.2).
+[[clutter_plots.component]]
+name = "background"
+intensity_per_m_rad = 0.0021683
+range_min_m = 1000.0
+range_max_m = 40000.0
+
+[tracking]
+# The EKF (Taylor) on every mode: the coordinated turn is nonlinear.
+linearisation = "taylor"
+motion = "imm"
+association = "gnn"
+# Mode noise, as CWNA sigma at a 1 s correlation time, q = 2 sigma^2 tau: quiet
+# and turn q = 0.5 m^2/s^3 (sigma 0.5), agile q = 20 (sigma sqrt(10) = 3.1623).
+mode_sigma_acceleration_mps2 = [0.5, 0.5, 3.1623]
+# 1.6e-5 rad^2/s^3 is a 0.5 deg/s turn-rate change per 4.8 s scan.
+turn_rate_noise_density_rad2ps3 = 1.6e-5
+# Mean sojourn times of quiet, turn and agile; leaving splits equally.
+sojourn_time_s = [120.0, 30.0, 20.0]
+# A CV mode's absent turn rate, on mixing: zero mean, 3 deg/s.
+turn_rate_sigma_degps = 3.0
+gate_probability = 0.99
+detection_probability = 0.90
+# 003's M-of-N: confirm on 4 hits of 5, delete after 3 misses in a row.
+n_confirm_hits = 4
+n_confirm_scans = 5
+n_delete_misses = 3
+assignment = "confirmed_first"
+clutter_intensity = "oracle"
+initial_speed_sigma_mps = 150.0
+# A track whose position sigma passes 300 m after its update is deleted
+# (tracker-001 §5.4): a gate that wide holds 85 rain plots at 20 km.
+max_position_sigma_m = 300.0
+
+[verify]
+stages = ["multitarget"]
+# Mean GOSPA over the 125 rotations, p = 2, c = 300 m (spec 011 §3.6). Not a spec number: it
+# pins the run, 524 m measured, most of it false confirmed tracks near the radar, where the
+# clutter per m^2 is densest and a one-plot track's second gate holds a few clutter plots.
+gospa_mean_max_m = 600.0
+# Spec 011 A5 (single run): the IMM's position NEES, chi-square(2) 95 % interval, 0.94 measured.
+nees_fraction_min = 0.9
+# Spec 011 A5 (single run): the median scans to the turn mode after a tracked turn's onset,
+# 4 measured over A3, A4 and H1's turns (A5's Monte Carlo: 90 % of trials within 5).
+mode_latency_max_scans = 5
+# The plot model's Pd 0.9 outside the notch: the 99 % binomial lower bound over this run's
+# 542 aircraft echoes outside the notch, 0.8653; 0.902 measured.
+pd_min = 0.8653
+# Spec 011 A6, as a run check: clutter plots over the plot model's lambda V; three scans
+# expect 1593, whose 99 % Poisson interval is within 7 %.
+false_alarm_rate_max = 1.1
+
+# Go-around on 23L: from 12 km out at 100 s, final to 2 km out (138.9 s), +1 m/s^2 for 13 s to 85 m/s, 27 s straight, left 3 deg/s for 30 s to 140 deg.
+[[target]]
+name = "A3"
+kind = "arc"
+class = "aircraft"
+start_time_s = 100.0
+position_enu_m = [24524.5, -5564.3]
+heading_deg = 230.0
+speed_mps = 72.0
+legs = [{ duration_s = 138.8889 }, { duration_s = 13, acceleration_mps2 = 1.0 }, { duration_s = 27 }, { duration_s = 30, turn_rate_degps = -3.0 }]
+
+# Right downwind for 23R, 4.75 km NW of the final, from abeam 2 km past the threshold: 050 deg for 12 km, right 90 deg at 3 deg/s, base 2 km, right 90 deg onto final.
+[[target]]
+name = "A4"
+kind = "arc"
+class = "aircraft"
+position_enu_m = [13168.0, -7587.4]
+heading_deg = 50.0
+speed_mps = 72.0
+legs = [{ duration_s = 166.6667 }, { duration_s = 30, turn_rate_degps = 3.0 }, { duration_s = 27.7778 }, { duration_s = 30, turn_rate_degps = 3.0 }]
+
+# Holding stack at the fix (25.0, 10.0) km, inbound 230 deg, 110 m/s; right turns at 3 deg/s (radius 2101 m), 60 s legs, 240 s a lap; 0 s into the lap at 0 s.
+[[target]]
+name = "H1"
+kind = "arc"
+class = "aircraft"
+position_enu_m = [25000.0, 10000.0]
+heading_deg = 230.0
+speed_mps = 110.0
+legs = [{ duration_s = 60, turn_rate_degps = 3.0 }, { duration_s = 60 }, { duration_s = 60, turn_rate_degps = 3.0 }, { duration_s = 60 }]
+repeat = 4
+
+# Light aircraft in the left-hand circuit of runway 05 at (-9.0, 12.0) km: a 3 km by 1.5 km rectangle, rate-2 turns (6 deg/s, radius 477 m) inside its corners, 50 m/s, 163.6 s a lap; from the field at 0 s.
+[[target]]
+name = "L1"
+kind = "arc"
+class = "aircraft"
+position_enu_m = [-9000.0, 12000.0]
+heading_deg = 50.0
+speed_mps = 50.0
+legs = [{ duration_s = 40.9014 }, { duration_s = 15, turn_rate_degps = -6.0 }, { duration_s = 10.9014 }, { duration_s = 15, turn_rate_degps = -6.0 }, { duration_s = 40.9014 }, { duration_s = 15, turn_rate_degps = -6.0 }, { duration_s = 10.9014 }, { duration_s = 15, turn_rate_degps = -6.0 }]
+repeat = 4
+
+# Air-ambulance helicopter at (1.6, 0.8) km: hovers 90 s, +2 m/s^2 for 30 s along 120 deg, then 60 m/s.
+[[target]]
+name = "HE"
+kind = "arc"
+class = "aircraft"
+position_enu_m = [1600.0, 800.0]
+heading_deg = 120.0
+speed_mps = 0.0
+legs = [{ duration_s = 90 }, { duration_s = 30, acceleration_mps2 = 2.0 }]
+

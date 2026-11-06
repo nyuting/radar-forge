@@ -1,11 +1,35 @@
 """Multi-target tracking in which every track is a row of one batched bank.
 
 ``models`` holds the state layouts and motion and measurement models; ``filters`` the bank and
-the one Gaussian filter (KF, EKF, UKF) over it; ``association`` gating and assignment;
-``tracker`` the scan loop, lifecycle and initiators; ``metrics`` NEES and RMSE.
+the one Gaussian filter (KF, EKF, UKF) over it; ``imm`` the interacting multiple model;
+``association`` gating, assignment and JPDA; ``initiation`` the initiators; ``tracker`` the scan
+loop and lifecycle; ``metrics`` NEES, RMSE and GOSPA; ``scene`` a plot-level scene and the plots
+a surveillance radar makes of it; ``scans`` that scene played rotation by rotation into a tracker.
 """
 
-from radar_forge.tracking import association, filters, metrics, models, tracker
+from radar_forge.tracking import (
+    association,
+    filters,
+    imm,
+    initiation,
+    metrics,
+    models,
+    scans,
+    scene,
+    tracker,
+)
 from radar_forge.tracking.tracker import Scan, Tracker
 
-__all__ = ["Scan", "Tracker", "association", "filters", "metrics", "models", "tracker"]
+__all__ = [
+    "Scan",
+    "Tracker",
+    "association",
+    "filters",
+    "imm",
+    "initiation",
+    "metrics",
+    "models",
+    "scans",
+    "scene",
+    "tracker",
+]

@@ -24,6 +24,10 @@ keystone's own ``keystone_only_loss_tolerance_db``), ``compensated_loss_min_db``
 with ``cancellation_tolerance_db``, ``floor_rise_db`` with ``floor_rise_tolerance_db``,
 ``sinr_loss_db`` with ``sinr_loss_tolerance_db``, ``detections_per_frame``,
 ``uncancelled_detections_per_frame`` and ``acceptance_frames``.
+
+:mod:`radar_forge.stages.tracking` holds ``multitarget`` (scenario 011): ``gospa_mean_max_m``,
+``swap_fraction_max``, ``mode_latency_max_scans``, ``nees_fraction_min``, ``pd_min`` and
+``false_alarm_rate_max``.
 """
 
 from __future__ import annotations

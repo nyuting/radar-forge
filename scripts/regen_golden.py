@@ -40,6 +40,12 @@ FINGERPRINT = (
     "rate_error_max_mps",
     "range_rmse_m",
     "nees_fraction",
+    # Scenario 011's multitarget stage.
+    "gospa_mean_m",
+    "measured_pd",
+    "false_plot_ratio",
+    "n_false_plots",
+    "n_false_alarms",
 )
 # Frames a config runs in the fast suite and its fingerprint, where three would cost too much:
 # its three-frame run moves to the slow tier, and 0 runs it there only, fingerprint included.

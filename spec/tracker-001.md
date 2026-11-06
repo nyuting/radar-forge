@@ -1,7 +1,8 @@
 # Tracker 001 — Tracking architecture
 
-> Status: built, in `src/radar_forge/tracking/` (`models`, `filters`, `association`, `tracker`,
-> `metrics`). Where this page and the code differ in a name, the code's name stands.
+> Status: built, in `src/radar_forge/tracking/` (`models`, `filters`, `imm`, `association`,
+> `initiation`, `tracker`, `metrics`, `scene`, `scans`). Where this page and the code differ in a
+> name, the code's name stands.
 >
 > The tracker after the tracking refactor: one Gaussian filter, a batched track bank, one
 > correction core, one scan loop. Running it is in [the user guide](../docs/user-guide/06-tracking.md).
@@ -30,26 +31,30 @@ trackers inside the loop, track-to-track fusion, real-time operation.
 ## 2. Architecture
 
 Pieces behind small protocols, close to [Stone Soup](https://stonesoup.readthedocs.io)'s cut.
-Predictor and updater are one `Estimator` here, and the hypothesiser is the gate.
+The filter is functions over a bank of tracks, and the hypothesiser is the gate.
 
 | Piece | Type | Knows about |
 | :--- | :--- | :--- |
-| State layout, estimate | `StateLayout`, `Coordinate`, `StateEstimate` | names, units, periods; mean, covariance, time |
-| Motion model | `MotionModel` | layout, `f(x, dt)`, `Q(dt)` |
-| Measurement, scan | `Measurement`, `Scan` | z, R, time, sensor, model ID; one revisit at one time |
-| Measurement model | `MeasurementModel` | layouts, `h(x)` |
-| Filter, transform | `GaussianFilter`; protocol `Linearisation`, `TaylorLinearisation`, `UnscentedTransform` | a motion model; a function, a mean, a covariance |
-| Gate, associator | `ChiSquareGate`; `GreedyNearestNeighbour`, `GlobalNearestNeighbour` | innovation statistics; a cost matrix |
-| Initiator, lifecycle | `TrackInitiator`, `LifecyclePolicy` | a prior; hits, misses, times, covariance |
-| Track bank | `TrackBank`, `TrackSnapshot` | batched means and covariances, status, counts |
+| State layout | `StateLayout`, `Coordinate` | names, units, periods |
+| Motion model | `MotionModel`: `CartesianMotion`, `RadialConstantVelocity`, `CoordinatedTurn` | layout, `transition(x, dt)`, `jacobian(x, dt)`, `process_noise(x, dt)` |
+| Scan | `Scan` | z `(n_meas, m)`, R per measurement, time, model ID, clutter intensity per measurement; one revisit at one time |
+| Measurement model | `MeasurementModel` | layouts, `predict(x)` = h(x), `jacobian(x)` |
+| Filter, transform | `predict`, `innovate`, `update`, `update_weighted` over a `TrackBank`; protocol `Linearisation`, `TaylorLinearisation`, `UnscentedTransform` | a motion model; a function, a mean, a covariance |
+| IMM | `InteractingMultipleModel`; `imm_predict`, `imm_innovate`, `imm_update` | modes, their union layout, `expm(Λ T)` |
+| Gate, associator | `gate`, `chi_square_gate_threshold`; `GreedyNearestNeighbour`, `GlobalNearestNeighbour`, `JointProbabilisticDataAssociation` | NIS; a cost matrix, or log-likelihoods and clutter intensity for weights |
+| Initiator, lifecycle | `Initiator` (`initiation.py`); `LifecyclePolicy`, `ExistencePolicy` | a prior; hits, misses, times, covariance, existence |
+| Track bank | `TrackBank`, `TrackSnapshot` | batched means and covariances, status, counts, existence, IMM modes |
 | Tracker | `Tracker` | all of the above, through their protocols |
 
 **Decoupling.** Swapping the transform (KF, EKF to UKF), the associator or the initiator changes
 one constructor argument and no pipeline code. A branch on the type of a transform, filter or
 tracker in the filter, the tracker or `pipeline.py` breaks this. There is one `Tracker`.
 
-**Dependencies.** `tracking/` imports NumPy and SciPy only, never `pipeline.py`; the pipeline
-builds the `Scan`.
+**Dependencies.** `tracking/` imports NumPy, SciPy and `radar.py`'s geometry helpers (the ENU ↔
+range-azimuth conversions `scene.py` uses), never `pipeline`, `scenario`, `evaluate` or `plots` at
+run time; `scans.py` names `Scenario` and `TrackingSettings` under `TYPE_CHECKING` only, because
+`scenario.py` imports `tracking.scene`. The pipeline builds an IQ scenario's `Scan`, `scans.py` a
+plot-level one's.
 
 ## 3. The filter
 
@@ -62,13 +67,12 @@ a mean and covariance are carried through a function.
 | `TaylorLinearisation` | the KF on a linear model, the EKF otherwise | mean g(x̂), covariance J P Jᵀ, J = ∂g/∂x at x̂ | yes |
 | `UnscentedTransform(alpha, beta, kappa)` | the UKF | weighted sums over 2n + 1 sigma points | no |
 
-The protocol `Linearisation` has `predict(motion, state, dt_s)` (mean `(n_state,)` and covariance
-`(n_state, n_state)` with Q added), `measure(model, state)` (ẑ `(n_meas,)`, P_xz `(n_state, n_meas)`,
-S without R `(n_meas, n_meas)`, and H `(n_meas, n_state)` or `None`) and `check_motion_model(motion)`,
-which refuses a bad pairing at construction. `GaussianFilter` holds an estimate, a motion model and
-a transform; `predict_to` calls `predict`; `innovation_statistics` calls `measure`, adds R and
-returns ν, S, NIS and the log-likelihood from the one `innovate` (Cholesky-whitened, every pair);
-`update` hands the same moments to the correction core. It never branches on the transform type.
+The protocol `Linearisation` has `predict(motion, bank, dt_s)` (means `(n_tracks, n_state)` and
+covariances with Q added) and `measure(model, bank)` (ẑ, P_xz, S without R, and H or `None`, each
+per row). The functions over a `TrackBank`: `predict` calls the linearisation's `predict`;
+`innovate` calls `measure`, adds R and returns ν, S, NIS and the log-likelihood for every
+(track, measurement) pair (Cholesky-whitened); `update` and `update_weighted` hand the same
+moments to the correction core. Nothing branches on the transform type.
 A cubature or Gauss-Hermite transform is a new `Linearisation`, never a new filter.
 
 **The correction core** is one private function shared by every filter:
@@ -77,7 +81,7 @@ A cubature or Gauss-Hermite transform is a new `Linearisation`, never a new filt
 2. mean x̂ = x̂⁻ + K ν, wrapping only the state layout's periodic components;
 3. covariance by the Joseph form (I − KH) P⁻ (I − KH)ᵀ + K R Kᵀ when H is supplied, else the short
    form P⁻ − K S Kᵀ;
-4. the symmetric part of P, returned as a new `StateEstimate`.
+4. the symmetric part of P, returned as a new `TrackBank`.
 
 The Joseph form is positive semidefinite for any K. The short form (UKF) is the Schur complement
 of S in a positive semidefinite joint covariance, so it is too, up to roundoff, provided every
@@ -89,10 +93,10 @@ periodic measurement (an azimuth, a range folded at the map's span) takes the sh
 mean update wraps only the state layout's periodic components, so a folded range stays continuous
 in the state.
 
-**Taylor.** Needs F and Q from a motion model with `matrices(dt_s)`, and H or J from a measurement
-model with `jacobian(state)`. A model without them raises `TypeError` naming it; there is no
+**Taylor.** Moves the mean through the motion model's `transition` and the covariance through its
+`jacobian` and `process_noise`, and needs the measurement model's `jacobian`. There is no
 finite-difference fallback, because a numeric Jacobian hides a wrong analytic one. On a linear
-model it is the textbook KF line for line.
+model it is the textbook KF line for line, `transition(x)` being `F x` to the bit.
 
 **Unscented** (Wan and van der Merwe 2000). With c = α²(n + κ) the weights are w₀ᵐ = 1 − n/c,
 w₀ᶜ = w₀ᵐ + 1 − α² + β and wᵢ = 1/(2c) for the other 2n points. Settings with w₀ᶜ < 0 are rejected,
@@ -119,6 +123,9 @@ interval at 99.9 %; covariances stay symmetric to `rtol=1e-12` with Cholesky suc
   the route length R_T + R_R and its time derivative, positive receding, with transition
   `[[1, T], [0, 1]]`. Monostatic, both are twice the slant values; nothing in the pipeline
   halves the state, and only a display does (`plots.display_axes`). Scenario 003 tracks with it.
+- **Coordinated turn**: `CoordinatedTurn`, `[x_m, xdot_mps, y_m, ydot_mps, turn_rate_radps]`,
+  the rate the heading's, positive to the right; exact discretisation with series forms near zero
+  rate (scenario 011 D26).
 - **Process noise**: `"cwna"`, continuous white-noise acceleration (q in m²/s³; Bar-Shalom, Li and
   Kirubarajan 2001, §6.2.2), is the default because its Q is right for any step length. `"dwna"`,
   the discrete model (σₐ² in m²/s⁴, §6.3.2), is kept because scenario 003 pins it.
@@ -146,7 +153,7 @@ interval at 99.9 %; covariances stay symmetric to `rtol=1e-12` with Cholesky suc
 
 ### 5.1 Gate and assign
 
-`ChiSquareGate(probability)` accepts a pair when its NIS is at most the chi-square quantile for the
+`gate(nis, chi_square_gate_threshold(probability, m))` accepts a pair when its NIS is at most the chi-square quantile for the
 measurement dimension. `GlobalNearestNeighbour` builds an (n_tracks, n_measurements) cost matrix,
 forbids pairs outside the gate and solves it with `scipy.optimize.linear_sum_assignment` (Crouse
 2016), maximising the number of matches before minimising cost. `GreedyNearestNeighbour` is the
@@ -169,9 +176,10 @@ scenario sets `"joint"`. Changing a default needs a measurement.
 
 ### 5.2 Update and initiate
 
-Each assigned pair updates through the correction core. An unassigned measurement may seed a track
-through `TrackInitiator`, which takes a prior and an estimator factory (a callable from a prior
-`StateEstimate` to an `Estimator`, with the motion model and transform bound in).
+Each assigned pair updates through the correction core. An associator that returns weights
+(JPDA, JIPDA) updates every row through `update_weighted` instead: confirmed rows jointly,
+tentative rows each alone (PDA) in two-stage assignment. An unassigned measurement may seed a
+track through an `Initiator` (`tracking/initiation.py`), which writes the measurement into a prior.
 
 ### 5.3 The track bank
 
@@ -185,7 +193,8 @@ counts, the measurement index taken this scan and that update's NIS.
 
 `tentative → confirmed ⇄ coasting → deleted`. One `LifecyclePolicy` holds every setting; pipeline
 configs hold one and never copy its fields. A *hit* is a scan in which a detection was assigned to
-the track, a *miss* one in which none was.
+the track (under association weights, one whose measurements weigh over one half), a *miss* one in
+which none was.
 
 | Rule | Setting |
 | :--- | :--- |
@@ -194,10 +203,11 @@ the track, a *miss* one in which none was.
 | Deletion after misses in a row; after a coast time | `n_delete_misses`; `max_coast_time_s` |
 | Re-acquisition window for confirmed tracks: extra misses in a row | `n_reacquire_misses` |
 | Covariance-based deletion | `max_position_sigma_m` |
-| Existence-based confirm and delete (JIPDA) | `ExistencePolicy(confirm, delete)` |
+| Existence-based confirm and delete (JIPDA) | `ExistencePolicy(p_survival, confirm, delete, initial)` |
 
-**Covariance-based deletion.** Delete when the square root of the largest eigenvalue of the
-position covariance exceeds `max_position_sigma_m`, whatever the miss count. Miss counts are proxies
+**Covariance-based deletion.** Delete a confirmed track when the square root of the largest
+eigenvalue of its position covariance exceeds `max_position_sigma_m` after its update, whatever the
+miss count; a tentative track, wide until it has a velocity, is spared. Miss counts are proxies
 for "we no longer know where it is"; the covariance is the thing itself. `None` turns it off.
 (Stone Soup's `CovarianceBasedDeleter` thresholds the trace, which mixes units.)
 
@@ -210,24 +220,22 @@ coordinates named in `LifecyclePolicy.reacquire_reset` (scenario 003: `("bistati
 their variances reset to the prior and their cross-covariances zeroed. The default selector returns
 the measurement's own model.
 
-## 6. Extension points
+## 6. Multi-target extensions
 
-Specified by [`scenario-011-terminal-area-tracking.md`](scenario-011-terminal-area-tracking.md),
-not yet built; none changes the loop.
+Built with scenario 011a (`config/scenario_011_*.toml`); none changes the loop.
 
-- **IMM** (Blom and Bar-Shalom 1988) is an `Estimator` of `Estimator`s. Its state is the
-  mode-weighted mixture in the union layout of its modes, a coordinate a mode lacks being added by
-  name at zero mean on mixing. The transition matrix is `expm(Λ T)` for the actual interval.
-- **JPDA** (Fortmann, Bar-Shalom and Scheffe 1983; JPDA\*, Set-JPDA, JIPDA) fills optional weights
-  `(n_tracks, n_measurements + 1)` on `AssociationResult`, applied through the correction core;
-  clusters are enumerated exactly, with a bound that raises.
-- **Track-oriented MHT** (Reid 1979; Blackman 2004): `TrackTree` satisfies `Estimator`;
-  `TrackOrientedMHT` is an associator using Murty's k-best assignment with N-scan pruning. With
-  `n_scan = 1` and `k_best = 1` it reduces to GNN, its first test.
-- **PMBM** (García-Fernández et al. 2018) cannot sit inside `Tracker`: hypotheses, existence and
-  birth are part of its density, leaving no associator, initiator or lifecycle to swap. It is a
-  comparison tracker in `tracking/rfs/pmbm.py`, sharing the models, `innovate`,
-  Murty's algorithm, `clutter_density` and the metrics.
+- **IMM** (Blom and Bar-Shalom 1988), `tracking/imm.py`: an IMM bank carries each mode's
+  estimate and probability as columns; mixing is in the union layout of the modes, a coordinate a
+  mode lacks carried at zero mean and a stated spread; the switching matrix is `expm(Λ T)` for
+  the actual interval. `Tracker(motion=InteractingMultipleModel(...))` runs it.
+- **JPDA** (Fortmann, Bar-Shalom and Scheffe 1983; JPDA\*, Set-JPDA, JIPDA),
+  `tracking/association.py`: `Associator.weights` returns weights `(n_tracks, n_measurements + 1)`
+  and posterior existence, applied through `update_weighted`; clusters are enumerated exactly,
+  with a bound that raises.
+- **Coverage**: a `Coverage` predicate tells `Tracker` which tracks a scan could see, so a rotating
+  radar's sector batches predict, gate and count each track once a rotation.
+- **Track-oriented MHT** and **PMBM** are [scenario 011b](scenario-011b-mht-pmbm.md)'s: MHT's tree
+  of leaves inside the one loop, PMBM a comparison tracker beside it.
 
 ## 7. Integration, performance and validation
 
@@ -254,8 +262,9 @@ M-of-N by hand, Jacobians against central differences, `rtol=1e-12`); consistenc
 200 runs × 30 steps, every transform, Bar-Shalom, Li and Kirubarajan 2001 §5.4.2); the drift guards
 of §3; hand-countable lifecycles; the batched gate against the textbook formulas pair by pair
 (`rtol=1e-12`); `benchmark` tests holding a scan of scenario 003's load and of 100 tracks × 1000
-measurements to a committed budget; scenario 003 end to end; OSPA (Schuhmacher, Vo and Vo 2008) and
-the metrics of `spec/data-001-formats.md` §6.9. Never loosen a tolerance to pass.
+measurements to a committed budget; scenario 003 end to end; and
+the metrics of `spec/data-001-formats.md` §6.9; for many targets GOSPA and trajectory GOSPA
+(`tracking/metrics.py`). Never loosen a tolerance to pass.
 
 ## 8. Decisions
 
@@ -265,17 +274,14 @@ the metrics of `spec/data-001-formats.md` §6.9. Never loosen a tolerance to pas
 - **Spherical measurements stay spherical.** Rejected: Cartesian conversion then a linear KF
   (state-dependent covariance, bias growing with range × angle error).
 - **Mechanism in `tracking/`, policy in `pipeline.py`** (the range-only selector), not in `Tracker`.
-- **D26: `CoordinatedTurn`, with the turn rate in the state.** One `MotionModel` in `motion.py`,
-  exact discretisation with a series form near zero turn rate.
-- **D27: `IMM` is an `Estimator` of `Estimator`s.** Mixing by name in the union layout; transition
-  matrix `expm(Λ T)` for the actual interval.
-- **D28: JPDA, JPDA\*, Set-JPDA and JIPDA fill `AssociationResult.weights`.** Exact events per
-  cluster with a bound that raises; clutter intensity from an oracle or a clutter map; JIPDA's
-  existence drives an `ExistencePolicy`.
-- **D29: Track-oriented MHT, the tree is the estimator.** `TrackTree` satisfies `Estimator`;
-  `TrackOrientedMHT` is an associator using Murty's k-best; the one loop stands.
-- **D30: PMBM is a comparison tracker beside `Tracker`.** It shares the models and metrics and owns
-  its density; it is the reference score, not a fourth associator.
+- **D26: `CoordinatedTurn`, with the turn rate in the state**, in `tracking/models.py`: exact
+  discretisation with series forms near zero turn rate.
+- **D27: the IMM is functions over a bank with per-mode columns**, `tracking/imm.py`: mixing by
+  name in the union layout; switching matrix `expm(Λ T)` for the actual interval.
+- **D28: JPDA, JPDA\*, Set-JPDA and JIPDA return weights from `Associator.weights`.** Exact events
+  per cluster with a bound that raises; clutter intensity per measurement from an oracle or a
+  clutter map; JIPDA's existence drives an `ExistencePolicy`.
+- **D29, D30: track-oriented MHT and PMBM** are scenario 011b's.
 
 ## 9. Limitations
 

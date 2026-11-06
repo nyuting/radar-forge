@@ -26,6 +26,7 @@ from radar_forge.tracking.filters import (
     innovate,
     predict,
     update,
+    update_weighted,
 )
 from radar_forge.tracking.metrics import consistency_interval, nees
 from radar_forge.tracking.models import (
@@ -508,3 +509,74 @@ def test_the_dwna_rate_variance_floors_above_the_bootstrap_threshold() -> None:
     # rtol 1e-9: the recursion contracts about 0.66 a scan, from 7.5e-6 at scan 30 to 2e-11.
     np.testing.assert_allclose(bank.covariance[0, 1, 1], steady[1, 1], rtol=1e-9)
     assert np.sqrt(steady[1, 1]) / 2 > BOOTSTRAP_THRESHOLD_MPS
+
+
+# --- scenario 011: the Taylor mean through the model, and the weighted update ---
+
+
+def test_the_taylor_mean_on_a_linear_model_is_still_f_times_x_to_the_bit() -> None:
+    """Moving the mean through transition() left every linear model's prediction unchanged."""
+    motion = CartesianMotion("xyz", sigma_acceleration_mps2=3.0)
+    rng = np.random.default_rng(SEED)
+    bank = _bank(motion.state_layout, rng.normal(0, 1e3, (5, 6)), np.eye(6))
+    mean, _ = TaylorLinearisation().predict(motion, bank, np.full(5, 2.5))
+    old = (motion.jacobian(bank.mean, np.full(5, 2.5)) @ bank.mean[..., None])[..., 0]
+    np.testing.assert_array_equal(mean, motion.state_layout.wrap(old))
+
+
+def test_a_weighted_update_with_one_hot_weights_is_the_kalman_update() -> None:
+    """All weight on one measurement: the mixture is that measurement's Kalman update."""
+    layout = RadialConstantVelocity().state_layout
+    model = LinearMeasurement(layout, ["bistatic_range_m", "bistatic_range_rate_mps"])
+    bank = _bank(layout, [[1e4, 50.0], [2e4, -30.0]], np.diag([400.0, 25.0]))
+    innovation = innovate(
+        bank,
+        model,
+        TaylorLinearisation(),
+        [[1e4 + 10, 49.0], [2e4 - 5, -31.0]],
+        np.diag([100.0, 1.0]),
+    )
+    weights = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    weighted = update_weighted(bank, innovation, weights)
+    hard = update(bank, innovation, [0, 1])
+    # rtol 1e-12: the same correction, plus a zero-weight term and a zero spread.
+    np.testing.assert_allclose(weighted.mean, hard.mean, rtol=1e-12)
+    np.testing.assert_allclose(weighted.covariance, hard.covariance, rtol=1e-12)
+
+
+def test_a_weighted_update_with_one_noise_is_the_textbook_pda_update() -> None:
+    """Shared R: x = x- + K nu_bar, P = b0 P- + (1 - b0) Pc + K (sum b nu nuT - nu_bar nu_barT) KT.
+
+    The PDA form, written out here from Bar-Shalom, Daum and Huang (2009), shares no code
+    with the mixture of Kalman updates the library computes.
+    """
+    layout = RadialConstantVelocity().state_layout
+    model = LinearMeasurement(layout, ["bistatic_range_m", "bistatic_range_rate_mps"])
+    prior = np.diag([400.0, 25.0])
+    bank = _bank(layout, [[1e4, 50.0]], prior)
+    z = np.array([[1e4 + 12.0, 49.0], [1e4 - 20.0, 52.0], [1e4 + 3.0, 50.5]])
+    noise = np.diag([100.0, 1.0])
+    innovation = innovate(bank, model, TaylorLinearisation(), z, noise)
+    beta = np.array([0.5, 0.2, 0.25, 0.05])
+    weighted = update_weighted(bank, innovation, beta[None])
+    h = np.eye(2)
+    s = h @ prior @ h.T + noise
+    gain = prior @ h.T @ np.linalg.inv(s)
+    nu = z - [1e4, 50.0]
+    nu_bar = beta[:3] @ nu
+    spread = (nu.T * beta[:3]) @ nu - np.outer(nu_bar, nu_bar)
+    corrected = prior - gain @ s @ gain.T
+    expected = beta[3] * prior + (1 - beta[3]) * corrected + gain @ spread @ gain.T
+    # rtol 1e-10: an inverse against a solve, and a Joseph form against the short one.
+    np.testing.assert_allclose(weighted.mean[0], [1e4, 50.0] + gain @ nu_bar, rtol=1e-10)
+    np.testing.assert_allclose(weighted.covariance[0], expected, rtol=1e-10)
+
+
+def test_the_bank_refuses_an_existence_outside_zero_to_one_and_bad_mode_weights() -> None:
+    layout = RadialConstantVelocity().state_layout
+    with pytest.raises(ValueError, match="existence"):
+        TrackBank.empty(layout).append([[0.0, 0.0]], [np.eye(2)], 0.0, [1], [0], existence=[1.5])
+    with pytest.raises(ValueError, match="mode_probability"):
+        TrackBank.empty(layout, 2).append(
+            [[0.0, 0.0]], [np.eye(2)], 0.0, [1], [0], mode_probability=[0.5, 0.6]
+        )

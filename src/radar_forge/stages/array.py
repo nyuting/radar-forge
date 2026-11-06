@@ -73,7 +73,8 @@ from radar_forge.pipeline import (
     synthesise,
 )
 from radar_forge.radar import Radar, TargetGeometry
-from radar_forge.scenario import DoaSettings, scattering_phase_rad
+from radar_forge.scenario import scattering_phase_rad
+from radar_forge.settings import DoaSettings
 
 __all__ = ["doa"]
 

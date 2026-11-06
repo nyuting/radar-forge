@@ -3,7 +3,8 @@ r"""State layouts, motion models and measurement models, batched over leading ax
 Every model takes states ``(..., n_state)``, so a bank of tracks or all its sigma points go
 through one call. :class:`StateLayout` names each coordinate and holds the package's one wrap
 of periodic values; :func:`check_covariances` is the one boundary check of a covariance.
-Motion: :class:`CartesianMotion` and :class:`RadialConstantVelocity`. Measurement:
+Motion: :class:`CartesianMotion`, :class:`RadialConstantVelocity` and the nonlinear
+:class:`CoordinatedTurn`. Measurement:
 :class:`LinearMeasurement`, :class:`RangeAzimuthElevationRangeRate`,
 :class:`BistaticRangeRateModel` and :func:`marginal`.
 
@@ -23,6 +24,8 @@ References
        pp. 473-483, 1970.
 .. [3] N. J. Willis, *Bistatic Radar*, 2nd ed., SciTech Publishing, 2005.
 .. [4] S. Särkkä, *Bayesian Filtering and Smoothing*, Cambridge University Press, 2013.
+.. [5] X. R. Li and V. P. Jilkov, "Survey of maneuvering target tracking. Part I: Dynamic
+       models," *IEEE Trans. Aerosp. Electron. Syst.*, vol. 39, no. 4, pp. 1333-1364, 2003.
 """
 
 from __future__ import annotations
@@ -40,6 +43,7 @@ __all__ = [
     "BistaticRangeRateModel",
     "CartesianMotion",
     "Coordinate",
+    "CoordinatedTurn",
     "LinearMeasurement",
     "MarginalModel",
     "MeasurementModel",
@@ -192,11 +196,11 @@ class StateLayout:
 
 
 class MotionModel(Protocol):
-    """A linear motion model: ``transition(x)`` is ``jacobian(x) @ x``.
+    """A motion model: ``transition`` moves states and ``jacobian`` is its derivative.
 
-    ``dt_s`` broadcasts against the states' leading axes ``(...)``. The Taylor
-    linearisation predicts the mean as F x from the one F it builds, so a nonlinear model
-    (scenario 011's coordinated turn) changes this protocol when it arrives.
+    ``dt_s`` broadcasts against the states' leading axes ``(...)``. A linear model's
+    ``transition(x)`` is ``jacobian(x) @ x``; the coordinated turn's is not, so the Taylor
+    linearisation moves the mean through ``transition`` and the covariance through F.
     """
 
     state_layout: StateLayout
@@ -336,6 +340,118 @@ class RadialConstantVelocity(_PolynomialMotion):
         q = _noise_intensity(sigma_acceleration_mps2, tau_s, process_noise, 1)
         names = (Coordinate("bistatic_range_m", "m"), Coordinate("bistatic_range_rate_mps", "m/s"))
         super().__init__(StateLayout(names, "radial"), [_axis_tables(1, process_noise, q)])
+
+
+# Below this |omega T| the turn's coefficients are their Taylor series to second order: the
+# exact forms divide by omega, and the next series term is (omega T)^4, 1e-24, of the first.
+_SERIES_TURN_RAD = 1e-6
+# The one coefficient whose exact form cancels badly, the along-track term's rate derivative,
+# is a series to a wider bound (see CoordinatedTurn._coefficients).
+_SERIES_DERIVATIVE_RAD = 1e-2
+
+
+class CoordinatedTurn:
+    r"""Constant speed and turn rate in the ground plane, the turn rate in the state.
+
+    State ``[x_m, xdot_mps, y_m, ydot_mps, turn_rate_radps]``, the rate being the heading's
+    (clockwise from north, positive to the right; Li and Jilkov's ω with its sign reversed).
+    With :math:`s = \sin\omega T`, :math:`c = \cos\omega T`: :math:`x' = x + (s/\omega)\dot x
+    + ((1-c)/\omega)\dot y`, :math:`\dot x' = c\dot x + s\dot y`, :math:`y' = y - ((1-c)/
+    \omega)\dot x + (s/\omega)\dot y`, :math:`\dot y' = -s\dot x + c\dot y`, ω held; 1 - c is
+    written 2 sin²(ωT/2), free of cancellation. Below :math:`|\omega T| = 10^{-6}` the
+    coefficients are their series, so F tends to the CV matrix. Q is CV's ``"cwna"`` per axis
+    (q = 2 sigma² tau) and ``turn_rate_noise_density_rad2ps3`` times T on the rate.
+
+    References
+    ----------
+    Li and Jilkov [5], §V (the coordinated turn with unknown turn rate); Bar-Shalom [1], §6.2.2.
+    """
+
+    def __init__(
+        self,
+        sigma_acceleration_mps2: float = 0.5,
+        turn_rate_noise_density_rad2ps3: float = 1.6e-5,
+        *,
+        acceleration_correlation_time_s: float = 1.0,
+    ) -> None:
+        q = _noise_intensity(sigma_acceleration_mps2, acceleration_correlation_time_s, "cwna", 1)
+        if not (
+            np.isfinite(turn_rate_noise_density_rad2ps3) and turn_rate_noise_density_rad2ps3 >= 0
+        ):
+            msg = f"need a finite turn-rate density >= 0; got {turn_rate_noise_density_rad2ps3}."
+            raise ValueError(msg)
+        names = ("x_m", "xdot_mps", "y_m", "ydot_mps", "turn_rate_radps")
+        units = ("m", "m/s", "m", "m/s", "rad/s")
+        self.state_layout = StateLayout(tuple(map(Coordinate, names, units)), "ENU")
+        tables = _axis_tables(1, "cwna", q)
+        self._q_coefficient = block_diag(tables[2], tables[2], [[turn_rate_noise_density_rad2ps3]])
+        self._q_exponent = block_diag(tables[3], tables[3], [[1.0]])
+
+    @staticmethod
+    def _coefficients(
+        turn_rate_radps: NDArray[np.float64], dt_s: NDArray[np.float64]
+    ) -> tuple[NDArray[np.float64], ...]:
+        """Return sin ωT/ω, (1 - cos ωT)/ω, cos ωT, sin ωT and the first two's ω-derivatives."""
+        angle = turn_rate_radps * dt_s
+        series = np.abs(angle) < _SERIES_TURN_RAD
+        rate = np.where(series, 1.0, turn_rate_radps)
+        sine, cosine = np.sin(angle), np.cos(angle)
+        along = np.where(series, dt_s * (1 - angle**2 / 6), sine / rate)
+        across = np.where(series, angle * dt_s / 2, 2 * np.sin(angle / 2) ** 2 / rate)
+        # (T cos ωT - sin ωT / ω) / ω loses (ωT)⁻² of its precision to cancellation; below
+        # |ωT| = 1e-2 its series in x = ωT, T² (-x/3 + x³/30 - x⁵/840), is exact to roundoff.
+        short = np.abs(angle) < _SERIES_DERIVATIVE_RAD
+        d_along = np.where(
+            short,
+            dt_s**2 * (-angle / 3 + angle**3 / 30 - angle**5 / 840),
+            (dt_s * cosine - along) / np.where(short, 1.0, rate),
+        )
+        d_across = np.where(series, dt_s**2 * (0.5 - angle**2 / 8), (dt_s * sine - across) / rate)
+        return along, across, cosine, sine, d_along, d_across
+
+    def _parts(
+        self, state: NDArray[np.float64], dt_s: ArrayLike
+    ) -> tuple[NDArray[np.float64], tuple[NDArray[np.float64], ...]]:
+        """Return the states and their coefficients, broadcast to one leading shape."""
+        state = np.asarray(state, dtype=np.float64)
+        step_s = np.broadcast_to(np.asarray(dt_s, dtype=np.float64), state.shape[:-1])
+        return state, self._coefficients(state[..., 4], step_s)
+
+    def transition(self, state: NDArray[np.float64], dt_s: ArrayLike) -> NDArray[np.float64]:
+        """Return the states moved on along their turns, ``(..., 5)``."""
+        state, (along, across, cosine, sine, _, _) = self._parts(state, dt_s)
+        x, xdot, y, ydot, rate = np.moveaxis(state, -1, 0)
+        return np.stack(
+            [
+                x + along * xdot + across * ydot,
+                cosine * xdot + sine * ydot,
+                y - across * xdot + along * ydot,
+                -sine * xdot + cosine * ydot,
+                rate,
+            ],
+            axis=-1,
+        )
+
+    def jacobian(self, state: NDArray[np.float64], dt_s: ArrayLike) -> NDArray[np.float64]:
+        """Return the transition's Jacobian at each state, ``(..., 5, 5)``."""
+        state, (along, across, cosine, sine, d_along, d_across) = self._parts(state, dt_s)
+        _, xdot, _, ydot, _ = np.moveaxis(state, -1, 0)
+        step_s = np.broadcast_to(np.asarray(dt_s, dtype=np.float64), xdot.shape)
+        one, zero = np.ones_like(xdot), np.zeros_like(xdot)
+        rows = [
+            [one, along, zero, across, d_along * xdot + d_across * ydot],
+            [zero, cosine, zero, sine, step_s * (cosine * ydot - sine * xdot)],
+            [zero, -across, one, along, -d_across * xdot + d_along * ydot],
+            [zero, -sine, zero, cosine, -step_s * (cosine * xdot + sine * ydot)],
+            [zero, zero, zero, zero, one],
+        ]
+        return np.stack([np.stack(row, axis=-1) for row in rows], axis=-2)
+
+    def process_noise(self, state: NDArray[np.float64], dt_s: ArrayLike) -> NDArray[np.float64]:
+        """Return Q, ``(..., 5, 5)``; it does not depend on the state."""
+        step_s = np.asarray(dt_s, dtype=np.float64)[..., None, None]
+        result: NDArray[np.float64] = self._q_coefficient * step_s**self._q_exponent
+        return result
 
 
 class MeasurementModel(Protocol):
