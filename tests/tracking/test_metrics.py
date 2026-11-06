@@ -120,3 +120,15 @@ def test_trajectory_gospa_without_switches_is_the_root_sum_of_per_scan_gospa() -
     # rtol 1e-9: HiGHS solves the program to about that.
     assert score.distance_m == pytest.approx(np.sqrt(3 * 25.0), rel=1e-9)
     assert score.n_switches == pytest.approx(0.0, abs=1e-9)
+
+
+def test_trajectory_gospa_without_estimates_scores_every_truth_missed() -> None:
+    """No estimate at all: each present truth at each step is missed, c^p / 2 each."""
+    truth = np.array([[[0.0, 0.0], [1e3, 0.0]]] * 3)
+    no_estimate = np.zeros((3, 0, 2))
+    for at_estimates in (None, np.zeros((3, 2, 0, 2))):
+        score = trajectory_gospa(no_estimate, truth, truths_at_estimates=at_estimates)
+        # rtol 1e-9: HiGHS solves the program to about that; 6 misses of 45 000 m^2.
+        assert score.distance_m == pytest.approx(np.sqrt(6 * 300.0**2 / 2), rel=1e-9)
+        assert score.missed_m == pytest.approx(score.distance_m, rel=1e-9)
+        assert score.n_switches == 0.0

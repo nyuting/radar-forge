@@ -16,8 +16,8 @@ References
 .. [1] W. Koch and G. van Keuk, "Multiple hypothesis track maintenance with possibly unresolved
        measurements," *IEEE Trans. Aerosp. Electron. Syst.*, vol. 33, no. 3, pp. 883-892, 1997.
 .. [2] M. I. Skolnik (ed.), *Radar Handbook*, 3rd ed., McGraw-Hill, 2008.
-.. [3] D. F. Crouse, "On implementing 2D rectangular assignment algorithms," *IEEE Trans.
-       Aerosp. Electron. Syst.*, vol. 52, no. 4, pp. 1679-1696, 2016.
+.. [3] M. Abramowitz and I. A. Stegun (eds.), *Handbook of Mathematical Functions*, National
+       Bureau of Standards, 1964.
 """
 
 from __future__ import annotations
@@ -30,6 +30,9 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.sparse import coo_array
 from scipy.sparse.csgraph import connected_components
+from scipy.special import ellipe, ellipk
+
+from radar_forge.radar import enu_to_range_azimuth_elevation_rad, range_azimuth_elevation_to_enu_m
 
 __all__ = [
     "LEAST_INTENSITY_PER_M_RAD",
@@ -45,6 +48,7 @@ __all__ = [
     "poisson_clutter_plots",
     "polar",
     "resolve",
+    "to_enu",
 ]
 
 
@@ -60,9 +64,20 @@ def _heading(heading_rad: ArrayLike) -> NDArray[np.float64]:
 
 
 def polar(position_m: ArrayLike) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Return the horizontal range and the azimuth in [0, 2π) of ENU positions ``(..., 2)``."""
-    east_m, north_m = np.moveaxis(np.asarray(position_m, dtype=np.float64), -1, 0)
-    return np.hypot(east_m, north_m), np.mod(np.arctan2(east_m, north_m), 2 * np.pi)
+    """Return the horizontal range and azimuth of ground-plane ENU positions ``(..., 2)``.
+
+    The radar module's conversion with no height: azimuth clockwise from north in [0, 2π).
+    """
+    ground = np.asarray(position_m, dtype=np.float64)
+    enu = np.concatenate([ground, np.zeros_like(ground[..., :1])], axis=-1)
+    range_m, azimuth_rad, _ = enu_to_range_azimuth_elevation_rad(enu)
+    return range_m, azimuth_rad
+
+
+def to_enu(range_m: ArrayLike, azimuth_rad: ArrayLike) -> NDArray[np.float64]:
+    """Return the ground-plane ENU position ``(..., 2)`` of a horizontal range and azimuth."""
+    result: NDArray[np.float64] = range_azimuth_elevation_to_enu_m(range_m, azimuth_rad, 0.0)
+    return result[..., :2]
 
 
 @dataclass(frozen=True)
@@ -112,8 +127,15 @@ class Arc:
             raise ValueError(msg)
         rows = [[self.start_time_s, *self.position_m, self.heading_rad, self.speed_mps]]
         # A chain: each leg starts where the one before ended.
-        for leg in self.legs:
+        for k, leg in enumerate(self.legs):
             time_s, east, north, heading, speed = rows[-1]
+            if speed + leg.acceleration_mps2 * leg.duration_s < 0:
+                msg = (
+                    f"leg {k} decelerates at {leg.acceleration_mps2} m/s^2 for "
+                    f"{leg.duration_s} s from {speed:.3g} m/s, past a stop: the target would fly "
+                    "backwards. Shorten the leg or end it at zero speed."
+                )
+                raise ValueError(msg)
             end = self._move(
                 np.array([leg.duration_s]),
                 np.array([[east, north, heading, speed]]),
@@ -262,9 +284,15 @@ class ClutterComponent:
 
     The region is the annulus ``[range_min_m, range_max_m)`` at every azimuth, or, with
     ``centre_enu_m``, a disc of ``radius_m`` drifting at ``drift_enu_mps`` (a rain cell),
-    which must lie inside the annulus and not cover the radar. A disc's volume is
-    :math:`\int dA / r = 2\pi (c - \sqrt{c^2 - R^2})`, c its centre's range: in (m rad), not
-    m², because a CFAR holds the rate per resolution cell, uniform in range and azimuth.
+    which must lie inside the annulus and not cover the radar. The intensity is per (m rad),
+    not m², because a CFAR holds the rate per resolution cell, uniform in range and azimuth;
+    so a disc's volume is :math:`\int dA / r = \int_{-\phi_0}^{\phi_0} 2\sqrt{R^2 - c^2
+    \sin^2\phi}\, d\phi`, its chords along each azimuth, :math:`\sin\phi_0 = R/c`, which is
+    :math:`4 (c E(m) - (c^2 - R^2) K(m) / c)` with :math:`m = R^2/c^2`, c the centre's range.
+
+    References
+    ----------
+    Abramowitz and Stegun [3], §17.3 (the complete elliptic integrals K and E).
     """
 
     intensity_per_m_rad: float
@@ -296,7 +324,12 @@ class ClutterComponent:
         if not (inside and centre_range_m + self.radius_m <= self.range_max_m):
             msg = f"the disc at {centre_range_m:.0f} m must lie inside the annulus at {time_s} s."
             raise ValueError(msg)
-        return 2 * np.pi * (centre_range_m - math.sqrt(centre_range_m**2 - self.radius_m**2))
+        m = (self.radius_m / centre_range_m) ** 2
+        chord = (
+            centre_range_m * ellipe(m)
+            - (centre_range_m**2 - self.radius_m**2) * ellipk(m) / centre_range_m
+        )
+        return float(4 * chord)
 
     def contains(
         self, range_m: ArrayLike, azimuth_rad: ArrayLike, time_s: float
@@ -305,7 +338,7 @@ class ClutterComponent:
         ranges = np.asarray(range_m, dtype=np.float64)
         result = (ranges >= self.range_min_m) & (ranges < self.range_max_m)
         if self.centre_enu_m is not None:
-            point = ranges[..., None] * _heading(azimuth_rad)
+            point = to_enu(ranges, azimuth_rad)
             result &= np.linalg.norm(point - self.centre_m(time_s), axis=-1) < self.radius_m
         return np.asarray(result, dtype=bool)
 

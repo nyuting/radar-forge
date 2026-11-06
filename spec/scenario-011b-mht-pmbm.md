@@ -29,7 +29,7 @@ Pairs placed **in radar coordinates**, as 006 §4.3 did: the same velocity, offs
 `tracking.scene.resolve`, at 20 km, so `d` holds for the run. The sweep is `d ∈ {0.25, 0.5, 1, 2, 4}` by
 `n_gate ∈ {0.1, 1, 3}` expected clutter plots per gate, each in both orientations, in a local
 window of clutter (011a's V2 windows: 19, 189 and 568 plots a scan in a box of 872.7 m rad, or
-the 2.5 km disc's 985.6 m rad). Trackers: GNN, JPDA, JPDA\*, Set-JPDA, JIPDA, MHT, PMBM, each
+the 2.5 km disc's 983.7 m rad). Trackers: GNN, JPDA, JPDA\*, Set-JPDA, JIPDA, MHT, PMBM, each
 CV quiet. 100 trials per point, 40 scans. 011a's A16 test runs V3's point `d = 1` across range
 at `n_gate = 1` for the JPDA family; its pair generator is the template.
 

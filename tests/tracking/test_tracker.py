@@ -25,6 +25,7 @@ from radar_forge.tracking.filters import (
     TrackStatus,
     UnscentedTransform,
 )
+from radar_forge.tracking.imm import InteractingMultipleModel
 from radar_forge.tracking.initiation import (
     DebiasedSphericalInitiator,
     DirectStateInitiator,
@@ -767,3 +768,81 @@ def test_no_track_starts_where_the_clutter_is_denser_than_the_birth_limit() -> N
     tracker = _one_axis(LifecyclePolicy(1, 1), max_birth_clutter_intensity=0.01)
     bank = tracker.process(Scan(0.0, [[0.0], [100.0], [200.0]], [[1.0]], "x", [0.001, 0.02, 0.01]))
     np.testing.assert_array_equal(bank.measurement_index, [0, 2])
+
+
+def _one_axis_jpda(policy: LifecyclePolicy, existence: ExistencePolicy | None = None) -> Tracker:
+    """The one-axis tracker of _one_axis with JPDA, gate 0.99, Pd 0.9."""
+    motion = CartesianMotion("x", sigma_acceleration_mps2=1.0, acceleration_correlation_time_s=0.5)
+    return Tracker(
+        {"x": LinearMeasurement(motion.state_layout, ("x_m",))},
+        motion,
+        TaylorLinearisation(),
+        0.99,
+        JointProbabilisticDataAssociation(0.9, 0.99),
+        DirectStateInitiator([0.0, 0.0], np.diag([1.0, 30.0**2])),
+        policy,
+        existence=existence,
+    )
+
+
+def test_a_reacquisition_reset_reaches_every_imm_mode() -> None:
+    """An IMM predicts from its modes, so the reset must reset each mode, not only the mixture.
+
+    Two CV modes; four hits, then misses: on the second miss, which opens re-acquisition, every
+    mode's rate variance is the prior's and its cross-covariance zero.
+    """
+    layout_motion = CartesianMotion("x", sigma_acceleration_mps2=1.0)
+    imm = InteractingMultipleModel(
+        (layout_motion, CartesianMotion("x", sigma_acceleration_mps2=3.0)), (60.0, 20.0)
+    )
+    prior = np.diag([1.0, 100.0**2])
+    tracker = Tracker(
+        {"x": LinearMeasurement(imm.state_layout, ("x_m",))},
+        imm,
+        TaylorLinearisation(),
+        0.997,
+        GlobalNearestNeighbour(),
+        DirectStateInitiator([0.0, 0.0], prior),
+        LifecyclePolicy(1, 1, 2, 3, reacquire_reset=("xdot_mps",)),
+    )
+    # Four hits along x = 20 t, then two misses.
+    for t in range(4):
+        tracker.process(_scan(float(t), [20.0 * t]))
+    tracker.process(_scan(4.0, []))
+    bank = tracker.process(_scan(5.0, []))
+    assert bank.n_misses[0] == 2 and bank.status[0] == TrackStatus.COASTING
+    np.testing.assert_array_equal(bank.mode_covariance[0, :, 1, 1], prior[1, 1])
+    np.testing.assert_array_equal(bank.mode_covariance[0, :, 0, 1], 0.0)
+    np.testing.assert_array_equal(bank.covariance[0, 1, 1], prior[1, 1])
+
+
+def test_a_jpda_track_whose_gate_holds_only_an_unlikely_plot_misses() -> None:
+    """The hit is the measurement taken (weights over one half), not any plot in the gate.
+
+    At 3.4 sigma-units in dense clutter (lambda 0.5) the plot weighs 0.2: a miss, and no
+    measurement recorded. At 0.1 it weighs 0.8: a hit.
+    """
+    for z, hit in ((3.4, False), (0.1, True)):
+        tracker = _one_axis_jpda(LifecyclePolicy(1, 1, 5))
+        tracker.seed([[0.0, 0.0]], [np.diag([1.0, 0.01])], 0.0)
+        bank = tracker.process(Scan(1.0, [[z]], [[1.0]], "x", [0.5]))
+        assert (bank.n_misses[0] == 0) == hit
+        assert (bank.measurement_index[0] == 0) == hit
+
+
+def test_a_weighting_tracker_refuses_a_scan_without_clutter_intensity() -> None:
+    """JPDA needs lambda at each measurement; the message names the Scan's field."""
+    tracker = _one_axis_jpda(LifecyclePolicy(1, 1))
+    with pytest.raises(ValueError, match="clutter_intensity"):
+        tracker.process(Scan(0.0, [[0.0]], [[1.0]], "x"))
+
+
+def test_existence_stays_at_most_one_when_survival_is_certain() -> None:
+    """With p_survival = 1 a steady target's existence rounds towards 1 + eps; it is clipped."""
+    tracker = _one_axis_jpda(LifecyclePolicy(1, 1), ExistencePolicy(p_survival=1.0))
+    # Thirty scans of one target in light clutter: existence climbs to one and stays.
+    for t in range(30):
+        bank = tracker.process(Scan(float(t), [[20.0 * t]], [[1.0]], "x", [1e-4]))
+    assert bank.n_tracks == 1
+    assert np.all((bank.existence > 0) & (bank.existence <= 1.0))
+    assert bank.existence[0] > 0.999

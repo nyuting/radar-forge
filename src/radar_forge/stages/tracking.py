@@ -35,6 +35,7 @@ from radar_forge.scenario import Scenario
 from radar_forge.tracking.filters import TrackBank, TrackStatus
 from radar_forge.tracking.metrics import gospa, nees, trajectory_gospa
 from radar_forge.tracking.scans import PlotScan, PlotTracker, scans
+from radar_forge.tracking.scene import to_enu
 
 __all__ = ["merged_counts", "multitarget", "pair_windows"]
 
@@ -269,9 +270,7 @@ def multitarget(ctx: evaluate.Context) -> evaluate.Context:
         false = np.isin(plots_scan.source, ("clutter", "discrete"))
         run.false_plots += int(false.sum())
         run.expected_false += _expected_false_plots(scenario, plots_scan.start_time_s)
-        enu = plots_scan.range_m[:, None] * np.column_stack(
-            [np.sin(plots_scan.azimuth_rad), np.cos(plots_scan.azimuth_rad)]
-        )
+        enu = to_enu(plots_scan.range_m, plots_scan.azimuth_rad)
         false_enu.append(enu[false])
         true_enu.append(enu[~false])
         plot_rows += _plot_rows(plots_scan)
@@ -398,6 +397,7 @@ def _trajectory_score(scenario: Scenario, run: _Run) -> Any:
     estimates = np.full((n_steps, len(ids), 2), np.nan)
     times = np.full((n_steps, len(ids)), np.nan)
     truths = np.full((n_steps, n_targets, len(ids), 2), np.nan)
+    present_at = np.full((n_steps, n_targets, 2), np.nan)
     # One rotation at a time: its tracks and the aircraft in coverage.
     for step, ((track_id, position, time_s), present) in enumerate(
         zip(run.confirmed, run.present, strict=True)
@@ -408,8 +408,15 @@ def _trajectory_score(scenario: Scenario, run: _Run) -> Any:
             np.isnan(times[step]), np.nanmean(time_s) if time_s.size else 0.0, times[step]
         )
         truths[step, present] = _truth(scenario, at)[present]
+        rotation_s = np.nanmean(time_s) if time_s.size else scenario.start_time_s
+        present_at[step, present] = _truth(scenario, np.array(rotation_s))[present]
     aircraft = [k for k, t in enumerate(scenario.arcs) if t.target_class == "aircraft"]
-    return trajectory_gospa(estimates, truths[:, aircraft], cutoff_m=_CUTOFF_M)
+    return trajectory_gospa(
+        estimates,
+        present_at[:, aircraft],
+        truths_at_estimates=truths[:, aircraft],
+        cutoff_m=_CUTOFF_M,
+    )
 
 
 def pair_windows(

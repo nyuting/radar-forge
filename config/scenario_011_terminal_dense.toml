@@ -42,7 +42,7 @@ range_min_m = 1000.0
 range_max_m = 6000.0
 
 [[clutter_plots.component]]
-name = "rain cell"              # n_gate 3; 1619 plots at the start, 1342 at the end
+name = "rain cell"              # n_gate 3; 1611 plots at the start, 1337 at 600 s
 intensity_per_m_rad = 0.65048
 range_min_m = 1000.0
 range_max_m = 40000.0
@@ -88,7 +88,7 @@ stages = ["multitarget"]
 gospa_mean_max_m = 700.0
 nees_fraction_min = 0.9           # 0.95 measured
 pd_min = 0.8795                 # Pd 0.9: 99 % binomial lower bound over 1469 echoes
-false_alarm_rate_max = 1.1        # three scans expect about 12 600 false plots
+false_alarm_rate_max = 1.1        # three scans expect about 12 590 false plots
 
 # Arrival on 23R, 22 km out on final at 0 s; straight at 230 deg, 72 m/s.
 [[target]]

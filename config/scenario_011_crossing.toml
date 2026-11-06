@@ -2,7 +2,7 @@
 # 30 and 10 deg, each angle once closing along range and once across it, six
 # pairs in all, far enough apart that no gate holds two pairs. Each crossing
 # sits in a disc of clutter at n_gate = 1 (0.21683 plots per m rad a scan) of
-# radius 2.5 km, 986 m rad: about 214 false plots a disc a scan. Outside the
+# radius 2.5 km, 983.7 m rad: about 213 false plots a disc a scan. Outside the
 # discs there is no clutter, so tracks start clean and meet the clutter later.
 # A 10 deg crossing closing across range spends about sixteen scans inside one
 # resolution cell (spec 011 §2.2): GNN swaps there and JPDA coalesces.
@@ -54,15 +54,15 @@ max_position_sigma_m = 300.0
 
 [verify]
 stages = ["multitarget"]
-# Mean GOSPA over the 62 rotations; pins the run (333 m measured): until 41 every aircraft is
+# Mean GOSPA over the 62 rotations; pins the run (323 m measured): until 41 every aircraft is
 # alone, then the crossings and the clutter discs.
 gospa_mean_max_m = 400.0
-# Spec 011 V2: crossings after which either aircraft's GOSPA track changed, JPDA, 3 of 7
+# Spec 011 V2: crossings after which either aircraft's GOSPA track changed, JPDA, 2 of 7
 # measured; A15 bounds GNN and MHT in 011b, JPDA is reported, not bounded: this pins it.
 swap_fraction_max = 0.6
 nees_fraction_min = 0.9           # 0.95 measured
 pd_min = 0.8704                 # Pd 0.9: 99 % binomial lower bound over 710 echoes
-false_alarm_rate_max = 1.1        # three scans expect 3850 plots in the discs
+false_alarm_rate_max = 1.1        # three scans expect 3839 plots in the discs
 
 # Pair X1: 90 deg apart, closing across range, crossing at 200 s at azimuth 30 deg, 20 km.
 [[target]]

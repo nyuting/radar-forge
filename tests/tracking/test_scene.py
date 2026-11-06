@@ -29,6 +29,7 @@ from radar_forge.tracking.scene import (
     poisson_clutter_plots,
     polar,
     resolve,
+    to_enu,
 )
 
 SEED = 20261106
@@ -138,13 +139,32 @@ def _components() -> list[ClutterComponent]:
     return list(load_scenario(TERMINAL).clutter_plots.components)
 
 
-def test_a_disc_of_clutter_has_the_volume_of_its_integral_over_range() -> None:
-    """2 pi (c - sqrt(c^2 - R^2)) m rad: 2488.6 for the rain cell at 20.4 km, not pi R^2 / c."""
-    rain = _components()[2]
-    centre_m = math.hypot(20e3, 4e3)
-    expected = 2 * math.pi * (centre_m - math.sqrt(centre_m**2 - 4e3**2))
-    assert rain.volume_m_rad(0.0) == pytest.approx(expected, rel=1e-12)
-    assert rain.volume_m_rad(0.0) == pytest.approx(2488.6, abs=0.1)
+@pytest.mark.parametrize(
+    ("centre_m", "radius_m", "volume_m_rad"),
+    [(10.0, 5.0, 8.126), (math.hypot(20e3, 4e3), 4e3, 2476.5)],
+    ids=["c10-r5", "rain-cell"],
+)
+def test_a_disc_of_clutter_has_the_volume_of_its_integral_of_one_over_range(
+    centre_m: float, radius_m: float, volume_m_rad: float
+) -> None:
+    """The volume in (m rad) is the integral over azimuth of each chord, done numerically here.
+
+    The closed form in K and E must equal quad's integral of 2 sqrt(R^2 - c^2 sin^2 phi):
+    8.126 for c = 10, R = 5 (the earlier 2 pi (c - sqrt(c^2 - R^2)) gave 8.418), and
+    2476.5 m rad for the rain cell at the start.
+    """
+    from scipy.integrate import quad
+
+    disc = ClutterComponent(1.0, 0.0, 40e3, (centre_m, 0.0), radius_m)
+    edge = math.asin(radius_m / centre_m)
+
+    def chord(angle: float) -> float:
+        return 2 * math.sqrt(max(radius_m**2 - (centre_m * math.sin(angle)) ** 2, 0.0))
+
+    # rtol 1e-9: quad's own accuracy on a square root that vanishes at the ends.
+    assert disc.volume_m_rad(0.0) == pytest.approx(quad(chord, -edge, edge)[0], rel=1e-9)
+    # abs 5e-4 of the value: the tabulated figures carry four or five digits.
+    assert disc.volume_m_rad(0.0) == pytest.approx(volume_m_rad, rel=5e-4)
 
 
 def test_every_clutter_component_draws_its_intensity_times_volume() -> None:
@@ -330,3 +350,24 @@ def test_the_iq_chain_merges_close_pairs_as_the_gaussian_resolution_model(tmp_pa
     low, high = np.nan_to_num(low, nan=0.0), np.nan_to_num(high, nan=1.0)
     print("alpha_r", alpha_m, "separations", separation_m, "measured", fraction, "model", model)
     assert np.all((low <= model) & (model <= high))
+
+
+def test_a_leg_that_decelerates_past_a_stop_is_refused() -> None:
+    """10 m/s braking at 2 m/s^2 for 10 s would end at -10 m/s, flying backwards."""
+    with pytest.raises(ValueError, match="decelerates"):
+        Arc(0.0, (0.0, 0.0), 0.0, 10.0, (Leg(10.0, 0.0, -2.0),))
+    Arc(0.0, (0.0, 0.0), 0.0, 10.0, (Leg(5.0, 0.0, -2.0),))
+
+
+def test_polar_and_to_enu_are_the_radar_modules_convention() -> None:
+    """Range and azimuth clockwise from north, from the radar module, and back again."""
+    from radar_forge.radar import enu_to_range_azimuth_elevation_rad
+
+    rng = np.random.default_rng(SEED)
+    position_m = rng.normal(0.0, 2e4, (50, 2))
+    range_m, azimuth_rad = polar(position_m)
+    expected = enu_to_range_azimuth_elevation_rad(np.column_stack([position_m, np.zeros(50)]))
+    np.testing.assert_array_equal(range_m, expected[0])
+    np.testing.assert_array_equal(azimuth_rad, expected[1])
+    # rtol 1e-12: two trigonometric round trips.
+    np.testing.assert_allclose(to_enu(range_m, azimuth_rad), position_m, rtol=1e-12, atol=1e-8)

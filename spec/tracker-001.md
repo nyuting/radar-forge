@@ -190,7 +190,8 @@ counts, the measurement index taken this scan and that update's NIS.
 
 `tentative → confirmed ⇄ coasting → deleted`. One `LifecyclePolicy` holds every setting; pipeline
 configs hold one and never copy its fields. A *hit* is a scan in which a detection was assigned to
-the track, a *miss* one in which none was.
+the track (under association weights, one whose measurements weigh over one half), a *miss* one in
+which none was.
 
 | Rule | Setting |
 | :--- | :--- |

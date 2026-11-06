@@ -210,6 +210,7 @@ def trajectory_gospa(
     estimates: ArrayLike,
     truths: ArrayLike,
     *,
+    truths_at_estimates: ArrayLike | None = None,
     p: float = 2.0,
     cutoff_m: float = 300.0,
     switch_cost_m: float | None = None,
@@ -217,7 +218,8 @@ def trajectory_gospa(
     r"""Return the trajectory GOSPA distance, as the linear program of [4], alpha = 2.
 
     ``estimates`` ``(n_steps, n_estimates, d)`` and ``truths`` ``(n_steps, n_truths, d)`` hold
-    NaN where a trajectory is absent (truths may be ``(n_steps, n_truths, n_estimates, d)``).
+    NaN where a trajectory is absent; ``truths_at_estimates`` ``(n_steps, n_truths,
+    n_estimates, d)``, if given, holds each truth where it was at each estimate's time.
     Each step k assigns with a matrix :math:`W^k` over the trajectories plus one dummy each,
     costed by :math:`D^k`: :math:`\min(d, c)^p` for two present, :math:`c^p/2` for one, zero
     for none. The program minimises :math:`\sum_k \mathrm{tr}(D^{kT} W^k) + (\gamma^p/2)
@@ -233,12 +235,16 @@ def trajectory_gospa(
     gamma = cutoff_m if switch_cost_m is None else switch_cost_m
     estimate = np.asarray(estimates, dtype=np.float64)
     truth = np.asarray(truths, dtype=np.float64)
+    if estimate.ndim != 3 or truth.ndim != 3 or len(estimate) != len(truth):
+        msg = f"need (n_steps, n, d) estimates and truths; got {estimate.shape}, {truth.shape}."
+        raise ValueError(msg)
     n_steps, n_estimates = estimate.shape[:2]
     n_truths = truth.shape[1]
+    seen = truth if truths_at_estimates is None else np.asarray(truths_at_estimates, float)
     # One distance matrix per step: a handful of scans to a few hundred.
-    distance = np.stack([_distances(estimate[k], truth[k]) for k in range(n_steps)])
+    distance = np.stack([_distances(estimate[k], seen[k]) for k in range(n_steps)])
     estimate_on = np.all(np.isfinite(estimate), axis=-1)
-    truth_on = np.all(np.isfinite(truth[:, :, 0] if truth.ndim == 4 else truth), axis=-1)
+    truth_on = np.all(np.isfinite(truth), axis=-1)
     half = cutoff_m**p / 2.0
     real = np.where(
         truth_on[:, :, None] & estimate_on[:, None, :],

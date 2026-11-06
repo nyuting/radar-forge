@@ -338,3 +338,22 @@ def test_the_imm_is_consistent_and_switches_to_its_turn_mode() -> None:
     print("turn-mode latency, scans: ", np.bincount(latency[latency < 99]), "within", within)
     assert low <= values.mean() <= high
     assert within >= 0.9
+
+
+def test_an_update_with_no_measurement_leaves_every_mode_as_predicted() -> None:
+    """A scan that saw nothing: the "none" weight is one, so modes and probabilities stand.
+
+    Catches the none column being dropped when there are zero measurements to weigh.
+    """
+    imm = _three_modes()
+    linearisation = TaylorLinearisation()
+    bank = imm_predict(_bank(imm, 2, np.random.default_rng(SEED)), imm, linearisation, 4.8)
+    model = RangeAzimuthElevationRangeRate(
+        imm.state_layout, np.zeros(3), ("range_m", "azimuth_rad"), fixed={"z_m": 0.0}
+    )
+    noise = np.diag([33.4**2, np.radians(0.15) ** 2])
+    combined, modes = imm_innovate(bank, model, linearisation, np.zeros((0, 2)), noise)
+    updated = imm_update(bank, combined, modes, np.ones((2, 1)))
+    # rtol 1e-12: a mixture of one component, weight one.
+    np.testing.assert_allclose(updated.mode_probability, bank.mode_probability, rtol=1e-12)
+    np.testing.assert_allclose(updated.mode_mean, bank.mode_mean, rtol=1e-12)

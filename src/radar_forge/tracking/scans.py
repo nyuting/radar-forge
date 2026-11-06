@@ -18,6 +18,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -106,7 +107,8 @@ def _beam_crossing(
     for _ in range(_BEAM_ITERATIONS):
         states = [target.arc.state(t) for target, t in zip(scenario.arcs, time_s, strict=True)]
         position_m = np.array([p for p, _ in states])
-        _, azimuth = polar(np.nan_to_num(position_m))
+        # A target not yet flying is NaN; its azimuth counts as 0, the rotation's start.
+        azimuth = np.nan_to_num(polar(position_m)[1])
         time_s = start_s + azimuth / (2 * np.pi) * period_s
     return time_s, position_m, np.array([v for _, v in states])
 
@@ -202,8 +204,9 @@ class PlotTracker:
     modes are CV quiet, coordinated turn and CV agile; z is (horizontal range, azimuth), the
     radar at the origin and z fixed at its height. A rotation reaches the tracker as
     ``n_sectors`` batches, each at its centre time, and a batch sees only the tracks whose
-    extrapolated azimuth lies in its sector. GNN costs by the likelihood ratio with no
-    assignment cheaper than ln(P_D / (1 - P_D P_G)), the track score's break-even; JPDA weighs
+    extrapolated azimuth lies in its sector. GNN costs by the likelihood ratio against the
+    clutter regions' mean intensity that rotation, with no assignment cheaper than
+    ln(P_D / (1 - P_D P_G)), the track score's break-even; JPDA weighs
     confirmed tracks jointly and tentative ones alone, with the clutter intensity at each plot
     from the scene (``"oracle"``) or a :class:`~radar_forge.tracking.scene.ClutterMap`
     (``"map"``) fed every plot no confirmed track took.
@@ -238,12 +241,7 @@ class PlotTracker:
         )
         prior = np.diag([v**2 for v in self._prior_sigma(layout.names, settings)])
         p_d, p_g = settings.detection_probability, settings.gate_probability
-        components = scenario.clutter_plots.components
-        volume = sum(c.volume_m_rad(scenario.start_time_s) for c in components)
-        plots = sum(
-            c.intensity_per_m_rad * c.volume_m_rad(scenario.start_time_s) for c in components
-        )
-        self.mean_intensity = max(plots / volume if volume else 0.0, LEAST_INTENSITY_PER_M_RAD)
+        self.components = scenario.clutter_plots.components
         associator: Any = GlobalNearestNeighbour(math.log(p_d / (1 - p_d * p_g)))
         if settings.association == "jpda":
             associator = JointProbabilisticDataAssociation(p_d, p_g, settings.coalescence)
@@ -264,7 +262,7 @@ class PlotTracker:
                 max_position_sigma_m=min(settings.max_position_sigma_m, 1e12),
             ),
             "negative_log_likelihood_ratio",
-            {_PLOTS: self.mean_intensity},
+            {_PLOTS: self.mean_intensity(scenario.start_time_s)},
             assignment=settings.assignment,
             coverage=self._covers,
             existence=ExistencePolicy() if settings.existence else None,
@@ -293,9 +291,22 @@ class PlotTracker:
         )
         return np.asarray(sector == self._sector, dtype=bool)
 
+    def mean_intensity(self, time_s: float) -> float:
+        """Return the clutter regions' mean intensity at ``time_s``, plots per (m rad): GNN's λ."""
+        volumes = [c.volume_m_rad(time_s) for c in self.components]
+        plots = sum(
+            c.intensity_per_m_rad * v for c, v in zip(self.components, volumes, strict=True)
+        )
+        mean = plots / sum(volumes) if self.components else 0.0
+        return max(mean, LEAST_INTENSITY_PER_M_RAD)
+
     def rotation(self, plots: PlotScan) -> list[tuple[TrackBank, Any]]:
         """Track one rotation, sector by sector; return each batch's bank and JPDA clusters."""
         n_sectors = self.sensor.n_sectors
+        # A drifting disc changes the regions' mean, so GNN's density is this rotation's.
+        self.tracker.clutter_density = MappingProxyType(
+            {_PLOTS: self.mean_intensity(plots.start_time_s)}
+        )
         oracle = self.settings.clutter_intensity == "oracle"
         intensity = (
             plots.clutter_intensity_per_m_rad

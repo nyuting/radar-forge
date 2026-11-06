@@ -300,7 +300,10 @@ def imm_update(
     # N_j / g is at most 1 / c_j, so the exponent is bounded; ungated pairs are never formed.
     gap = np.stack([m.log_likelihood for m in modes], axis=1) - combined.log_likelihood[:, None]
     ratio = np.where(gated[:, None, :], np.exp(np.where(gated[:, None, :], gap, 0.0)), 0.0)
-    joint = np.concatenate([beta[:, None, :-1] * ratio, beta[:, None, -1:] + 0 * ratio[..., :1]], 2)
+    # Each mode's weight on each measurement, and on none: (n_tracks, n_modes, n_meas + 1).
+    joint = np.empty((*prior.shape, beta.shape[1]))
+    joint[..., :-1] = beta[:, None, :-1] * ratio
+    joint[..., -1] = beta[:, None, -1]
     joint = joint * prior[:, :, None]
     posterior = joint.sum(axis=2)
     posterior = posterior / posterior.sum(axis=1, keepdims=True)

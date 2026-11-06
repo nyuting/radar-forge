@@ -354,6 +354,11 @@ class Tracker:
         self.time_s: float | None = None
         self.last_association: AssociationWeights | None = None
         self._next_track_id = 1
+        # Whether the associator weights: asked once, of an empty scan.
+        empty = np.zeros((0, 0))
+        self._weighs = (
+            associator.weights(empty, empty.astype(bool), clutter_intensity=np.zeros(0)) is not None
+        )
 
     def seed(self, mean: ArrayLike, covariance: ArrayLike, time_s: float) -> NDArray[np.int64]:
         """Add tracks ``(n_new, n_state)`` from a cue and return their IDs; bistatic needs it."""
@@ -401,6 +406,12 @@ class Tracker:
         model = self.models.get(scan.model_id)
         if model is None or scan.measurements.shape[1] != model.measurement_layout.dimension:
             msg = f"scan model {scan.model_id!r} is unknown, or its dimension does not match."
+            raise ValueError(msg)
+        if self._weighs and scan.clutter_intensity is None:
+            msg = (
+                "the associator weights by clutter intensity, so the Scan needs "
+                f"clutter_intensity, one per measurement: shape ({len(scan.measurements)},)."
+            )
             raise ValueError(msg)
         last_scan_s = -math.inf if self.time_s is None else self.time_s
         latest_s = max(last_scan_s, float(self.bank.time_s.max(initial=-math.inf)))
@@ -559,7 +570,8 @@ class Tracker:
         Confirmed rows are weighted jointly (JPDA, JIPDA), and in ``"confirmed_first"``
         assignment tentative rows each alone (PDA, IPDA) over the measurements outside every
         confirmed gate, so a new track's wide gate never joins a cluster. Returns the bank,
-        whether each row gated a measurement (its hit), and the measurements any row gated.
+        whether each row took a measurement (weights over half: its hit), and the measurements
+        any row gated.
         """
         in_gate = chosen >= 0
         n_meas = in_gate.shape[1]
@@ -607,17 +619,20 @@ class Tracker:
                 existence[rows] = alone.existence
         self.last_association = joint
         bank = self._correct(bank, innovations[0], weights)
-        # The likeliest measurement is recorded when the track more likely took one than none.
-        likeliest = np.argmax(np.column_stack([weights[:, :-1], np.zeros(bank.n_tracks)]), axis=1)
-        taken = weights[:, :-1].sum(axis=1) > 0.5
-        index = np.where(taken, likeliest, -1)
-        padded = np.column_stack([innovations[0][0].nis, np.full(bank.n_tracks, np.nan)])
-        nis = np.where(taken, padded[np.arange(bank.n_tracks), likeliest], np.nan)
+        # A track took a measurement, its hit, when one is likelier than none; that one is
+        # recorded as the measurement it took.
+        taken = np.asarray(weights[:, :-1].sum(axis=1) > 0.5, dtype=bool)
+        index = np.full(bank.n_tracks, -1, dtype=np.int64)
+        nis = np.full(bank.n_tracks, np.nan)
+        if n_meas:
+            likeliest = weights[:, :-1].argmax(axis=1)
+            index[taken] = likeliest[taken]
+            nis[taken] = innovations[0][0].nis[np.flatnonzero(taken), likeliest[taken]]
         if self.existence is not None:
-            bank = replace(bank, existence=existence)
-        bank = replace(bank, nis=nis, measurement_index=index.astype(np.int64))
-        hit = np.asarray(in_gate.any(axis=1), dtype=bool)
-        return bank, hit, np.asarray(in_gate.any(axis=0), dtype=bool)
+            # Round-off can leave a sure target at 1 + eps, which the next scan would refuse.
+            bank = replace(bank, existence=np.clip(existence, np.finfo(float).tiny, 1.0))
+        bank = replace(bank, nis=nis, measurement_index=index)
+        return bank, taken, np.asarray(in_gate.any(axis=0), dtype=bool)
 
     def _count(
         self, bank: TrackBank, hit: NDArray[np.bool_], live: NDArray[np.bool_], time_s: float
@@ -645,21 +660,30 @@ class Tracker:
         # The miss that opens re-acquisition, and only it: a later reset would undo what the
         # coast has learnt.
         reset = (status == TrackStatus.COASTING) & (n_misses == policy.n_delete_misses)
-        covariance, kept = bank.covariance.copy(), self._reset
-        block = covariance[reset]
-        block[:, kept, :] = 0.0
-        block[:, :, kept] = 0.0
-        block[:, kept[:, None], kept[None, :]] = self.initiator.prior_covariance[np.ix_(kept, kept)]
-        covariance[reset] = block
+        covariance, modes = bank.covariance.copy(), bank.mode_covariance.copy()
+        # An IMM predicts from its modes, so each mode is reset with the mixture.
+        covariance[reset] = self._reset_block(covariance[reset])
+        modes[reset] = self._reset_block(modes[reset])
         return replace(
             bank,
             covariance=covariance,
+            mode_covariance=modes,
             status=status,
             n_hits=n_hits,
             n_misses=n_misses,
             n_scans=n_scans,
             last_hit_time_s=np.where(hit, time_s, bank.last_hit_time_s),
         )
+
+    def _reset_block(self, matrices: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Return covariances ``(..., n, n)`` with the reset coordinates back at the prior."""
+        kept, result = self._reset, matrices.copy()
+        result[..., kept, :] = 0.0
+        result[..., :, kept] = 0.0
+        result[..., kept[:, None], kept[None, :]] = self.initiator.prior_covariance[
+            np.ix_(kept, kept)
+        ]
+        return result
 
     def _start(
         self,
