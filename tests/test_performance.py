@@ -29,8 +29,9 @@ def _cube_bytes(path: Path) -> int:
     scenario = load_scenario(path)
     # complex128: 16 bytes a sample, of the samples each burst's gate records. A noise burst
     # holds its code beside its stream, and its map is n_range_lags wide, not a batch: those
-    # count with the cube.
-    return sum(
+    # count with the cube. A receive array multiplies it by its channels (scenario 006).
+    n_rx = 1 if scenario.receive_array is None else scenario.receive_array.n_rx
+    return n_rx * sum(
         16 * n * (gate.n_samples(r) * (2 if lags else 1) + lags)
         for r, n, gate, lags in zip(
             scenario.radars, scenario.n_pulses, scenario.gates, scenario.n_range_lags, strict=True
@@ -59,6 +60,15 @@ def _migration_bytes(path: Path) -> int:
     return total
 
 
+def _array_bytes(path: Path) -> int:
+    """A receive array's map: the range profiles and the Doppler spectrum, a cube each.
+
+    Each transform makes a copy of the multi-channel cube, 65.5 MB at scenario 006's 16
+    channels, beyond the 64 MiB slack a one-channel chain's copies fit in.
+    """
+    return 0 if load_scenario(path).receive_array is None else 2 * _cube_bytes(path)
+
+
 MEASURED = sorted(
     {max(CONFIGS, key=_cube_bytes)}
     | {path for path in CONFIGS if load_scenario(path).migration.method != "none"}
@@ -82,7 +92,8 @@ def test_one_frame_holds_at_most_two_cubes_a_keystones_working_set_and_64_mib(pa
         _, peak_bytes = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
-    assert peak_bytes <= 2 * _cube_bytes(path) + _migration_bytes(path) + 64 * 2**20
+    budget_bytes = 2 * _cube_bytes(path) + _migration_bytes(path) + _array_bytes(path)
+    assert peak_bytes <= budget_bytes + 64 * 2**20
 
 
 # Budgets, s, for three frames of S1 without figures: about four times this machine's time.

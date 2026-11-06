@@ -56,6 +56,10 @@ FAST_FRAMES: dict[str, int] = {
     "scenario_005_distorted_transmitter": 1,
     "scenario_005_static_leakage": 1,
     "scenario_005_varying_clutter": 1,
+    # Scenario 006: a 16-channel cube is 65.5 MB a frame, and the doa stage maps it again.
+    "scenario_006_parallel_resolved": 1,
+    "scenario_006_parallel_subrayleigh": 1,
+    "scenario_006_parallel_sweep": 1,
 }
 
 
