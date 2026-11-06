@@ -4,7 +4,8 @@ r"""A plot-level scenario played rotation by rotation, and the ground-plane trac
 the beam crosses each target at its own time, the plot model of
 :mod:`~radar_forge.tracking.scene` merges, detects and measures the echoes, and clutter and
 fixed discretes are added, each plot with the clutter intensity at it. :class:`PlotTracker`
-builds a :class:`~radar_forge.tracking.Tracker` from ``[tracking]`` and feeds it each rotation
+builds a :class:`~radar_forge.tracking.Tracker` (GNN, the JPDA family or MHT) or a
+:class:`~radar_forge.tracking.rfs.PmbmTracker` from ``[tracking]`` and feeds it each rotation
 as sector batches, keeping the clutter map as policy. Nothing here halves a range or does I/O.
 
 References
@@ -15,11 +16,12 @@ References
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -34,6 +36,7 @@ from radar_forge.tracking.filters import (
     TrackStatus,
     UnscentedTransform,
 )
+from radar_forge.tracking.hypotheses import TrackOrientedMHT
 from radar_forge.tracking.imm import InteractingMultipleModel
 from radar_forge.tracking.initiation import DebiasedSphericalInitiator
 from radar_forge.tracking.models import (
@@ -41,6 +44,7 @@ from radar_forge.tracking.models import (
     CoordinatedTurn,
     RangeAzimuthElevationRangeRate,
 )
+from radar_forge.tracking.rfs import PmbmTracker
 from radar_forge.tracking.scene import (
     LEAST_INTENSITY_PER_M_RAD,
     ClutterMap,
@@ -59,7 +63,7 @@ if TYPE_CHECKING:
     # Types only: scenario.py imports tracking.scene, so a run-time import would be a cycle.
     from radar_forge.scenario import Scenario, TrackingSettings
 
-__all__ = ["PlotScan", "PlotTracker", "scans"]
+__all__ = ["VARIANTS", "PlotScan", "PlotTracker", "scans", "tracker_name"]
 
 # A plot-level scan's one model, and the state coordinates a sector's coverage reads.
 _PLOTS = "plots"
@@ -68,6 +72,20 @@ _POSITION_VELOCITY = ("x_m", "xdot_mps", "y_m", "ydot_mps")
 # The fixed-point iterations that find when the beam crosses a moving target: its azimuth moves
 # under a degree a rotation, so each iteration shrinks the time error a hundredfold.
 _BEAM_ITERATIONS = 3
+
+# Each named tracker as [tracking]'s association, coalescence and existence; "pmbm" stands alone.
+VARIANTS: dict[
+    str, tuple[Literal["gnn", "jpda", "mht"], Literal["none", "jpda_star", "set"], bool]
+] = {
+    "gnn": ("gnn", "none", False),
+    "jpda": ("jpda", "none", False),
+    "jpda_star": ("jpda", "jpda_star", False),
+    "set": ("jpda", "set", False),
+    "jipda": ("jpda", "none", True),
+    "mht": ("mht", "none", False),
+}
+# A cue's spread about the truth: 50 m in position, 5 m/s in velocity (011a's A16 template).
+_CUE_SIGMA = {"x_m": 50.0, "y_m": 50.0, "xdot_mps": 5.0, "ydot_mps": 5.0}
 
 
 @dataclass(frozen=True, eq=False)
@@ -197,6 +215,12 @@ def scans(
         )
 
 
+def tracker_name(settings: TrackingSettings) -> str:
+    """Return the configured tracker's name, the key of :data:`VARIANTS` its settings match."""
+    chosen = (settings.association, settings.coalescence, settings.existence)
+    return next((name for name, value in VARIANTS.items() if value == chosen), "jpda")
+
+
 class PlotTracker:
     """The ``[tracking]`` table as a ground-plane :class:`~radar_forge.tracking.Tracker`.
 
@@ -209,14 +233,22 @@ class PlotTracker:
     ln(P_D / (1 - P_D P_G)), the track score's break-even; JPDA weighs
     confirmed tracks jointly and tentative ones alone, with the clutter intensity at each plot
     from the scene (``"oracle"``) or a :class:`~radar_forge.tracking.scene.ClutterMap`
-    (``"map"``) fed every plot no confirmed track took.
+    (``"map"``) fed every plot no confirmed track took. MHT scores by the same intensity.
+    ``name`` (a key of :data:`VARIANTS`, or ``"pmbm"``) replaces the configured association;
+    PMBM runs one CV model, the agile mode's under ``motion = "imm"``. ``seed_truth`` starts
+    each aircraft's track at its truth, confirmed.
     """
 
-    def __init__(self, scenario: Scenario) -> None:
+    def __init__(self, scenario: Scenario, name: str | None = None) -> None:
         settings, sensor = scenario.tracking, scenario.sensor
         if settings is None or sensor is None:
             msg = f"scenario {scenario.name!r} needs [sensor] and [tracking] to track plots."
             raise ValueError(msg)
+        if name is not None and name != "pmbm":
+            association, coalescence, existence = VARIANTS[name]
+            settings = dataclasses.replace(
+                settings, association=association, coalescence=coalescence, existence=existence
+            )
         self.sensor, self.settings = sensor, settings
         self.period_s = sensor.scan_period_s
         quiet, turn, agile = settings.mode_sigma_acceleration_mps2
@@ -242,10 +274,20 @@ class PlotTracker:
         prior = np.diag([v**2 for v in self._prior_sigma(layout.names, settings)])
         p_d, p_g = settings.detection_probability, settings.gate_probability
         self.components = scenario.clutter_plots.components
+        initiator = DebiasedSphericalInitiator(np.zeros(layout.dimension), prior)
         associator: Any = GlobalNearestNeighbour(math.log(p_d / (1 - p_d * p_g)))
         if settings.association == "jpda":
             associator = JointProbabilisticDataAssociation(p_d, p_g, settings.coalescence)
-        self.tracker = Tracker(
+        elif settings.association == "mht":
+            associator = TrackOrientedMHT(
+                p_d,
+                p_g,
+                settings.k_best,
+                settings.n_scan,
+                settings.confirm_score,
+                settings.delete_drop,
+            )
+        self.tracker: Tracker | PmbmTracker = Tracker(
             {_PLOTS: model},
             motion,
             {"taylor": TaylorLinearisation, "unscented": UnscentedTransform}[
@@ -253,7 +295,7 @@ class PlotTracker:
             ](),
             p_g,
             associator,
-            DebiasedSphericalInitiator(np.zeros(layout.dimension), prior),
+            initiator,
             LifecyclePolicy(
                 settings.n_confirm_hits,
                 settings.n_confirm_scans,
@@ -265,13 +307,57 @@ class PlotTracker:
             {_PLOTS: self.mean_intensity(scenario.start_time_s)},
             assignment=settings.assignment,
             coverage=self._covers,
-            existence=ExistencePolicy() if settings.existence else None,
+            existence=ExistencePolicy(settings.survival_probability)
+            if settings.existence
+            else None,
             max_birth_clutter_intensity=settings.max_birth_clutter_intensity_per_m_rad,
         )
+        if name == "pmbm":
+            sigma = settings.sigma_acceleration_mps2 if settings.motion == "cv" else agile
+            cv_prior = np.diag([v**2 for v in self._prior_sigma(cv.state_layout.names, settings)])
+            self.tracker = PmbmTracker(
+                CartesianMotion("xy", sigma_acceleration_mps2=sigma),
+                RangeAzimuthElevationRangeRate(
+                    cv.state_layout, np.zeros(3), ("range_m", "azimuth_rad"), fixed={"z_m": 0.0}
+                ),
+                DebiasedSphericalInitiator(np.zeros(cv.state_layout.dimension), cv_prior),
+                detection_probability=p_d,
+                gate_probability=p_g,
+                coverage_volume=2 * np.pi * (sensor.range_max_m - sensor.range_min_m),
+                birth_intensity_per_scan=settings.birth_intensity_per_scan,
+                survival_probability=settings.survival_probability,
+                prune_existence=settings.prune_existence,
+                prune_weight=settings.prune_weight,
+                max_birth_clutter_intensity=settings.max_birth_clutter_intensity_per_m_rad,
+                coverage=self._covers,
+                assignment=settings.assignment,
+            )
+        if settings.seed_truth:
+            self._seed(scenario)
         # The map starts at twice the birth threshold: no track starts where it has not looked.
         limit = settings.max_birth_clutter_intensity_per_m_rad
         self.clutter_map = ClutterMap(range_max_m=sensor.range_max_m, prior_per_m_rad=2 * limit)
         self._sector = 0
+
+    def _seed(self, scenario: Scenario) -> None:
+        """Start a confirmed track on each aircraft at its truth at the start time: a cue."""
+        start_s = scenario.start_time_s
+        aircraft = [t for t in scenario.arcs if t.target_class == "aircraft"]
+        # Position and velocity, east then north, per aircraft: (n, 4) in x, xdot, y, ydot order.
+        truth = np.array([np.ravel(np.array(t.arc.state(start_s)).T) for t in aircraft])
+        names = self.tracker.bank.layout.names
+        mean = np.zeros((len(aircraft), len(names)))
+        for k, name in enumerate(_POSITION_VELOCITY):
+            mean[:, names.index(name)] = truth[:, k]
+        sigma = self._prior_sigma(names, self.settings)
+        spread = np.array([_CUE_SIGMA.get(n, sigma[k]) for k, n in enumerate(names)])
+        covariance = np.zeros((len(aircraft), len(names), len(names))) + np.diag(spread**2)
+        self.tracker.seed(mean, covariance, start_s)
+
+    @property
+    def bank(self) -> TrackBank:
+        """Return the tracks this tracker reports now: every track, or MHT's and PMBM's best."""
+        return self.tracker.bank
 
     @staticmethod
     def _prior_sigma(names: Sequence[str], settings: TrackingSettings) -> list[float]:
@@ -304,9 +390,10 @@ class PlotTracker:
         """Track one rotation, sector by sector; return each batch's bank and JPDA clusters."""
         n_sectors = self.sensor.n_sectors
         # A drifting disc changes the regions' mean, so GNN's density is this rotation's.
-        self.tracker.clutter_density = MappingProxyType(
-            {_PLOTS: self.mean_intensity(plots.start_time_s)}
-        )
+        if isinstance(self.tracker, Tracker):
+            self.tracker.clutter_density = MappingProxyType(
+                {_PLOTS: self.mean_intensity(plots.start_time_s)}
+            )
         oracle = self.settings.clutter_intensity == "oracle"
         intensity = (
             plots.clutter_intensity_per_m_rad
@@ -321,11 +408,16 @@ class PlotTracker:
             time_s = plots.start_time_s + (sector + 0.5) / n_sectors * self.period_s
             z = np.column_stack([plots.range_m[mine], plots.azimuth_rad[mine]])
             scan = Scan(time_s, z, self.noise_covariance, _PLOTS, intensity[mine])
-            self.tracker.last_association = None
-            bank = self.tracker.process(scan)
+            association = None
+            if isinstance(self.tracker, Tracker):
+                self.tracker.last_association = None
+                bank = self.tracker.process(scan)
+                association = self.tracker.last_association
+            else:
+                bank = self.tracker.process(scan)
             confirmed = np.isin(bank.status, (TrackStatus.CONFIRMED, TrackStatus.COASTING))
             used = bank.measurement_index[confirmed & (bank.measurement_index >= 0)]
             taken[mine[used]] = True
-            results.append((bank, self.tracker.last_association))
+            results.append((bank, association))
         self.clutter_map.update(plots.range_m[~taken], plots.azimuth_rad[~taken])
         return results

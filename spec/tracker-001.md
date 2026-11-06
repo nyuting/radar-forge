@@ -1,8 +1,8 @@
 # Tracker 001 — Tracking architecture
 
 > Status: built, in `src/radar_forge/tracking/` (`models`, `filters`, `imm`, `association`,
-> `initiation`, `tracker`, `metrics`, `scene`, `scans`). Where this page and the code differ in a
-> name, the code's name stands.
+> `initiation`, `lifecycle`, `tracker`, `hypotheses`, `rfs`, `metrics`, `scene`, `scans`). Where
+> this page and the code differ in a name, the code's name stands.
 >
 > The tracker after the tracking refactor: one Gaussian filter, a batched track bank, one
 > correction core, one scan loop. Running it is in [the user guide](../docs/user-guide/06-tracking.md).
@@ -234,8 +234,11 @@ Built with scenario 011a (`config/scenario_011_*.toml`); none changes the loop.
   with a bound that raises.
 - **Coverage**: a `Coverage` predicate tells `Tracker` which tracks a scan could see, so a rotating
   radar's sector batches predict, gate and count each track once a rotation.
-- **Track-oriented MHT** and **PMBM** are [scenario 011b](scenario-011b-mht-pmbm.md)'s: MHT's tree
-  of leaves inside the one loop, PMBM a comparison tracker beside it.
+- **Track-oriented MHT** (scenario 011b), `tracking/hypotheses.py`: an associator with a
+  `hypotheses` method; `Tracker` then keeps a `TrackTree` of leaves, rows of a bank, scored by
+  Blackman's track score, ranked per cluster by `murty_k_best` and N-scan pruned, and reports
+  each cluster's best hypothesis, causally. **PMBM**, `tracking/rfs.py`, is a second tracker
+  beside the loop: `PmbmTracker` reports each track's marginal Bernoulli.
 
 ## 7. Integration, performance and validation
 
@@ -281,7 +284,10 @@ the metrics of `spec/data-001-formats.md` §6.9; for many targets GOSPA and traj
 - **D28: JPDA, JPDA\*, Set-JPDA and JIPDA return weights from `Associator.weights`.** Exact events
   per cluster with a bound that raises; clutter intensity per measurement from an oracle or a
   clutter map; JIPDA's existence drives an `ExistencePolicy`.
-- **D29, D30: track-oriented MHT and PMBM** are scenario 011b's.
+- **D29: track-oriented MHT inside the one loop**, its leaves a bank, its global hypotheses
+  pairs per cluster; confirmation and deletion by score on its path only.
+- **D30: PMBM a second tracker**, sharing the models, `innovate`, `murty_k_best` and the
+  hypothesis machinery of `tracking/hypotheses.py`.
 
 ## 9. Limitations
 

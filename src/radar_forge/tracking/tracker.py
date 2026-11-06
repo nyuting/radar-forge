@@ -8,9 +8,11 @@ a pair keeping the first it passes; associate, confirmed tracks first (the defau
 tracks and PDA over tentative ones; update; count hits and misses, confirming by M-of-N [1] or
 by existence (JIPDA [4]) and, on the miss that opens re-acquisition, resetting
 ``reacquire_reset``; start a row from each measurement no track took or gated; report deleted
-rows once and drop them. The bank is replaced only when a scan completes, so an error leaves
-the tracker as it was. At M = 3, N = 5: hit, miss, hit, miss, hit confirms on scan 5; hit,
-miss, miss, miss deletes on scan 4.
+rows once and drop them. An associator that branches (MHT) grows its trees' leaves instead,
+confirming and deleting by score, and the bank reports each cluster's best hypothesis. The
+bank is replaced only when a scan completes, so an error leaves the tracker as it was. At
+M = 3, N = 5: hit, miss, hit, miss, hit confirms on scan 5; hit, miss, miss, miss deletes on
+scan 4.
 
 References
 ----------
@@ -30,7 +32,7 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields, replace
 from types import MappingProxyType
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -53,6 +55,7 @@ from radar_forge.tracking.filters import (
     update,
     update_weighted,
 )
+from radar_forge.tracking.hypotheses import Hypothesiser, TrackTree
 from radar_forge.tracking.imm import (
     InteractingMultipleModel,
     imm_innovate,
@@ -261,21 +264,51 @@ class Tracker:
         self._weighs = (
             associator.weights(empty, empty.astype(bool), clutter_intensity=np.zeros(0)) is not None
         )
+        # An associator that branches (MHT) keeps its leaves in a tree; the bank then reports.
+        branches = callable(getattr(associator, "hypotheses", None))
+        self._mht = cast("Hypothesiser", associator) if branches else None
+        self.tree = TrackTree.empty(layout, n_modes) if branches else None
 
     def seed(self, mean: ArrayLike, covariance: ArrayLike, time_s: float) -> NDArray[np.int64]:
-        """Add tracks ``(n_new, n_state)`` from a cue and return their IDs; bistatic needs it."""
+        """Add tracks ``(n_new, n_state)`` from a cue, surely there, and return their IDs."""
         if self.time_s is not None and time_s < self.time_s - _TIME_TOLERANCE_S:
             msg = f"cannot seed at {time_s} s, before the last scan at {self.time_s} s."
             raise ValueError(msg)
         n_new = len(np.asarray(mean))
         ids = np.arange(self._next_track_id, self._next_track_id + n_new, dtype=np.int64)
-        self.bank = self._append(self.bank, mean, covariance, time_s, ids, None)
         self._next_track_id += n_new
+        if self._mht is None or self.tree is None:
+            # A cue is a confirmed track: under an existence policy, it surely exists.
+            self.bank = self._append(self.bank, mean, covariance, time_s, ids, None, 1.0)
+            return ids
+        # A cue is a confirmed track: its tree starts at the confirmation score.
+        status = np.full(n_new, TrackStatus.CONFIRMED)
+        roots = self._roots(mean, covariance, time_s, ids, status, None)
+        self.tree = self.tree.plant(roots, self._mht.confirm_score)
+        self.bank = self.tree.bank.take(self.tree.best_leaves())
         return ids
+
+    def _roots(
+        self,
+        mean: ArrayLike,
+        covariance: ArrayLike,
+        time_s: float,
+        ids: NDArray[np.int64],
+        status: ArrayLike,
+        measurement_index: ArrayLike | None,
+    ) -> TrackBank:
+        """Return new rows in a bank of their own, each IMM mode at its initial probability."""
+        empty = TrackBank.empty(self.bank.layout, self.bank.n_modes)
+        modes = None if self.imm is None else self.imm.initial_probability
+        return empty.append(
+            mean, covariance, time_s, ids, status, measurement_index, mode_probability=modes
+        )
 
     def process(self, scan: Scan) -> TrackBank:
         """Run one scan; return survivors then births, this scan's deleted rows included once."""
         model = self._check(scan)
+        if self._mht is not None and self.tree is not None:
+            return self._branch(scan, model, self._mht, self.tree)
         time_s = max(scan.time_s, float(self.bank.time_s.max(initial=scan.time_s)))
         seen = np.ones(self.bank.n_tracks, dtype=bool)
         if self.coverage is not None:
@@ -330,6 +363,7 @@ class Tracker:
         time_s: float,
         ids: NDArray[np.int64],
         measurement_index: ArrayLike | None,
+        initial_existence: float | None = None,
     ) -> TrackBank:
         """Append new rows: tentative (or confirmed under 1-of-N), at the initial existence."""
         n_new = len(ids)
@@ -337,7 +371,7 @@ class Tracker:
         status = m_of_n(np.zeros(n_new, dtype=np.int8), ones, ones, self.policy)
         existence = None
         if self.existence is not None:
-            existence = np.full(n_new, self.existence.initial)
+            existence = np.full(n_new, initial_existence or self.existence.initial)
             status = by_existence(np.zeros(n_new, dtype=np.int8), existence, self.existence)
         return bank.append(
             mean,
@@ -587,6 +621,83 @@ class Tracker:
         ]
         return result
 
+    def _branch(
+        self, scan: Scan, model: MeasurementModel, mht: Hypothesiser, tree: TrackTree
+    ) -> TrackBank:
+        """Grow every tree the scan covers by one scan of MHT; report each best hypothesis.
+
+        A tree is covered whole when any leaf is. A leaf is confirmed once its branch reaches
+        the confirmation score, coasting on a miss after; a tree left with no leaf is reported
+        once, deleted.
+        """
+        leaves = tree.bank
+        time_s = max(scan.time_s, float(leaves.time_s.max(initial=scan.time_s)))
+        seen = np.ones(leaves.n_tracks, dtype=bool)
+        if self.coverage is not None:
+            seen = np.asarray(self.coverage(leaves, scan), dtype=bool)
+        seen = np.isin(leaves.track_id, leaves.track_id[seen])
+        bank = self._predict(leaves.compact(seen), time_s)
+        none = np.full(bank.n_tracks, -1, dtype=np.int64)
+        bank = replace(bank, nis=np.full(bank.n_tracks, np.nan), measurement_index=none)
+        _, chosen, innovations = self._score(bank, scan, np.ones(bank.n_tracks, dtype=bool))
+        if len(innovations) != 1 or scan.clutter_intensity is None:
+            msg = "MHT needs one measurement model a scan and the Scan's clutter_intensity."
+            raise ValueError(msg)
+        size = scan.measurements.shape[1]
+        seeds = self.initiator.initiate(np.zeros((0, size)), np.zeros((0, size, size)), model)
+        born = self._may_start(scan) & (seeds is not None)
+        step = mht.hypotheses(
+            tree,
+            seen,
+            innovations[0][0].log_likelihood,
+            chosen >= 0,
+            clutter_intensity=scan.clutter_intensity,
+            born=born,
+            linking=None if self.assignment == "joint" else np.isin(bank.status, _CONFIRMED),
+        )
+        kept, new = step.measurement == -2, step.parent < 0
+        grown = ~kept & ~new
+        rows, taken = (np.cumsum(seen) - 1)[step.parent[grown]], step.measurement[grown]
+        innovation, modes = innovations[0]
+        scored = (innovation.take(rows), tuple(mode.take(rows) for mode in modes))
+        children = self._update(bank.take(rows), [scored], chosen[rows], taken)
+        hit = taken >= 0
+        state = np.where(hit, TrackStatus.CONFIRMED, TrackStatus.COASTING)
+        children = replace(
+            children,
+            status=np.where(step.confirmed[grown], state, TrackStatus.TENTATIVE).astype(np.int8),
+            n_hits=(children.n_hits + hit).astype(np.int32),
+            n_misses=np.where(hit, 0, children.n_misses + 1).astype(np.int32),
+            n_scans=(children.n_scans + 1).astype(np.int32),
+            last_hit_time_s=np.where(hit, time_s, children.last_hit_time_s),
+        )
+        free = step.measurement[new]
+        ids = np.arange(self._next_track_id, self._next_track_id + free.size, dtype=np.int64)
+        start = self.initiator.initiate(scan.measurements[free], scan.noise_covariance[free], model)
+        status = np.where(step.confirmed[new], TrackStatus.CONFIRMED, TrackStatus.TENTATIVE)
+        roots = bank.take(np.zeros(0, dtype=np.intp))
+        if start is not None:
+            roots = self._roots(*start, time_s, ids, status, free)
+        carried = leaves.take(step.parent[kept])
+        none = np.full(carried.n_tracks, -1, dtype=np.int64)
+        carried = replace(carried, nis=np.full(carried.n_tracks, np.nan), measurement_index=none)
+        order = np.concatenate([np.flatnonzero(kept), np.flatnonzero(grown), np.flatnonzero(new)])
+        self.tree = step.grow(carried.join(children, roots).take(np.argsort(order)))
+        report = self.tree.bank.take(self.tree.best_leaves())
+        gone = self.bank.compact(~np.isin(self.bank.track_id, self.tree.bank.track_id))
+        gone = replace(gone, status=np.full(gone.n_tracks, TrackStatus.DELETED, dtype=np.int8))
+        self.bank, self.time_s = report, time_s
+        self._next_track_id += free.size
+        return report.join(gone)
+
+    def _may_start(self, scan: Scan) -> NDArray[np.bool_]:
+        """Return where a track may start: wherever the clutter is under the birth limit."""
+        allowed = np.ones(len(scan.measurements), dtype=bool)
+        limit = self.max_birth_clutter_intensity
+        if limit is not None and scan.clutter_intensity is not None:
+            allowed &= scan.clutter_intensity <= limit
+        return allowed
+
     def _start(
         self,
         bank: TrackBank,
@@ -596,11 +707,7 @@ class Tracker:
         time_s: float,
     ) -> tuple[TrackBank, int]:
         """Append a tentative row per measurement no track used; return the next free ID."""
-        allowed = ~used
-        limit = self.max_birth_clutter_intensity
-        if limit is not None and scan.clutter_intensity is not None:
-            allowed &= scan.clutter_intensity <= limit
-        free = np.flatnonzero(allowed)
+        free = np.flatnonzero(~used & self._may_start(scan))
         rows = self.initiator.initiate(scan.measurements[free], scan.noise_covariance[free], model)
         if rows is None or not free.size:
             return bank, self._next_track_id
