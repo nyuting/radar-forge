@@ -1,15 +1,16 @@
-r"""The scan loop over a bank of tracks: its lifecycle rules, initiators and :class:`Tracker`.
+r"""The scan loop over a bank of tracks: its lifecycle rules and :class:`Tracker`.
 
-:meth:`Tracker.process` takes one :class:`Scan` and runs, over every track and measurement at
-once: predict; drop rows past ``max_coast_time_s``; innovate and gate through each model the
-selector offers, a pair keeping the first it passes; assign, confirmed tracks first (the
-default) or in one ``"joint"`` solve, which scenario 003 measured better (tracker-001 §5.1);
-update, once per model offered; count hits and misses as integer arithmetic, confirming by
-M-of-N [1] and, on the miss that opens re-acquisition, resetting ``reacquire_reset``; start a
-row from each unclaimed measurement (in two-stage assignment, none inside a confirmed gate);
-report deleted rows once and drop them. The bank is immutable and replaced only when a scan
-completes, so an error leaves the tracker as it was. At M = 3, N = 5: hit, miss, hit, miss, hit
-confirms on scan 5; hit, miss, miss, miss deletes on scan 4.
+:meth:`Tracker.process` takes one :class:`Scan` and runs, over every track the scan could see
+(``coverage``; default all) and every measurement at once: predict, by one model or an IMM;
+drop rows past ``max_coast_time_s``; innovate and gate through each model the selector offers,
+a pair keeping the first it passes; associate, confirmed tracks first (the default) or jointly
+(tracker-001 §5.1), by assignment or, for an associator that weights, by JPDA over confirmed
+tracks and PDA over tentative ones; update; count hits and misses, confirming by M-of-N [1] or
+by existence (JIPDA [4]) and, on the miss that opens re-acquisition, resetting
+``reacquire_reset``; start a row from each measurement no track took or gated; report deleted
+rows once and drop them. The bank is replaced only when a scan completes, so an error leaves
+the tracker as it was. At M = 3, N = 5: hit, miss, hit, miss, hit confirms on scan 5; hit,
+miss, miss, miss deletes on scan 4.
 
 References
 ----------
@@ -17,25 +18,25 @@ References
        Techniques*, YBS Publishing, 1995.
 .. [2] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications to Tracking
        and Navigation*, Wiley, 2001.
-.. [3] S. Bordonaro, P. Willett and Y. Bar-Shalom, "Decorrelated unbiased converted
-       measurement Kalman filter," *IEEE Trans. Aerosp. Electron. Syst.*, vol. 50, no. 2,
-       pp. 1431-1444, 2014, as restated by W. Wang et al., arXiv:1412.5524, §III-B.
-.. [4] S. S. Blackman and R. Popoli, *Design and Analysis of Modern Tracking Systems*,
+.. [3] S. S. Blackman and R. Popoli, *Design and Analysis of Modern Tracking Systems*,
        Artech House, 1999.
+.. [4] D. Mušicki and R. Evans, "Joint integrated probabilistic data association: JIPDA,"
+       *IEEE Trans. Aerosp. Electron. Syst.*, vol. 40, no. 3, pp. 1093-1099, 2004.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from types import MappingProxyType
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from radar_forge.tracking.association import (
+    AssociationWeights,
     Associator,
     Cost,
     association_cost,
@@ -50,25 +51,29 @@ from radar_forge.tracking.filters import (
     innovate,
     predict,
     update,
+    update_weighted,
 )
+from radar_forge.tracking.imm import (
+    InteractingMultipleModel,
+    imm_innovate,
+    imm_predict,
+    imm_update,
+)
+from radar_forge.tracking.initiation import Initiator
 from radar_forge.tracking.models import (
-    LinearMeasurement,
     MarginalModel,
     MeasurementModel,
     MotionModel,
-    RangeAzimuthElevationRangeRate,
     check_covariances,
 )
 
 __all__ = [
-    "DebiasedSphericalInitiator",
-    "DirectStateInitiator",
-    "Initiator",
+    "Coverage",
+    "ExistencePolicy",
     "LifecyclePolicy",
     "ModelSelector",
     "Scan",
     "Tracker",
-    "debiased_spherical_to_enu",
 ]
 
 # Two times this close are one time: one scan time computed two ways differs by roundoff far
@@ -79,6 +84,9 @@ _CONFIRMED = (TrackStatus.CONFIRMED, TrackStatus.COASTING)
 
 Rows = tuple[NDArray[np.float64], NDArray[np.float64]]
 
+# One model's scoring of a scan: the innovation that gates, and each IMM mode's (none without).
+Scored = tuple[Innovation, tuple[Innovation, ...]]
+
 
 @dataclass(frozen=True)
 class LifecyclePolicy:
@@ -87,6 +95,9 @@ class LifecyclePolicy:
     ``n_reacquire_misses`` extra misses in a row are allowed a confirmed track only.
     ``reacquire_reset`` names coordinates whose variances return to the prior, and
     cross-covariances to zero, on the miss that opens re-acquisition (tracker-001 §5.4).
+    ``max_position_sigma_m`` deletes a confirmed track once the square root of the largest
+    eigenvalue of its ENU position covariance exceeds it after the update; None never does. A
+    tentative track is spared: under PDA its covariance is wide until it has a velocity.
 
     References
     ----------
@@ -99,6 +110,7 @@ class LifecyclePolicy:
     n_reacquire_misses: int = 0
     max_coast_time_s: float = 30.0
     reacquire_reset: tuple[str, ...] = ()
+    max_position_sigma_m: float | None = None
 
     def __post_init__(self) -> None:
         """Reject a policy that could not work."""
@@ -111,11 +123,44 @@ class LifecyclePolicy:
         ):
             msg = f"need int counts, 1 <= M <= N, n_delete_misses >= 1; got {counts}."
             raise ValueError(msg)
-        names = self.reacquire_reset
+        names, sigma_m = self.reacquire_reset, self.max_position_sigma_m
         if not (math.isfinite(self.max_coast_time_s) and self.max_coast_time_s > 0) or not (
             isinstance(names, tuple) and len(set(names)) == len(names) and all(names)
         ):
             msg = f"need max_coast_time_s > 0 and unique reset names; got {names!r}."
+            raise ValueError(msg)
+        if sigma_m is not None and not (math.isfinite(sigma_m) and sigma_m > 0):
+            msg = f"max_position_sigma_m must be None or positive and finite; got {sigma_m}."
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True)
+class ExistencePolicy:
+    """Confirm and delete by the probability that a track's target exists (JIPDA).
+
+    Each scan that sees a track multiplies its existence by ``p_survival`` before the
+    association updates it; a track is confirmed at ``confirm`` or more and deleted below
+    ``delete``. A new track starts at ``initial``. It replaces M-of-N, and needs an associator
+    that weights.
+
+    References
+    ----------
+    Mušicki and Evans [4] (the existence prediction and the confirm and delete thresholds).
+    """
+
+    p_survival: float = 0.995
+    confirm: float = 0.95
+    delete: float = 0.05
+    initial: float = 0.2
+
+    def __post_init__(self) -> None:
+        """Need 0 < delete < initial and delete < confirm <= 1, survival in (0, 1]."""
+        if not (
+            0 < self.p_survival <= 1
+            and 0 < self.delete < self.initial <= 1
+            and self.delete < self.confirm <= 1
+        ):
+            msg = f"need 0 < delete < initial, confirm <= 1 and 0 < p_survival <= 1; got {self}."
             raise ValueError(msg)
 
 
@@ -125,7 +170,8 @@ class Scan:
 
     ``noise_covariance`` may be one ``(m, m)`` for every measurement; it is stored as the
     ``(n_meas, m, m)`` stack, each positive definite. ``(0, m)`` measurements is a scan that
-    saw nothing.
+    saw nothing. ``clutter_intensity`` ``(n_meas,)`` is the false-measurement density at each
+    measurement, per scan per unit of z: an associator that weights needs it.
 
     References
     ----------
@@ -136,6 +182,7 @@ class Scan:
     measurements: NDArray[np.float64]
     noise_covariance: NDArray[np.float64]
     model_id: str
+    clutter_intensity: NDArray[np.float64] | None = None
 
     def __post_init__(self) -> None:
         """Check, copy and freeze the measurements and their covariances."""
@@ -152,209 +199,18 @@ class Scan:
             shared = check_covariances(noise, (size, size), "noise_covariance")
             noise = np.zeros((n_meas, size, size)) + shared
         noise = check_covariances(noise, (n_meas, size, size), "noise_covariance")
+        if self.clutter_intensity is not None:
+            clutter = np.array(self.clutter_intensity, dtype=np.float64)
+            if clutter.shape != (n_meas,) or not np.all(np.isfinite(clutter) & (clutter > 0)):
+                msg = f"clutter_intensity must be ({n_meas},), positive and finite."
+                raise ValueError(msg)
+            clutter.setflags(write=False)
+            object.__setattr__(self, "clutter_intensity", clutter)
         measurements.setflags(write=False)
         noise.setflags(write=False)
         object.__setattr__(self, "time_s", float(self.time_s))
         object.__setattr__(self, "measurements", measurements)
         object.__setattr__(self, "noise_covariance", noise)
-
-
-class Initiator(Protocol):
-    """Starts tracks from a prior ``(n_state,)``; the re-acquisition reset reads it too."""
-
-    prior_mean: NDArray[np.float64]
-    prior_covariance: NDArray[np.float64]
-
-    def initiate(
-        self,
-        measurements: NDArray[np.float64],
-        noise_covariance: NDArray[np.float64],
-        model: MeasurementModel,
-    ) -> Rows | None:
-        """Return a mean and covariance per measurement, or None if ``model`` cannot seed."""
-        ...
-
-
-class _PriorInitiator:
-    """A prior, checked once, and the rule for writing measured coordinates into it."""
-
-    def __init__(self, prior_mean: ArrayLike, prior_covariance: ArrayLike) -> None:
-        mean = np.array(prior_mean, dtype=np.float64)
-        if mean.ndim != 1 or not np.all(np.isfinite(mean)):
-            msg = f"prior_mean must be a finite vector; got shape {mean.shape}."
-            raise ValueError(msg)
-        self.prior_mean = mean
-        shape = (len(mean), len(mean))
-        self.prior_covariance = check_covariances(prior_covariance, shape, "prior_covariance")
-
-    def _seed(
-        self, rows: Sequence[int], values: NDArray[np.float64], blocks: NDArray[np.float64]
-    ) -> Rows:
-        """Copy the prior per measurement, and replace the measured rows and their block."""
-        index = np.asarray(rows, dtype=np.intp)
-        # Replacing a block the prior ties to other coordinates would leave cross terms that
-        # no longer fit, and the covariance could stop being positive semidefinite.
-        if np.any(np.delete(self.prior_covariance[index], index, axis=1) != 0):
-            msg = f"the prior ties the measured coordinates {index.tolist()} to the others."
-            raise ValueError(msg)
-        mean = np.zeros((len(values), len(self.prior_mean))) + self.prior_mean
-        covariance = np.zeros((len(values), *self.prior_covariance.shape)) + self.prior_covariance
-        mean[:, index] = values
-        covariance[:, index[:, None], index[None, :]] = blocks
-        return mean, covariance
-
-
-class DirectStateInitiator(_PriorInitiator):
-    """Start a track by writing a linear measurement's coordinates and their R into a prior.
-
-    Unmeasured coordinates keep the prior, whose measured block must be uncorrelated with the
-    rest. ``seed_names`` copies only those, such as range while a folded rate is untrusted.
-    A model that is not a :class:`~radar_forge.tracking.models.LinearMeasurement` starts none.
-
-    References
-    ----------
-    Bar-Shalom [2], §5.5.
-    """
-
-    def __init__(
-        self,
-        prior_mean: ArrayLike,
-        prior_covariance: ArrayLike,
-        *,
-        seed_names: Sequence[str] | None = None,
-    ) -> None:
-        super().__init__(prior_mean, prior_covariance)
-        self.seed_names = None if seed_names is None else tuple(seed_names)
-
-    def initiate(
-        self,
-        measurements: NDArray[np.float64],
-        noise_covariance: NDArray[np.float64],
-        model: MeasurementModel,
-    ) -> Rows | None:
-        """Return the seeded rows, or None for a model that is not linear."""
-        if not isinstance(model, LinearMeasurement):
-            return None
-        names = self.seed_names or model.measurement_layout.names
-        rows = np.asarray(model.measurement_layout.indices(names))
-        blocks = noise_covariance[:, rows[:, None], rows[None, :]]
-        return self._seed(model.state_layout.indices(names), measurements[:, rows], blocks)
-
-
-def _angle_moments(
-    angle_rad: NDArray[np.float64], sigma_rad: NDArray[np.float64]
-) -> tuple[NDArray[np.float64], ...]:
-    """Return E[cos a], E[sin a], E[cos² a], E[sin² a], E[sin a cos a] for a Gaussian angle.
-
-    E[cos a] = λ cos ā with λ = exp(-sigma²/2); the double angle's damping is λ⁴.
-    """
-    damping, double_damping = np.exp(-(sigma_rad**2) / 2), np.exp(-2 * sigma_rad**2)
-    cos_2a = np.cos(2 * angle_rad)
-    return (
-        damping * np.cos(angle_rad),
-        damping * np.sin(angle_rad),
-        (1 + double_damping * cos_2a) / 2,
-        (1 - double_damping * cos_2a) / 2,
-        double_damping * np.sin(2 * angle_rad) / 2,
-    )
-
-
-def debiased_spherical_to_enu(
-    range_m: ArrayLike,
-    azimuth_rad: ArrayLike,
-    elevation_rad: ArrayLike,
-    sigma_range_m: ArrayLike,
-    sigma_azimuth_rad: ArrayLike,
-    sigma_elevation_rad: ArrayLike = 0.0,
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    r"""Return the ENU offset ``(..., 3)`` and covariance of the true position, without bias.
-
-    The naive conversion is biased towards the radar: the mean of cos(θ + w) is λ cos θ with
-    λ = exp(-sigma²/2). Given z, the true range and angles are Gaussians about the measured
-    ones, so with p = r d, :math:`E[p] = r_m E[d]` and :math:`\operatorname{cov} p = (r_m^2 +
-    \sigma_r^2) E[d d^T] - r_m^2 E[d] E[d]^T`: exact for Gaussian errors, and the posterior
-    under a flat prior. Azimuth is clockwise from north; elevation 0 for a 2-D radar.
-
-    >>> position_m, _ = debiased_spherical_to_enu(20_000.0, 0.0, 0.0, 10.0, 0.1)
-    >>> round(float(position_m[1]), 1)
-    19900.2
-
-    References
-    ----------
-    Bordonaro, Willett and Bar-Shalom [3], restated as eqs. (8)-(14) of arXiv:1412.5524.
-    """
-    given = (range_m, azimuth_rad, elevation_rad, sigma_range_m, sigma_azimuth_rad)
-    values = np.broadcast_arrays(
-        *(np.asarray(v, dtype=np.float64) for v in given),
-        np.asarray(sigma_elevation_rad, dtype=np.float64),
-    )
-    radius_m, azimuth, elevation, sigma_r, sigma_az, sigma_el = values
-    if not np.all(np.isfinite(values)) or np.any(radius_m <= 0) or np.any(np.stack(values[3:]) < 0):
-        msg = "need finite values, positive ranges and nonnegative standard deviations."
-        raise ValueError(msg)
-    cos_az, sin_az, cos2_az, sin2_az, sincos_az = _angle_moments(azimuth, sigma_az)
-    cos_el, sin_el, cos2_el, sin2_el, sincos_el = _angle_moments(elevation, sigma_el)
-    direction = np.stack([cos_el * sin_az, cos_el * cos_az, sin_el], axis=-1)
-    # E[d dᵀ]: azimuth and elevation are independent, so each entry factorises.
-    rows = [
-        [cos2_el * sin2_az, cos2_el * sincos_az, sincos_el * sin_az],
-        [cos2_el * sincos_az, cos2_el * cos2_az, sincos_el * cos_az],
-        [sincos_el * sin_az, sincos_el * cos_az, sin2_el],
-    ]
-    second_moment = np.stack([np.stack(row, axis=-1) for row in rows], axis=-2)
-    position_m = radius_m[..., None] * direction
-    outer = position_m[..., :, None] * position_m[..., None, :]
-    covariance_m2 = (radius_m**2 + sigma_r**2)[..., None, None] * second_moment - outer
-    return position_m, (covariance_m2 + np.swapaxes(covariance_m2, -1, -2)) / 2
-
-
-class DebiasedSphericalInitiator(_PriorInitiator):
-    """Start a track at a spherical measurement's debiased position; the rest keeps the prior.
-
-    Needs a :class:`~radar_forge.tracking.models.RangeAzimuthElevationRangeRate` model that
-    reports range and azimuth, with independent errors; the height keeps the prior when no
-    elevation is reported. Every later update uses the spherical model itself.
-
-    References
-    ----------
-    Bordonaro, Willett and Bar-Shalom [3].
-    """
-
-    def initiate(
-        self,
-        measurements: NDArray[np.float64],
-        noise_covariance: NDArray[np.float64],
-        model: MeasurementModel,
-    ) -> Rows | None:
-        """Return the converted rows, or None for a model without range and azimuth."""
-        if not isinstance(model, RangeAzimuthElevationRangeRate) or not (
-            {"range_m", "azimuth_rad"} <= set(model.components)
-        ):
-            return None
-        names = [n for n in ("range_m", "azimuth_rad", "elevation_rad") if n in model.components]
-        rows = np.asarray(model.measurement_layout.indices(names))
-        block = noise_covariance[:, rows[:, None], rows[None, :]]
-        if np.any(block != block * np.eye(len(rows))):
-            msg = f"the debiased conversion needs independent errors in {names}."
-            raise ValueError(msg)
-        value, sigma = measurements[:, rows], np.sqrt(np.diagonal(block, axis1=1, axis2=2))
-        elevation = len(rows) == 3
-        position_m, covariance_m2 = debiased_spherical_to_enu(
-            value[:, 0],
-            value[:, 1],
-            value[:, 2] if elevation else 0.0,
-            sigma[:, 0],
-            sigma[:, 1],
-            sigma[:, 2] if elevation else 0.0,
-        )
-        layout = model.state_layout
-        axes = [a for a in "xyz" if f"{a}_m" in layout.names and (a != "z" or elevation)]
-        enu = np.array(["xyz".index(a) for a in axes])
-        return self._seed(
-            layout.indices([f"{a}_m" for a in axes]),
-            (position_m + model.sensor_enu_m)[:, enu],
-            covariance_m2[:, enu[:, None], enu[None, :]],
-        )
 
 
 class ModelSelector(Protocol):
@@ -366,6 +222,18 @@ class ModelSelector(Protocol):
 
     def __call__(self, bank: TrackBank, model_id: str) -> Sequence[tuple[str, NDArray[np.bool_]]]:
         """Return ``(model_id, allowed)`` pairs, ``allowed`` of shape ``(n_tracks,)``."""
+        ...
+
+
+class Coverage(Protocol):
+    """Which tracks a scan could have seen, such as those in a rotating radar's sector.
+
+    A track the scan could not see is neither predicted, gated nor counted: its row waits,
+    at its own time, for the scan that covers it.
+    """
+
+    def __call__(self, bank: TrackBank, scan: Scan) -> NDArray[np.bool_]:
+        """Return ``(n_tracks,)`` True where the scan covers the track."""
         ...
 
 
@@ -385,10 +253,16 @@ def _m_of_n(
     return result
 
 
-def _births(n_new: int, policy: LifecyclePolicy) -> NDArray[np.int8]:
-    """Return new rows' status: tentative, or confirmed at once under 1-of-N."""
-    ones = np.ones(n_new, dtype=np.int32)
-    return _m_of_n(np.zeros(n_new, dtype=np.int8), ones, ones, policy)
+def _by_existence(
+    status: NDArray[np.int8], existence: NDArray[np.float64], policy: ExistencePolicy
+) -> NDArray[np.int8]:
+    """Confirm a tentative row at the confirm threshold; delete any row below delete."""
+    result = status.copy()
+    result[(status == TrackStatus.TENTATIVE) & (existence >= policy.confirm)] = (
+        TrackStatus.CONFIRMED
+    )
+    result[existence < policy.delete] = TrackStatus.DELETED
+    return result
 
 
 class Tracker:
@@ -398,6 +272,8 @@ class Tracker:
     ----------
     models : mapping of str to MeasurementModel
         Every model by ID, marginals included, all in the motion model's layout.
+    motion : MotionModel or InteractingMultipleModel
+        One motion model, or an IMM's modes, whose union layout the models share.
     linearisation : Linearisation
         ``TaylorLinearisation()`` (KF, EKF) or ``UnscentedTransform()`` (UKF).
     cost : {"nis", "negative_log_likelihood_ratio"}, default "nis"
@@ -406,16 +282,20 @@ class Tracker:
         λ per model ID: required for every model by the likelihood ratio, refused otherwise.
     model_selector : ModelSelector or None, optional
         None offers the scan's own model to every track.
+    existence : ExistencePolicy or None, optional
+        Confirm and delete by existence instead of M-of-N; needs an associator that weights.
+    max_birth_clutter_intensity : float or None, optional
+        No track starts from a measurement whose ``Scan.clutter_intensity`` exceeds this.
 
     References
     ----------
-    Bar-Shalom and Li [1], §2.6.1, and Blackman and Popoli [4] (M-of-N and assignment).
+    Bar-Shalom and Li [1], §2.6.1, and Blackman and Popoli [3] (M-of-N and assignment).
     """
 
     def __init__(
         self,
         models: Mapping[str, MeasurementModel],
-        motion: MotionModel,
+        motion: MotionModel | InteractingMultipleModel,
         linearisation: Linearisation,
         gate_probability: float,
         associator: Associator,
@@ -426,6 +306,9 @@ class Tracker:
         *,
         assignment: Literal["confirmed_first", "joint"] = "confirmed_first",
         model_selector: ModelSelector | None = None,
+        coverage: Coverage | None = None,
+        existence: ExistencePolicy | None = None,
+        max_birth_clutter_intensity: float | None = None,
     ) -> None:
         layout = motion.state_layout
         densities = dict(clutter_density or {})
@@ -450,6 +333,8 @@ class Tracker:
         chi_square_gate_threshold(gate_probability, 1)
         self.policy = policy or LifecyclePolicy()
         self._reset = np.asarray(layout.indices(self.policy.reacquire_reset), dtype=np.intp)
+        position = [f"{axis}_m" for axis in "xyz" if f"{axis}_m" in layout.names]
+        self._position = np.asarray(layout.indices(position), dtype=np.intp)
         self.models = MappingProxyType(dict(models))
         self.clutter_density = MappingProxyType(densities)
         self.motion = motion
@@ -460,9 +345,20 @@ class Tracker:
         self.cost = cost
         self.assignment = assignment
         self.model_selector = model_selector
-        self.bank = TrackBank.empty(layout)
+        self.coverage = coverage
+        self.existence = existence
+        self.max_birth_clutter_intensity = max_birth_clutter_intensity
+        self.imm = motion if isinstance(motion, InteractingMultipleModel) else None
+        n_modes = 0 if self.imm is None else len(self.imm.motions)
+        self.bank = TrackBank.empty(layout, n_modes)
         self.time_s: float | None = None
+        self.last_association: AssociationWeights | None = None
         self._next_track_id = 1
+        # Whether the associator weights: asked once, of an empty scan.
+        empty = np.zeros((0, 0))
+        self._weighs = (
+            associator.weights(empty, empty.astype(bool), clutter_intensity=np.zeros(0)) is not None
+        )
 
     def seed(self, mean: ArrayLike, covariance: ArrayLike, time_s: float) -> NDArray[np.int64]:
         """Add tracks ``(n_new, n_state)`` from a cue and return their IDs; bistatic needs it."""
@@ -471,7 +367,7 @@ class Tracker:
             raise ValueError(msg)
         n_new = len(np.asarray(mean))
         ids = np.arange(self._next_track_id, self._next_track_id + n_new, dtype=np.int64)
-        self.bank = self.bank.append(mean, covariance, time_s, ids, _births(n_new, self.policy))
+        self.bank = self._append(self.bank, mean, covariance, time_s, ids, None)
         self._next_track_id += n_new
         return ids
 
@@ -479,15 +375,28 @@ class Tracker:
         """Run one scan; return survivors then births, this scan's deleted rows included once."""
         model = self._check(scan)
         time_s = max(scan.time_s, float(self.bank.time_s.max(initial=scan.time_s)))
-        bank = predict(self.bank, self.motion, self.linearisation, time_s)
+        seen = np.ones(self.bank.n_tracks, dtype=bool)
+        if self.coverage is not None:
+            seen = np.asarray(self.coverage(self.bank, scan), dtype=bool)
+        bank = self.bank if seen.all() else self.bank.compact(seen)
+        bank = self._predict(bank, time_s)
         no_index = np.full(bank.n_tracks, -1, dtype=np.int64)
         bank = replace(bank, nis=np.full(bank.n_tracks, np.nan), measurement_index=no_index)
         live = time_s - bank.last_hit_time_s <= self.policy.max_coast_time_s
         cost, chosen, innovations = self._score(bank, scan, live)
-        assigned, blocked = self._assign(cost, chosen >= 0, bank.status)
-        bank = self._update(bank, innovations, chosen, assigned)
-        bank = self._count(bank, assigned >= 0, live, time_s)
-        bank, next_track_id = self._start(bank, scan, model, assigned, blocked, time_s)
+        weighed = self._weigh(bank, scan, chosen, innovations)
+        if weighed is None:
+            assigned, blocked = self._assign(cost, chosen >= 0, bank.status)
+            bank = self._update(bank, innovations, chosen, assigned)
+            hit = assigned >= 0
+            used = blocked.copy()
+            used[assigned[hit]] = True
+        else:
+            bank, hit, used = weighed
+        bank = self._count(bank, hit, live, time_s)
+        if not seen.all():
+            bank = self._merge(seen, bank)
+        bank, next_track_id = self._start(bank, scan, model, used, time_s)
         self.bank = bank.compact(bank.status != TrackStatus.DELETED)
         self.time_s, self._next_track_id = time_s, next_track_id
         return bank
@@ -498,12 +407,69 @@ class Tracker:
         if model is None or scan.measurements.shape[1] != model.measurement_layout.dimension:
             msg = f"scan model {scan.model_id!r} is unknown, or its dimension does not match."
             raise ValueError(msg)
+        if self._weighs and scan.clutter_intensity is None:
+            msg = (
+                "the associator weights by clutter intensity, so the Scan needs "
+                f"clutter_intensity, one per measurement: shape ({len(scan.measurements)},)."
+            )
+            raise ValueError(msg)
         last_scan_s = -math.inf if self.time_s is None else self.time_s
         latest_s = max(last_scan_s, float(self.bank.time_s.max(initial=-math.inf)))
         if scan.time_s < latest_s - _TIME_TOLERANCE_S:
             msg = f"out-of-sequence scan at {scan.time_s} s, after {latest_s} s."
             raise ValueError(msg)
         return model
+
+    def _append(
+        self,
+        bank: TrackBank,
+        mean: ArrayLike,
+        covariance: ArrayLike,
+        time_s: float,
+        ids: NDArray[np.int64],
+        measurement_index: ArrayLike | None,
+    ) -> TrackBank:
+        """Append new rows: tentative (or confirmed under 1-of-N), at the initial existence."""
+        n_new = len(ids)
+        ones = np.ones(n_new, dtype=np.int32)
+        status = _m_of_n(np.zeros(n_new, dtype=np.int8), ones, ones, self.policy)
+        existence = None
+        if self.existence is not None:
+            existence = np.full(n_new, self.existence.initial)
+            status = _by_existence(np.zeros(n_new, dtype=np.int8), existence, self.existence)
+        return bank.append(
+            mean,
+            covariance,
+            time_s,
+            ids,
+            status,
+            measurement_index,
+            existence=existence,
+            mode_probability=None if self.imm is None else self.imm.initial_probability,
+        )
+
+    def _predict(self, bank: TrackBank, time_s: float) -> TrackBank:
+        """Predict every row to ``time_s``, by its one model or its IMM, and its existence."""
+        if isinstance(self.motion, InteractingMultipleModel):
+            bank = imm_predict(bank, self.motion, self.linearisation, time_s)
+        else:
+            bank = predict(bank, self.motion, self.linearisation, time_s)
+        if self.existence is not None:
+            bank = replace(bank, existence=bank.existence * self.existence.p_survival)
+        return bank
+
+    def _merge(self, seen: NDArray[np.bool_], part: TrackBank) -> TrackBank:
+        """Return the bank with the seen rows replaced by ``part``; the rest took nothing."""
+        columns: dict[str, Any] = {}
+        for column in fields(TrackBank)[1:]:
+            values = getattr(self.bank, column.name).copy()
+            if column.name == "nis":
+                values[:] = np.nan
+            elif column.name == "measurement_index":
+                values[:] = -1
+            values[seen] = getattr(part, column.name)
+            columns[column.name] = values
+        return TrackBank(self.bank.layout, **columns)
 
     def _view(self, scan: Scan, model_id: str) -> Rows:
         """Return the scan as ``model_id`` sees it: itself, or a marginal's components."""
@@ -518,27 +484,30 @@ class Tracker:
 
     def _score(
         self, bank: TrackBank, scan: Scan, live: NDArray[np.bool_]
-    ) -> tuple[NDArray[np.float64], NDArray[np.intp], list[Innovation]]:
+    ) -> tuple[NDArray[np.float64], NDArray[np.intp], list[Scored]]:
         """Gate every pair; return costs, each pair's model index (-1 none) and innovations."""
         everyone = [(scan.model_id, np.ones(bank.n_tracks, dtype=bool))]
         selector = self.model_selector
         offered = everyone if selector is None else selector(bank, scan.model_id)
         cost = np.full((bank.n_tracks, len(scan.measurements)), np.inf)
         chosen = np.full(cost.shape, -1, dtype=np.intp)
-        innovations: list[Innovation] = []
+        innovations: list[Scored] = []
         # A loop over the few models offered; each is batched over every pair.
         for k, (model_id, allowed) in enumerate(offered):
             measurements, noise = self._view(scan, model_id)
-            innovation = innovate(
-                bank, self.models[model_id], self.linearisation, measurements, noise
-            )
+            arguments = (bank, self.models[model_id], self.linearisation, measurements, noise)
+            modes: tuple[Innovation, ...] = ()
+            if self.imm is None:
+                innovation = innovate(*arguments)
+            else:
+                innovation, modes = imm_innovate(*arguments)
             threshold = chi_square_gate_threshold(self.gate_probability, measurements.shape[1])
             passed = gate(innovation.nis, threshold) & (chosen < 0) & (live & allowed)[:, None]
             pair_cost = association_cost(innovation, self.cost, self.clutter_density.get(model_id))
             cost = np.where(passed, pair_cost, cost)
             chosen[passed] = k
-            innovations.append(innovation)
-        sizes = {innovations[k].innovation.shape[-1] for k in np.unique(chosen[chosen >= 0])}
+            innovations.append((innovation, modes))
+        sizes = {innovations[k][0].innovation.shape[-1] for k in np.unique(chosen[chosen >= 0])}
         if self.cost == "nis" and len(sizes) > 1:
             msg = f"NIS cannot compare dimensions {sorted(sizes)}; use the likelihood ratio."
             raise ValueError(msg)
@@ -559,10 +528,17 @@ class Tracker:
         assigned[np.flatnonzero(~first)[second >= 0]] = np.flatnonzero(free)[second[second >= 0]]
         return assigned, np.asarray(in_gate[first].any(axis=0), dtype=bool)
 
+    def _correct(self, bank: TrackBank, scored: Scored, weights: ArrayLike) -> TrackBank:
+        """Correct every row by association weights, through its one model or its IMM."""
+        innovation, modes = scored
+        if self.imm is None:
+            return update_weighted(bank, innovation, weights)
+        return imm_update(bank, innovation, modes, weights)
+
     def _update(
         self,
         bank: TrackBank,
-        innovations: list[Innovation],
+        innovations: list[Scored],
         chosen: NDArray[np.intp],
         assigned: NDArray[np.intp],
     ) -> TrackBank:
@@ -572,14 +548,91 @@ class Tracker:
         through[rows] = chosen[rows, assigned[rows]]
         nis, index = bank.nis.copy(), bank.measurement_index.copy()
         # One batched correction per model offered: a few, each over its own rows.
-        for k, innovation in enumerate(innovations):
+        for k, (innovation, modes) in enumerate(innovations):
             mine = np.flatnonzero(through == k)
             choice = np.full(bank.n_tracks, -1, dtype=np.intp)
             choice[mine] = assigned[mine]
-            bank = update(bank, innovation, choice)
+            if self.imm is None:
+                bank = update(bank, innovation, choice)
+            else:
+                one_hot = np.zeros((bank.n_tracks, innovation.nis.shape[1] + 1))
+                one_hot[np.arange(bank.n_tracks), choice] = 1.0
+                bank = imm_update(bank, innovation, modes, one_hot)
             nis[mine] = innovation.nis[mine, assigned[mine]]
         index[rows] = assigned[rows]
         return replace(bank, nis=nis, measurement_index=index)
+
+    def _weigh(
+        self, bank: TrackBank, scan: Scan, chosen: NDArray[np.intp], innovations: list[Scored]
+    ) -> tuple[TrackBank, NDArray[np.bool_], NDArray[np.bool_]] | None:
+        """Update every row by association weights; None for an associator that only assigns.
+
+        Confirmed rows are weighted jointly (JPDA, JIPDA), and in ``"confirmed_first"``
+        assignment tentative rows each alone (PDA, IPDA) over the measurements outside every
+        confirmed gate, so a new track's wide gate never joins a cluster. Returns the bank,
+        whether each row took a measurement (weights over half: its hit), and the measurements
+        any row gated.
+        """
+        in_gate = chosen >= 0
+        n_meas = in_gate.shape[1]
+        first = np.ones(bank.n_tracks, dtype=bool)
+        if self.assignment == "confirmed_first":
+            first = np.isin(bank.status, _CONFIRMED)
+        prior = bank.existence if self.existence is not None else None
+        clutter = scan.clutter_intensity
+        log_likelihood = innovations[0][0].log_likelihood
+        joint = self.associator.weights(
+            log_likelihood[first],
+            in_gate[first],
+            clutter_intensity=clutter,
+            existence=None if prior is None else prior[first],
+        )
+        if joint is None:
+            if self.existence is not None:
+                msg = "an existence policy needs an associator that returns weights."
+                raise ValueError(msg)
+            return None
+        if len(innovations) != 1:
+            msg = "probabilistic association needs one measurement model a scan."
+            raise ValueError(msg)
+        weights = np.zeros((bank.n_tracks, n_meas + 1))
+        weights[:, -1] = 1.0
+        weights[first] = joint.weights
+        existence = bank.existence.copy()
+        existence[first] = joint.existence
+        free = np.asarray(~in_gate[first].any(axis=0), dtype=bool)
+        in_gate = in_gate & (first[:, None] | free[None, :])
+        second = ~first
+        if second.any():
+            alone = self.associator.weights(
+                log_likelihood[second][:, free],
+                in_gate[second][:, free],
+                clutter_intensity=None if clutter is None else clutter[free],
+                existence=None if prior is None else prior[second],
+                joint=False,
+            )
+            if alone is not None:
+                rows = np.flatnonzero(second)
+                weights[rows] = 0.0
+                weights[np.ix_(rows, np.flatnonzero(free))] = alone.weights[:, :-1]
+                weights[rows, -1] = alone.weights[:, -1]
+                existence[rows] = alone.existence
+        self.last_association = joint
+        bank = self._correct(bank, innovations[0], weights)
+        # A track took a measurement, its hit, when one is likelier than none; that one is
+        # recorded as the measurement it took.
+        taken = np.asarray(weights[:, :-1].sum(axis=1) > 0.5, dtype=bool)
+        index = np.full(bank.n_tracks, -1, dtype=np.int64)
+        nis = np.full(bank.n_tracks, np.nan)
+        if n_meas:
+            likeliest = weights[:, :-1].argmax(axis=1)
+            index[taken] = likeliest[taken]
+            nis[taken] = innovations[0][0].nis[np.flatnonzero(taken), likeliest[taken]]
+        if self.existence is not None:
+            # Round-off can leave a sure target at 1 + eps, which the next scan would refuse.
+            bank = replace(bank, existence=np.clip(existence, np.finfo(float).tiny, 1.0))
+        bank = replace(bank, nis=nis, measurement_index=index)
+        return bank, taken, np.asarray(in_gate.any(axis=0), dtype=bool)
 
     def _count(
         self, bank: TrackBank, hit: NDArray[np.bool_], live: NDArray[np.bool_], time_s: float
@@ -592,21 +645,29 @@ class Tracker:
         status = bank.status.copy()
         status[hit & (status == TrackStatus.COASTING)] = TrackStatus.CONFIRMED
         status[live & ~hit & (status == TrackStatus.CONFIRMED)] = TrackStatus.COASTING
-        status = _m_of_n(status, n_hits, n_scans, policy)
-        extra = np.where(np.isin(status, _CONFIRMED), policy.n_reacquire_misses, 0)
-        status[~live | (n_misses >= policy.n_delete_misses + extra)] = TrackStatus.DELETED
+        if self.existence is not None:
+            status = _by_existence(status, bank.existence, self.existence)
+            status[~live] = TrackStatus.DELETED
+        else:
+            status = _m_of_n(status, n_hits, n_scans, policy)
+            extra = np.where(np.isin(status, _CONFIRMED), policy.n_reacquire_misses, 0)
+            status[~live | (n_misses >= policy.n_delete_misses + extra)] = TrackStatus.DELETED
+        if policy.max_position_sigma_m is not None and self._position.size:
+            block = bank.covariance[:, self._position[:, None], self._position[None, :]]
+            largest_m2 = np.linalg.eigvalsh(block)[:, -1] if len(block) else np.zeros(0)
+            wide = (largest_m2 > policy.max_position_sigma_m**2) & np.isin(status, _CONFIRMED)
+            status[wide] = TrackStatus.DELETED
         # The miss that opens re-acquisition, and only it: a later reset would undo what the
         # coast has learnt.
         reset = (status == TrackStatus.COASTING) & (n_misses == policy.n_delete_misses)
-        covariance, kept = bank.covariance.copy(), self._reset
-        block = covariance[reset]
-        block[:, kept, :] = 0.0
-        block[:, :, kept] = 0.0
-        block[:, kept[:, None], kept[None, :]] = self.initiator.prior_covariance[np.ix_(kept, kept)]
-        covariance[reset] = block
+        covariance, modes = bank.covariance.copy(), bank.mode_covariance.copy()
+        # An IMM predicts from its modes, so each mode is reset with the mixture.
+        covariance[reset] = self._reset_block(covariance[reset])
+        modes[reset] = self._reset_block(modes[reset])
         return replace(
             bank,
             covariance=covariance,
+            mode_covariance=modes,
             status=status,
             n_hits=n_hits,
             n_misses=n_misses,
@@ -614,22 +675,32 @@ class Tracker:
             last_hit_time_s=np.where(hit, time_s, bank.last_hit_time_s),
         )
 
+    def _reset_block(self, matrices: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Return covariances ``(..., n, n)`` with the reset coordinates back at the prior."""
+        kept, result = self._reset, matrices.copy()
+        result[..., kept, :] = 0.0
+        result[..., :, kept] = 0.0
+        result[..., kept[:, None], kept[None, :]] = self.initiator.prior_covariance[
+            np.ix_(kept, kept)
+        ]
+        return result
+
     def _start(
         self,
         bank: TrackBank,
         scan: Scan,
         model: MeasurementModel,
-        assigned: NDArray[np.intp],
-        blocked: NDArray[np.bool_],
+        used: NDArray[np.bool_],
         time_s: float,
     ) -> tuple[TrackBank, int]:
-        """Append a tentative row per measurement no track took; return the next free ID."""
-        claimed = np.zeros(len(scan.measurements), dtype=bool)
-        claimed[assigned[assigned >= 0]] = True
-        free = np.flatnonzero(~claimed & ~blocked)
+        """Append a tentative row per measurement no track used; return the next free ID."""
+        allowed = ~used
+        limit = self.max_birth_clutter_intensity
+        if limit is not None and scan.clutter_intensity is not None:
+            allowed &= scan.clutter_intensity <= limit
+        free = np.flatnonzero(allowed)
         rows = self.initiator.initiate(scan.measurements[free], scan.noise_covariance[free], model)
         if rows is None or not free.size:
             return bank, self._next_track_id
         ids = np.arange(self._next_track_id, self._next_track_id + free.size, dtype=np.int64)
-        status = _births(free.size, self.policy)
-        return bank.append(*rows, time_s, ids, status, free), int(ids[-1]) + 1
+        return self._append(bank, *rows, time_s, ids, free), int(ids[-1]) + 1

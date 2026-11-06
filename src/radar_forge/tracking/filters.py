@@ -3,10 +3,12 @@ r"""The Gaussian filter over a bank of tracks: the KF, the EKF and the UKF in on
 A track is a row of a :class:`TrackBank`, a struct of arrays. :func:`predict` moves every row;
 :func:`innovate` scores every row against every measurement of a scan, ``(n_tracks, n_meas)``
 pairs from one batched Cholesky factorisation and no loop over pairs; :func:`update` is the one
-correction core. The filters differ only in their :class:`Linearisation` [2]:
+correction core, and :func:`update_weighted` the same core over a probabilistic association
+(PDA, JPDA). The filters differ only in their :class:`Linearisation` [2]:
 :class:`TaylorLinearisation` (KF on linear models, EKF otherwise) or :class:`UnscentedTransform`
-(UKF). Nothing asks which one it holds; the core only asks whether H exists. Validation happens
-once, in :meth:`TrackBank.append`.
+(UKF). Nothing asks which one it holds; the core only asks whether H exists. An IMM bank also
+carries each mode's estimate and probability, which :mod:`~radar_forge.tracking.imm` moves
+and corrects. Validation happens once, in :meth:`TrackBank.append`.
 
 References
 ----------
@@ -16,6 +18,8 @@ References
 .. [3] E. A. Wan and R. van der Merwe, "The unscented Kalman filter for nonlinear estimation,"
        *Proc. IEEE Adaptive Systems for Signal Processing, Communications, and Control
        Symposium*, 2000, pp. 153-158.
+.. [4] Y. Bar-Shalom, F. Daum and J. Huang, "The probabilistic data association filter,"
+       *IEEE Control Syst. Mag.*, vol. 29, no. 6, pp. 82-100, 2009.
 """
 
 from __future__ import annotations
@@ -47,6 +51,7 @@ __all__ = [
     "innovate",
     "predict",
     "update",
+    "update_weighted",
 ]
 
 
@@ -101,7 +106,11 @@ class TrackBank:
     Treat it as immutable; every function returns a new bank. :meth:`empty` and
     :meth:`append` validate, the constructor trusts. The counts are int32 (a birth is one scan
     and one hit), ``status`` int8 :class:`TrackStatus`, ``nis`` NaN and ``measurement_index``
-    -1 for a row with no measurement this scan.
+    -1 for a row with no measurement this scan. ``existence`` is the probability the target is
+    real (1 unless an existence policy runs). An IMM bank's ``mean`` and ``covariance`` are the
+    mixture's, with each mode's in ``mode_mean`` ``(n_tracks, n_modes, n_state)``,
+    ``mode_covariance`` and ``mode_probability`` ``(n_tracks, n_modes)``; ``n_modes`` is 0
+    otherwise. Every column has the track as its first axis, so a row is always one track.
 
     References
     ----------
@@ -120,18 +129,35 @@ class TrackBank:
     last_hit_time_s: NDArray[np.float64]
     nis: NDArray[np.float64]
     measurement_index: NDArray[np.int64]
+    existence: NDArray[np.float64]
+    mode_probability: NDArray[np.float64]
+    mode_mean: NDArray[np.float64]
+    mode_covariance: NDArray[np.float64]
 
     @classmethod
-    def empty(cls, layout: StateLayout) -> TrackBank:
-        """Return a bank with no rows."""
-        n_state = layout.dimension
-        columns = {f.name: np.zeros(0, dtype=_DTYPES[f.name]) for f in fields(cls)[3:]}
-        return cls(layout, np.zeros((0, n_state)), np.zeros((0, n_state, n_state)), **columns)
+    def empty(cls, layout: StateLayout, n_modes: int = 0) -> TrackBank:
+        """Return a bank with no rows, holding ``n_modes`` IMM modes (0: one model)."""
+        n = layout.dimension
+        columns = {name: np.zeros(0, dtype=dtype) for name, dtype in _DTYPES.items()}
+        return cls(
+            layout,
+            np.zeros((0, n)),
+            np.zeros((0, n, n)),
+            **columns,
+            mode_probability=np.zeros((0, n_modes)),
+            mode_mean=np.zeros((0, n_modes, n)),
+            mode_covariance=np.zeros((0, n_modes, n, n)),
+        )
 
     @property
     def n_tracks(self) -> int:
         """Number of rows."""
         return len(self.track_id)
+
+    @property
+    def n_modes(self) -> int:
+        """Number of IMM modes; 0 for a one-model bank."""
+        return int(self.mode_probability.shape[1])
 
     def append(
         self,
@@ -141,8 +167,16 @@ class TrackBank:
         track_id: ArrayLike,
         status: ArrayLike,
         measurement_index: ArrayLike | None = None,
+        *,
+        existence: ArrayLike | None = None,
+        mode_probability: ArrayLike | None = None,
     ) -> TrackBank:
-        """Return the bank with new rows ``(n_new, n_state)``, validated: the API boundary."""
+        """Return the bank with new rows ``(n_new, n_state)``, validated: the API boundary.
+
+        Every IMM mode starts at the row's mean and covariance, weighted by
+        ``mode_probability`` ``(n_modes,)`` or ``(n_new, n_modes)``; ``existence`` defaults
+        to 1.
+        """
         n_state = self.layout.dimension
         new_mean = np.array(mean, dtype=np.float64)
         if new_mean.ndim != 2 or new_mean.shape[1] != n_state or not np.all(np.isfinite(new_mean)):
@@ -165,10 +199,28 @@ class TrackBank:
             "last_hit_time_s": np.full(n_new, time_s, dtype=np.float64),
             "nis": np.full(n_new, np.nan),
             "measurement_index": _column(index, n_new, np.int64, "measurement_index"),
+            "existence": _column(
+                np.ones(n_new) if existence is None else existence, n_new, np.float64, "existence"
+            ),
         }
         if not np.all(np.isin(new["status"], list(TrackStatus))):
             msg = f"status must hold TrackStatus values; got {new['status'].tolist()}."
             raise ValueError(msg)
+        if not np.all((new["existence"] > 0) & (new["existence"] <= 1)):
+            msg = f"existence must lie in (0, 1]; got {new['existence'].tolist()}."
+            raise ValueError(msg)
+        n_modes = self.n_modes
+        weights = np.zeros((n_new, n_modes))
+        if n_modes:
+            weights = weights + np.asarray(mode_probability, dtype=np.float64)
+            if not (np.all(weights >= 0) and np.allclose(weights.sum(axis=1), 1.0)):
+                msg = f"mode_probability must be ({n_modes},) weights summing to 1."
+                raise ValueError(msg)
+        new["mode_probability"] = weights
+        new["mode_mean"] = np.zeros((n_new, n_modes, n_state)) + new_mean[:, None]
+        new["mode_covariance"] = (
+            np.zeros((n_new, n_modes, n_state, n_state)) + new["covariance"][:, None]
+        )
         columns = {name: np.concatenate([getattr(self, name), new[name]]) for name in new}
         return TrackBank(self.layout, **columns)
 
@@ -212,6 +264,7 @@ _DTYPES = {
     "last_hit_time_s": np.float64,
     "nis": np.float64,
     "measurement_index": np.int64,
+    "existence": np.float64,
 }
 
 
@@ -251,8 +304,9 @@ class TaylorLinearisation:
 
     With F and H the Jacobians at the mean this is the textbook filter line for line:
     :math:`\hat{x}^- = F \hat{x}`, :math:`P^- = F P F^T + Q`, :math:`P_{xz} = P^- H^T`,
-    :math:`S - R = H P^- H^T`, with one F per step for both mean and covariance (every motion
-    model is linear). It hands H to the correction core, which then takes the Joseph form.
+    :math:`S - R = H P^- H^T`. The mean goes through the motion model, :math:`f(\hat{x})`,
+    and the covariance through its Jacobian F; on a linear model f(x̂) is F x̂ to the bit. It
+    hands H to the correction core, which then takes the Joseph form.
 
     References
     ----------
@@ -262,10 +316,10 @@ class TaylorLinearisation:
     def predict(
         self, motion: MotionModel, bank: TrackBank, dt_s: NDArray[np.float64]
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-        r"""Return :math:`F \hat{x}` and :math:`F P F^T + Q` for every row, from one F."""
+        r"""Return :math:`f(\hat{x})` and :math:`F P F^T + Q` for every row."""
         transition = motion.jacobian(bank.mean, dt_s)
         noise = motion.process_noise(bank.mean, dt_s)
-        mean = bank.layout.wrap((transition @ bank.mean[..., None])[..., 0])
+        mean = bank.layout.wrap(motion.transition(bank.mean, dt_s))
         return mean, _symmetrise(transition @ bank.covariance @ _transpose(transition) + noise)
 
     def measure(self, model: MeasurementModel, bank: TrackBank) -> MeasurementMoments:
@@ -461,7 +515,17 @@ def update(
     """
     choice = np.asarray(assigned, dtype=np.intp)
     rows = np.flatnonzero(choice >= 0)
-    cols = choice[rows]
+    step, posterior = _correct(bank, innovation, rows, choice[rows])
+    mean, full_covariance = bank.mean.copy(), bank.covariance.copy()
+    mean[rows] = bank.layout.wrap(bank.mean[rows] + step)
+    full_covariance[rows] = _symmetrise(posterior)
+    return replace(bank, mean=mean, covariance=full_covariance)
+
+
+def _correct(
+    bank: TrackBank, innovation: Innovation, rows: NDArray[np.intp], cols: NDArray[np.intp]
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Return the Kalman step (gain times innovation) and posterior covariance of each pair."""
     covariance = innovation.innovation_covariance[rows, cols]
     cross = innovation.moments.cross_covariance[rows]
     gain = _transpose(np.linalg.solve(covariance, _transpose(cross)))
@@ -473,8 +537,34 @@ def update(
         spread = np.eye(bank.layout.dimension) - gain @ matrix[rows]
         noise = innovation.measurement_noise[cols]
         posterior = spread @ prior @ _transpose(spread) + gain @ noise @ _transpose(gain)
-    mean, full_covariance = bank.mean.copy(), bank.covariance.copy()
     step = (gain @ innovation.innovation[rows, cols][..., None])[..., 0]
-    mean[rows] = bank.layout.wrap(bank.mean[rows] + step)
-    full_covariance[rows] = _symmetrise(posterior)
-    return replace(bank, mean=mean, covariance=full_covariance)
+    return step, posterior
+
+
+def update_weighted(bank: TrackBank, innovation: Innovation, weights: ArrayLike) -> TrackBank:
+    r"""Correct each row with every measurement at once, by association weights.
+
+    ``weights`` is ``(n_tracks, n_meas + 1)``, rows summing to one, the last column the
+    probability that none is the target's. Each weighted pair is corrected by the core of
+    :func:`update`, and the row becomes the moments of that mixture: :math:`\hat{x} = \hat{x}^-
+    + \sum_j \beta_j K_j \nu_j`, :math:`P = \beta_0 P^- + \sum_j \beta_j (P_j + s_j s_j^T) -
+    \bar{s} \bar{s}^T` with :math:`s_j = K_j \nu_j`. With one R for every measurement this is
+    the PDA update, :math:`\beta_0 P^- + (1 - \beta_0) P^c + K (\sum_j \beta_j \nu_j \nu_j^T -
+    \bar{\nu} \bar{\nu}^T) K^T`; with a one-hot row, the Kalman update.
+
+    References
+    ----------
+    Bar-Shalom, Daum and Huang [4], the PDAF state and covariance update.
+    """
+    beta = np.asarray(weights, dtype=np.float64)
+    rows, cols = np.nonzero(beta[:, :-1] > 0)
+    step, posterior = _correct(bank, innovation, rows, cols)
+    weight = beta[rows, cols]
+    shift = np.zeros_like(bank.mean)
+    np.add.at(shift, rows, weight[:, None] * step)
+    outer = posterior + step[:, :, None] * step[:, None, :]
+    covariance = beta[:, -1, None, None] * bank.covariance
+    np.add.at(covariance, rows, weight[:, None, None] * outer)
+    covariance -= shift[:, :, None] * shift[:, None, :]
+    mean = bank.layout.wrap(bank.mean + shift)
+    return replace(bank, mean=mean, covariance=_symmetrise(covariance))

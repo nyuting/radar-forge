@@ -19,6 +19,7 @@ from radar_forge.tracking.models import (
     BistaticRangeRateModel,
     CartesianMotion,
     Coordinate,
+    CoordinatedTurn,
     LinearMeasurement,
     MarginalModel,
     RadialConstantVelocity,
@@ -422,3 +423,87 @@ def test_a_marginal_keeps_the_named_components_rows_and_periods() -> None:
 def test_a_marginal_needs_known_unique_components(names: tuple[str, ...]) -> None:
     with pytest.raises(ValueError, match=r"marginal|not in the layout"):
         marginal(LinearMeasurement(LAYOUT_3D, ("x_m",)), names)
+
+
+# --- CoordinatedTurn (spec 011 D26, criterion A1) ---
+
+
+def test_a_coordinated_turn_at_zero_rate_is_constant_velocity_exactly() -> None:
+    """At omega = 0 the series branch gives CV's F and Q to the bit, on the shared axes."""
+    turn, cv = CoordinatedTurn(0.5), CartesianMotion("xy", sigma_acceleration_mps2=0.5)
+    state = np.array([1e4, 72.0, -2e3, -30.0, 0.0])
+    np.testing.assert_array_equal(turn.jacobian(state, 4.8)[:4, :4], cv.jacobian(state[:4], 4.8))
+    np.testing.assert_array_equal(
+        turn.process_noise(state, 4.8)[:4, :4], cv.process_noise(state[:4], 4.8)
+    )
+
+
+def test_a_coordinated_turn_near_zero_rate_differs_from_cv_by_its_first_order_term() -> None:
+    """At omega = 1e-9 F - F_CV is omega T²/2 across axes and omega T on velocity (A1, restated).
+
+    A1 asked for equality at rtol 1e-10, which no entry that is zero in CV can meet: the turn's
+    first-order term is a real 1.2e-8 there. rtol 1e-10 holds against the series instead.
+    """
+    rate, step = 1e-9, 4.8
+    turn = CoordinatedTurn(0.5)
+    cv = CartesianMotion("xy", sigma_acceleration_mps2=0.5).jacobian(np.zeros(4), step)
+    expected = cv.copy()
+    expected[0, 3], expected[2, 1] = rate * step**2 / 2, -rate * step**2 / 2
+    expected[1, 3], expected[3, 1] = rate * step, -rate * step
+    got = turn.jacobian(np.array([0.0, 0.0, 0.0, 0.0, rate]), step)[:4, :4]
+    np.testing.assert_allclose(got, expected, rtol=1e-10, atol=0.0)
+
+
+def test_a_coordinated_turn_is_continuous_across_the_series_threshold() -> None:
+    """F either side of |omega T| = 1e-6 agrees to rtol 1e-10: the series is not a step."""
+    step = 4.8
+    # A relative 1e-12 either side: entries proportional to the rate then move by 2e-12.
+    below, above = (1e-6 / step) * (1 - 1e-12), (1e-6 / step) * (1 + 1e-12)
+    turn = CoordinatedTurn(0.5)
+    state = np.array([[1e4, 72.0, -2e3, -30.0, below], [1e4, 72.0, -2e3, -30.0, above]])
+    jacobian = turn.jacobian(state, step)
+    # rtol 1e-10 on F; the omega column is 1e-5 of the rest, so it is held to 1e-10 of F's scale.
+    np.testing.assert_allclose(jacobian[0], jacobian[1], rtol=1e-10, atol=1e-10 * step)
+    # The rate itself differs by 2e-12 between the two states; the moved position does not.
+    moved = turn.transition(state, step)
+    np.testing.assert_allclose(moved[0, :4], moved[1, :4], rtol=1e-12)
+
+
+def test_a_positive_turn_rate_turns_right_onto_the_textbook_radius() -> None:
+    """Heading north at 72 m/s, +3 deg/s for 30 s: heading east, at (R, R), R = v / omega."""
+    rate = np.radians(3.0)
+    radius = 72.0 / rate
+    moved = CoordinatedTurn().transition(np.array([0.0, 0.0, 0.0, 72.0, rate]), 30.0)
+    # rtol 1e-12: a handful of trigonometric evaluations.
+    np.testing.assert_allclose(moved[[0, 2]], [radius, radius], rtol=1e-12)
+    np.testing.assert_allclose(moved[[1, 3]], [72.0, 0.0], atol=1e-12)
+
+
+def test_a_coordinated_turn_jacobian_matches_central_differences() -> None:
+    """The analytic Jacobian, rate column included, against a central difference."""
+    rng = np.random.default_rng(20261106)
+    states = np.column_stack(
+        [
+            rng.normal(0, 1e4, 20),
+            rng.normal(0, 100, 20),
+            rng.normal(0, 1e4, 20),
+            rng.normal(0, 100, 20),
+            rng.normal(0, 0.05, 20),
+        ]
+    )
+    turn = CoordinatedTurn()
+    step = 1e-6 * np.maximum(np.abs(states), 1.0)
+    # One central difference per state coordinate: five.
+    numeric = np.stack(
+        [
+            (
+                turn.transition(states + h[:, None] * e, 4.8)
+                - turn.transition(states - h[:, None] * e, 4.8)
+            )
+            / (2 * h[:, None])
+            for h, e in zip(step.T, np.eye(5), strict=True)
+        ],
+        axis=-1,
+    )
+    # rtol 1e-6: a central difference's truncation and cancellation, at a 1e-6 relative step.
+    np.testing.assert_allclose(turn.jacobian(states, 4.8), numeric, rtol=1e-6, atol=1e-6)
