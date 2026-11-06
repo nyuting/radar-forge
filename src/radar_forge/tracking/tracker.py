@@ -60,6 +60,12 @@ from radar_forge.tracking.imm import (
     imm_update,
 )
 from radar_forge.tracking.initiation import Initiator
+from radar_forge.tracking.lifecycle import (
+    ExistencePolicy,
+    LifecyclePolicy,
+    by_existence,
+    m_of_n,
+)
 from radar_forge.tracking.models import (
     MarginalModel,
     MeasurementModel,
@@ -86,82 +92,6 @@ Rows = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 # One model's scoring of a scan: the innovation that gates, and each IMM mode's (none without).
 Scored = tuple[Innovation, tuple[Innovation, ...]]
-
-
-@dataclass(frozen=True)
-class LifecyclePolicy:
-    """When a track is confirmed (M hits in its first N scans) or deleted.
-
-    ``n_reacquire_misses`` extra misses in a row are allowed a confirmed track only.
-    ``reacquire_reset`` names coordinates whose variances return to the prior, and
-    cross-covariances to zero, on the miss that opens re-acquisition (tracker-001 §5.4).
-    ``max_position_sigma_m`` deletes a confirmed track once the square root of the largest
-    eigenvalue of its ENU position covariance exceeds it after the update; None never does. A
-    tentative track is spared: under PDA its covariance is wide until it has a velocity.
-
-    References
-    ----------
-    Bar-Shalom and Li [1], §2.6.1.
-    """
-
-    n_confirm_hits: int = 3
-    n_confirm_scans: int = 5
-    n_delete_misses: int = 5
-    n_reacquire_misses: int = 0
-    max_coast_time_s: float = 30.0
-    reacquire_reset: tuple[str, ...] = ()
-    max_position_sigma_m: float | None = None
-
-    def __post_init__(self) -> None:
-        """Reject a policy that could not work."""
-        counts = (self.n_confirm_hits, self.n_confirm_scans, self.n_delete_misses)
-        # A bool is an int in Python, so the exact type is tested.
-        if any(type(n) is not int for n in (*counts, self.n_reacquire_misses)) or not (
-            1 <= self.n_confirm_hits <= self.n_confirm_scans
-            and self.n_delete_misses >= 1
-            and self.n_reacquire_misses >= 0
-        ):
-            msg = f"need int counts, 1 <= M <= N, n_delete_misses >= 1; got {counts}."
-            raise ValueError(msg)
-        names, sigma_m = self.reacquire_reset, self.max_position_sigma_m
-        if not (math.isfinite(self.max_coast_time_s) and self.max_coast_time_s > 0) or not (
-            isinstance(names, tuple) and len(set(names)) == len(names) and all(names)
-        ):
-            msg = f"need max_coast_time_s > 0 and unique reset names; got {names!r}."
-            raise ValueError(msg)
-        if sigma_m is not None and not (math.isfinite(sigma_m) and sigma_m > 0):
-            msg = f"max_position_sigma_m must be None or positive and finite; got {sigma_m}."
-            raise ValueError(msg)
-
-
-@dataclass(frozen=True)
-class ExistencePolicy:
-    """Confirm and delete by the probability that a track's target exists (JIPDA).
-
-    Each scan that sees a track multiplies its existence by ``p_survival`` before the
-    association updates it; a track is confirmed at ``confirm`` or more and deleted below
-    ``delete``. A new track starts at ``initial``. It replaces M-of-N, and needs an associator
-    that weights.
-
-    References
-    ----------
-    Mušicki and Evans [4] (the existence prediction and the confirm and delete thresholds).
-    """
-
-    p_survival: float = 0.995
-    confirm: float = 0.95
-    delete: float = 0.05
-    initial: float = 0.2
-
-    def __post_init__(self) -> None:
-        """Need 0 < delete < initial and delete < confirm <= 1, survival in (0, 1]."""
-        if not (
-            0 < self.p_survival <= 1
-            and 0 < self.delete < self.initial <= 1
-            and self.delete < self.confirm <= 1
-        ):
-            msg = f"need 0 < delete < initial, confirm <= 1 and 0 < p_survival <= 1; got {self}."
-            raise ValueError(msg)
 
 
 @dataclass(frozen=True, eq=False)
@@ -235,34 +165,6 @@ class Coverage(Protocol):
     def __call__(self, bank: TrackBank, scan: Scan) -> NDArray[np.bool_]:
         """Return ``(n_tracks,)`` True where the scan covers the track."""
         ...
-
-
-def _m_of_n(
-    status: NDArray[np.int8],
-    n_hits: NDArray[np.int32],
-    n_scans: NDArray[np.int32],
-    policy: LifecyclePolicy,
-) -> NDArray[np.int8]:
-    """Confirm a tentative row on its M-th hit; delete it once M is out of reach."""
-    tentative = status == TrackStatus.TENTATIVE
-    confirm = tentative & (n_hits >= policy.n_confirm_hits)
-    reachable = n_hits + np.maximum(policy.n_confirm_scans - n_scans, 0)
-    result = status.copy()
-    result[confirm] = TrackStatus.CONFIRMED
-    result[tentative & ~confirm & (reachable < policy.n_confirm_hits)] = TrackStatus.DELETED
-    return result
-
-
-def _by_existence(
-    status: NDArray[np.int8], existence: NDArray[np.float64], policy: ExistencePolicy
-) -> NDArray[np.int8]:
-    """Confirm a tentative row at the confirm threshold; delete any row below delete."""
-    result = status.copy()
-    result[(status == TrackStatus.TENTATIVE) & (existence >= policy.confirm)] = (
-        TrackStatus.CONFIRMED
-    )
-    result[existence < policy.delete] = TrackStatus.DELETED
-    return result
 
 
 class Tracker:
@@ -432,11 +334,11 @@ class Tracker:
         """Append new rows: tentative (or confirmed under 1-of-N), at the initial existence."""
         n_new = len(ids)
         ones = np.ones(n_new, dtype=np.int32)
-        status = _m_of_n(np.zeros(n_new, dtype=np.int8), ones, ones, self.policy)
+        status = m_of_n(np.zeros(n_new, dtype=np.int8), ones, ones, self.policy)
         existence = None
         if self.existence is not None:
             existence = np.full(n_new, self.existence.initial)
-            status = _by_existence(np.zeros(n_new, dtype=np.int8), existence, self.existence)
+            status = by_existence(np.zeros(n_new, dtype=np.int8), existence, self.existence)
         return bank.append(
             mean,
             covariance,
@@ -646,10 +548,10 @@ class Tracker:
         status[hit & (status == TrackStatus.COASTING)] = TrackStatus.CONFIRMED
         status[live & ~hit & (status == TrackStatus.CONFIRMED)] = TrackStatus.COASTING
         if self.existence is not None:
-            status = _by_existence(status, bank.existence, self.existence)
+            status = by_existence(status, bank.existence, self.existence)
             status[~live] = TrackStatus.DELETED
         else:
-            status = _m_of_n(status, n_hits, n_scans, policy)
+            status = m_of_n(status, n_hits, n_scans, policy)
             extra = np.where(np.isin(status, _CONFIRMED), policy.n_reacquire_misses, 0)
             status[~live | (n_misses >= policy.n_delete_misses + extra)] = TrackStatus.DELETED
         if policy.max_position_sigma_m is not None and self._position.size:

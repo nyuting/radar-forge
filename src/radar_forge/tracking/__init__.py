@@ -2,9 +2,10 @@
 
 ``models`` holds the state layouts and motion and measurement models; ``filters`` the bank and
 the one Gaussian filter (KF, EKF, UKF) over it; ``imm`` the interacting multiple model;
-``association`` gating, assignment and JPDA; ``initiation`` the initiators; ``tracker`` the scan
-loop and lifecycle; ``metrics`` NEES, RMSE and GOSPA; ``scene`` a plot-level scene and the plots
-a surveillance radar makes of it; ``scans`` that scene played rotation by rotation into a tracker.
+``association`` gating, assignment and JPDA; ``initiation`` the initiators; ``lifecycle``
+M-of-N and existence; ``tracker`` the scan loop; ``metrics`` NEES, RMSE and GOSPA; ``scene`` a
+plot-level scene and the plots a surveillance radar makes of it; ``scans`` that scene played
+rotation by rotation into a tracker.
 """
 
 from radar_forge.tracking import (
@@ -12,6 +13,7 @@ from radar_forge.tracking import (
     filters,
     imm,
     initiation,
+    lifecycle,
     metrics,
     models,
     scans,
@@ -27,6 +29,7 @@ __all__ = [
     "filters",
     "imm",
     "initiation",
+    "lifecycle",
     "metrics",
     "models",
     "scans",
