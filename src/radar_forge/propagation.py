@@ -33,7 +33,7 @@ from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.radar import Radar, TargetGeometry
 
 if TYPE_CHECKING:
-    from radar_forge.scenario import ClutterSettings, LeakageSettings
+    from radar_forge.settings import ClutterSettings, LeakageSettings
 
 __all__ = [
     "PointTarget",

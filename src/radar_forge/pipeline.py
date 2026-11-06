@@ -46,12 +46,8 @@ from radar_forge.dsp import (
 from radar_forge.migration import compensate_migration, pulse_compress
 from radar_forge.propagation import PropagationPaths, disturbance_paths, line_of_sight_paths
 from radar_forge.radar import Radar, TargetGeometry
-from radar_forge.scenario import (
-    DetectionSettings,
-    MigrationSettings,
-    Scenario,
-    truth_geometry,
-)
+from radar_forge.scenario import Scenario, truth_geometry
+from radar_forge.settings import DetectionSettings, MigrationSettings
 from radar_forge.signal import (
     RangeGate,
     cubic_amplifier,

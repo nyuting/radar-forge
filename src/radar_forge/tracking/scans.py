@@ -57,7 +57,8 @@ from radar_forge.tracking.tracker import ExistencePolicy, LifecyclePolicy, Scan,
 
 if TYPE_CHECKING:
     # Types only: scenario.py imports tracking.scene, so a run-time import would be a cycle.
-    from radar_forge.scenario import Scenario, TrackingSettings
+    from radar_forge.scenario import Scenario
+    from radar_forge.settings import TrackingSettings
 
 __all__ = ["PlotScan", "PlotTracker", "scans"]
 

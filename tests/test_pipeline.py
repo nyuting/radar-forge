@@ -35,13 +35,8 @@ from radar_forge.pipeline import (
     synthesise,
 )
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter
-from radar_forge.scenario import (
-    CancellationSettings,
-    RangeGate,
-    Target,
-    load_scenario,
-    truth_geometry,
-)
+from radar_forge.scenario import RangeGate, load_scenario, truth_geometry
+from radar_forge.settings import CancellationSettings, Target
 from radar_forge.signal import noise_waveform, thermal_noise
 from radar_forge.stages import core
 
