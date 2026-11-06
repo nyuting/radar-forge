@@ -1,8 +1,8 @@
 # Tracker 001 — Tracking architecture
 
 > Status: built, in `src/radar_forge/tracking/` (`models`, `filters`, `imm`, `association`,
-> `initiation`, `tracker`, `metrics`, `scene`). Where this page and the code differ in a name,
-> the code's name stands.
+> `initiation`, `tracker`, `metrics`, `scene`, `scans`). Where this page and the code differ in a
+> name, the code's name stands.
 >
 > The tracker after the tracking refactor: one Gaussian filter, a batched track bank, one
 > correction core, one scan loop. Running it is in [the user guide](../docs/user-guide/06-tracking.md).
@@ -50,8 +50,11 @@ The filter is functions over a bank of tracks, and the hypothesiser is the gate.
 one constructor argument and no pipeline code. A branch on the type of a transform, filter or
 tracker in the filter, the tracker or `pipeline.py` breaks this. There is one `Tracker`.
 
-**Dependencies.** `tracking/` imports NumPy and SciPy only, never `pipeline.py`; the pipeline
-builds the `Scan`.
+**Dependencies.** `tracking/` imports NumPy, SciPy and `radar.py`'s geometry helpers (the ENU ↔
+range-azimuth conversions `scene.py` uses), never `pipeline`, `scenario`, `evaluate` or `plots` at
+run time; `scans.py` names `Scenario` and `TrackingSettings` under `TYPE_CHECKING` only, because
+`scenario.py` imports `tracking.scene`. The pipeline builds an IQ scenario's `Scan`, `scans.py` a
+plot-level one's.
 
 ## 3. The filter
 
