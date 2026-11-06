@@ -273,8 +273,8 @@ def multitarget(ctx: evaluate.Context) -> evaluate.Context:
     fraction of crossings followed by a swap; ``mode_latency_max_scans`` the median scans an
     IMM takes to its turn mode after the onset of a turn it tracks; ``nees_fraction_min`` the
     fraction of position NEES inside chi-square(2)'s 95 % interval; ``pd_min`` the measured
-    Pd; ``false_alarm_rate_max`` ``false_plot_ratio``, false plots over the model's count:
-    each of the configured tracker. ``leaf_count_max`` bounds MHT's most leaves in one tree;
+    Pd; ``false_alarm_rate_max`` ``false_plot_ratio``, false plots over the model's count;
+    all of the configured tracker. ``leaf_count_max`` bounds MHT's most leaves in one tree;
     ``pmbm_cardinality_error_max`` PMBM's mean |tracks - aircraft| a rotation;
     ``mht_resolved_lead_min`` MHT's resolved fraction less JPDA's and
     ``pmbm_resolved_lead_min`` PMBM's less the best other tracker's, on a pair (V3).

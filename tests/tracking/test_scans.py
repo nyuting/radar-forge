@@ -44,12 +44,16 @@ def test_halving_the_sector_moves_the_terminal_scenes_gospa_less_than_its_seed_s
     stamp error the sectors trade is the same in every rotation.
     """
     scenario = load_scenario(TERMINAL)
-    assert scenario.sensor is not None
+    assert scenario.sensor is not None and scenario.tracking is not None
+    # The configured JIPDA alone: the other trackers V4 scores (011b) do not enter A12.
+    tracking = dataclasses.replace(scenario.tracking, trackers=())
     gospa_m = {16: [], 32: []}
     for seed in range(20):
         for n_sectors in (16, 32):
             sensor = dataclasses.replace(scenario.sensor, n_sectors=n_sectors)
-            run = dataclasses.replace(scenario, seed=20261108 + seed, sensor=sensor, verify={})
+            run = dataclasses.replace(
+                scenario, seed=20261108 + seed, sensor=sensor, tracking=tracking, verify={}
+            )
             report = evaluate.run(run, ["multitarget"], n_frames=25, out_dir=tmp_path, render=False)
             gospa_m[n_sectors].append(report.values["gospa_mean_m"])
     shift = abs(np.mean(gospa_m[32]) - np.mean(gospa_m[16]))
