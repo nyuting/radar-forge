@@ -31,7 +31,6 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from radar_forge.clutter import CancellationResult, cancel, fill_notch
-from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.detection import Detection, cfar_detect, cluster_detections
 from radar_forge.dsp import (
     batched_correlation,
@@ -192,8 +191,8 @@ def map_axes(
 
     FMCW range is the beat axis; a pulsed bin is one sample of delay from the range gate's
     first, :func:`~radar_forge.dsp.delay_bin_centers_m` (no gate: the whole PRI from zero); a
-    noise burst's is one lag of its correlation, :math:`c m / f_s` for ``m < n_range_lags``, a
-    window that does not wrap (:attr:`~radar_forge.radar.Radar.unambiguous_delay_s`).
+    noise burst's is one lag of its correlation, the same axis from zero for ``m < n_range_lags``,
+    a window that does not wrap (:attr:`~radar_forge.radar.Radar.unambiguous_delay_s`).
     """
     transmitter, sample_rate_hz = radar.transmitter, radar.receiver.sample_rate_hz
     gate = RangeGate() if gate is None else gate
@@ -201,9 +200,8 @@ def map_axes(
         if n_range_lags < 1:
             msg = "a noise burst's map needs n_range_lags, its count of correlation lags."
             raise ValueError(msg)
-        # Until dsp gains a delay axis: lag m is the route c m / f_s.
-        lags = np.arange(n_range_lags, dtype=np.float64)
-        range_axis_m = SPEED_OF_LIGHT_MPS * lags / sample_rate_hz
+        # Lag m is m samples of delay from zero: the ungated pulsed axis, c m / f_s.
+        range_axis_m = delay_bin_centers_m(n_range_lags, sample_rate_hz)
     elif transmitter.waveform == "pulsed":
         range_axis_m = delay_bin_centers_m(
             gate.n_samples(radar), sample_rate_hz, range_gate_start_m=gate.range_gate_start_m
