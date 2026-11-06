@@ -69,6 +69,8 @@ class PropagationPaths:
     from the delay. ``aoa_rad`` and ``aod_rad`` are ``(n_paths, 2)`` (azimuth,
     elevation). ``doppler_rate_hzps`` and ``doppler_jerk_hzps2``, the first and
     second time derivatives of ``doppler_hz``, default to zero and are stored per path.
+    ``scattering_phase_rad``, the phase a scatterer adds to its echo (an airframe's aspect),
+    defaults to zero, is stored per path, and the generators add it to the propagation phase.
     """
 
     delay_s: NDArray[np.float64]
@@ -79,6 +81,7 @@ class PropagationPaths:
     n_bounces: NDArray[np.int_]
     doppler_rate_hzps: NDArray[np.float64] = field(default_factory=lambda: np.zeros(()))
     doppler_jerk_hzps2: NDArray[np.float64] = field(default_factory=lambda: np.zeros(()))
+    scattering_phase_rad: NDArray[np.float64] = field(default_factory=lambda: np.zeros(()))
 
     def __post_init__(self) -> None:
         """Reject per-path arrays that disagree on the number of paths."""
@@ -95,7 +98,7 @@ class PropagationPaths:
                     f"{name} must have shape ({n_paths}, 2) for (azimuth, elevation); got {shape}."
                 )
                 raise ValueError(msg)
-        for name in ("doppler_rate_hzps", "doppler_jerk_hzps2"):
+        for name in ("doppler_rate_hzps", "doppler_jerk_hzps2", "scattering_phase_rad"):
             if np.shape(getattr(self, name)) not in ((), (n_paths,)):
                 msg = f"{name} must be a scalar or have shape ({n_paths},)."
                 raise ValueError(msg)
@@ -258,8 +261,12 @@ def line_of_sight_paths(
     *,
     gain_tx_linear: ArrayLike | None = None,
     gain_rx_linear: ArrayLike | None = None,
+    scattering_phase_rad: ArrayLike = 0.0,
 ) -> PropagationPaths:
-    """Build one direct path per target; the gains default to the boresight gains."""
+    """Build one direct path per target; the gains default to the boresight gains.
+
+    ``scattering_phase_rad``, one per target or one for all, is each echo's own phase.
+    """
     rcs_arr = np.asarray(rcs_m2, dtype=np.float64)
     if not np.all(rcs_arr >= 0.0):
         msg = "rcs_m2 must be non-negative; 0.0 is a target that returns nothing."
@@ -277,7 +284,13 @@ def line_of_sight_paths(
         range_tx_m=geometry.range_tx_m,
         range_rx_m=geometry.range_rx_m,
     )
-    phase_rad = propagation_phase_rad(geometry.bistatic_range_m, radar.wavelength_m)
+    scattering_rad = np.zeros(geometry.bistatic_range_m.shape) + np.asarray(
+        scattering_phase_rad, dtype=np.float64
+    )
+    # Added second, so zero scattering leaves the propagation phase bit for bit.
+    phase_rad = (
+        propagation_phase_rad(geometry.bistatic_range_m, radar.wavelength_m) + scattering_rad
+    )
     return PropagationPaths(
         delay_s=propagation_delay_s(geometry.bistatic_range_m),
         doppler_hz=doppler_shift_hz(geometry.bistatic_range_rate_mps, radar.wavelength_m),
@@ -288,6 +301,7 @@ def line_of_sight_paths(
         doppler_rate_hzps=doppler_rate_hzps(
             geometry.bistatic_range_acceleration_mps2, radar.wavelength_m
         ),
+        scattering_phase_rad=scattering_rad,
     )
 
 
