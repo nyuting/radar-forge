@@ -42,11 +42,10 @@ from radar_forge.radar import Radar, TargetGeometry
 from radar_forge.scenario import (
     DetectionSettings,
     MigrationSettings,
-    RangeGate,
     Scenario,
     truth_geometry,
 )
-from radar_forge.signal import fmcw_deramp_baseband, pulsed_baseband
+from radar_forge.signal import RangeGate, fmcw_deramp_baseband, pulsed_baseband
 from radar_forge.tracking.association import GlobalNearestNeighbour
 from radar_forge.tracking.filters import (
     TaylorLinearisation,
@@ -230,7 +229,14 @@ def range_doppler_product(
     if radar.transmitter.waveform == "pulsed":
         data_rfst = pulse_compress(samples, radar, gate=gate)
         if migration is not None:
-            data_rfst = compensate_migration(data_rfst, radar, migration).data_rfst
+            data_rfst = compensate_migration(
+                data_rfst,
+                radar,
+                method=migration.method,
+                keystone=migration.keystone,
+                fold_factor_max=migration.fold_factor_max,
+                accelerations_mps2=migration.accelerations_mps2,
+            ).data_rfst
         rd_map = doppler_fft(data_rfst, axis=0)
     else:
         rd_map = range_doppler_map(samples)

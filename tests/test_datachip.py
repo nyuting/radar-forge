@@ -95,6 +95,17 @@ def _compressed_noise(rng: np.random.Generator, n_range: int, power_w: float) ->
     return full[:, reference.size - 1 : reference.size - 1 + n_range]
 
 
+def _settings_fields(scenario: object) -> dict[str, object]:
+    """A scenario's [migration] table as compensate_migration's keyword arguments."""
+    settings = scenario.migration  # type: ignore[attr-defined]
+    return {
+        "method": settings.method,
+        "keystone": settings.keystone,
+        "fold_factor_max": settings.fold_factor_max,
+        "accelerations_mps2": settings.accelerations_mps2,
+    }
+
+
 class TestChip:
     def test_slow_time_chip_round_trips_exactly_and_clips_at_the_edge(self) -> None:
         """A10: integer cells map back with ==, metres are the parent's values, an edge clips."""
@@ -325,7 +336,7 @@ def scenario_chips() -> dict[str, tuple[DataChip, object]]:
             radar,
             gate=gate,
         )
-        compensated = compensate_migration(clean, radar, scenario.migration)
+        compensated = compensate_migration(clean, radar, **_settings_fields(scenario))
         peak = integrated_peak(compensated.data_rfst, refine_range=False)
         processing = ChipProcessing(
             CARRIER_HZ,

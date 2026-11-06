@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
@@ -29,6 +30,7 @@ from radar_forge.propagation import PropagationPaths, propagation_delay_s, propa
 from radar_forge.radar import Radar, Transmitter
 
 __all__ = [
+    "RangeGate",
     "ambiguity_function",
     "beat_frequency_hz",
     "bistatic_range_from_beat_frequency_m",
@@ -207,6 +209,32 @@ def range_gate_first_sample(range_gate_start_m: float, sample_rate_hz: float) ->
     ``range_gate_start_m`` is bistatic, :math:`c\tau`; the gate opens on the nearest sample.
     """
     return round(range_gate_start_m * sample_rate_hz / SPEED_OF_LIGHT_MPS)
+
+
+@dataclass(frozen=True)
+class RangeGate:
+    """A burst's receive window: ``[[burst]] range_gate_start_m`` (bistatic) and ``n_gate_samples``.
+
+    Pulsed only. The gate opens on the sample nearest the start's delay; ``None`` samples to the
+    end of the PRI, so the default records the whole PRI.
+    """
+
+    range_gate_start_m: float = 0.0
+    n_gate_samples: int | None = None
+
+    def first_sample(self, radar: Radar) -> int:
+        """Return the fast-time sample the gate opens on."""
+        return range_gate_first_sample(self.range_gate_start_m, radar.receiver.sample_rate_hz)
+
+    def n_samples(self, radar: Radar) -> int:
+        """Return the fast-time samples the gate records in each pulse."""
+        if self.n_gate_samples is not None:
+            return self.n_gate_samples
+        return radar.n_samples_per_pri - self.first_sample(radar)
+
+    def is_whole_pri(self, radar: Radar) -> bool:
+        """Return whether the gate records every sample of the PRI, from zero delay."""
+        return self.first_sample(radar) == 0 and self.n_samples(radar) == radar.n_samples_per_pri
 
 
 def _synthesise(

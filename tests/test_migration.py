@@ -30,8 +30,8 @@ from radar_forge.migration import (
     second_order_keystone,
 )
 from radar_forge.pipeline import synthesise
-from radar_forge.scenario import RangeGate, load_scenario, truth_geometry
-from radar_forge.signal import lfm_chirp
+from radar_forge.scenario import load_scenario, truth_geometry
+from radar_forge.signal import RangeGate, lfm_chirp
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -102,6 +102,17 @@ def _radon_fourier_peak(data: np.ndarray, start_bin: float, rate_mps: float) -> 
     samples = np.sum(spectrum * shift, axis=1) / n_fft
     doppler = np.exp(2j * np.pi * CARRIER_HZ * rate_mps * time_s / SPEED_OF_LIGHT_MPS)
     return float(np.abs(np.sum(samples * doppler)) ** 2)
+
+
+def _settings_fields(scenario: object) -> dict[str, object]:
+    """A scenario's [migration] table as compensate_migration's keyword arguments."""
+    settings = scenario.migration  # type: ignore[attr-defined]
+    return {
+        "method": settings.method,
+        "keystone": settings.keystone,
+        "fold_factor_max": settings.fold_factor_max,
+        "accelerations_mps2": settings.accelerations_mps2,
+    }
 
 
 class TestRangeSpectrum:
@@ -371,7 +382,7 @@ def test_cfar_misses_the_uncorrected_target_and_finds_the_corrected_one(full_siz
     """A3 and A4: at 28.89 dB, CA-CFAR at Pfa 1e-6 finds the target in <= 5 % of uncorrected
     maps and >= 95 % of corrected ones, 100 trials each."""
     scenario, _, clean = full_size[variant]
-    corrected = compensate_migration(clean, scenario.radar, scenario.migration).data_rfst
+    corrected = compensate_migration(clean, scenario.radar, **_settings_fields(scenario)).data_rfst
     fractions = []
     for data in (clean, corrected):
         clean_map = doppler_fft(data, axis=0)
@@ -401,7 +412,7 @@ def test_k3_fold_factor_is_found_in_every_noisy_trial(full_size):
     for _ in range(200):
         noise = rng.normal(0, sigma, (1024, 256, 2)) @ [1, 1j]
         noisy = clean + pulse_compress(noise, radar, gate=gate)
-        found.append(compensate_migration(noisy, radar, scenario.migration).fold_factor)
+        found.append(compensate_migration(noisy, radar, **_settings_fields(scenario)).fold_factor)
     assert found == [1] * 200
 
 

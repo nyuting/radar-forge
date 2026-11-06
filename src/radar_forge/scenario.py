@@ -32,7 +32,7 @@ from numpy.typing import NDArray
 from radar_forge.detection import CfarVariant
 from radar_forge.propagation import dbsm_to_m2
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter, geodetic_to_enu_m
-from radar_forge.signal import range_gate_first_sample
+from radar_forge.signal import RangeGate
 
 __all__ = [
     "DetectionSettings",
@@ -137,32 +137,6 @@ class TrackingSettings:
                 f"{self.initiator!r} seed takes the folded rate, at a bin of variance."
             )
             raise ValueError(msg)
-
-
-@dataclass(frozen=True)
-class RangeGate:
-    """A burst's receive window: ``[[burst]] range_gate_start_m`` (bistatic) and ``n_gate_samples``.
-
-    Pulsed only. The gate opens on the sample nearest the start's delay; ``None`` samples to the
-    end of the PRI, so the default records the whole PRI.
-    """
-
-    range_gate_start_m: float = 0.0
-    n_gate_samples: int | None = None
-
-    def first_sample(self, radar: Radar) -> int:
-        """Return the fast-time sample the gate opens on."""
-        return range_gate_first_sample(self.range_gate_start_m, radar.receiver.sample_rate_hz)
-
-    def n_samples(self, radar: Radar) -> int:
-        """Return the fast-time samples the gate records in each pulse."""
-        if self.n_gate_samples is not None:
-            return self.n_gate_samples
-        return radar.n_samples_per_pri - self.first_sample(radar)
-
-    def is_whole_pri(self, radar: Radar) -> bool:
-        """Return whether the gate records every sample of the PRI, from zero delay."""
-        return self.first_sample(radar) == 0 and self.n_samples(radar) == radar.n_samples_per_pri
 
 
 @dataclass(frozen=True)

@@ -35,6 +35,7 @@ from radar_forge.migration import (
 )
 from radar_forge.pipeline import frames, map_axes, synthesise
 from radar_forge.radar import Radar
+from radar_forge.scenario import MigrationSettings
 
 __all__ = ["keystone_stage"]
 
@@ -92,7 +93,7 @@ def keystone_stage(ctx: evaluate.Context) -> evaluate.Context:
     loss("uncompensated_loss_db", clean)
     carrier = radar.transmitter.carrier_frequency_hz
     sample_rate_hz = radar.receiver.sample_rate_hz
-    compensated = compensate_migration(clean, radar, scenario.migration)
+    compensated = _compensate(clean, radar, scenario.migration)
     # The keystone at fold factor 0: the method's own first step, unless it searched folds.
     keystoned = compensated.keystone or keystone(
         clean, carrier_frequency_hz=carrier, sample_rate_hz=sample_rate_hz
@@ -162,7 +163,7 @@ def _estimates(ctx: evaluate.Context) -> dict[str, Any]:
     radar, n_pulses, gate = scenario.radar, scenario.n_pulses[0], scenario.gates[0]
     frame = next(frames(scenario, n_frames=1))
     noisy = pulse_compress(frame.cubes[0], radar, gate=gate)
-    compensated = compensate_migration(noisy, radar, scenario.migration)
+    compensated = _compensate(noisy, radar, scenario.migration)
     range_axis_m, rate_axis_mps = map_axes(radar, n_pulses, gate=gate)
     peak = integrated_peak(compensated.data_rfst, refine_range=False)
     chip = crop_slow_time(
@@ -204,6 +205,20 @@ def _estimates(ctx: evaluate.Context) -> dict[str, Any]:
             found[f"{name}_crb"] = ctx.record(f"{name}_crb", bound)
             found[f"{name}_error_crb"] = ctx.record(f"{name}_error_crb", error / bound)
     return found
+
+
+def _compensate(
+    data_rfst: NDArray[np.complex128], radar: Radar, settings: MigrationSettings
+) -> CompensatedPulses:
+    """Apply ``[migration]``, its fields unpacked as the pipeline does."""
+    return compensate_migration(
+        data_rfst,
+        radar,
+        method=settings.method,
+        keystone=settings.keystone,
+        fold_factor_max=settings.fold_factor_max,
+        accelerations_mps2=settings.accelerations_mps2,
+    )
 
 
 def _processing(radar: Radar, compensated: CompensatedPulses, keystoned: bool) -> ChipProcessing:

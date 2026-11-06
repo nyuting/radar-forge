@@ -46,8 +46,7 @@ from radar_forge._fourier import aboutanios_mulgrew, signed_cycles
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.dsp import matched_filter
 from radar_forge.radar import Radar
-from radar_forge.scenario import MigrationSettings, RangeGate
-from radar_forge.signal import lfm_chirp
+from radar_forge.signal import RangeGate, lfm_chirp
 
 __all__ = [
     "KEYSTONE_METHODS",
@@ -201,6 +200,10 @@ def keystone(
         int(fold_factor),
         method,
     )
+
+
+# compensate_migration's ``keystone`` argument names the interpolation and hides the function.
+_keystone = keystone
 
 
 def second_order_keystone(
@@ -424,41 +427,49 @@ class CompensatedPulses:
 
 
 def compensate_migration(
-    data_rfst: ArrayLike, radar: Radar, settings: MigrationSettings
+    data_rfst: ArrayLike,
+    radar: Radar,
+    *,
+    method: Literal["none", "keystone", "keystone_doppler_rate"] = "none",
+    keystone: KeystoneMethod = "czt",
+    fold_factor_max: int = 0,
+    accelerations_mps2: ArrayLike = (),
 ) -> CompensatedPulses:
-    """Apply ``[migration]``: keystone, its fold-factor search, then the Doppler-rate search."""
+    """Apply a ``[migration]`` table's fields: keystone, its fold-factor search, Doppler rate.
+
+    ``method`` ``"keystone"`` keystones, searching the fold factor when ``fold_factor_max`` is
+    positive; ``"keystone_doppler_rate"`` then searches ``accelerations_mps2`` with the
+    Doppler-rate filter. ``keystone`` names the interpolation.
+    """
     data = np.asarray(data_rfst, dtype=np.complex128)
-    if settings.method == "none":
+    if method == "none":
         return CompensatedPulses(data, None, None, None)
     transmitter, sample_rate_hz = radar.transmitter, radar.receiver.sample_rate_hz
     carrier_hz = transmitter.carrier_frequency_hz
     keystoned, fold = None, None
-    if settings.fold_factor_max > 0:
+    if fold_factor_max > 0:
         fold = fold_factor_search(
             data,
             carrier_frequency_hz=carrier_hz,
             sample_rate_hz=sample_rate_hz,
             bandwidth_hz=transmitter.bandwidth_hz,
-            fold_factor_max=settings.fold_factor_max,
-            method=settings.keystone,
+            fold_factor_max=fold_factor_max,
+            method=keystone,
         )
         data = fold.data_rfst
     else:
-        keystoned = keystone(
-            data,
-            carrier_frequency_hz=carrier_hz,
-            sample_rate_hz=sample_rate_hz,
-            method=settings.keystone,
+        keystoned = _keystone(
+            data, carrier_frequency_hz=carrier_hz, sample_rate_hz=sample_rate_hz, method=keystone
         )
         data = keystoned.data_rfst
     rate = None
-    if settings.method == "keystone_doppler_rate":
+    if method == "keystone_doppler_rate":
         rate = doppler_rate_compensation(
             data,
             carrier_frequency_hz=carrier_hz,
             sample_rate_hz=sample_rate_hz,
             prf_hz=transmitter.prf_hz,
-            accelerations_mps2=settings.accelerations_mps2,
+            accelerations_mps2=accelerations_mps2,
         )
         data = rate.data_rfst
     return CompensatedPulses(data, keystoned, fold, rate)
