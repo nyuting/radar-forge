@@ -47,6 +47,9 @@ FAST_FRAMES: dict[str, int] = {
     "scenario_004_keystone_k1": 1,
     "scenario_004_keystone_k2": 1,
     "scenario_004_keystone_k3": 1,
+    "scenario_005_distorted_transmitter": 1,
+    "scenario_005_static_leakage": 1,
+    "scenario_005_varying_clutter": 1,
 }
 
 

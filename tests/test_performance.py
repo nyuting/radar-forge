@@ -27,10 +27,14 @@ CONFIGS = sorted((REPO / "config").glob("*.toml"))
 
 def _cube_bytes(path: Path) -> int:
     scenario = load_scenario(path)
-    # complex128: 16 bytes a sample, of the samples each burst's gate records.
+    # complex128: 16 bytes a sample, of the samples each burst's gate records. A noise burst
+    # holds its code beside its stream, and its map is n_range_lags wide, not a batch: those
+    # count with the cube.
     return sum(
-        16 * n * gate.n_samples(r)
-        for r, n, gate in zip(scenario.radars, scenario.n_pulses, scenario.gates, strict=True)
+        16 * n * (gate.n_samples(r) * (2 if lags else 1) + lags)
+        for r, n, gate, lags in zip(
+            scenario.radars, scenario.n_pulses, scenario.gates, scenario.n_range_lags, strict=True
+        )
     )
 
 
