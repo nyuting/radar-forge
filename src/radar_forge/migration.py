@@ -597,11 +597,12 @@ def _chirp_z_plan(
     """
     scale = np.frombuffer(scale_bytes, dtype=np.float64)[:, None]
     index = np.arange(n_pulses, dtype=np.float64)
-    pre_chirp = np.exp(1j * np.pi * scale * index**2 / n_pulses)
+    # The chirps are complex by construction; asarray states it where the stubs cannot.
+    pre_chirp = np.asarray(np.exp(1j * np.pi * scale * index**2 / n_pulses), dtype=np.complex128)
     n_fft = int(2 ** np.ceil(np.log2(2 * n_pulses - 1)))
     lag = np.arange(n_fft, dtype=np.float64)
     lag_squared = np.where(lag < n_pulses, lag, lag - n_fft) ** 2
-    kernel_fft = np.empty((scale.size, n_fft), dtype=np.complex128)
+    kernel_fft: NDArray[np.complex128] = np.empty((scale.size, n_fft), dtype=np.complex128)
     # A block of rows at a time: the kernel's temporaries stay a block's size.
     for start in range(0, scale.size, _PLAN_BLOCK_ROWS):
         rows = slice(start, start + _PLAN_BLOCK_ROWS)
@@ -609,7 +610,8 @@ def _chirp_z_plan(
         kernel[:, n_pulses : n_fft - n_pulses + 1] = 0.0
         kernel_fft[rows] = np.fft.fft(kernel, axis=1)
     half = n_pulses // 2
-    post_chirp = pre_chirp * np.exp(-2j * np.pi * scale * half * index / n_pulses) / n_pulses
+    shift = np.exp(-2j * np.pi * scale * half * index / n_pulses)
+    post_chirp = np.asarray(pre_chirp * shift / n_pulses, dtype=np.complex128)
     return pre_chirp, kernel_fft, post_chirp
 
 
