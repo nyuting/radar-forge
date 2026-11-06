@@ -519,6 +519,7 @@ def test_a_cancellation_that_cannot_tile_the_cpi_fails_at_load(tmp_path, table, 
 
 def test_the_cancellation_figure_labels_truth_once_and_draws_without_it():
     """One legend entry for two targets; no truth, no legend (an empty legend warns)."""
+    pytest.importorskip("matplotlib")
     radar = load_scenario(NOISE_CONFIG).radar
     rd_map = np.ones((8, 16), dtype=complex)
     range_m = SPEED_OF_LIGHT_MPS * np.arange(16) / 8.0e6
