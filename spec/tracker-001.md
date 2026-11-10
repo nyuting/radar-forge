@@ -1,0 +1,319 @@
+# Tracker 001 — Tracking architecture
+
+> Status: built, in `src/radar_forge/tracking/` (`models`, `filters`, `imm`, `association`,
+> `initiation`, `lifecycle`, `tracker`, `hypotheses`, `rfs`, `metrics`, `scene`, `scans`). Where
+> this page and the code differ in a name, the code's name stands.
+>
+> The tracker after the tracking refactor: one Gaussian filter, a batched track bank, one
+> correction core, one scan loop. Running it is in [the user guide](../docs/user-guide/06-tracking.md).
+
+## 1. Scope and principles
+
+In scope: `tracking/`: one Gaussian filter (Kalman, extended and unscented are its
+transforms), motion and measurement models, gating, assignment, M-of-N confirmation with
+covariance-based deletion, and the interface the pipeline uses. Out of scope: random-finite-set
+trackers inside the loop, track-to-track fusion, real-time operation.
+
+1. **Models are data; the filter is generic.** A new sensor or target needs a new model, never a
+   new filter.
+2. **One implementation of each equation, and one flow.** Two copies drift.
+3. **Names, not positions.** Code reaches a state component through `StateLayout` by name
+   (`"x_m"`, `"xdot_mps"`).
+4. **Range rate is the time derivative of range, positive receding** (`spec/data-001-formats.md`
+   §5); Doppler is `-rate/wavelength`. A sign slip passes every test that uses one sign, so tests
+   use both.
+5. **Covariances stay symmetric and positive definite**; every update symmetrises.
+6. **Consistency is tested statistically** (NEES and NIS against chi-square bounds, fixed seeds),
+   and ground truth is analytic (`docs/conventions/testing.md`).
+7. **Readable and fast, neither traded**: the hot path is batched NumPy that still reads as the
+   textbook equation, with shapes written out.
+
+## 2. Architecture
+
+Pieces behind small protocols, close to [Stone Soup](https://stonesoup.readthedocs.io)'s cut.
+The filter is functions over a bank of tracks, and the hypothesiser is the gate.
+
+| Piece | Type | Knows about |
+| :--- | :--- | :--- |
+| State layout | `StateLayout`, `Coordinate` | names, units, periods |
+| Motion model | `MotionModel`: `CartesianMotion`, `RadialConstantVelocity`, `CoordinatedTurn` | layout, `transition(x, dt)`, `jacobian(x, dt)`, `process_noise(x, dt)` |
+| Scan | `Scan` | z `(n_meas, m)`, R per measurement, time, model ID, clutter intensity per measurement; one revisit at one time |
+| Measurement model | `MeasurementModel` | layouts, `predict(x)` = h(x), `jacobian(x)` |
+| Filter, transform | `predict`, `innovate`, `update`, `update_weighted` over a `TrackBank`; protocol `Linearisation`, `TaylorLinearisation`, `UnscentedTransform` | a motion model; a function, a mean, a covariance |
+| IMM | `InteractingMultipleModel`; `imm_predict`, `imm_innovate`, `imm_update` | modes, their union layout, `expm(Λ T)` |
+| Gate, associator | `gate`, `chi_square_gate_threshold`; `GreedyNearestNeighbour`, `GlobalNearestNeighbour`, `JointProbabilisticDataAssociation` | NIS; a cost matrix, or log-likelihoods and clutter intensity for weights |
+| Initiator, lifecycle | `Initiator` (`initiation.py`); `LifecyclePolicy`, `ExistencePolicy` | a prior; hits, misses, times, covariance, existence |
+| Track bank | `TrackBank`, `TrackSnapshot` | batched means and covariances, status, counts, existence, IMM modes |
+| Tracker | `Tracker` | all of the above, through their protocols |
+
+**Decoupling.** Swapping the transform (KF, EKF to UKF), the associator or the initiator changes
+one constructor argument and no pipeline code. A branch on the type of a transform, filter or
+tracker in the filter, the tracker or `pipeline.py` breaks this. There is one `Tracker`.
+
+**Dependencies.** `tracking/` imports NumPy, SciPy and `radar.py`'s geometry helpers (the ENU ↔
+range-azimuth conversions `scene.py` uses), never `pipeline`, `scenario`, `evaluate` or `plots` at
+run time; `scans.py` names `Scenario` and `TrackingSettings` under `TYPE_CHECKING` only, because
+`scenario.py` imports `tracking.scene`. The pipeline builds an IQ scenario's `Scan`, `scans.py` a
+plot-level one's.
+
+## 3. The filter
+
+The KF, EKF and UKF are one algorithm, the general Gaussian filter (Särkkä 2013, ch. 6): match the
+mean and covariance of the density, then apply the same Kalman correction. They differ only in how
+a mean and covariance are carried through a function.
+
+| Transform | Gives | Moments of g(x), x with mean x̂ and covariance P | Supplies H |
+| :--- | :--- | :--- | :--- |
+| `TaylorLinearisation` | the KF on a linear model, the EKF otherwise | mean g(x̂), covariance J P Jᵀ, J = ∂g/∂x at x̂ | yes |
+| `UnscentedTransform(alpha, beta, kappa)` | the UKF | weighted sums over 2n + 1 sigma points | no |
+
+The protocol `Linearisation` has `predict(motion, bank, dt_s)` (means `(n_tracks, n_state)` and
+covariances with Q added) and `measure(model, bank)` (ẑ, P_xz, S without R, and H or `None`, each
+per row). The functions over a `TrackBank`: `predict` calls the linearisation's `predict`;
+`innovate` calls `measure`, adds R and returns ν, S, NIS and the log-likelihood for every
+(track, measurement) pair (Cholesky-whitened); `update` and `update_weighted` hand the same
+moments to the correction core. Nothing branches on the transform type.
+A cubature or Gauss-Hermite transform is a new `Linearisation`, never a new filter.
+
+**The correction core** is one private function shared by every filter:
+
+1. gain K = P_xz S⁻¹ by solving S Kᵀ = P_xzᵀ, never inverting S;
+2. mean x̂ = x̂⁻ + K ν, wrapping only the state layout's periodic components;
+3. covariance by the Joseph form (I − KH) P⁻ (I − KH)ᵀ + K R Kᵀ when H is supplied, else the short
+   form P⁻ − K S Kᵀ;
+4. the symmetric part of P, returned as a new `TrackBank`.
+
+The Joseph form is positive semidefinite for any K. The short form (UKF) is the Schur complement
+of S in a positive semidefinite joint covariance, so it is too, up to roundoff, provided every
+sigma-point covariance weight is non-negative. The two agree at the optimal gain. The core's only
+branch is whether H is `None`.
+
+**Two layouts, two wraps.** ν = z − ẑ goes through the measurement layout's `residual`, so a
+periodic measurement (an azimuth, a range folded at the map's span) takes the short way round; the
+mean update wraps only the state layout's periodic components, so a folded range stays continuous
+in the state.
+
+**Taylor.** Moves the mean through the motion model's `transition` and the covariance through its
+`jacobian` and `process_noise`, and needs the measurement model's `jacobian`. There is no
+finite-difference fallback, because a numeric Jacobian hides a wrong analytic one. On a linear
+model it is the textbook KF line for line, `transition(x)` being `F x` to the bit.
+
+**Unscented** (Wan and van der Merwe 2000). With c = α²(n + κ) the weights are w₀ᵐ = 1 − n/c,
+w₀ᶜ = w₀ᵐ + 1 − α² + β and wᵢ = 1/(2c) for the other 2n points. Settings with w₀ᶜ < 0 are rejected,
+because the short form needs non-negative covariance weights; a small α such as 10⁻³ is refused on
+purpose. Sigma points straddling a wrap are averaged and differenced the short way round through
+the layout's `weighted_mean_about` and `residual`.
+
+**On a linear model the UKF is the KF.** The ± sigma pairs cancel through a linear map, so the mean
+is F x̂; the centre point's deviation is zero, which removes β and α from the covariance, and the
+other 2n points give Σᵢ F Lᵢ Lᵢᵀ Fᵀ = F P Fᵀ (Lᵢ the columns of the Cholesky factor). The weights
+matter only once g bends.
+
+**Drift guards.** One parametrised fixture holds every estimator, so a new transform joins every
+guard once. UKF and KF moments agree to `rtol=1e-10` on linear models for several accepted
+(α, β, κ), per step and over 200 steps; EKF and UKF on a nonlinear model differ at second order in
+the prior scale s (fitted slope of log gap on log s at least 1.8); NEES and NIS pass a chi-square
+interval at 99.9 %; covariances stay symmetric to `rtol=1e-12` with Cholesky succeeding.
+
+## 4. State and measurement models
+
+- **Cartesian state**: per-axis interleaved `[x_m, xdot_mps, y_m, ydot_mps, z_m, zdot_mps]` in
+  local ENU (x east, y north, z up); other orders via `CartesianMotion(order=...)`.
+- **Radial state**: `RadialConstantVelocity`, `[bistatic_range_m, bistatic_range_rate_mps]`:
+  the route length R_T + R_R and its time derivative, positive receding, with transition
+  `[[1, T], [0, 1]]`. Monostatic, both are twice the slant values; nothing in the pipeline
+  halves the state, and only a display does (`plots.display_axes`). Scenario 003 tracks with it.
+- **Coordinated turn**: `CoordinatedTurn`, `[x_m, xdot_mps, y_m, ydot_mps, turn_rate_radps]`,
+  the rate the heading's, positive to the right; exact discretisation with series forms near zero
+  rate (scenario 011 D26).
+- **Process noise**: `"cwna"`, continuous white-noise acceleration (q in m²/s³; Bar-Shalom, Li and
+  Kirubarajan 2001, §6.2.2), is the default because its Q is right for any step length. `"dwna"`,
+  the discrete model (σₐ² in m²/s⁴, §6.3.2), is kept because scenario 003 pins it.
+- **State models are configurations**: a motion and a measurement model in one layout.
+  `pipeline.ScanTracker` builds the radial one from a scenario's `[tracking]` table; an ENU
+  one pairs `CartesianMotion` with a spherical or bistatic model.
+- **Spherical measurements stay spherical.** `RangeAzimuthElevationRangeRate` maps an ENU state to
+  `(range_m, azimuth_rad, elevation_rad, range_rate_mps)` about a sensor pose: r = |p − pₛ|,
+  azimuth atan2(Δe, Δn) clockwise from north (periodic), elevation asin(Δu/r), range rate
+  +(p − pₛ)·v/r. The geometry is written inline (PR 77), not imported from `radar`; the model raises rather
+  than return a non-finite Jacobian at r → 0 or the zenith. Converting to Cartesian is allowed only
+  to seed a track, with the measurement-conditioned conversion of Duan, Han and Li (2004) and
+  Bordonaro, Willett and Bar-Shalom (2014).
+- **Range rate is measured, not stated.** It is a row of z and h(x), so it enters S and the gate:
+  a false alarm matching in position but not Doppler fails. A Cartesian state carries no range-rate
+  component (redundant with velocity, and it makes the covariance singular). The pipeline unfolds a
+  folded Doppler first; a track that cannot yet trust its unfolding uses range alone (§5.4).
+- **Bistatic**: `BistaticRangeRateModel` maps an ENU state to `(bistatic_range_m,
+  bistatic_range_rate_mps)` (or excess bistatic range) about transmitter and receiver poses. One
+  bistatic measurement cannot fix a position, so seed such tracks with `Tracker.seed`.
+
+## 5. The scan loop
+
+`Tracker.process(scan)` runs gate, assign, update, initiate, lifecycle.
+
+### 5.1 Gate and assign
+
+`gate(nis, chi_square_gate_threshold(probability, m))` accepts a pair when its NIS is at most the chi-square quantile for the
+measurement dimension. `GlobalNearestNeighbour` builds an (n_tracks, n_measurements) cost matrix,
+forbids pairs outside the gate and solves it with `scipy.optimize.linear_sum_assignment` (Crouse
+2016), maximising the number of matches before minimising cost. `GreedyNearestNeighbour` is the
+greedy version, for teaching.
+
+**Costs across dimensions.** With the range-only retry of §5.4 one matrix can mix pairs scored in
+different dimensions, and neither NIS nor the negative log-likelihood is comparable across them (the
+density's value depends on the units of what it measures). So then the cost is
+`cost="negative_log_likelihood_ratio"`: −ln(g/λ), with g = 𝒩(ν; 0, S) and λ the clutter density over
+the same components (the per-update increment of Blackman's 2004 track score).
+`Tracker(clutter_density=...)` takes λ per model ID, required for every model under this cost,
+refused under any other, positive and finite; the values are the caller's. `cost="nis"` is allowed
+only when every pair has one dimension, and `Tracker` raises rather than mix them.
+
+**Assignment order** is `assignment: Literal["confirmed_first", "joint"]`. `"confirmed_first"`
+(default) lets confirmed tracks pick first and starts no track inside a confirmed gate; `"joint"`
+solves once. On scenario 003 confirmed-first was worse on every count (range RMSE 25.3 m against
+17.5 m), because a widened re-acquisition gate outbids tentative tracks for false alarms, so that
+scenario sets `"joint"`. Changing a default needs a measurement.
+
+### 5.2 Update and initiate
+
+Each assigned pair updates through the correction core. An associator that returns weights
+(JPDA, JIPDA) updates every row through `update_weighted` instead: confirmed rows jointly,
+tentative rows each alone (PDA) in two-stage assignment. An unassigned measurement may seed a
+track through an `Initiator` (`tracking/initiation.py`), which writes the measurement into a prior.
+
+### 5.3 The track bank
+
+`TrackBank` holds the live tracks of one layout as arrays: means `(n_tracks, n_state)`, covariances
+`(n_tracks, n_state, n_state)`, and per-track status, hit and miss counts and times. Predict, gate
+and update act on the whole bank; tracks of different layouts live in separate banks.
+`TrackSnapshot` is the read-only view of one track for `tracks.csv`: `mean`, `covariance`, status,
+counts, the measurement index taken this scan and that update's NIS.
+
+### 5.4 Lifecycle
+
+`tentative → confirmed ⇄ coasting → deleted`. One `LifecyclePolicy` holds every setting; pipeline
+configs hold one and never copy its fields. A *hit* is a scan in which a detection was assigned to
+the track (under association weights, one whose measurements weigh over one half), a *miss* one in
+which none was.
+
+| Rule | Setting |
+| :--- | :--- |
+| M-of-N confirmation, counted from birth | `n_confirm_hits`, `n_confirm_scans` |
+| Tentative deletion once M is unreachable | (derived) |
+| Deletion after misses in a row; after a coast time | `n_delete_misses`; `max_coast_time_s` |
+| Re-acquisition window for confirmed tracks: extra misses in a row | `n_reacquire_misses` |
+| Covariance-based deletion | `max_position_sigma_m` |
+| Existence-based confirm and delete (JIPDA) | `ExistencePolicy(p_survival, confirm, delete, initial)` |
+
+**Covariance-based deletion.** Delete a confirmed track when the square root of the largest
+eigenvalue of its position covariance exceeds `max_position_sigma_m` after its update, whatever the
+miss count; a tentative track, wide until it has a velocity, is spared. Miss counts are proxies
+for "we no longer know where it is"; the covariance is the thing itself. `None` turns it off.
+(Stone Soup's `CovarianceBasedDeleter` thresholds the trace, which mixes units.)
+
+**Range-only bootstrap, retry and reset.** Mechanism in `tracking/`, policy in the scenario. A
+measurement model can return its marginal over named components. The pipeline passes a selector (a
+callable from the bank and the scan's model ID to the ordered `(model_id, allowed rows)` pairs to
+try); the tracker gates against them in order and keeps the first that passes, which gives the range-only bootstrap
+and the range-only retry when the velocity gate fails. On the miss that starts re-acquisition, the
+coordinates named in `LifecyclePolicy.reacquire_reset` (scenario 003: `("bistatic_range_rate_mps",)`) have
+their variances reset to the prior and their cross-covariances zeroed. The default selector returns
+the measurement's own model.
+
+## 6. Multi-target extensions
+
+Built with scenario 011a (`config/scenario_011_*.toml`); none changes the loop.
+
+- **IMM** (Blom and Bar-Shalom 1988), `tracking/imm.py`: an IMM bank carries each mode's
+  estimate and probability as columns; mixing is in the union layout of the modes, a coordinate a
+  mode lacks carried at zero mean and a stated spread; the switching matrix is `expm(Λ T)` for
+  the actual interval. `Tracker(motion=InteractingMultipleModel(...))` runs it.
+- **JPDA** (Fortmann, Bar-Shalom and Scheffe 1983; JPDA\*, Set-JPDA, JIPDA),
+  `tracking/association.py`: `Associator.weights` returns weights `(n_tracks, n_measurements + 1)`
+  and posterior existence, applied through `update_weighted`; clusters are enumerated exactly,
+  with a bound that raises.
+- **Coverage**: a `Coverage` predicate tells `Tracker` which tracks a scan could see, so a rotating
+  radar's sector batches predict, gate and count each track once a rotation.
+- **Track-oriented MHT** (scenario 011b), `tracking/hypotheses.py`: an associator with a
+  `hypotheses` method; `Tracker` then keeps a `TrackTree` of leaves, rows of a bank, scored by
+  Blackman's track score, ranked per cluster by `murty_k_best` and N-scan pruned, and reports
+  each cluster's best hypothesis, causally. **PMBM**, `tracking/rfs.py`, is a second tracker
+  beside the loop: `PmbmTracker` reports each track's marginal Bernoulli.
+
+## 7. Integration, performance and validation
+
+**Data flow.** `detection.Detection` (cell indices, W) is converted by `pipeline.frame_plots` to
+plots (bistatic m and m/s, positive receding), which `pipeline.ScanTracker` builds into a `Scan`
+and passes to `Tracker.process(scan)`; that returns the bank, each row with its NIS and the
+measurement it took. The stepper's track stage (`evaluate.py`) writes `tracks.csv` and
+`metrics.csv` from them (`spec/data-001-formats.md` §6.6, §6.9). Settings come from the scenario
+TOML's `[tracking]` table, read once; scenario-only policy (track-aided unfolding) stays in
+`pipeline.py`. Every
+measurement in a scan carries the scan's time and scans arrive in order. Every sensor registers in
+one `Tracker`, so one target has one track whichever sensor sees it.
+
+**Performance.** The cost of a scan is the gate. The (n_tracks, n_measurements) gate and cost
+matrices come from one batched computation, not a loop over pairs: Taylor Jacobians as `(n_tracks,
+n_meas, n_state)`, sigma points as `(n_tracks, 2 n_state + 1, n_state)`. `np.linalg.cholesky` and
+`solve` take stacks over leading axes, so batched functions keep the textbook names. Gating is
+O(n_tracks · n_measurements · n_meas³); assignment is O(n³). A loop off the hot path carries a
+comment saying why. No compiled dependency in the library; a backend comes only when a benchmark shows
+NumPy is the limit, and then as an extra.
+
+**Validation.** Analytic (dead reckoning, Q against the published matrices, a known GNN optimum,
+M-of-N by hand, Jacobians against central differences, `rtol=1e-12`); consistency (NEES and NIS over
+200 runs × 30 steps, every transform, Bar-Shalom, Li and Kirubarajan 2001 §5.4.2); the drift guards
+of §3; hand-countable lifecycles; the batched gate against the textbook formulas pair by pair
+(`rtol=1e-12`); `benchmark` tests holding a scan of scenario 003's load and of 100 tracks × 1000
+measurements to a committed budget; scenario 003 end to end; and
+the metrics of `spec/data-001-formats.md` §6.9; for many targets GOSPA and trajectory GOSPA
+(`tracking/metrics.py`). Never loosen a tolerance to pass.
+
+## 8. Decisions
+
+- **One tracker, one Gaussian filter, one correction core.** Rejected: two filter classes sharing
+  a core (two flows, which is where they drift); a filter-type switch (breaks decoupling); a KF
+  built as a UKF (hides the KF a student looks for); Joseph form everywhere (the UKF has no H).
+- **Spherical measurements stay spherical.** Rejected: Cartesian conversion then a linear KF
+  (state-dependent covariance, bias growing with range × angle error).
+- **Mechanism in `tracking/`, policy in `pipeline.py`** (the range-only selector), not in `Tracker`.
+- **D26: `CoordinatedTurn`, with the turn rate in the state**, in `tracking/models.py`: exact
+  discretisation with series forms near zero turn rate.
+- **D27: the IMM is functions over a bank with per-mode columns**, `tracking/imm.py`: mixing by
+  name in the union layout; switching matrix `expm(Λ T)` for the actual interval.
+- **D28: JPDA, JPDA\*, Set-JPDA and JIPDA return weights from `Associator.weights`.** Exact events
+  per cluster with a bound that raises; clutter intensity per measurement from an oracle or a
+  clutter map; JIPDA's existence drives an `ExistencePolicy`.
+- **D29: track-oriented MHT inside the one loop**, its leaves a bank, its global hypotheses
+  pairs per cluster; confirmation and deletion by score on its path only.
+- **D30: PMBM a second tracker**, sharing the models, `innovate`, `murty_k_best` and the
+  hypothesis machinery of `tracking/hypotheses.py`.
+
+## 9. Limitations
+
+Out-of-sequence measurements are rejected, not buffered. GNN gives a track at most one measurement
+per scan, so one target giving several detections starts several tracks. A target crossing the
+line of sight is lost in the Doppler blind zone. There is no bistatic initiator or Singer model.
+
+## References
+
+- Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications to Tracking and
+  Navigation*, Wiley, 2001: §5.4.2 (consistency), §6.2.2, §6.3.2 (white-noise acceleration),
+  §10.3 (EKF), ch. 11 (IMM).
+- S. Särkkä, *Bayesian Filtering and Smoothing*, Cambridge University Press, 2013, ch. 5-6.
+- E. A. Wan and R. van der Merwe, "The unscented Kalman filter for nonlinear estimation," *Proc.
+  IEEE AS-SPCC*, 2000, pp. 153-158.
+- S. S. Blackman, "Multiple hypothesis tracking for multiple target tracking," *IEEE Aerosp.
+  Electron. Syst. Mag.*, 19(1), 2004, pp. 5-18.
+- D. F. Crouse, "On implementing 2D rectangular assignment algorithms," *IEEE Trans. Aerosp.
+  Electron. Syst.*, 52(4), 2016, pp. 1679-1696.
+- Z. Duan, C. Han and X. R. Li, *IEEE Trans. Aerosp. Electron. Syst.*, 40(4), 2004, pp. 1374-1377;
+  S. Bordonaro, P. Willett and Y. Bar-Shalom, *IEEE Trans. Aerosp. Electron. Syst.*, 50(2), 2014,
+  pp. 1431-1444 (converted measurements).
+- H. A. P. Blom and Y. Bar-Shalom, *IEEE Trans. Autom. Control*, 33(8), 1988, pp. 780-783 (IMM);
+  T. E. Fortmann, Y. Bar-Shalom and M. Scheffe, *IEEE J. Oceanic Eng.*, 8(3), 1983, pp. 173-184
+  (JPDA); D. B. Reid, *IEEE Trans. Autom. Control*, 24(6), 1979, pp. 843-854 (MHT).
+- Á. F. García-Fernández, J. L. Williams, K. Granström and L. Svensson, *IEEE Trans. Aerosp.
+  Electron. Syst.*, 54(4), 2018, pp. 1883-1901 (PMBM).
+- D. Schuhmacher, B.-T. Vo and B.-N. Vo, *IEEE Trans. Signal Process.*, 56(8), 2008, pp. 3447-3457
+  (OSPA).

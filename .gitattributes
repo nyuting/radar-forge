@@ -1,0 +1,15 @@
+# LF in the repo and in every working tree, on every OS. The hooks are bash and
+# break on CRLF; ruff's format.line-ending = "lf" and .editorconfig agree.
+* text=auto eol=lf
+
+# Binary: never normalise. Generated arrays are gitignored; golden data may not be.
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.npy  binary
+*.npz  binary
+*.h5   binary
+*.hdf5 binary
+*.mat  binary

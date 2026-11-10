@@ -1,0 +1,97 @@
+# Scenario 001 -- X-band radar at the Duke Receiver, Durham NC.
+# The three variants share every block below except [[burst]]; that is the
+# whole point of the comparison. Every range and rate on the map is bistatic:
+# monostatic, twice the slant range and twice the radial velocity.
+
+[scenario]
+name = "scenario-001-fmcw-dual-prf"
+description = "S3: two FMCW bursts at 5 kHz and 6 kHz. Neither resolves the rate alone, but the coprime 5:6 pair does, to +-459 m/s of bistatic rate (+-229 m/s radial), beyond S2's, by a completely different mechanism."
+seed = 20260911
+
+[[target]]
+name = "light-aircraft"
+rcs_dbsm = 10.0        # 10 m^2, Swerling 0 (non-fluctuating)
+trajectory_path = "../data/flight_coordinates.csv"
+altitude_m = 1500.0    # the CSV has no altitude column; held constant
+
+[frames]
+start_time_s = 0.0
+duration_s = 120.0     # the full track is ~16,500 frames; this window is opt-out
+frame_rate_hz = 1.0
+
+[site.tx]
+# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna. With
+# no [site.rx] the receiver stands here too: monostatic.
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
+
+# Two bursts, 128 pulses each, alternating. Both cover the track in range;
+# their bistatic rate intervals of +-76.48 and +-91.77 m/s are combined by
+# radar_forge.dsp.unfold_doppler_dual_prf.
+#
+# Burst A: 200 us sweep at 10 GHz/s, 4 MHz -> 800 samples. PRF 5.0 kHz.
+[[burst]]
+waveform = "fmcw"
+carrier_frequency_hz = 9.8e9
+bandwidth_hz = 2.0e6
+transmit_power_w = 100.0
+gain_tx_dbi = 30.0
+chirp_duration_s = 200.0e-6
+prf_hz = 5.0e3
+sample_rate_hz = 4.0e6
+n_pulses = 128
+
+# Burst B: PRF 6.0 kHz at 100 % duty, so the chirp time is exactly 1/6000 s
+# = 166.667 us -> 667 samples. The rounded 166.7 us is a duty cycle of 1.0002
+# and Transmitter rejects it: the next chirp would start before this one
+# finished.
+[[burst]]
+waveform = "fmcw"
+carrier_frequency_hz = 9.8e9
+bandwidth_hz = 2.0e6
+transmit_power_w = 100.0
+gain_tx_dbi = 30.0
+chirp_duration_s = 1.6666666666666667e-4
+prf_hz = 6.0e3
+sample_rate_hz = 4.0e6
+n_pulses = 128
+
+[receiver]
+gain_rx_dbi = 30.0
+noise_figure_db = 3.0
+
+# Cell-averaging CFAR along range, which wraps, as scenario 003 runs it. At
+# pfa = 1e-5, S1's map of 256 x 1000 cells holds about 2.6 false alarms a frame.
+[detection]
+pfa = 1e-5
+n_train = 16
+n_guard = 4
+variant = "ca"
+merge_range_bins = 1.0
+max_bistatic_range_rate_mps = 400.0   # 200 m/s radial
+
+# What the stepper checks (radar_forge.evaluate). Every number is re-derived for
+# bistatic range and rate, positive receding: twice the slant values.
+[verify]
+stages = ["geometry", "iq", "rd", "detect"]
+# Fraction of frames whose true range and rate lie inside the map, unfolded.
+# S3's pair resolves the rate within its +-400 m/s search bound, and its maps
+# span 120 and 100 km of range: always inside.
+truth_in_map_fraction = [1.0, 1.0]
+# P_r T N / (k T0 F) on an exact bin at frame 0's ranges (R = 17,560.7 m, burst A), from the
+# radar equation by hand: P_r = -143.046 dBW.
+expected_snr_db = 42.01
+snr_tolerance_db = 0.01
+# Five standard errors of a mean over 85,376 (burst B) complex samples, 5 x 4.343 / sqrt(N) dB.
+noise_tolerance_db = 0.08
+# A noiseless echo has |a|^2 = P_r in every sample it fills.
+peak_tolerance_db = 0.01
+# Scenario 001 A5: every frame detected within one bin on both maps.
+truth_within_bins = 1.0
+detection_fraction = 1.0
+# Noise-only maps hold 30 expected false alarms; the Poisson 99.9 % interval,
+# about 14 to 50, lies within a factor of two.
+pfa_tolerance_factor = 2.0
+# Scenario 001 A5: unfolded, within one burst-A bin, 152.96 / 128 m/s, of the truth.
+rate_tolerance_mps = 1.19496

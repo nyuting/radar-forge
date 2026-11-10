@@ -1,0 +1,78 @@
+# Scenario 001 -- X-band radar at the Duke Receiver, Durham NC.
+# The three variants share every block below except [[burst]]; that is the
+# whole point of the comparison. Every range and rate on the map is bistatic:
+# monostatic, twice the slant range and twice the radial velocity.
+
+[scenario]
+name = "scenario-001-pulsed-medium-prf"
+description = "S2: LFM pulses at 25 kHz PRF. The bistatic rate is unambiguous to +-382 m/s (+-191 m/s radial); bistatic range folds at 11.99 km (5.996 km slant), so the target at 33-37 km bistatic wraps twice or three times. The exact mirror of S1."
+seed = 20260911
+
+[[target]]
+name = "light-aircraft"
+rcs_dbsm = 10.0        # 10 m^2, Swerling 0 (non-fluctuating)
+trajectory_path = "../data/flight_coordinates.csv"
+altitude_m = 1500.0    # the CSV has no altitude column; held constant
+
+[frames]
+start_time_s = 0.0
+duration_s = 120.0     # the full track is ~16,500 frames; this window is opt-out
+frame_rate_hz = 1.0
+
+[site.tx]
+# The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna. With
+# no [site.rx] the receiver stands here too: monostatic.
+latitude_deg = 36.00250
+longitude_deg = -78.94100
+altitude_m = 60.0
+
+# One burst. 10 us LFM pulse, B = 2 MHz (time-bandwidth 20), matched-filtered.
+# PRI 40 us at 2.5 MHz -> 100 samples/PRI. 256 pulses = 10.24 ms of CPI.
+[[burst]]
+waveform = "pulsed"
+carrier_frequency_hz = 9.8e9
+bandwidth_hz = 2.0e6
+transmit_power_w = 1.0e3
+gain_tx_dbi = 30.0
+chirp_duration_s = 10.0e-6
+prf_hz = 25.0e3
+sample_rate_hz = 2.5e6
+n_pulses = 256
+
+[receiver]
+gain_rx_dbi = 30.0
+noise_figure_db = 3.0
+
+# Cell-averaging CFAR along range, which wraps, as scenario 003 runs it. At
+# pfa = 1e-5, S1's map of 256 x 1000 cells holds about 2.6 false alarms a frame.
+[detection]
+pfa = 1e-5
+n_train = 16
+n_guard = 4
+variant = "ca"
+merge_range_bins = 1.0
+max_bistatic_range_rate_mps = 400.0   # 200 m/s radial
+
+# What the stepper checks (radar_forge.evaluate). Every number is re-derived for
+# bistatic range and rate, positive receding: twice the slant values.
+[verify]
+stages = ["geometry", "iq", "rd", "detect"]
+# Fraction of frames whose true range and rate lie inside the map, unfolded.
+# S2 folds range at 11.99 km, and the target is at 33-37 km: never inside.
+truth_in_map_fraction = [0.0, 0.0]
+# P_r T N / (k T0 F) on an exact bin at frame 0's ranges (R = 17,560.7 m), from the
+# radar equation by hand: P_r = -133.046 dBW.
+expected_snr_db = 42.01
+snr_tolerance_db = 0.01
+# Five standard errors of a mean over 25,600 complex samples, 5 x 4.343 / sqrt(N) dB.
+noise_tolerance_db = 0.15
+# A noiseless echo has |a|^2 = P_r in every sample it fills.
+peak_tolerance_db = 0.01
+# Scenario 001 A3 and A4: a detection within one bin of the truth, its range wrapped, every frame.
+truth_within_bins = 1.0
+detection_fraction = 1.0
+# Noise-only maps hold 30 expected false alarms; the Poisson 99.9 % interval,
+# about 14 to 50, lies within a factor of two.
+pfa_tolerance_factor = 2.0
+# Scenario 001 A4: the rate within one bin, 764.78 / 256 m/s, of the truth.
+rate_tolerance_mps = 2.98741

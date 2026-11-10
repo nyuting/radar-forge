@@ -1,0 +1,41 @@
+# Weekly dependency-update PRs.
+#
+# The commit-message prefixes make every Dependabot subject a valid Conventional
+# Commit ("build(deps): bump numpy …", "ci(deps): bump actions/checkout …"), so
+# the PRs pass .githooks/commit-msg and the commit-messages CI job unchanged.
+# Bumps add no new dependency, so they need no justification in the PR.
+#
+# Grouping keeps the PR count low: Python minor/patch bumps share one PR, and
+# every GitHub Actions bump shares another (CI on that PR exercises the
+# workflows). The cooldown waits a week after a release before proposing it,
+# skipping releases that are yanked or quickly patched.
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build"
+      include: "scope"
+    # One PR for the routine bumps; each major version gets its own PR and review,
+    # because a numpy/scipy major can change numerical results.
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    # All Actions bumps, majors included, in one PR.
+    groups:
+      actions:
+        patterns: ["*"]
