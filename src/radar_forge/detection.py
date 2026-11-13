@@ -43,6 +43,8 @@ from numpy.typing import ArrayLike, NDArray
 from scipy import ndimage, optimize, sparse, special
 from scipy.sparse import csgraph
 
+from radar_forge.clustering import mean_shift
+
 __all__ = [
     "CFAR_VARIANTS",
     "CfarVariant",
@@ -278,17 +280,23 @@ def cluster_detections(
     threshold_w: ArrayLike | None = None,
     connectivity: int = 1,
     wrap_axes: tuple[int, ...] = (),
+    bandwidth_bins: ArrayLike | None = None,
 ) -> list[Detection]:
-    """Return one :class:`Detection` per connected group of crossings, strongest peak first.
+    """Return one :class:`Detection` per group of crossings, strongest peak first.
 
-    Touching targets are one cluster: there is no non-maximum suppression. A tied peak is the
-    first tied cell in C order.
+    A group is a connected set of crossings, so touching targets are one cluster. With
+    ``bandwidth_bins`` it is instead the crossings that climb to one mode of the power under
+    :func:`radar_forge.clustering.mean_shift`: two peaks that touch are then two clusters,
+    and fragments within a bandwidth are one. A tied peak is the first tied cell in C order.
 
     Parameters
     ----------
     wrap_axes : tuple of int, optional
         Circular axes, counted from the end: ``(-2,)`` for Doppler, or a target on the
         velocity wrap is two.
+    bandwidth_bins : array_like, optional
+        Mean-shift window radius in bins, one per axis or a scalar; ``connectivity`` is
+        then unused.
 
     References
     ----------
@@ -313,6 +321,12 @@ def cluster_detections(
     if n_groups == 0:
         return []
     value_w = values_w.ravel()[cells]
+    if bandwidth_bins is not None:
+        circular = {_axis(axis, flags.ndim) for axis in wrap_axes}
+        period = [n if axis in circular else math.nan for axis, n in enumerate(flags.shape)]
+        indices = np.stack(np.unravel_index(cells, flags.shape), axis=1)
+        label_of, modes = mean_shift(indices, bandwidth_bins, weights=value_w, period=period)
+        n_groups = len(modes)
     n_cells = np.bincount(label_of, minlength=n_groups)
     total_w = np.bincount(label_of, weights=value_w, minlength=n_groups)
     coords = np.unravel_index(cells, flags.shape)

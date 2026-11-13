@@ -105,7 +105,7 @@ def test_clustering_a_frame_sized_map_runs_within_its_budget(rng):
     """A (256, 1000) map, ten 3 x 5 targets and about 30 false alarms, clustered inside 0.02 s.
 
     Both axes wrap. Labelling the whole padded map took 7 ms warm and 23 to 26 ms cold here;
-    labelling only the flagged cells takes about 3 ms warm and 4 ms cold.
+    labelling only the flagged cells takes about 1 ms warm and 2 to 4 ms cold.
     """
     power_w = rng.exponential(size=(256, 1000))
     # Ten blocks, one assignment each: a loop over the targets, not the cells.
@@ -115,6 +115,25 @@ def test_clustering_a_frame_sized_map_runs_within_its_budget(rng):
     mask = power_w > math.log(power_w.size / 30.0)
     start_s = time.perf_counter()
     found = cluster_detections(mask, power_w, wrap_axes=(0, 1))
+    elapsed_s = time.perf_counter() - start_s
+    assert sum(d.n_cells >= 15 for d in found) == 10
+    assert 20 <= len(found) <= 60
+    assert elapsed_s < 0.02, f"clustering took {elapsed_s:.3f} s"
+
+
+@pytest.mark.benchmark
+def test_mean_shift_clustering_of_a_frame_sized_map_runs_within_its_budget(rng):
+    """The same map grouped by mean-shift mode at a bandwidth of one cell, inside 0.02 s.
+
+    Seeding every flagged cell takes about 4 ms.
+    """
+    power_w = rng.exponential(size=(256, 1000))
+    # Ten blocks, one assignment each: a loop over the targets, not the cells.
+    for k in range(10):
+        power_w[25 * k + 3 : 25 * k + 6, 97 * k + 5 : 97 * k + 10] = 100.0
+    mask = power_w > math.log(power_w.size / 30.0)
+    start_s = time.perf_counter()
+    found = cluster_detections(mask, power_w, wrap_axes=(0, 1), bandwidth_bins=1.0)
     elapsed_s = time.perf_counter() - start_s
     assert sum(d.n_cells >= 15 for d in found) == 10
     assert 20 <= len(found) <= 60

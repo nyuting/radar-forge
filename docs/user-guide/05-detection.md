@@ -122,14 +122,26 @@ fewer reference cells pays more: 12.268 dB with 16.
    mirror image. Edges are clipped and recalibrated as in 1-D, so no border goes untested. A
    zero pair on one axis reduces the ring to the 1-D window along the other.
 7. **Group the crossings.** `label_connected_cells(mask, wrap_axes=)` gives every connected
-   group of True cells its own integer label. `cluster_detections(mask, power_w, threshold_w=,
+   group of True cells its own integer label; it visits only the True cells, so its cost
+   grows with the crossings and not with the map. `cluster_detections(mask, power_w, threshold_w=,
    wrap_axes=)` turns each group into one `Detection`, strongest first: its peak cell, its
    power-weighted centroid in fractional cell indices, its total power, its `n_cells`, and
    `cfar_threshold_w`, the threshold at its peak. Pass the Doppler axis in `wrap_axes` (`-2`),
-   or a target on the rate wrap becomes two detections.
+   or a target on the rate wrap becomes two detections. Connected cells make touching targets
+   one detection. With `bandwidth_bins=` each crossing instead joins the mode of the power it
+   climbs to (`clustering.mean_shift`, a flat window of that radius), so two peaks that touch
+   are two detections and fragments within a bandwidth are one; a saddle cell balanced between
+   two equal peaks stays a group of its own. Detections that are not on a grid, such as plots
+   refined off it or gathered over several bursts, are grouped as points by
+   `clustering.cluster_points(points, epsilon, min_samples=, period=)`: DBSCAN with one radius
+   per column and a period on each circular one, a label per point and `-1` for noise. The
+   pipeline does not call it.
 8. **Plots.** `pipeline.frame_plots(products, scenario.detection)` runs steps 1 to 7 on each
    burst's map with the scenario's `[detection]` table: CA-CFAR along range with range wrapped,
-   so every cell keeps its full window; clusters on the circle of both axes; then keeps only the
+   so every cell keeps its full window; clusters on the circle of both axes, connected cells
+   or, with `mean_shift_bandwidth_bins` above 0, mean-shift modes (on
+   `scenario_011_iq_check_mean_shift.toml` a pair 1.5 range bins apart is one detection in 28
+   frames of 120, against 61 with connected cells); then keeps only the
    strongest cluster within `merge_range_bins` range cells (scenario 003: 1), since an untapered
    map's Doppler sidelobes cross at the target's own range. Each kept centroid becomes a
    bistatic range and a folded rate through the map's own axes, with one bin over $\sqrt{12}$

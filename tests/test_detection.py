@@ -672,6 +672,45 @@ def test_labelling_reads_a_mask_that_is_not_contiguous(rng):
     np.testing.assert_array_equal(labels, expected)
 
 
+def test_two_touching_peaks_are_one_connected_cluster_and_two_mean_shift_modes():
+    """Row 4, columns 3 to 8 at powers 1, 8, 1, 2, 9, 1: one connected group of six cells.
+
+    At a bandwidth of one cell the first three rest at 3.889, 4 and 4.111 and the last three
+    at 6.818, 6.818 and 7.1, two groups 2.7 cells apart. Their centroids are
+    (3 + 32 + 5) / 10 = 4 and (12 + 63 + 8) / 12 = 6.9167; the stronger is first.
+    """
+    power_w = np.zeros((8, 16))
+    power_w[4, 3:9] = [1.0, 8.0, 1.0, 2.0, 9.0, 1.0]
+    (joined,) = cluster_detections(power_w > 0, power_w)
+    assert joined.n_cells == 6
+    found = cluster_detections(power_w > 0, power_w, bandwidth_bins=1.0)
+    assert [d.peak_index for d in found] == [(4, 7), (4, 4)]
+    assert [d.n_cells for d in found] == [3, 3]
+    np.testing.assert_allclose([d.total_power_w for d in found], [12.0, 10.0], rtol=1e-14)
+    np.testing.assert_allclose(found[0].centroid_index, (4.0, 83.0 / 12.0), rtol=1e-14)
+    np.testing.assert_allclose(found[1].centroid_index, (4.0, 4.0), rtol=1e-14)
+
+
+def test_fragments_within_a_bandwidth_are_one_mean_shift_cluster():
+    """Columns 3 and 5 at equal power, column 4 empty: two groups, or one mode at 4."""
+    power_w = np.zeros((8, 16))
+    power_w[4, [3, 5]] = 4.0
+    assert len(cluster_detections(power_w > 0, power_w)) == 2
+    (found,) = cluster_detections(power_w > 0, power_w, bandwidth_bins=2.0)
+    assert found.n_cells == 2
+    assert found.peak_index == (4, 3)
+    np.testing.assert_allclose(found.centroid_index, (4.0, 4.0), rtol=1e-14)
+
+
+def test_a_mean_shift_cluster_forms_across_a_wrapped_axis():
+    """Rows 15 and 0 of 16 at powers 1 and 3: both rest at 15.75 when the axis wraps."""
+    power_w = np.zeros((16, 8))
+    power_w[[15, 0], 4] = [1.0, 3.0]
+    assert len(cluster_detections(power_w > 0, power_w, bandwidth_bins=1.0)) == 2
+    (found,) = cluster_detections(power_w > 0, power_w, wrap_axes=(0,), bandwidth_bins=1.0)
+    np.testing.assert_allclose(found.centroid_index, (15.75, 4.0), rtol=1e-14)
+
+
 def test_each_detection_summarises_exactly_one_label(rng):
     power_w = rng.exponential(1.0, size=(32, 64))
     labels, n_groups = label_connected_cells(power_w > 3.0, wrap_axes=(0,))
