@@ -7,9 +7,9 @@ there too, but may move. Modules, in signal-path order:
     Every physical constant, defined once.
 ``radar``, ``propagation``, ``signal``
     The radar and its sites; propagation paths and the radar equation; waveforms and IQ.
-``dsp``, ``clutter``, ``detection``, ``tracking``
-    Range-Doppler processing; leakage and clutter cancellation; CFAR and clustering; batched
-    multi-target tracking.
+``dsp``, ``clutter``, ``detection``, ``clustering``, ``tracking``
+    Range-Doppler processing; leakage and clutter cancellation; CFAR and clustering of cells;
+    clustering of points; batched multi-target tracking.
 ``scenario``, ``pipeline``, ``evaluate``, ``stages``, ``plots``
     A scenario file, the chain from it to tracks, the stepper that checks each stage, the
     stages it runs, and figures (the ``visualisation`` extra, imported only when drawing).
@@ -17,6 +17,7 @@ there too, but may move. Modules, in signal-path order:
 
 from __future__ import annotations
 
+from radar_forge.clustering import cluster_points, mean_shift
 from radar_forge.detection import Detection, cfar_detect, cfar_detect_2d, cluster_detections
 from radar_forge.dsp import (
     doppler_bin_centers_mps,
@@ -62,6 +63,7 @@ __all__ = [
     "cfar_detect",
     "cfar_detect_2d",
     "cluster_detections",
+    "cluster_points",
     "doppler_bin_centers_mps",
     "doppler_fft",
     "doppler_shift_hz",
@@ -71,6 +73,7 @@ __all__ = [
     "line_of_sight_paths",
     "load_scenario",
     "matched_filter",
+    "mean_shift",
     "pulsed_baseband",
     "range_bin_centers_m",
     "range_doppler_map",
