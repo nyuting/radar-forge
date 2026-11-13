@@ -104,8 +104,8 @@ def test_each_stage_of_three_frames_runs_within_its_budget(tmp_path):
 def test_clustering_a_frame_sized_map_runs_within_its_budget(rng):
     """A (256, 1000) map, ten 3 x 5 targets and about 30 false alarms, clustered inside 0.02 s.
 
-    Both axes wrap. The whole-map ndimage summaries took 32 ms here; the labelled cells alone
-    take about 3 ms.
+    Both axes wrap. Labelling the whole padded map took 7 ms warm and 23 to 26 ms cold here;
+    labelling only the flagged cells takes about 3 ms warm and 4 ms cold.
     """
     power_w = rng.exponential(size=(256, 1000))
     # Ten blocks, one assignment each: a loop over the targets, not the cells.

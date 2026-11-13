@@ -251,8 +251,9 @@ def label_connected_cells(
 ) -> tuple[NDArray[np.int_], int]:
     """Return ``(labels, n_groups)``: each connected group of True cells labelled 1, 2, ...
 
-    :func:`scipy.ndimage.label` has no periodic boundary, so a circular axis is padded with one
-    wrapped cell at each end and each copy's label is joined to its original's.
+    Groups are numbered in C order of their first cell. Only the True cells are visited, so
+    the cost grows with the crossings and not with the map; a circular axis joins its two
+    ends by taking each neighbour's index modulo the axis length.
 
     Parameters
     ----------
@@ -264,28 +265,10 @@ def label_connected_cells(
     Rosenfeld and Pfaltz [7]_.
     """
     flags = np.asarray(mask, dtype=bool)
-    if not 1 <= connectivity <= max(1, flags.ndim):
-        msg = f"connectivity must be between 1 and mask.ndim ({flags.ndim}), got {connectivity!r}."
-        raise ValueError(msg)
-    circular = {_axis(axis, flags.ndim) for axis in wrap_axes}
-    structure = ndimage.generate_binary_structure(flags.ndim, connectivity)
-    padding = [(1, 1) if axis in circular else (0, 0) for axis in range(flags.ndim)]
-    padded, n_padded = ndimage.label(np.pad(flags, padding, mode="wrap"), structure=structure)
-    labels = padded[_crop(padding, flags.shape)]
-    if not circular or n_padded == 0:
-        return labels, int(n_padded)
-    # Join the label of every labelled padded cell to that of the cell it copies.
-    cells = np.nonzero(padded)
-    originals = tuple(
-        (index - 1) % flags.shape[axis] if axis in circular else index
-        for axis, index in enumerate(cells)
-    )
-    joins = sparse.coo_matrix(
-        (np.ones(cells[0].size), (padded[cells] - 1, labels[originals] - 1)),
-        shape=(n_padded, n_padded),
-    )
-    n_groups, component = csgraph.connected_components(joins, directed=False)
-    return np.where(labels > 0, component[labels - 1] + 1, 0), int(n_groups)
+    cells, label_of, n_groups = _label_cells(flags, connectivity, wrap_axes)
+    labels = np.zeros(flags.shape, dtype=np.int_)
+    labels.reshape(-1)[cells] = label_of + 1
+    return labels, n_groups
 
 
 def cluster_detections(
@@ -325,12 +308,10 @@ def cluster_detections(
     if len(shapes) > 1:
         msg = f"mask {flags.shape}, power_w {values_w.shape} and threshold_w do not match."
         raise ValueError(msg)
-    labels, n_groups = label_connected_cells(flags, connectivity=connectivity, wrap_axes=wrap_axes)
+    # Only the flagged cells, in C order: a frame's map has 10^5 cells, its clusters a few.
+    cells, label_of, n_groups = _label_cells(flags, connectivity, wrap_axes)
     if n_groups == 0:
         return []
-    # Only the labelled cells, in C order: a frame's map has 10^5 cells, its clusters a few.
-    cells = np.flatnonzero(labels)
-    label_of = labels.ravel()[cells] - 1
     value_w = values_w.ravel()[cells]
     n_cells = np.bincount(label_of, minlength=n_groups)
     total_w = np.bincount(label_of, weights=value_w, minlength=n_groups)
@@ -366,6 +347,52 @@ def cluster_detections(
         for peak, centroid, total, count in zip(peaks, centroids, total_w, n_cells, strict=True)
     ]
     return sorted(found, key=lambda detection: detection.peak_power_w, reverse=True)
+
+
+def _label_cells(
+    flags: NDArray[np.bool_], connectivity: int, wrap_axes: tuple[int, ...]
+) -> tuple[NDArray[np.intp], NDArray[np.intp], int]:
+    """Return ``(cells, label_of, n_groups)`` for the True cells of ``flags``.
+
+    ``cells`` holds their flat C-order indices and ``label_of`` each one's group, 0, 1, ... in
+    order of first cell. Two True cells are joined when one is the other's neighbour; the
+    groups are the connected components of those joins.
+    """
+    if not 1 <= connectivity <= max(1, flags.ndim):
+        msg = f"connectivity must be between 1 and mask.ndim ({flags.ndim}), got {connectivity!r}."
+        raise ValueError(msg)
+    circular = {_axis(axis, flags.ndim) for axis in wrap_axes}
+    cells = np.flatnonzero(flags)
+    if cells.size == 0:
+        return cells, cells, 0
+    coords = np.unravel_index(cells, flags.shape)
+    # Row of each flagged cell in ``cells``, by flat index; the other entries are never read.
+    position = np.empty(flags.size, dtype=np.intp)
+    position[cells] = np.arange(cells.size)
+    # The offsets after the centre in C order, so that each pair of neighbours is met once.
+    offsets = np.argwhere(ndimage.generate_binary_structure(flags.ndim, connectivity)) - 1
+    first, second = [], []
+    # A loop over the neighbour offsets, two or four on a map, not over the cells.
+    for offset in offsets[len(offsets) // 2 + 1 :]:
+        inside = np.ones(cells.size, dtype=bool)
+        stepped = []
+        for axis, (coord, step) in enumerate(zip(coords, offset, strict=True)):
+            moved = coord + step
+            if axis in circular:
+                moved %= flags.shape[axis]
+            else:
+                inside &= (moved >= 0) & (moved < flags.shape[axis])
+            stepped.append(moved)
+        neighbour = np.ravel_multi_index(stepped, flags.shape, mode="clip")
+        joined = inside & flags.reshape(-1)[neighbour]
+        first.append(np.flatnonzero(joined))
+        second.append(position[neighbour[joined]])
+    rows, columns = np.concatenate(first), np.concatenate(second)
+    graph = sparse.coo_array(
+        (np.ones(rows.size, dtype=bool), (rows, columns)), shape=(cells.size, cells.size)
+    )
+    n_groups, label_of = csgraph.connected_components(graph, directed=False)
+    return cells, np.asarray(label_of, dtype=np.intp), int(n_groups)
 
 
 def _footprint(

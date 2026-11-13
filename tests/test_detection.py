@@ -620,6 +620,58 @@ def test_opposite_corners_join_when_both_axes_wrap():
     np.testing.assert_allclose(found[0].centroid_index, (7 + 2 / 3, 7 + 2 / 3), rtol=1e-14)
 
 
+def _flood_fill_labels(mask, connectivity, circular):
+    """Label by flood fill from each unlabelled True cell in C order: the definition, slowly."""
+    steps = np.argwhere(ndimage.generate_binary_structure(mask.ndim, connectivity)) - 1
+    labels = np.zeros(mask.shape, dtype=int)
+    n_groups = 0
+    # Python loops on purpose: an independent reference, one cell at a time, on tiny masks.
+    for start in map(tuple, np.argwhere(mask)):
+        if labels[start]:
+            continue
+        n_groups += 1
+        labels[start] = n_groups
+        stack = [start]
+        while stack:
+            cell = stack.pop()
+            for step in steps:
+                moved = [
+                    (c + s) % n if axis in circular else c + s
+                    for axis, (c, s, n) in enumerate(zip(cell, step, mask.shape, strict=True))
+                ]
+                inside = all(0 <= m < n for m, n in zip(moved, mask.shape, strict=True))
+                if inside and mask[tuple(moved)] and not labels[tuple(moved)]:
+                    labels[tuple(moved)] = n_groups
+                    stack.append(tuple(moved))
+    return labels, n_groups
+
+
+@pytest.mark.parametrize("shape", [(1,), (2,), (17,), (1, 6), (2, 2), (7, 9), (3, 4, 5)])
+def test_labels_match_a_flood_fill_for_every_connectivity_and_wrap(shape, rng):
+    """Same groups, numbered in C order of first cell, at fill fractions from sparse to full."""
+    ndim = len(shape)
+    for fill in (0.1, 0.4, 0.7, 1.0):
+        mask = rng.random(shape) < fill
+        for connectivity in range(1, ndim + 1):
+            for wrapped in range(2**ndim):
+                wrap_axes = tuple(axis for axis in range(ndim) if wrapped >> axis & 1)
+                labels, n_groups = label_connected_cells(
+                    mask, connectivity=connectivity, wrap_axes=wrap_axes
+                )
+                expected, n_expected = _flood_fill_labels(mask, connectivity, set(wrap_axes))
+                assert n_groups == n_expected
+                np.testing.assert_array_equal(labels, expected)
+
+
+def test_labelling_reads_a_mask_that_is_not_contiguous(rng):
+    """A transposed, strided view labels as its copy does."""
+    mask = (rng.random((12, 20)) < 0.4).T[::2]
+    labels, n_groups = label_connected_cells(mask, wrap_axes=(0, 1))
+    expected, n_expected = label_connected_cells(mask.copy(), wrap_axes=(0, 1))
+    assert n_groups == n_expected
+    np.testing.assert_array_equal(labels, expected)
+
+
 def test_each_detection_summarises_exactly_one_label(rng):
     power_w = rng.exponential(1.0, size=(32, 64))
     labels, n_groups = label_connected_cells(power_w > 3.0, wrap_axes=(0,))
@@ -803,6 +855,7 @@ def test_a_target_on_the_doppler_wrap_gives_one_detection(rng):
         (lambda: cluster_detections(np.ones(4, dtype=bool), [1.0, np.nan, 1.0, 1.0]), "finite"),
         (lambda: label_connected_cells(np.zeros((4, 4)), connectivity=3), "connectivity must be"),
         (lambda: label_connected_cells(np.zeros((4, 4)), wrap_axes=(2,)), "out of bounds"),
+        (lambda: cluster_detections(np.zeros(4, dtype=bool), np.zeros(4), connectivity=2), "conn"),
     ],
 )
 def test_rejects_an_invalid_argument_and_says_which(call, match):
