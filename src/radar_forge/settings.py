@@ -81,7 +81,9 @@ class DetectionSettings:
     A cluster within ``merge_range_bins`` range bins of a stronger one is taken for its Doppler
     sidelobe and dropped, a single-target simplification for an untapered map; 0 keeps every
     cluster. ``max_bistatic_range_rate_mps`` is the fastest a target may open or close: the
-    dual-PRF search bound and a new track's prior rate spread.
+    dual-PRF search bound and a new track's prior rate spread. Crossings are grouped as
+    connected cells, or, with ``mean_shift_bandwidth_bins`` above 0, by the mode of the power
+    each climbs to within that many bins, which separates two peaks that touch.
     """
 
     pfa: float = 1e-5
@@ -89,6 +91,7 @@ class DetectionSettings:
     n_guard: int = 4
     variant: CfarVariant = "ca"
     merge_range_bins: float = 1.0
+    mean_shift_bandwidth_bins: float = 0.0
     max_bistatic_range_rate_mps: float = 400.0
 
 

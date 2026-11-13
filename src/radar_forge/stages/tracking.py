@@ -261,6 +261,7 @@ def _expected_false_plots(scenario: Scenario, time_s: float) -> float:
     "nees_fraction_min",
     "pd_min",
     "false_alarm_rate_max",
+    "merged_fraction_max",
     "leaf_count_max",
     "pmbm_cardinality_error_max",
     "mht_resolved_lead_min",
@@ -274,7 +275,9 @@ def multitarget(ctx: evaluate.Context) -> evaluate.Context:
     IMM takes to its turn mode after the onset of a turn it tracks; ``nees_fraction_min`` the
     fraction of position NEES inside chi-square(2)'s 95 % interval; ``pd_min`` the measured
     Pd; ``false_alarm_rate_max`` ``false_plot_ratio``, false plots over the model's count;
-    all of the configured tracker. ``leaf_count_max`` bounds MHT's most leaves in one tree;
+    all of the configured tracker. ``merged_fraction_max`` bounds, pair by pair in range
+    order, the fraction of an IQ chain's frames in which a pair gives one detection.
+    ``leaf_count_max`` bounds MHT's most leaves in one tree;
     ``pmbm_cardinality_error_max`` PMBM's mean |tracks - aircraft| a rotation;
     ``mht_resolved_lead_min`` MHT's resolved fraction less JPDA's and
     ``pmbm_resolved_lead_min`` PMBM's less the best other tracker's, on a pair (V3).
@@ -678,6 +681,13 @@ def _iq_statistics(ctx: evaluate.Context) -> evaluate.Context:
     separation, merged, n_frames = merged_counts(ctx)
     for gap_m, count in zip(separation, merged, strict=True):
         ctx.record(f"merged_fraction_{gap_m:.0f}m", count / n_frames)
+    if "merged_fraction_max" in verify and n_frames >= _MIN_ECHOES:
+        bounds = verify["merged_fraction_max"]
+        for gap_m, count, bound in zip(separation, merged, bounds, strict=True):
+            name = f"merged_fraction_{gap_m:.0f}m"
+            ctx.check("multitarget", name, count / n_frames, 0.0, bound)
+    elif "merged_fraction_max" in verify:
+        print("  merged_fraction: too few frames in this run to check")
     if "pd_min" in verify and len(detected) >= _MIN_ECHOES:
         ctx.check("multitarget", "measured_pd", pd, verify["pd_min"], 1.0)
     elif "pd_min" in verify:

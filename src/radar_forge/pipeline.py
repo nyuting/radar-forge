@@ -459,7 +459,14 @@ def _detect(
         axis=-1,
         wrap=True,
     )
-    clusters = cluster_detections(detected, power_w, threshold_w=threshold_w, wrap_axes=(0, 1))
+    bandwidth = settings.mean_shift_bandwidth_bins
+    clusters = cluster_detections(
+        detected,
+        power_w,
+        threshold_w=threshold_w,
+        wrap_axes=(0, 1),
+        bandwidth_bins=bandwidth if bandwidth > 0.0 else None,
+    )
     kept = tuple(_merge_sidelobes(clusters, settings.merge_range_bins, power_w.shape[1]))
     rate_index, range_index = np.array([d.centroid_index for d in kept]).reshape(-1, 2).T
     folded_mps = product.rate_at_index_mps(rate_index)
