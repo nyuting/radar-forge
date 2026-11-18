@@ -39,6 +39,8 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.linalg import block_diag
 from scipy.special import factorial
 
+from radar_forge.tracking._linalg import symmetrise
+
 __all__ = [
     "BistaticRangeRateModel",
     "CartesianMotion",
@@ -92,7 +94,7 @@ def check_covariances(value: ArrayLike, shape: tuple[int, ...], name: str) -> ND
     if np.any(np.max(np.abs(covariance - transposed), axis=(-2, -1), initial=0.0) > allowance):
         msg = f"{name} must be symmetric to within roundoff."
         raise ValueError(msg)
-    covariance = (covariance + transposed) / 2
+    covariance = symmetrise(covariance)
     if not _is_positive_definite(covariance):
         stack = covariance.reshape(-1, *shape[-2:])
         # Only on the error path: one factorisation per matrix names the ones that fail.

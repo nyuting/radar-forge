@@ -37,7 +37,12 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.sparse import coo_array
 from scipy.sparse.csgraph import connected_components
 
-from radar_forge.tracking.association import Assignment, global_nearest_neighbour, murty_k_best
+from radar_forge.tracking.association import (
+    Assignment,
+    global_nearest_neighbour,
+    murty_k_best,
+    non_assignment_cost,
+)
 from radar_forge.tracking.filters import TrackBank, TrackStatus
 from radar_forge.tracking.models import StateLayout
 
@@ -570,8 +575,7 @@ class TrackOrientedMHT:
     @property
     def non_assignment_cost(self) -> float:
         r"""Return :math:`\ln(P_D / (1 - P_D P_G))`, where a hit and a miss score alike."""
-        p_d = self.detection_probability
-        return math.log(p_d / (1 - p_d * self.gate_probability))
+        return non_assignment_cost(self.detection_probability, self.gate_probability)
 
     def assign(self, cost: ArrayLike, in_gate: ArrayLike) -> Assignment:
         """Return the one best assignment, GNN's, for a caller that needs one."""

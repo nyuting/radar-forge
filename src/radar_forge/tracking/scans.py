@@ -29,6 +29,7 @@ from numpy.typing import NDArray
 from radar_forge.tracking.association import (
     GlobalNearestNeighbour,
     JointProbabilisticDataAssociation,
+    non_assignment_cost,
 )
 from radar_forge.tracking.filters import (
     TaylorLinearisation,
@@ -276,7 +277,7 @@ class PlotTracker:
         p_d, p_g = settings.detection_probability, settings.gate_probability
         self.components = scenario.clutter_plots.components
         initiator = DebiasedSphericalInitiator(np.zeros(layout.dimension), prior)
-        associator: Any = GlobalNearestNeighbour(math.log(p_d / (1 - p_d * p_g)))
+        associator: Any = GlobalNearestNeighbour(non_assignment_cost(p_d, p_g))
         if settings.association == "jpda":
             associator = JointProbabilisticDataAssociation(p_d, p_g, settings.coalescence)
         elif settings.association == "mht":

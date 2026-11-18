@@ -8,6 +8,7 @@ by a Clopper-Pearson interval rather than a tolerance (docs/conventions/testing.
 from __future__ import annotations
 
 import itertools
+import math
 import time
 
 import numpy as np
@@ -26,6 +27,7 @@ from radar_forge.tracking.association import (
     greedy_nearest_neighbour,
     joint_probabilistic_data_association,
     murty_k_best,
+    non_assignment_cost,
     probabilistic_data_association,
 )
 from radar_forge.tracking.filters import (
@@ -159,6 +161,13 @@ def test_a_finite_non_assignment_cost_leaves_a_dear_pair_unmade() -> None:
     cost = np.array([[20.0, 1.0], [np.inf, 30.0]])
     assigned, _ = global_nearest_neighbour(cost, np.isfinite(cost), non_assignment_cost=10.0)
     np.testing.assert_array_equal(assigned, [1, -1])
+
+
+def test_at_the_non_assignment_cost_a_hit_scores_as_a_miss() -> None:
+    """A hit adds ln(P_D) - cost to the track score, a miss ln(1 - P_D P_G)."""
+    cost = non_assignment_cost(0.9, 0.99)
+    np.testing.assert_allclose(cost, math.log(0.9 / 0.109), rtol=1e-15)
+    np.testing.assert_allclose(math.log(0.9) - cost, math.log(1 - 0.9 * 0.99), rtol=1e-14)
 
 
 def test_gnn_takes_negative_costs_such_as_a_log_likelihood_ratio() -> None:
