@@ -146,7 +146,8 @@ radar-forge/
 └── src/
     └── radar_forge/            # The import package: flat modules, signal-path order
         ├── constants.py        # Every physical constant, once
-        ├── radar.py            # Transmitter, receiver, sites, bistatic geometry, WGS-84
+        ├── radar.py            # Transmitter, receiver, sites, bistatic geometry
+        ├── coordinates.py      # WGS-84 geodetic, ECEF, ENU, range-azimuth-elevation
         ├── propagation.py      # Propagation paths, the radar equation, Swerling draws
         ├── signal.py           # LFM chirp, thermal noise, FMCW and pulsed IQ synthesis
         ├── dsp.py              # Windows, matched filter, range and Doppler FFTs, unfolding

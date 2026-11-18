@@ -5,8 +5,9 @@ there too, but may move. Modules, in signal-path order:
 
 ``constants``
     Every physical constant, defined once.
-``radar``, ``propagation``, ``signal``
-    The radar and its sites; propagation paths and the radar equation; waveforms and IQ.
+``coordinates``, ``radar``, ``propagation``, ``signal``
+    Geodetic and ENU conversions; the radar and its sites; propagation paths and the radar
+    equation; waveforms and IQ.
 ``dsp``, ``clutter``, ``detection``, ``clustering``, ``tracking``
     Range-Doppler processing; leakage and clutter cancellation; CFAR and clustering of cells;
     clustering of points; batched multi-target tracking.

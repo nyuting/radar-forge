@@ -4,14 +4,15 @@ This stage turns *where things are* into *what the receiver hears*. It takes a t
 longitude and altitude, works out its route from the transmitter to the receiver and how fast
 that route grows, and turns those into a delay, a Doppler shift and an amplitude for each echo.
 It is the *Where things are* and *How energy travels* boxes of
-[the chain](README.md#the-chain). It covers the geodesy functions, `Radar.geometry` and
-`TargetGeometry` in `radar_forge.radar`, and `radar_forge.propagation`.
+[the chain](README.md#the-chain). It covers the geodesy in `radar_forge.coordinates`,
+`Radar.geometry` and `TargetGeometry` in `radar_forge.radar`, and `radar_forge.propagation`.
 
 ## What this stage does
 
 A scenario says where the sites and the target are in the coordinates the world uses: WGS-84
 latitude, longitude and height above the ellipsoid (the **geodetic** frame). Radar geometry
-wants a flat Cartesian frame with a site at the origin. The geodesy functions are the bridge.
+wants a flat Cartesian frame with a site at the origin. The functions in `coordinates` are the
+bridge.
 They go through Earth-centred, Earth-fixed (**ECEF**) metres to a local **east-north-up (ENU)**
 frame on the tangent plane at the site. They are the only code in the library that knows the
 Earth is round.
@@ -169,13 +170,13 @@ import csv
 
 import numpy as np
 
-from radar_forge.plots import display_axes
-from radar_forge.propagation import line_of_sight_paths
-from radar_forge.radar import (
+from radar_forge.coordinates import (
     enu_to_range_azimuth_elevation_rad,
     geodetic_to_ecef_m,
     geodetic_to_enu_m,
 )
+from radar_forge.plots import display_axes
+from radar_forge.propagation import line_of_sight_paths
 from radar_forge.scenario import load_scenario, truth_geometry
 
 scenario = load_scenario("config/scenario_001_fmcw_low_prf.toml")
@@ -289,7 +290,8 @@ bug reports on any module, and this one is a good place to look.
 **The azimuth is 232.36°, but `np.degrees(np.arctan2(north, east))` gives 217.64°.** That is the
 maths angle, counter-clockwise from east. The library uses the compass angle, clockwise from
 north, which is `atan2(east, north)`. `enu_to_range_azimuth_elevation_rad` says so in its
-docstring.
+docstring. It also returns range first, where pymap3d's `enu2aer` returns (azimuth, elevation,
+range).
 
 **S1's rate is positive but its Doppler shift is negative.** The rate is the time derivative of
 $R_b$, positive receding; the Doppler shift is positive closing. `doppler_shift_hz` relates them

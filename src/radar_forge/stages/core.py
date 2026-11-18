@@ -23,8 +23,9 @@ import numpy as np
 from scipy.stats import chi2
 
 from radar_forge import evaluate, plots
-from radar_forge.array import directions_unit, enu_to_array_frame
+from radar_forge.array import enu_to_array_frame
 from radar_forge.clutter import cancel
+from radar_forge.coordinates import directions_unit
 from radar_forge.detection import cfar_detect
 from radar_forge.dsp import fold_into_period
 from radar_forge.pipeline import (

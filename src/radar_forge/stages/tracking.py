@@ -35,12 +35,12 @@ from numpy.typing import NDArray
 from scipy.stats import chi2
 
 from radar_forge import evaluate, plots
+from radar_forge.coordinates import range_azimuth_to_east_north_m
 from radar_forge.scenario import Scenario
 from radar_forge.tracking.filters import TrackBank, TrackStatus
 from radar_forge.tracking.metrics import gospa, nees, trajectory_gospa
 from radar_forge.tracking.rfs import PmbmTracker
 from radar_forge.tracking.scans import PlotScan, PlotTracker, scans, tracker_name
-from radar_forge.tracking.scene import to_enu
 
 __all__ = ["merged_counts", "multitarget", "pair_scores", "pair_windows", "play"]
 
@@ -356,7 +356,7 @@ def play(scenario: Scenario, n_frames: int | None = None, *, rows: bool = False)
         run.false_plots += int(false.sum())
         run.expected_false += _expected_false_plots(scenario, plots_scan.start_time_s)
         if rows:
-            enu = to_enu(plots_scan.range_m, plots_scan.azimuth_rad)
+            enu = range_azimuth_to_east_north_m(plots_scan.range_m, plots_scan.azimuth_rad)
             false_enu.append(enu[false])
             true_enu.append(enu[~false])
             plot_rows += _plot_rows(plots_scan)
