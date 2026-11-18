@@ -39,6 +39,7 @@ from radar_forge.tracking.filters import (
 )
 from radar_forge.tracking.hypotheses import TrackOrientedMHT
 from radar_forge.tracking.initiation import DebiasedSphericalInitiator
+from radar_forge.tracking.lifecycle import LifecyclePolicy
 from radar_forge.tracking.models import (
     CartesianMotion,
     LinearMeasurement,
@@ -52,7 +53,7 @@ from radar_forge.tracking.scene import (
     poisson_clutter_plots,
     resolve,
 )
-from radar_forge.tracking.tracker import LifecyclePolicy, Scan, Tracker
+from radar_forge.tracking.tracker import Scan, Tracker
 
 ALL = np.ones((2, 2), dtype=bool)
 

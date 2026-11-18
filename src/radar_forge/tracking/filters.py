@@ -50,6 +50,7 @@ __all__ = [
     "TrackStatus",
     "UnscentedTransform",
     "innovate",
+    "is_confirmed",
     "predict",
     "update",
     "update_weighted",
@@ -63,6 +64,11 @@ class TrackStatus(IntEnum):
     CONFIRMED = 1
     COASTING = 2
     DELETED = 3
+
+
+def is_confirmed(status: ArrayLike) -> NDArray[np.bool_]:
+    """Return which statuses are a confirmed track's: with a hit this scan, or coasting."""
+    return np.isin(status, (TrackStatus.CONFIRMED, TrackStatus.COASTING))
 
 
 @dataclass(frozen=True, eq=False)

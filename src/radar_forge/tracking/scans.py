@@ -40,6 +40,7 @@ from radar_forge.tracking.filters import (
 from radar_forge.tracking.hypotheses import TrackOrientedMHT
 from radar_forge.tracking.imm import InteractingMultipleModel
 from radar_forge.tracking.initiation import DebiasedSphericalInitiator
+from radar_forge.tracking.lifecycle import ExistencePolicy, LifecyclePolicy
 from radar_forge.tracking.models import (
     CartesianMotion,
     CoordinatedTurn,
@@ -58,7 +59,7 @@ from radar_forge.tracking.scene import (
     polar,
     resolve,
 )
-from radar_forge.tracking.tracker import ExistencePolicy, LifecyclePolicy, Scan, Tracker
+from radar_forge.tracking.tracker import Scan, Tracker
 
 if TYPE_CHECKING:
     # Types only: scenario.py imports tracking.scene, so a run-time import would be a cycle.

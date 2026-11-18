@@ -36,7 +36,7 @@ from scipy.stats import chi2
 
 from radar_forge import evaluate, plots
 from radar_forge.scenario import Scenario
-from radar_forge.tracking.filters import TrackBank, TrackStatus
+from radar_forge.tracking.filters import TrackBank, TrackStatus, is_confirmed
 from radar_forge.tracking.metrics import gospa, nees, trajectory_gospa
 from radar_forge.tracking.rfs import PmbmTracker
 from radar_forge.tracking.scans import PlotScan, PlotTracker, scans, tracker_name
@@ -60,7 +60,6 @@ _MIN_FALSE_PLOTS, _MIN_ECHOES = 30.0, 100
 # at most 6 bins apart, and the pairs 20 bins or more apart).
 _PAIR_BINS = 8.0
 
-_CONFIRMED = (TrackStatus.CONFIRMED, TrackStatus.COASTING)
 # V3's pair is judged over its last 20 scans (spec 011b §2.1): held within c/2 in 90 % of them.
 _PAIR_SCANS, _HELD_FRACTION = 20, 0.9
 
@@ -102,7 +101,7 @@ def _score_rotation(scenario: Scenario, plots_scan: PlotScan, bank: TrackBank, r
     """Score one rotation's confirmed tracks: GOSPA, its assignment, NEES and mode probability."""
     aircraft = np.array([t.target_class == "aircraft" for t in scenario.arcs])
     present = np.flatnonzero(aircraft & plots_scan.echo_in_coverage)
-    confirmed = np.flatnonzero(np.isin(bank.status, _CONFIRMED))
+    confirmed = np.flatnonzero(is_confirmed(bank.status))
     names = bank.layout.names
     columns = [names.index("x_m"), names.index("y_m")]
     estimate = bank.mean[confirmed][:, columns]

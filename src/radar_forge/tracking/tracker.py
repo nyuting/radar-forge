@@ -51,6 +51,7 @@ from radar_forge.tracking.filters import (
     TrackBank,
     TrackStatus,
     innovate,
+    is_confirmed,
     predict,
     update,
     update_weighted,
@@ -62,7 +63,7 @@ from radar_forge.tracking.imm import (
     imm_predict,
     imm_update,
 )
-from radar_forge.tracking.initiation import Initiator
+from radar_forge.tracking.initiation import Initiator, Rows
 from radar_forge.tracking.lifecycle import (
     ExistencePolicy,
     LifecyclePolicy,
@@ -78,8 +79,6 @@ from radar_forge.tracking.models import (
 
 __all__ = [
     "Coverage",
-    "ExistencePolicy",
-    "LifecyclePolicy",
     "ModelSelector",
     "Scan",
     "Tracker",
@@ -88,10 +87,6 @@ __all__ = [
 # Two times this close are one time: one scan time computed two ways differs by roundoff far
 # under a microsecond, while a target at 300 m/s moves 0.3 mm in one.
 _TIME_TOLERANCE_S = 1e-6
-
-_CONFIRMED = (TrackStatus.CONFIRMED, TrackStatus.COASTING)
-
-Rows = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 # One model's scoring of a scan: the innovation that gates, and each IMM mode's (none without).
 Scored = tuple[Innovation, tuple[Innovation, ...]]
@@ -455,7 +450,7 @@ class Tracker:
         """Return each row's measurement (-1 none), and the measurements no birth may use."""
         if self.assignment == "joint":
             return self.associator.assign(cost, in_gate)[0], np.zeros(cost.shape[1], dtype=bool)
-        first = np.isin(status, _CONFIRMED)
+        first = is_confirmed(status)
         assigned = np.full(len(cost), -1, dtype=np.intp)
         assigned[first] = self.associator.assign(cost[first], in_gate[first])[0]
         free = np.ones(cost.shape[1], dtype=bool)
@@ -513,7 +508,7 @@ class Tracker:
         n_meas = in_gate.shape[1]
         first = np.ones(bank.n_tracks, dtype=bool)
         if self.assignment == "confirmed_first":
-            first = np.isin(bank.status, _CONFIRMED)
+            first = is_confirmed(bank.status)
         prior = bank.existence if self.existence is not None else None
         clutter = scan.clutter_intensity
         log_likelihood = innovations[0][0].log_likelihood
@@ -586,12 +581,12 @@ class Tracker:
             status[~live] = TrackStatus.DELETED
         else:
             status = m_of_n(status, n_hits, n_scans, policy)
-            extra = np.where(np.isin(status, _CONFIRMED), policy.n_reacquire_misses, 0)
+            extra = np.where(is_confirmed(status), policy.n_reacquire_misses, 0)
             status[~live | (n_misses >= policy.n_delete_misses + extra)] = TrackStatus.DELETED
         if policy.max_position_sigma_m is not None and self._position.size:
             block = bank.covariance[:, self._position[:, None], self._position[None, :]]
             largest_m2 = np.linalg.eigvalsh(block)[:, -1] if len(block) else np.zeros(0)
-            wide = (largest_m2 > policy.max_position_sigma_m**2) & np.isin(status, _CONFIRMED)
+            wide = (largest_m2 > policy.max_position_sigma_m**2) & is_confirmed(status)
             status[wide] = TrackStatus.DELETED
         # The miss that opens re-acquisition, and only it: a later reset would undo what the
         # coast has learnt.
@@ -653,7 +648,7 @@ class Tracker:
             chosen >= 0,
             clutter_intensity=scan.clutter_intensity,
             born=born,
-            linking=None if self.assignment == "joint" else np.isin(bank.status, _CONFIRMED),
+            linking=None if self.assignment == "joint" else is_confirmed(bank.status),
         )
         kept, new = step.measurement == -2, step.parent < 0
         grown = ~kept & ~new
