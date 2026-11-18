@@ -37,6 +37,7 @@ from radar_forge.signal import (
     range_resolution_m,
     sweep_rate_hzps,
 )
+from radar_forge.units import power_to_db
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 MODULE_NAMES = sorted(
@@ -112,6 +113,7 @@ def test_no_name_is_exported_twice_or_private(module_name: str) -> None:
         pytest.param(range_resolution_m, ([1e9, 2e9],), id="range_resolution_m"),
         pytest.param(sweep_rate_hzps, ([1e9, 2e9], [1e-5, 2e-5]), id="sweep_rate_hzps"),
         pytest.param(bistatic_range_from_beat_frequency_m, ([1e6], 1e9, 4e-5), id="from_beat"),
+        pytest.param(power_to_db, ([1.0, 2.0],), id="power_to_db"),
     ],
 )
 def test_a_python_list_is_accepted_and_a_float64_array_returned(function, arguments):

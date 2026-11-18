@@ -54,6 +54,9 @@ class TestTransmitter:
         """2 MHz over 1 ms is 2.000 GHz/s, per spec §3.4 S1."""
         np.testing.assert_allclose(S1_TRANSMITTER.sweep_rate_hzps, 2.0e9, rtol=1e-12)
 
+    def test_thirty_dbi_of_gain_is_a_factor_of_a_thousand(self) -> None:
+        np.testing.assert_allclose(S1_TRANSMITTER.gain_tx_linear, 1000.0, rtol=1e-15)
+
     def test_fmcw_runs_at_full_duty(self) -> None:
         """Exactly 100% duty is permitted, and the formula is T * PRF."""
         np.testing.assert_allclose(S1_TRANSMITTER.duty_cycle_linear, 1.0, rtol=1e-12)
@@ -88,6 +91,10 @@ class TestTransmitter:
 class TestReceiver:
     def test_noise_figure_of_three_db_is_about_a_factor_of_two(self) -> None:
         np.testing.assert_allclose(S1_RECEIVER.noise_figure_linear, 1.995_262, rtol=1e-6)
+
+    def test_receive_gain_is_linear_as_the_noise_figure(self) -> None:
+        np.testing.assert_allclose(S1_RECEIVER.gain_rx_linear, 1000.0, rtol=1e-15)
+        np.testing.assert_allclose(Receiver(1.0e6, -3.0, 3.0).gain_rx_linear, 0.501_187, rtol=1e-6)
 
     def test_zero_db_noise_figure_is_unity(self) -> None:
         """Zero is the guard's boundary: a ``<= 0`` check would reject an ideal receiver."""

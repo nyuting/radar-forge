@@ -159,19 +159,20 @@ rate on maps of pure noise, then adds one target and clusters it:
 import numpy as np
 
 from radar_forge import detection
+from radar_forge.units import power_to_db
 
 # Scenario 003's [detection] table: CA-CFAR along range, 16 training and 4 guard cells a side.
 pfa, window = 1e-5, {"n_train": 16, "n_guard": 4}
 alpha = detection.cfar_threshold_factor(pfa=pfa, n_train=16)
 n_reference = detection.cfar_reference_cell_count(16, 4)
 pfa_back = detection.cfar_probability_of_false_alarm(alpha, n_train=16)
-print(f"M = {n_reference}, alpha_cfar = {alpha:.3f} ({10 * np.log10(alpha):.3f} dB)")
+print(f"M = {n_reference}, alpha_cfar = {alpha:.3f} ({power_to_db(alpha):.3f} dB)")
 print(f"P_fa from alpha_cfar: {pfa_back:.3e}")
 
 # On a flat 1 W profile each cell's threshold is its own factor.
 for wrap in (False, True):
     _, threshold_w = detection.cfar_detect(np.ones(1000), pfa, wrap=wrap, **window)
-    cells_db = 10 * np.log10(threshold_w[[0, 4, 5, 10, 20, 500]])
+    cells_db = power_to_db(threshold_w[[0, 4, 5, 10, 20, 500]])
     print(f"wrap={wrap}: cells 0, 4, 5, 10, 20, 500 at {cells_db.round(3).tolist()} dB")
 
 # Ten maps of noise alone, (n_doppler, n_range) each: exponential power, mean 1 W.

@@ -77,6 +77,7 @@ from radar_forge.pipeline import (
 from radar_forge.radar import Radar, TargetGeometry
 from radar_forge.scenario import scattering_phase_rad
 from radar_forge.settings import DoaSettings
+from radar_forge.units import power_to_db
 
 __all__ = ["doa"]
 
@@ -306,7 +307,7 @@ def _bound_at_truth(
     noise_w = _cell_noise_w(radar, ctx.scenario.n_pulses[0])
     variance = np.diag(crb_deterministic(a, derivative, amplitude, noise_w))
     for k, s in enumerate(amplitude):
-        ctx.record(f"source_{k}_cell_snr_db", evaluate.to_db(abs(s) ** 2 / noise_w))
+        ctx.record(f"source_{k}_cell_snr_db", float(power_to_db(abs(s) ** 2 / noise_w)))
     # A pair the snapshot cannot tell apart leaves a round-off variance of either sign: nan.
     result: NDArray[np.float64] = np.sqrt(np.where(variance > 0.0, variance, np.nan))
     return result
@@ -397,7 +398,7 @@ def _truth_rows(
     power_w = evaluate.target_power_w(radar, truth, scenario.rcs_m2)
     # Per channel on an exact bin, as predicted_snr_db: P_r T N over the noise of one sample.
     gain = radar.n_samples_per_chirp * scenario.n_pulses[0]
-    snr_db = 10.0 * np.log10(power_w / radar.receiver.noise_power_per_sample_w * gain)
+    snr_db = power_to_db(power_w / radar.receiver.noise_power_per_sample_w * gain)
     in_array = enu_to_array_frame(array, directions_unit(truth.aoa_rad[:, 0], truth.aoa_rad[:, 1]))
     # Folded as the map reads it, beside the estimates' folded rates.
     folded_mps = fold_velocity_mps(
@@ -466,7 +467,7 @@ def _estimate_rows(
                     show.rate_name + "_folded": rate_mps * show.scale,
                     "range_bin": range_bin,
                     "doppler_bin": rate_bin,
-                    "snr_db": evaluate.to_db(abs(estimate.amplitude[source]) ** 2 / noise_w),
+                    "snr_db": float(power_to_db(abs(estimate.amplitude[source]) ** 2 / noise_w)),
                     "crb_std_direction_cosine": float(estimate.crb_std_direction_cosine[source]),
                 }
             )

@@ -36,6 +36,7 @@ from radar_forge.constants import (
     WGS84_FLATTENING,
     WGS84_SEMI_MAJOR_AXIS_M,
 )
+from radar_forge.units import db_to_power
 
 __all__ = [
     "Radar",
@@ -89,6 +90,11 @@ class Transmitter:
             raise ValueError(msg)
 
     @property
+    def gain_tx_linear(self) -> float:
+        """Transmit antenna gain as a linear factor."""
+        return float(db_to_power(self.gain_tx_dbi))
+
+    @property
     def wavelength_m(self) -> float:
         r"""Carrier wavelength :math:`\lambda = c/f_c`, m."""
         return SPEED_OF_LIGHT_MPS / self.carrier_frequency_hz
@@ -127,9 +133,14 @@ class Receiver:
             raise ValueError(msg)
 
     @property
+    def gain_rx_linear(self) -> float:
+        """Receive antenna gain as a linear factor."""
+        return float(db_to_power(self.gain_rx_dbi))
+
+    @property
     def noise_figure_linear(self) -> float:
         r"""Noise figure as a linear factor :math:`F \ge 1`."""
-        return float(10.0 ** (self.noise_figure_db / 10.0))
+        return float(db_to_power(self.noise_figure_db))
 
     @property
     def noise_density_w_per_hz(self) -> float:

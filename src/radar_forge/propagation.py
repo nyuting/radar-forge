@@ -31,6 +31,7 @@ from numpy.typing import ArrayLike, NDArray
 
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.radar import Radar, TargetGeometry
+from radar_forge.units import db_to_power, power_to_db
 
 if TYPE_CHECKING:
     from radar_forge.settings import ClutterSettings, LeakageSettings
@@ -272,9 +273,9 @@ def line_of_sight_paths(
         msg = "rcs_m2 must be non-negative; 0.0 is a target that returns nothing."
         raise ValueError(msg)
     if gain_tx_linear is None:
-        gain_tx_linear = 10.0 ** (radar.transmitter.gain_tx_dbi / 10.0)
+        gain_tx_linear = radar.transmitter.gain_tx_linear
     if gain_rx_linear is None:
-        gain_rx_linear = 10.0 ** (radar.receiver.gain_rx_dbi / 10.0)
+        gain_rx_linear = radar.receiver.gain_rx_linear
     power_w = received_power_w(
         transmit_power_w=radar.transmitter.transmit_power_w,
         gain_tx_linear=gain_tx_linear,
@@ -357,7 +358,7 @@ def _specified_paths(
     if not np.all(range_m >= 0.0):
         msg = "a leakage or clutter route must be non-negative."
         raise ValueError(msg)
-    power_w = radar.receiver.noise_power_per_sample_w * 10.0 ** (ratio / 10.0)
+    power_w = radar.receiver.noise_power_per_sample_w * db_to_power(ratio)
     phase_rad = propagation_phase_rad(range_m, radar.wavelength_m)
     return PropagationPaths(
         delay_s=propagation_delay_s(range_m),
@@ -371,7 +372,7 @@ def _specified_paths(
 
 def dbsm_to_m2(rcs_dbsm: ArrayLike) -> NDArray[np.float64]:
     """Convert a cross-section from dBsm to m²."""
-    return np.asarray(10.0 ** (np.asarray(rcs_dbsm, dtype=np.float64) / 10.0), dtype=np.float64)
+    return np.asarray(db_to_power(rcs_dbsm), dtype=np.float64)
 
 
 def m2_to_dbsm(rcs_m2: ArrayLike) -> NDArray[np.float64]:
@@ -380,7 +381,7 @@ def m2_to_dbsm(rcs_m2: ArrayLike) -> NDArray[np.float64]:
     if np.any(rcs_arr <= 0.0):
         msg = "rcs_m2 must be strictly positive; a non-positive area has no decibel value."
         raise ValueError(msg)
-    return np.asarray(10.0 * np.log10(rcs_arr), dtype=np.float64)
+    return np.asarray(power_to_db(rcs_arr), dtype=np.float64)
 
 
 @dataclass(frozen=True)

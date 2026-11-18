@@ -151,12 +151,13 @@ import numpy as np
 from radar_forge import dsp, plots
 from radar_forge.pipeline import frames, range_doppler_product
 from radar_forge.scenario import load_scenario
+from radar_forge.units import power_to_db
 
 s1 = load_scenario("config/scenario_001_fmcw_low_prf.toml")
 frame = next(frames(s1, n_frames=1))
 product = range_doppler_product(frame.cubes[0], s1.radar)  # FMCW: range FFT, then Doppler FFT
 range_m, rate_mps = product.range_axis_m, product.rate_axis_mps
-gain_db = 10 * np.log10(product.rd_map.size)
+gain_db = power_to_db(product.rd_map.size)
 show = plots.display_axes(s1.radar)
 print(f"map {product.rd_map.shape}, gain of the two FFTs {gain_db:.2f} dB")
 print(f"range bins {product.range_bin_m:.4f} m apart; bin N/2 at {range_m[500]:.1f} m")
