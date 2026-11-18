@@ -127,8 +127,8 @@ three forms differ by convention, not by physics. A designer uses the number thr
 No single burst reaches more than $c\lambda$, and one can reach less. An FMCW receiver reads
 range from the beat frequency, which its sample rate limits to a delay of $f_s/\alpha$; and an
 echo that arrives after its own chirp has ended meets the next chirp, so a real sawtooth radar
-cannot place it. The delay a burst can use, its *reach*, is the smaller of $f_s/\alpha$ and
-$T_c$, and the product of reach and rate span is $c\lambda \cdot d \cdot \min(f_s/B, 1)$. S1
+cannot place it. The delay an FMCW burst can use, its *reach*, is the smaller of $f_s/\alpha$
+and $T_c$, and the product of its reach and rate span is $c\lambda \cdot d \cdot \min(f_s/B, 1)$. S1
 and S3 have $d = 1$. S1 has $f_s/B = 0.5$ and reaches half of $c\lambda$: its sample rate, not
 its PRF, is the limit. S3 has $f_s/B = 2$, so its map's range axis, $R_{b,ua} = c f_s/\alpha$,
 is twice as long as its chirp, and each burst reaches exactly $c\lambda$. That is what a real
@@ -355,7 +355,8 @@ route length. A monostatic figure or CSV halves them (`plots.display_axes`).
   transmitter to receiver is not modelled.
 - The FMCW $R_{b,ua}$ ignores the $c T_c$ cap of a real sawtooth, whose delay must be shorter
   than the chirp, and so does the simulator: it writes a full-length beat tone for any delay, so
-  a target beyond $c T_c$ of route appears at its range at full strength.
+  a target beyond $c T_c$ of route appears at full strength wherever the map's axis puts it: at
+  its range up to $c f_s/\alpha$ (S3: 80 km appears at 80 km), folded beyond.
 
 ## References
 
