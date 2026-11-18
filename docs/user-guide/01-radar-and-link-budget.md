@@ -103,33 +103,39 @@ $$R_{b,ua} = \frac{c}{\mathrm{PRF}}\ \text{(pulsed)}, \qquad R_{b,ua} = \frac{c\
 
 **The trade between the two.** A waveform that repeats every $T_{\mathrm{PRI}}$ cannot tell a
 delay $\tau$ from $\tau + T_{\mathrm{PRI}}$, and a phase sampled once per repetition cannot tell
-a Doppler shift $f$ from $f + \mathrm{PRF}$. The two periods multiply to one whatever the PRF,
-so in range and rate
+a Doppler shift $f$ from $f + \mathrm{PRF}$. The two periods multiply to one whatever the PRF.
+For a pulsed radar, whose range limit is one repetition, that is
 
 $$R_{b,ua}\, \dot R_{b,ua} = \frac{c}{\mathrm{PRF}} \cdot \lambda\, \mathrm{PRF} = c\lambda$$
 
-Only the carrier sets it. Halve both for one site and count the rate as $\pm v_{ua}$, and it is
-the textbook $R_{ua}\, v_{ua} = c\lambda/8$, with $R_{ua} = c/2\,\mathrm{PRF}$ and
-$v_{ua} = \lambda\,\mathrm{PRF}/4$; the three forms differ by convention, not by physics. A
-designer uses the number three ways:
+Only the carrier sets it. Halve both for one site and it is $c\lambda/4$; count the rate as
+$\pm v_{ua}$ as well and it is the textbook $R_{ua}\, v_{ua} = c\lambda/8$, with
+$R_{ua} = c/(2\,\mathrm{PRF})$ and $v_{ua} = \lambda\,\mathrm{PRF}/4$ of radial velocity. The
+three forms differ by convention, not by physics. A designer uses the number three ways:
 
 - **As a test.** Multiply the range span the radar must cover by the rate span it must cover. If
   the product is above $c\lambda$, no single PRF does both, and the choice is which axis folds:
-  a low PRF keeps range and folds rate (S1), a high PRF keeps rate and folds range, a medium PRF
-  folds both a little (S2).
+  a low PRF keeps range and folds rate (S1); a high PRF keeps rate and folds range (S2, for this
+  aircraft); a medium PRF folds both a little. S2 is called medium because a target faster than
+  ±382 m/s of bistatic rate would fold there too.
 - **To size the cure.** The folded axis is recovered from several PRFs (page 4), and the ratio of
   the product needed to $c\lambda$ says how far they must stretch it.
-- **To compare bands.** At 9.8 GHz $c\lambda$ is 3.5 times smaller than at 2.8 GHz, which is why
-  scenario 002's S-band variant folds nothing that its X-band variant folds.
+- **To compare bands.** $c\lambda = c^2/f_c$, so at 2.8 GHz it is 3.5 times what it is at
+  9.8 GHz. Scenario 002 shows it: the same waveform and the same flight fold the rate in 107 of
+  120 frames at X-band and in 42 at S-band.
 
-A single burst reaches at most $c\lambda$, and can reach less. An FMCW receiver reads range from
-the beat frequency, which its sample rate limits to a delay of $f_s/\alpha$, and it cannot see an
-echo that arrives after its own chirp has ended, so its delay reach is the smaller of
-$f_s/\alpha$ and $T_c$. S1 has $f_s/\alpha = T_c/2$ and reaches half of $c\lambda$: its sample
-rate, not its PRF, is the limit. S3 has $f_s/\alpha = 2T_c$, so its map's range axis is twice as
-long as the chirp, but only the first half can hold an echo, and each burst reaches exactly
-$c\lambda$. What S3's second PRF buys does not show in a per-burst product: the pair together
-tells apart six times the rates either burst can.
+No single burst reaches more than $c\lambda$, and one can reach less. An FMCW receiver reads
+range from the beat frequency, which its sample rate limits to a delay of $f_s/\alpha$; and an
+echo that arrives after its own chirp has ended meets the next chirp, so a real sawtooth radar
+cannot place it. The delay a burst can use, its *reach*, is the smaller of $f_s/\alpha$ and
+$T_c$, and the product of reach and rate span is $c\lambda \cdot d \cdot \min(f_s/B, 1)$. S1
+and S3 have $d = 1$. S1 has $f_s/B = 0.5$ and reaches half of $c\lambda$: its sample rate, not
+its PRF, is the limit. S3 has $f_s/B = 2$, so its map's range axis, $R_{b,ua} = c f_s/\alpha$,
+is twice as long as its chirp, and each burst reaches exactly $c\lambda$. That is what a real
+radar could use. The simulator does not apply the cap: an S3 target at 80 km of route appears
+at 80 km, at full strength (see Limits). What S3's second PRF buys does not show in a per-burst
+product: the pair together tells apart six times the rates the first burst can, and five times
+the second's.
 
 ## How it works, step by step
 
@@ -151,8 +157,8 @@ tells apart six times the rates either burst can.
    receiver that samples below the bandwidth. It gives `is_monostatic`, `baseline_m`,
    `range_resolution_m`, `unambiguous_delay_s`, `unambiguous_bistatic_range_m`,
    `unambiguous_bistatic_range_rate_mps`, `noise_power_matched_w`, `n_samples_per_chirp` and
-   `n_samples_per_pri`, the same properties whether the radar is monostatic or bistatic. `n_samples_per_pri` is the row
-   length of the `(n_pulses, n_samples)` IQ cube.
+   `n_samples_per_pri`, the same properties whether the radar is monostatic or bistatic.
+   `n_samples_per_pri` is the row length of the `(n_pulses, n_samples)` IQ cube.
 6. **The geometry.** `Radar.geometry(position_enu_m, velocity_enu_mps)` gives a
    `TargetGeometry` whose `range_tx_m`, `range_rx_m`, `bistatic_range_m`,
    `bistatic_range_rate_mps` and `bistatic_angle_rad` are each of shape `(n_targets,)`.
@@ -269,8 +275,9 @@ fmcw_dual_prf        6000 Hz  reach  49.965 km  span 183.546 m/s  product / (c l
 S1 sees far and folds in rate; S2 sees fast and folds in range. Each of S3's bursts reaches
 $c\lambda$ and no more, although `unambiguous_bistatic_range_m` reports 119.917 km and
 99.931 km for them: that property is where the map's range axis wraps, $c f_s/\alpha$, and for
-S3 the far half of that axis lies beyond the chirp. The pair's 917.7 m/s is ±458.9 m/s, six times
-the first burst's span; page 4 shows how the two readings are combined.
+S3 the far half of that axis lies beyond the chirp. The pair's 917.7 m/s is ±458.9 m/s, six
+times the first burst's span and five times the second's; page 4 shows how the two readings are
+combined. (The scenario itself searches only ±400 m/s, its `max_bistatic_range_rate_mps`.)
 
 ## Try it in a scenario
 
@@ -347,7 +354,8 @@ route length. A monostatic figure or CSV halves them (`plots.display_axes`).
 - A bistatic pair is perfectly synchronised in time and phase, and the direct signal from
   transmitter to receiver is not modelled.
 - The FMCW $R_{b,ua}$ ignores the $c T_c$ cap of a real sawtooth, whose delay must be shorter
-  than the chirp.
+  than the chirp, and so does the simulator: it writes a full-length beat tone for any delay, so
+  a target beyond $c T_c$ of route appears at its range at full strength.
 
 ## References
 

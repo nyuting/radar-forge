@@ -248,10 +248,11 @@ def test_no_markdown_equation_uses_a_macro_github_refuses() -> None:
     tracked = subprocess.run(
         ["git", "ls-files", "*.md"], capture_output=True, text=True, check=True, cwd=REPO
     ).stdout.split()
-    found = [
-        f"{name}:{number}: \\{match.group(1)}"
-        for name in tracked
-        for number, line in enumerate((REPO / name).read_text(encoding="utf-8").splitlines(), 1)
-        for match in _REFUSED_MACRO_RE.finditer(line)
-    ]
+    assert tracked, "git listed no Markdown file: the test would pass without reading anything"
+    found = []
+    for name in tracked:
+        # Code is not rendered as maths: drop fenced blocks and inline code spans first.
+        text = _BLOCK_RE.sub("", (REPO / name).read_text(encoding="utf-8"))
+        text = re.sub(r"`[^`\n]*`", "", text)
+        found += [f"{name}: \\{match.group(1)}" for match in _REFUSED_MACRO_RE.finditer(text)]
     assert found == []

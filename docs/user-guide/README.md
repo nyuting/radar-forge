@@ -21,8 +21,8 @@ flowchart LR
 ```
 
 The top line of each box is the question that stage answers; the bottom line is the module that
-answers it. `radar` appears twice because it holds both the radar's description (the dashed box,
-which every stage reads) and the geometry that places targets around it.
+answers it. `radar` appears twice because it holds both the radar's description (the box with
+dashed arrows, which the later stages read) and the geometry that places targets around it.
 
 | Page | Modules | Read it to learn |
 | :-- | :-- | :-- |

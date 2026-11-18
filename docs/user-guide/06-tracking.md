@@ -32,8 +32,10 @@ twice the radial value when monostatic.
 | `association.py` | `chi_square_gate_threshold` and `gate`; `association_cost`, `"nis"` or `"negative_log_likelihood_ratio"`; `GlobalNearestNeighbour` (GNN) and `GreedyNearestNeighbour`. |
 | `tracker.py` | `Tracker`, which runs one `Scan` at a time; `Scan`, every measurement one sensor made at one time with its R, checked and frozen; `LifecyclePolicy`, the M-of-N rule, deletion and re-acquisition. `initiation.py` holds the initiators `DirectStateInitiator` and `DebiasedSphericalInitiator`. |
 | `metrics.py` | `nees`, `consistency_interval` and `rmse`, which score a tracker against the truth; `gospa` and `trajectory_gospa` for a many-target scene. |
-| `imm.py`, `hypotheses.py`, `rfs.py`, `lifecycle.py` | The many-target methods of scenario 011, not walked through here: the interacting multiple model, track-oriented MHT, the PMBM tracker, and the confirmation rules. |
-| `scene.py`, `scans.py` | Not tracker code: a simulator of the plots a rotating surveillance radar makes (true trajectories, merged echoes, missed detections, false plots), and the code that feeds them to a tracker a rotation at a time. Scenario 011 uses them in place of IQ. |
+| `lifecycle.py` | `LifecyclePolicy`, the M-of-N rule this page uses (`tracker` re-exports it), and `ExistencePolicy`, confirmation by existence probability (scenario 011). |
+| `imm.py`, `hypotheses.py`, `rfs.py` | The many-target methods of scenario 011, not walked through here: the interacting multiple model, track-oriented MHT and the PMBM tracker. |
+| `scene.py` | Not tracker code: a simulator of the plots a rotating surveillance radar makes (true trajectories, merged echoes, missed detections, false plots). Four of scenario 011's six variants use it in place of IQ. |
+| `scans.py` | Plays that scene a rotation at a time, and holds `PlotTracker`, the tracker scenario 011 builds from its `[tracking]` table. |
 
 `radar_forge.tracking` exports `Scan` and `Tracker`; everything else is imported from its
 module.
@@ -407,8 +409,9 @@ multiple hypothesis tracking (`hypotheses.py`) and the Poisson multi-Bernoulli m
 (`rfs.py`); confirmation by existence probability (`lifecycle.py`); GOSPA and trajectory GOSPA
 (`metrics.py`); and sensor coverage, so that a scan counts a miss only against the tracks it
 could have seen (`tracker.Coverage`). Their docstrings and `spec/tracker-001.md` describe them.
-Only scenario 011's plot-level tracker can be configured to use them today; the tracker this
-page's scenarios build (`pipeline.ScanTracker`) is always GNN on range and rate.
+Only scenario 011's tracker (`tracking.scans.PlotTracker`) can be configured to use them today;
+the tracker this page's scenarios build (`pipeline.ScanTracker`) is always GNN, with a
+range-and-rate state.
 
 **Not yet supported:**
 

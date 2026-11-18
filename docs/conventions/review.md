@@ -92,10 +92,11 @@ Name the drafter when an agent did the work, and never push to the contributor's
 ## 5. Auditing existing code
 
 An audit checks code against the specified behaviour first (the equation, the bounds, the
-documented contract). It then compares the code with the benchmark implementations the spec
-names and with house style. A benchmark is evidence, not the standard: where one disagrees with
-the code, find out which is right before changing anything. Each public name gets a conformance
-verdict and a quality verdict on ten dimensions:
+documented contract). It then compares the code with the reference implementations a spec or
+`README.md`'s related-work table names, and with house style. A reference implementation is
+evidence, not the standard: where one disagrees with the code, find out which is right before
+changing anything. Each public name gets a conformance verdict and a quality verdict on ten
+dimensions:
 
 - **Q1** Accuracy and radar-physics fidelity: the right thing, to the claimed accuracy.
 - **Q2** Clarity: would an intern follow it without the docstring?
@@ -106,9 +107,10 @@ verdict and a quality verdict on ten dimensions:
 - **Q7** Inputs: order, keyword-only where a swap is silent, sensible defaults, `ArrayLike`.
 - **Q8** Outputs: type, shape, units and a contract a caller can rely on.
 - **Q9** Agreement with the field: the name and signature a practitioner would search for, as the
-  textbooks and the benchmark libraries have them; a numeric cross-check against an independent
-  implementation where a permissively licensed one exists. Record each benchmark's licence;
-  copyleft or unlicensed code is read for structure and never copied.
+  textbooks and the reference implementations have them; a numeric cross-check against an
+  independent implementation where a permissively licensed one exists. Record each one's
+  licence; copyleft or unlicensed code is read for structure and never copied. Where the field's
+  signature and house naming disagree, Q6 and Q7 win, and the docstring gives the field's name.
 - **Q10** House style: the shape of `src/radar_forge/propagation.py`, [style.md](style.md), and
   one word for one thing across modules.
 

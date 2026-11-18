@@ -3,9 +3,9 @@
 This stage turns *where things are* into *what the receiver hears*. It takes a target's latitude,
 longitude and altitude, works out its route from the transmitter to the receiver and how fast
 that route grows, and turns those into a delay, a Doppler shift and an amplitude for each echo.
-It is the second and third boxes of [the chain](README.md#the-chain). It covers the geodesy
-functions, `Radar.geometry` and `TargetGeometry` in `radar_forge.radar`, and
-`radar_forge.propagation`.
+It is the *Where things are* and *How energy travels* boxes of
+[the chain](README.md#the-chain). It covers the geodesy functions, `Radar.geometry` and
+`TargetGeometry` in `radar_forge.radar`, and `radar_forge.propagation`.
 
 ## What this stage does
 
@@ -67,17 +67,18 @@ from the two examples under [Try it](#try-it).
 | Received power | $P_r$ | $P_r = \lvert a \rvert^2 = P_t G_t G_r \lambda^2 \sigma / ((4\pi)^3 R_T^2 R_R^2)$ | `abs(PropagationPaths.amplitude_linear) ** 2` | 4.959 × 10⁻¹⁵ W |
 | Carrier phase | $\arg a$ | $-2\pi R_b / \lambda$ | `propagation_phase_rad` | — |
 | Transmit and receive range (B1) | $R_T$, $R_R$ | ENU distance from each site | `TargetGeometry.range_tx_m`, `.range_rx_m` | 14800.6 m, 7523.6 m |
-| Baseline (B1) | $L$ | distance between the two sites | `Radar.baseline_m` | 19601.4 m |
-| Bistatic angle (B1) | $\beta$ | $\cos\beta = (R_T^2 + R_R^2 - L^2) / (2 R_T R_R)$ | `TargetGeometry.bistatic_angle_rad` | 119.17° |
+| Baseline (B1) | $L_b$ | distance between the two sites | `Radar.baseline_m` | 19601.4 m |
+| Bistatic angle (B1) | $\beta$ | $\cos\beta = (R_T^2 + R_R^2 - L_b^2) / (2 R_T R_R)$ | `TargetGeometry.bistatic_angle_rad` | 119.17° |
 | Delay (B1) | $\tau$ | $\tau = (R_T + R_R) / c$ | `propagation_delay_s` | 74.4653 µs |
 | Bistatic range (B1) | $R_b$ | $R_b = R_T + R_R = c\tau$ | `PropagationPaths.bistatic_range_m` | 22324.1 m |
 | Bistatic range rate (B1) | $\dot R_b$ | as above | `TargetGeometry.bistatic_range_rate_mps` | −19.228 m/s (closing) |
 | Doppler shift (B1) | $f_d$ | $f_d = -\dot R_b / \lambda$ | `doppler_shift_hz` | +628.6 Hz |
 
-`propagation_delay_s` and `doppler_shift_hz` are the formulas. `line_of_sight_paths` calls them
-once per target and stores the results in a `PropagationPaths`, as its fields `delay_s` and
-`doppler_hz`: the fields are those functions' outputs, not a second calculation. The same two
-functions serve the monostatic and the bistatic rows, because both are written in $R_b$.
+`propagation_delay_s` and `doppler_shift_hz` are the formulas. `line_of_sight_paths` calls each
+once, for all targets together, and stores the results in a `PropagationPaths`, as its fields
+`delay_s` and `doppler_hz`: the fields are those functions' outputs, not a second calculation.
+The same two functions serve the monostatic and the bistatic rows, because both are written in
+$R_b$.
 
 Symbols used only on this page:
 
@@ -96,7 +97,7 @@ Symbols used only on this page:
 - $R_b$, $\dot R_b$: bistatic range $R_T + R_R$, m (`bistatic_range_m`), and its time
   derivative, m/s, positive receding (`bistatic_range_rate_mps`).
 - $f_d$: Doppler shift, Hz, positive closing (`doppler_hz`).
-- $L$: baseline between transmitter and receiver, m (`baseline_m`).
+- $L_b$: baseline between transmitter and receiver, m (`baseline_m`).
 - $\vec{v}$: target velocity in ENU; $\hat{u}_T$, $\hat{u}_R$: unit vectors from the transmitter
   and from the receiver towards the target.
 
@@ -117,8 +118,9 @@ it. A monostatic radar has $R_T = R_R = R$, so $R_b = 2R$ and the familiar pair 
 $$\tau = \frac{2R}{c}, \qquad f_d = -\frac{2\dot R}{\lambda}$$
 
 `propagation` writes each relation once, as a function of $R_b$ (`propagation_delay_s`,
-`propagation_phase_rad`, `doppler_shift_hz`), and a monostatic and a bistatic radar call the same functions. The
-range-Doppler map keeps $R_b$ and $\dot R_b$ on its axes too. Only a display halves them:
+`propagation_phase_rad`, `doppler_shift_hz`), and a monostatic and a bistatic radar call the
+same functions. The range-Doppler map keeps $R_b$ and $\dot R_b$ on its axes too. Only a display
+halves them:
 `plots.display_axes(radar)` gives a monostatic radar a scale of 0.5 and the names `range_m` and
 `range_rate_mps`, which the figures and the stepper's CSVs use. A bistatic display keeps $R_b$.
 
@@ -135,8 +137,9 @@ range-Doppler map keeps $R_b$ and $\dot R_b$ on its axes too. Only a display hal
 3. **ENU to range and angles.** `enu_to_range_azimuth_elevation_rad(enu_m)` returns three arrays
    of shape `(...,)`: range in metres, and azimuth and elevation in radians.
    `range_azimuth_elevation_to_enu_m` goes back the other way.
-4. **Motion.** `truth_geometry(scenario)` interpolates each target's trajectory onto the frame times,
-   converts it to ENU about the receiving site, and takes its velocity with `numpy.gradient`. A
+4. **Motion.** `truth_geometry(scenario)` interpolates each target's trajectory onto the frame
+   times, converts it to ENU about the receiving site, and takes its velocity with
+   `numpy.gradient`. A
    `[[target]]` given `position_enu_m` and `velocity_enu_mps` instead moves at constant velocity.
    The geodesy functions themselves have no notion of time.
 5. **The route.** `Radar.geometry(position_enu_m, velocity_enu_mps)` takes `(n_targets, 3)`
@@ -234,7 +237,7 @@ paths = line_of_sight_paths(radar, truth, scenario.targets[0].rcs_m2)
 r_t, r_r = truth.range_tx_m[0], truth.range_rx_m[0]
 
 print(f"monostatic: {radar.is_monostatic}")
-print(f"R_T = {r_t:.1f} m, R_R = {r_r:.1f} m, L = {radar.baseline_m:.1f} m")
+print(f"R_T = {r_t:.1f} m, R_R = {r_r:.1f} m, L_b = {radar.baseline_m:.1f} m")
 print(f"beta = {np.degrees(truth.bistatic_angle_rad[0]):.2f} deg")
 sum_delay_us = (r_t + r_r) / SPEED_OF_LIGHT_MPS * 1e6
 print(f"tau = {paths.delay_s[0] * 1e6:.4f} us, (R_T + R_R)/c = {sum_delay_us:.4f} us")
@@ -244,7 +247,7 @@ print(f"rate = {truth.bistatic_range_rate_mps[0]:+.3f} m/s, f_d = {paths.doppler
 
 ```text
 monostatic: False
-R_T = 14800.6 m, R_R = 7523.6 m, L = 19601.4 m
+R_T = 14800.6 m, R_R = 7523.6 m, L_b = 19601.4 m
 beta = 119.17 deg
 tau = 74.4653 us, (R_T + R_R)/c = 74.4653 us
 R_b = 22324.1 m
@@ -305,7 +308,7 @@ $R_b$ is not a distance from either site.
 
 **The bistatic delay (74.4653 µs) is longer than a real bistatic receiver would measure.** A real
 receiver times echoes from the direct pulse it hears from the transmitter, so it would measure
-$(R_T + R_R - L)/c$, here 9.0821 µs. The library keeps the absolute delay on purpose, because it
+$(R_T + R_R - L_b)/c$, here 9.0821 µs. The library keeps the absolute delay on purpose, because it
 carries the right carrier phase, and it models no direct signal (`radar`'s module docstring).
 
 ## Limits

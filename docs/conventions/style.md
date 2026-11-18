@@ -90,6 +90,9 @@ example is the test. Doctests that are present run (`tests/test_conventions.py`)
 - **Write out array shapes** with the `n_` names, where a shape is documented.
 - **LaTeX goes in a raw string**, `r"""…"""`. Never write source through a string that reads
   escapes (Python in a shell heredoc): `\alpha` lands as BEL (R9 catches it).
+- **Markdown maths is read on GitHub**, which refuses some macros and shows an error in place of
+  the equation. Write `\mathrm{atan2}`, not `\operatorname{atan2}`
+  (`tests/test_conventions.py` checks every tracked page).
 
 ### 4.1 Checking a citation
 
