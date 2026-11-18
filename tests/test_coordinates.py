@@ -13,6 +13,7 @@ from radar_forge.constants import WGS84_FLATTENING, WGS84_SEMI_MAJOR_AXIS_M
 from radar_forge.coordinates import (
     east_north_to_range_azimuth_rad,
     ecef_to_enu_m,
+    enu_axes_in_ecef,
     enu_to_range_azimuth_elevation_rad,
     geodetic_to_ecef_m,
     geodetic_to_enu_m,
@@ -133,3 +134,19 @@ def test_the_ground_plane_pair_is_the_spherical_conversion_with_no_height() -> N
     np.testing.assert_allclose(
         range_azimuth_to_east_north_m(range_m, azimuth_rad), position_m, rtol=1e-12, atol=1e-8
     )
+
+
+def test_the_enu_axes_are_a_rotation_whose_up_is_the_ellipsoid_normal() -> None:
+    """Orthonormal rows, up along (cos lat cos lon, cos lat sin lon, sin lat), as ecef_to_enu_m."""
+    latitude_deg, longitude_deg = 36.0025, -78.941
+    axes = enu_axes_in_ecef(latitude_deg, longitude_deg)
+    # atol 1e-15: products of sines and cosines, a few float64 epsilons.
+    np.testing.assert_allclose(axes @ axes.T, np.eye(3), atol=1e-15)
+    lat, lon = np.radians(latitude_deg), np.radians(longitude_deg)
+    normal = [np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)]
+    np.testing.assert_allclose(axes[2], normal, atol=1e-15)
+    offset_m = np.array([[1200.0, -3400.0, 560.0], [-75.0, 20.0, 9000.0]])
+    site_ecef_m = geodetic_to_ecef_m(latitude_deg, longitude_deg, 60.0)
+    expected_m = ecef_to_enu_m(site_ecef_m + offset_m, latitude_deg, longitude_deg, 60.0)
+    # atol 1e-8 m: ecef_to_enu_m subtracts 6e6 m coordinates, a few nm of round-off.
+    np.testing.assert_allclose(offset_m @ axes.T, expected_m, rtol=0.0, atol=1e-8)

@@ -226,7 +226,7 @@ def _wrapped(scaled: NDArray[np.float64], box: NDArray[np.float64] | None) -> ND
 
 def _short_way(gap: NDArray[np.float64], box: NDArray[np.float64]) -> NDArray[np.float64]:
     """Return a difference on a circle of circumference ``box`` in ``[-box / 2, box / 2]``."""
-    # Not _periodic.fold: a sum that rounds onto the edge gives +box / 2 here and -box / 2
-    # there; kept.
+    # Unguarded: a sum that rounds onto the edge gives +box / 2, where _periodic.fold gives
+    # -box / 2.
     result: NDArray[np.float64] = (gap + box / 2.0) % box - box / 2.0
     return result

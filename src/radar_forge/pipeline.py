@@ -702,8 +702,8 @@ class ScanTracker:
             range_m = float(ranges_m[bank.measurement_index[row]])
             if history:
                 last_m = history[-1][1]
-                # Not _periodic.fold: last_m + fold(...) adds in another order, which moves
-                # the last bit of many ranges; kept.
+                # Adds last_m after the mod: last_m + _periodic.fold(...) adds in another
+                # order and moves the last bit of many ranges.
                 range_m = last_m + (range_m - last_m + period_m / 2) % period_m - period_m / 2
             history.append((time_s, range_m))
 

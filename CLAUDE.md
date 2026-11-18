@@ -66,7 +66,7 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 | matched filter, batched correlation, range/Doppler FFT, map | `matched_filter`, `batched_correlation`, `range_fft`, `doppler_fft`, `range_doppler_map` (dsp.py); `range_doppler_product` (pipeline.py) |
 | bin axes, Doppler resolution; MTI | `range_bin_centers_m`, `doppler_bin_centers_mps` (its spacing λ/(N T)); `mti_filter` (dsp.py) |
 | fold, dual-PRF unfold | `fold_velocity_mps`, `unfold_doppler_dual_prf`, `unfold_range_dual_prf` (dsp.py; all take the span) |
-| wrap any periodic value into `[lower, lower + period)` | `fold_into_period` (dsp.py); `tracking/`, `clustering` and `coordinates` call `fold` (_periodic.py) |
+| wrap any periodic value into `[lower, lower + period)` | `fold_into_period` (dsp.py); `tracking/`, `clustering`, `coordinates` and `doa` call `fold` (_periodic.py) |
 | CFAR Pfa, threshold, detect; clustering of cells (connected, or mean-shift modes) | `cfar_probability_of_false_alarm`, `cfar_threshold_factor`, `cfar_detect`, `cfar_detect_2d`; `label_connected_cells`, `cluster_detections(bandwidth_bins=)` (detection.py) |
 | clustering of points: DBSCAN, mean shift; per-column scale and period | `cluster_points`, `mean_shift` (clustering.py) |
 | predict, innovate, update, weighted update; NEES, GOSPA, trajectory GOSPA | `predict`, `innovate`, `update`, `update_weighted`, `TaylorLinearisation`, `UnscentedTransform` (tracking/filters.py); `nees`, `gospa`, `trajectory_gospa` (tracking/metrics.py) |
@@ -86,7 +86,7 @@ No function yet: Pd (Swerling detection curves).
 | Path | What |
 | :--- | :--- |
 | `src/radar_forge/propagation.py` | The style exemplar; copy its shape |
-| `src/radar_forge/coordinates.py` | Geodetic, ECEF, ENU and range-azimuth conversions, each written once |
+| `src/radar_forge/coordinates.py` | Geodetic, ECEF, ENU and range-azimuth conversions |
 | `src/radar_forge/constants.py` | Every physical constant, defined once |
 | `docs/conventions/` | `style.md`, `testing.md`, `review.md` (also `/pr-review`), `commits.md` |
 | `.githooks/`,`Makefile`, `scripts/check_conventions.py` | Hooks; every gate defined once; rules R1–R12 |

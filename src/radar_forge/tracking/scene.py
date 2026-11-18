@@ -205,7 +205,7 @@ def resolve(
     ranges = np.asarray(range_m, dtype=np.float64)
     azimuths = np.asarray(azimuth_rad, dtype=np.float64)
     first, second = np.triu_indices(ranges.size, k=1)
-    # Not _periodic.fold: a sum that rounds onto the edge gives +pi here and -pi there; kept.
+    # Unguarded: a sum that rounds onto the edge gives +pi, where _periodic.fold gives -pi.
     gap_az = np.mod(azimuths[first] - azimuths[second] + np.pi, 2 * np.pi) - np.pi
     distance = np.hypot(
         (ranges[first] - ranges[second]) / alpha_range_m, gap_az / alpha_azimuth_rad
@@ -256,11 +256,11 @@ def measure(
     ranges = np.bincount(labels, weights=np.asarray(range_m, dtype=np.float64)) / count
     # Averaged as offsets from each group's first echo, so a group across north stays together.
     reference = azimuths[np.unique(labels, return_index=True)[1]]
-    # Not _periodic.fold: a sum that rounds onto the edge gives +pi here and -pi there; kept.
+    # Unguarded: a sum that rounds onto the edge gives +pi, where _periodic.fold gives -pi.
     offset = np.mod(azimuths - reference[labels] + np.pi, 2 * np.pi) - np.pi
     centre = reference + np.bincount(labels, weights=offset) / count
     noise = rng.standard_normal((2, count.size))
-    # Not _periodic.fold: a tiny negative angle wraps to exactly 2 pi here and to 0 there; kept.
+    # Unguarded: a tiny negative angle rounds up to exactly 2 pi, where _periodic.fold gives 0.
     measured_az = np.mod(centre + sigma_azimuth_rad * noise[1], 2 * np.pi)
     return ranges + sigma_range_m * noise[0], measured_az
 
@@ -356,7 +356,7 @@ def poisson_clutter_plots(
             low_az, span_az = float(centre_az) - half, 2 * half
         count = rng.poisson(component.intensity_per_m_rad * (high_r - low_r) * span_az)
         draw = rng.random((count, 2))
-        # Not _periodic.fold: a tiny negative angle wraps to exactly 2 pi here and to 0 there; kept.
+        # Unguarded: a tiny negative angle rounds up to exactly 2 pi, where _periodic.fold gives 0.
         ranges, azimuths = (
             low_r + draw[:, 0] * (high_r - low_r),
             np.mod(low_az + draw[:, 1] * span_az, 2 * np.pi),
@@ -396,7 +396,7 @@ class FixedDiscretes:
         reported = rng.random(self.range_m.size) < self.report_probability
         noise = rng.standard_normal((2, int(reported.sum())))
         range_m = self.range_m[reported] + sigma_range_m * noise[0]
-        # Not _periodic.fold: a tiny negative angle wraps to exactly 2 pi here and to 0 there; kept.
+        # Unguarded: a tiny negative angle rounds up to exactly 2 pi, where _periodic.fold gives 0.
         return range_m, np.mod(self.azimuth_rad[reported] + sigma_azimuth_rad * noise[1], 2 * np.pi)
 
 
@@ -459,8 +459,8 @@ class ClutterMap:
         rows = np.clip(
             (np.asarray(range_m) // self.cell_range_m).astype(np.intp), 0, self.shape[0] - 1
         )
-        # Not _periodic.fold: a tiny negative angle wraps to exactly 2 pi here and to 0 there, so
-        # the last column, not the first; kept.
+        # Unguarded: a tiny negative angle rounds up to exactly 2 pi, the last column, where
+        # _periodic.fold gives 0, the first.
         columns = (np.mod(azimuth_rad, 2 * np.pi) // self.cell_azimuth_rad).astype(np.intp)
         return rows, np.minimum(columns, self.shape[1] - 1)
 

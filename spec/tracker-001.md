@@ -51,8 +51,9 @@ one constructor argument and no pipeline code. A branch on the type of a transfo
 tracker in the filter, the tracker or `pipeline.py` breaks this. There is one `Tracker`.
 
 **Dependencies.** `tracking/` imports NumPy, SciPy, `coordinates.py` (the ENU ↔ range-azimuth
-conversions `scene.py` uses) and the private `_periodic.fold` (the one wrap of a periodic value,
-which `dsp.fold_into_period` also calls), never `dsp`, `pipeline`, `scenario`, `evaluate` or
+conversions `scene.py` and `scans.py` use) and the private `_periodic.fold` (the guarded
+half-open fold that `StateLayout` shares with `dsp.fold_into_period`; `scene.py` and
+`RangeAzimuthElevationRangeRate.predict` still wrap inline), never `dsp`, `pipeline`, `scenario`, `evaluate` or
 `plots` at run time; `scans.py` names `Scenario` and `TrackingSettings` under `TYPE_CHECKING` only, because
 `scenario.py` imports `tracking.scene`. The pipeline builds an IQ scenario's `Scan`, `scans.py` a
 plot-level one's.
@@ -137,8 +138,9 @@ interval at 99.9 %; covariances stay symmetric to `rtol=1e-12` with Cholesky suc
   `(range_m, azimuth_rad, elevation_rad, range_rate_mps)` about a sensor pose: r = |p − pₛ|,
   azimuth atan2(Δe, Δn) clockwise from north (periodic), elevation atan2(Δu, g) with g the ground
   range √(Δe² + Δn²), range rate +(p − pₛ)·v/r. The geometry is written inline, not imported from
-  `coordinates`, whose elevation is asin(Δu/r): the two agree to rounding but not bit for bit,
-  and atan2 keeps its accuracy near the zenith. The model raises rather than return a non-finite
+  `coordinates`, whose elevation is asin(Δu/r): about half of all directions differ, by up to a
+  few hundred ulp (1e-13 rad), and near the zenith asin(Δu/r) is off by up to 2e-8 rad where
+  atan2 is not. The model raises rather than return a non-finite
   Jacobian at r → 0 or the zenith. Converting to Cartesian is allowed only to seed a track, with
   the measurement-conditioned conversion of Duan, Han and Li (2004) and Bordonaro, Willett and
   Bar-Shalom (2014).

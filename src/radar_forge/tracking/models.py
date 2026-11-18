@@ -578,7 +578,8 @@ class RangeAzimuthElevationRangeRate:
     r"""A monostatic radar's range, azimuth, elevation and range rate, chosen by name.
 
     With :math:`d = p - p_s`, :math:`r = |d|`, :math:`u = d / r` and ground range g: azimuth
-    atan2(d_e, d_n) clockwise from north in [0, 2π), elevation atan2(d_u, g), and range rate
+    atan2(d_e, d_n) clockwise from north in [0, 2π] (2π itself only when a tiny negative angle
+    rounds up), elevation atan2(d_u, g), and range rate
     :math:`u \cdot v`, positive receding. Jacobian rows on position: :math:`u^T`,
     :math:`(d_n, -d_e, 0)/g^2`, :math:`(-d_e d_u, -d_n d_u, g^2)/(r^2 g)` and
     :math:`(v - u (u \cdot v))^T / r`; the rate's row on velocity is :math:`u^T`. The site,
@@ -625,12 +626,13 @@ class RangeAzimuthElevationRangeRate:
         east_m, north_m, up_m = np.moveaxis(offset_m, -1, 0)
         range_m = np.linalg.norm(offset_m, axis=-1)
         # Inline, not coordinates.enu_to_range_azimuth_elevation_rad: elevation here is
-        # atan2(up, ground), accurate near the zenith, where that function takes asin(up / r);
-        # the two differ in the last bit for about half of all directions.
+        # atan2(up, ground), where that function takes asin(up / r). About half of all
+        # directions differ, by up to a few hundred ulp (1e-13 rad), and near the zenith
+        # asin(up / r) is off by up to 2e-8 rad where atan2 is not.
         values = {
             "range_m": range_m,
-            # Not _periodic.fold: a tiny negative angle wraps to exactly 2 pi here and to 0
-            # there; kept.
+            # Unguarded: a tiny negative angle rounds up to exactly 2 pi, where _periodic.fold
+            # gives 0.
             "azimuth_rad": np.mod(np.arctan2(east_m, north_m), 2 * np.pi),
             "elevation_rad": np.arctan2(up_m, np.hypot(east_m, north_m)),
         }

@@ -27,6 +27,7 @@ __all__ = [
     "directions_unit",
     "east_north_to_range_azimuth_rad",
     "ecef_to_enu_m",
+    "enu_axes_in_ecef",
     "enu_to_range_azimuth_elevation_rad",
     "geodetic_to_ecef_m",
     "geodetic_to_enu_m",
@@ -167,10 +168,11 @@ def range_azimuth_elevation_to_enu_m(
 def east_north_to_range_azimuth_rad(
     east_north_m: ArrayLike,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Return the horizontal range, m, and azimuth of ground-plane positions ``(..., 2)``.
+    """Convert ground-plane (east, north) metres ``(..., 2)`` to horizontal range and azimuth.
 
-    :func:`enu_to_range_azimuth_elevation_rad` with no height: azimuth clockwise from north in
-    [0, 2 pi). pymap3d ``enu2aer`` with ``u = 0``.
+    Returns range in m first, then azimuth in rad in [0, 2 pi), zero at true north and
+    clockwise: :func:`enu_to_range_azimuth_elevation_rad` with no height. pymap3d ``enu2aer``
+    with ``u = 0``, which returns (az, el, range).
     """
     ground = np.asarray(east_north_m, dtype=np.float64)
     enu = np.concatenate([ground, np.zeros_like(ground[..., :1])], axis=-1)
@@ -181,9 +183,10 @@ def east_north_to_range_azimuth_rad(
 def range_azimuth_to_east_north_m(
     range_m: ArrayLike, azimuth_rad: ArrayLike
 ) -> NDArray[np.float64]:
-    """Return the ground-plane east, north position ``(..., 2)`` of a horizontal range and azimuth.
+    """Convert horizontal range and azimuth to ground-plane (east, north) metres, ``(..., 2)``.
 
-    pymap3d ``aer2enu`` with ``el = 0``.
+    Azimuth is in rad, zero at true north and clockwise. pymap3d ``aer2enu`` with ``el = 0``,
+    which takes (az, el, range).
     """
     result: NDArray[np.float64] = range_azimuth_elevation_to_enu_m(range_m, azimuth_rad, 0.0)
     return result[..., :2]
@@ -210,10 +213,10 @@ def directions_unit(azimuth_rad: ArrayLike, elevation_rad: ArrayLike) -> NDArray
     return result
 
 
-def _enu_axes_in_ecef(latitude_deg: float, longitude_deg: float) -> NDArray[np.float64]:
-    """Return the east, north and up axes at a geodetic point in ECEF, as rows.
+def enu_axes_in_ecef(latitude_deg: float, longitude_deg: float) -> NDArray[np.float64]:
+    """Return the east, north and up axes at a geodetic point as ECEF rows (Misra [2] 4.A).
 
-    The rotation :func:`ecef_to_enu_m` applies.
+    A ``(3, 3)`` rotation: the one :func:`ecef_to_enu_m` applies, written out there term by term.
     """
     sin_lat, cos_lat = np.sin(np.radians(latitude_deg)), np.cos(np.radians(latitude_deg))
     sin_lon, cos_lon = (

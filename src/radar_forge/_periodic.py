@@ -1,10 +1,12 @@
-r"""Folding a value into one period: private, the one wrap behind every periodic coordinate.
+r"""Folding a value into one period: private, the guarded half-open fold several modules share.
 
 :func:`radar_forge.dsp.fold_into_period` is the public form, which checks the period. The
 tracker's state layout, the clustering of circular columns, the azimuth of
 :func:`radar_forge.coordinates.enu_to_range_azimuth_elevation_rad` and DOA's direction cosines
-call :func:`fold` directly. It lives here, not in ``dsp``, so that ``tracking/`` need not import
-the signal-processing chain (``spec/tracker-001.md`` §2).
+call :func:`fold` directly. Other wraps (``tracking/scene.py``,
+``RangeAzimuthElevationRangeRate.predict`` and a few more) still use an unguarded ``np.mod``.
+It lives here, not in ``dsp``, so that ``tracking/`` need not import the signal-processing
+chain (``spec/tracker-001.md`` §2).
 
 References
 ----------

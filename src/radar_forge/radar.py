@@ -36,7 +36,7 @@ from radar_forge.constants import (
     STANDARD_NOISE_TEMPERATURE_K,
 )
 from radar_forge.coordinates import (
-    _enu_axes_in_ecef,
+    enu_axes_in_ecef,
     enu_to_range_azimuth_elevation_rad,
     geodetic_to_enu_m,
 )
@@ -423,8 +423,8 @@ def _look(
     """Return the unit vector, and (azimuth, elevation) in ``site``'s own frame (Misra [4] 4.A)."""
     site_axes_m = offset_enu_m
     if site != origin:
-        origin_axes = _enu_axes_in_ecef(origin.latitude_deg, origin.longitude_deg)
-        site_axes = _enu_axes_in_ecef(site.latitude_deg, site.longitude_deg)
+        origin_axes = enu_axes_in_ecef(origin.latitude_deg, origin.longitude_deg)
+        site_axes = enu_axes_in_ecef(site.latitude_deg, site.longitude_deg)
         site_axes_m = offset_enu_m @ (origin_axes @ site_axes.T)
     _, azimuth_rad, elevation_rad = enu_to_range_azimuth_elevation_rad(site_axes_m)
     unit_vector = offset_enu_m / range_m[..., None]
