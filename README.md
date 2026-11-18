@@ -150,12 +150,19 @@ radar-forge/
         ├── propagation.py      # Propagation paths, the radar equation, Swerling draws
         ├── signal.py           # LFM chirp, thermal noise, FMCW and pulsed IQ synthesis
         ├── dsp.py              # Windows, matched filter, range and Doppler FFTs, unfolding
-        ├── detection.py        # CFAR (CA, GO, SO, OS; 1-D and 2-D) and clustering
-        ├── tracking/           # Models, filters, association, tracker, metrics
+        ├── migration.py        # Range migration: keystone, Doppler-rate compensation
+        ├── clutter.py          # Leakage and near-clutter cancellation
+        ├── detection.py        # CFAR (CA, GO, SO, OS; 1-D and 2-D) and clustering of cells
+        ├── clustering.py       # Clustering of points: DBSCAN, mean shift
+        ├── datachip.py         # A crop around one target, and fine estimates on it
+        ├── array.py            # The receive array: geometry, steering, weights, covariance
+        ├── doa.py              # Direction of arrival: spectra, subspace and sparse estimators
+        ├── tracking/           # Models, filters, association, tracker, MHT, PMBM, metrics
+        ├── settings.py         # The settings a scenario's TOML tables hold
         ├── scenario.py         # A scenario TOML and its truth
         ├── pipeline.py         # Frames, range-Doppler products, plots, scans
         ├── evaluate.py         # The stepper: runs the stages, checks [verify]
-        ├── stages/             # The stages, in run order: core (geometry, iq, rd, detect, track)
+        ├── stages/             # The stepper's stages: geometry, iq, rd, detect, track, ...
         └── plots.py            # Figures (the visualisation extra)
 ```
 

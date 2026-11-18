@@ -3,8 +3,9 @@
 
     uv run python scripts/run_scenario.py config/scenario_001_fmcw_low_prf.toml --frames 3
 
-Thin by design: the stages live in ``radar_forge.evaluate`` and the scenario's ``[verify]``
-table says which run and what they check. The exit status is 1 when a check fails.
+Thin by design: the stages live in ``radar_forge.stages`` and register with
+``radar_forge.evaluate``; the scenario's ``[verify]`` table says which run and what they check.
+The exit status is 1 when a check fails.
 """
 
 from __future__ import annotations

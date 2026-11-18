@@ -25,7 +25,7 @@ This document specifies the **receive chain as a vertical slice**, on the 16-cha
    slice shows its Doppler skirt against the closed form, and what calibration can and cannot remove.
 
 The direct-baseband path is **not changed**. The front end is an optional stage selected by the
-presence of a `[front_end]` table, exactly as `[site.rx]` selects bistatic siting in
+presence of a `[front_end]` table, exactly as `[site.rx]` selects a bistatic geometry in
 scenario 002. Absent, every cube is bit-identical to today's (§6, A1).
 
 | Section | What it fixes |

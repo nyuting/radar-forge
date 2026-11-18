@@ -31,7 +31,11 @@ twice the radial value when monostatic.
 | `filters.py` | `TrackBank`, every track a row of one immutable struct of arrays; `TrackStatus` and the read-only `TrackSnapshot`; the one Gaussian filter, `predict`, `innovate` and `update`, through `TaylorLinearisation` (the KF on a linear model, the EKF otherwise) or `UnscentedTransform` (the UKF). |
 | `association.py` | `chi_square_gate_threshold` and `gate`; `association_cost`, `"nis"` or `"negative_log_likelihood_ratio"`; `GlobalNearestNeighbour` (GNN) and `GreedyNearestNeighbour`. |
 | `tracker.py` | `Tracker`, which runs one `Scan` at a time; `Scan`, every measurement one sensor made at one time with its R, checked and frozen; `LifecyclePolicy`, the M-of-N rule, deletion and re-acquisition. `initiation.py` holds the initiators `DirectStateInitiator` and `DebiasedSphericalInitiator`. |
-| `metrics.py` | `nees`, `consistency_interval` and `rmse`, which score a tracker against the truth. |
+| `metrics.py` | `nees`, `consistency_interval` and `rmse`, which score a tracker against the truth; `gospa` and `trajectory_gospa` for a many-target scene. |
+| `lifecycle.py` | `LifecyclePolicy`, the M-of-N rule this page uses (`tracker` re-exports it), and `ExistencePolicy`, confirmation by existence probability (scenario 011). |
+| `imm.py`, `hypotheses.py`, `rfs.py` | The many-target methods of scenario 011, not walked through here: the interacting multiple model, track-oriented MHT and the PMBM tracker. |
+| `scene.py` | Not tracker code: a simulator of the plots a rotating surveillance radar makes (true trajectories, merged echoes, missed detections, false plots). Four of scenario 011's six variants use it in place of IQ. |
+| `scans.py` | Plays that scene a rotation at a time, and holds `PlotTracker`, the tracker scenario 011 builds from its `[tracking]` table. |
 
 `radar_forge.tracking` exports `Scan` and `Tracker`; everything else is imported from its
 module.
@@ -397,18 +401,22 @@ from here.
 
 ## Limits
 
-**Not yet supported here:**
+**Built, but not covered on this page.** The page walks through the single-target tracker of
+scenario 003. The package also holds, for the many-target scenario 011: the interacting multiple
+model filter (`imm.py`) and the `CoordinatedTurn` motion model; probabilistic association (PDA,
+JPDA and its variants) and Murty's k-best assignments (`association.py`); track-oriented
+multiple hypothesis tracking (`hypotheses.py`) and the Poisson multi-Bernoulli mixture tracker
+(`rfs.py`); confirmation by existence probability (`lifecycle.py`); GOSPA and trajectory GOSPA
+(`metrics.py`); and sensor coverage, so that a scan counts a miss only against the tracks it
+could have seen (`tracker.Coverage`). Their docstrings and `spec/tracker-001.md` describe them.
+Only scenario 011's tracker (`tracking.scans.PlotTracker`) can be configured to use them today;
+the tracker this page's scenarios build (`pipeline.ScanTracker`) is always GNN, with a
+range-and-rate state.
 
-- the interacting multiple model (IMM) filter and a coordinated-turn motion model: every motion
-  model is linear (scenario 011);
-- probabilistic association (JPDA) and Murty's k-best assignments, for heavy clutter
-  (scenario 011); association is GNN or greedy nearest neighbour, each track taking at most one
-  measurement a scan;
-- OSPA and GOSPA, one score for a multi-target scene (scenario 011);
+**Not yet supported:**
+
 - an initiator for `BistaticRangeRateModel`: one bistatic measurement cannot fix a position, so
-  `DirectStateInitiator` returns None for it. Add its tracks with `Tracker.seed`;
-- sensor coverage: a scan counts a miss against every live track it does not update, whether
-  or not that sensor could see it.
+  `DirectStateInitiator` returns None for it. Add its tracks with `Tracker.seed`.
 
 **Built-in assumptions.**
 

@@ -194,7 +194,7 @@ def test_k_best_one_n_scan_one_is_gnn_with_the_finite_non_assignment_cost() -> N
 
 
 def test_no_tree_holds_more_leaves_than_k_best_and_every_tree_agrees_n_scan_back() -> None:
-    """D29: a tree's leaves are at most k_best, and after N-scan pruning they share their
+    """A tree's leaves are at most k_best, and after N-scan pruning they share their
     ancestor n_scan scans back; a cluttered crossing in 1-D makes many branches to prune."""
     rng = np.random.default_rng(7)
     tracker = _one_axis_mht(k_best=4, n_scan=2)

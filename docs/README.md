@@ -24,7 +24,7 @@ The rules, and the check that enforces each, are summarised in [CLAUDE.md](../CL
 - [**testing.md**](conventions/testing.md) — layout, tolerances, ground truth, markers, and which
   radar-domain tests each stage needs.
 - [**review.md**](conventions/review.md) — reviewing a PR (also `/pr-review`), auditing code
-  against the spec (Q1–Q8) and refactoring (F1–F9).
+  against the spec (Q1–Q10) and refactoring (F1–F9).
 - [**commits.md**](conventions/commits.md) — Conventional Commits, branches, squash-merged PRs.
 
 ## Getting started

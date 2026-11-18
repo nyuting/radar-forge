@@ -1,6 +1,6 @@
 """Package-wide conventions: the import is light, the API explicit, the docs run.
 
-Four rules from ``CLAUDE.md`` and ``docs/conventions/style.md`` that hold for the whole
+Five rules from ``CLAUDE.md`` and ``docs/conventions/style.md`` that hold for the whole
 library and no module can test of itself:
 
 * ``import radar_forge`` needs no extra: matplotlib, the ``visualisation`` extra, is imported
@@ -9,7 +9,8 @@ library and no module can test of itself:
   public callable returns is on its surface; array arguments are ``ArrayLike`` in, float64 out;
 * every docstring example runs and prints what it claims, and every export is documented;
 * every ``python`` block of ``docs/user-guide/`` runs, and prints the ``text`` block after it
-  (a last line ``...`` stands for any further lines).
+  (a last line ``...`` stands for any further lines);
+* no Markdown equation uses a LaTeX macro that GitHub refuses to render.
 """
 
 from __future__ import annotations
@@ -236,3 +237,22 @@ def test_guide_example_prints_what_the_guide_shows(source, expected, monkeypatch
         wanted = wanted[:-1]
         printed = printed[: len(wanted)]
     assert printed == wanted
+
+
+# GitHub replaces the whole equation with "The following macros are not allowed: ...".
+_REFUSED_MACRO_RE = re.compile(r"\\(operatorname)\b")
+
+
+def test_no_markdown_equation_uses_a_macro_github_refuses() -> None:
+    """Regression: page 2's azimuth showed an error on GitHub; ``\\mathrm{atan2}`` renders."""
+    tracked = subprocess.run(
+        ["git", "ls-files", "*.md"], capture_output=True, text=True, check=True, cwd=REPO
+    ).stdout.split()
+    assert tracked, "git listed no Markdown file: the test would pass without reading anything"
+    found = []
+    for name in tracked:
+        # Code is not rendered as maths: drop fenced blocks and inline code spans first.
+        text = _BLOCK_RE.sub("", (REPO / name).read_text(encoding="utf-8"))
+        text = re.sub(r"`[^`\n]*`", "", text)
+        found += [f"{name}: \\{match.group(1)}" for match in _REFUSED_MACRO_RE.finditer(text)]
+    assert found == []

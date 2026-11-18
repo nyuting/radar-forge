@@ -68,7 +68,7 @@ merge_range_bins = 1.0
 max_bistatic_range_rate_mps = 400.0
 
 # Capon, MUSIC, root-MUSIC and ESPRIT train on the chip's 5 x 5 cells; Bartlett, IAA, SPICE
-# and ML take its peak cell (D14).
+# and ML take its peak cell.
 [doa]
 methods = ["bartlett", "capon", "music", "esprit", "fb_music", "fbss_music", "fbss_esprit", "iaa", "spice", "deterministic_ml"]
 n_sources = 2

@@ -214,14 +214,14 @@ samples, so waveform changes live in one place and backends compare on identical
 ### D6 — The path set covers bistatic geometry unchanged
 
 `delay_s·c` is `bistatic_range_m` (`2R` monostatic), and Doppler is `-bistatic_range_rate_mps/λ`.
-Each relation is written once for both sitings; the two legs are geometry and belong to the radar,
-not the path set.
+Each relation is written once for monostatic and bistatic alike; the two legs are geometry and
+belong to the radar, not the path set.
 
-### D7 — One siting-agnostic pipeline
+### D7 — One pipeline for either geometry
 
 One `Radar(transmitter, receiver, tx_site, rx_site=None)`, where `rx_site` of `None` means
 monostatic: zero baseline, nothing raises. Consumers take one type with no `bistatic_*` twins, and
-a scenario file selects siting by the presence of a receiver site table.
+a scenario file selects the geometry by the presence of a receiver site table.
 
 ## References
 

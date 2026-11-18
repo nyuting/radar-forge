@@ -1,6 +1,6 @@
 r"""The radar: transmitter, receiver, sites, and the route geometry of a target.
 
-One :class:`Radar` covers both sitings: ``rx_site=None`` is the zero-baseline,
+One :class:`Radar` covers monostatic and bistatic: ``rx_site=None`` is the zero-baseline,
 monostatic case. Sites are stationary and synchronised, with no direct signal. A
 target's route has transmit and receive ranges :math:`R_T`, :math:`R_R`, the
 bistatic range :math:`R_b = R_T + R_R` (monostatic :math:`2R`) and its rate

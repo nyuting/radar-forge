@@ -88,7 +88,7 @@ def test_steering_phase_is_each_elements_own_path_phase_to_a_far_target():
 
 
 def test_azimuth_from_boresight_is_the_bearing_less_the_boresight_without_tilt():
-    """D13 item 6: with no tilt, the array-frame azimuth is the bearing minus 235.795 deg."""
+    """With no tilt, the array-frame azimuth is the bearing minus 235.795 deg."""
     bearing_deg = np.array([200.0, 235.795, 250.0, 300.0])
     in_array = enu_to_array_frame(ULA, directions_unit(np.radians(bearing_deg), 0.1))
     azimuth_deg = np.degrees(np.arctan2(in_array[:, 0], in_array[:, 1]))
@@ -98,7 +98,7 @@ def test_azimuth_from_boresight_is_the_bearing_less_the_boresight_without_tilt()
 
 
 def test_uniform_linear_array_is_centred_and_conjugate_centro_symmetric():
-    """D13 item 5: phase centre at the origin, so J a* = a."""
+    """Phase centre at the origin, so J a* = a."""
     assert is_centro_symmetric(ULA)
     a = steering_vectors(ULA, _toward(0.37), WAVELENGTH_M)[:, 0]
     np.testing.assert_allclose(a[::-1].conj(), a, rtol=1e-12)
