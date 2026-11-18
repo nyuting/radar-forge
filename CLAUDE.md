@@ -51,7 +51,7 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 
 | Relation | Function (file under `src/radar_forge/`) |
 | :--- | :--- |
-| wavelength; PRI, duty cycle, sweep rate; range resolution c/2B | `Transmitter.wavelength_m`; `.pulse_repetition_interval_s`, `.duty_cycle_linear`, `.sweep_rate_hzps`; `Radar.range_resolution_m` (radar.py); `range_resolution_m` (signal.py) |
+| wavelength; PRI, duty cycle, sweep rate; range resolution c/2B | `Transmitter.wavelength_m`; `.pulse_repetition_interval_s`, `.duty_cycle_linear`, `.sweep_rate_hzps` and `sweep_rate_hzps`; `Radar.range_resolution_m` (radar.py); `range_resolution_m` (signal.py) |
 | unambiguous delay, range, rate | `Radar.unambiguous_delay_s`, `.unambiguous_bistatic_range_m` (c τ, the map's range span), `.unambiguous_bistatic_range_rate_mps` (λ PRF, the whole span) (radar.py) |
 | route geometry, baseline, bistatic angle; geodesy | `Radar.geometry` -> `TargetGeometry`, `Radar.baseline_m`, `TargetGeometry.bistatic_angle_rad`; `geodetic_to_enu_m`, `enu_to_range_azimuth_elevation_rad`, `range_azimuth_elevation_to_enu_m` (radar.py) |
 | beat frequency ↔ bistatic range | `beat_frequency_hz`, `bistatic_range_from_beat_frequency_m` (signal.py) |

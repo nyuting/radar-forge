@@ -34,7 +34,7 @@ from scipy.signal import fftconvolve
 
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.propagation import PropagationPaths, propagation_delay_s, propagation_phase_rad
-from radar_forge.radar import Radar, Transmitter
+from radar_forge.radar import Radar, Transmitter, sweep_rate_hzps
 
 __all__ = [
     "RangeGate",
@@ -49,7 +49,6 @@ __all__ = [
     "range_gate_first_sample",
     "range_resolution_m",
     "stream_baseband",
-    "sweep_rate_hzps",
     "thermal_noise",
 ]
 
@@ -69,14 +68,6 @@ def range_resolution_m(bandwidth_hz: ArrayLike) -> NDArray[np.float64]:
     r"""Return the monostatic range resolution :math:`c/2B`, m (Richards [1], §4.6.1)."""
     result: NDArray[np.float64] = SPEED_OF_LIGHT_MPS / (
         2.0 * np.asarray(bandwidth_hz, dtype=np.float64)
-    )
-    return result
-
-
-def sweep_rate_hzps(bandwidth_hz: ArrayLike, chirp_duration_s: ArrayLike) -> NDArray[np.float64]:
-    r"""Return the chirp slope :math:`\alpha = B/T`, Hz/s."""
-    result: NDArray[np.float64] = np.asarray(bandwidth_hz, dtype=np.float64) / np.asarray(
-        chirp_duration_s, dtype=np.float64
     )
     return result
 
@@ -137,7 +128,7 @@ def lfm_chirp(
         msg = f"chirp_duration_s {chirp_duration_s:g} is too short for one sample."
         raise ValueError(msg)
 
-    sweep_rate = bandwidth_hz / chirp_duration_s
+    sweep_rate = float(sweep_rate_hzps(bandwidth_hz, chirp_duration_s))
     if sweep_direction == "down":
         sweep_rate = -sweep_rate
     if start_frequency_hz is None:

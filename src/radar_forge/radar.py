@@ -50,6 +50,7 @@ __all__ = [
     "geodetic_to_ecef_m",
     "geodetic_to_enu_m",
     "range_azimuth_elevation_to_enu_m",
+    "sweep_rate_hzps",
 ]
 
 # First eccentricity squared, e^2 = f(2 - f), derived rather than stored.
@@ -57,6 +58,14 @@ _ECCENTRICITY_SQUARED = WGS84_FLATTENING * (2.0 - WGS84_FLATTENING)
 
 WaveformKind = Literal["fmcw", "pulsed", "noise"]
 """Which waveform family a transmitter emits: deramped FMCW, a pulse train or a noise code."""
+
+
+def sweep_rate_hzps(bandwidth_hz: ArrayLike, chirp_duration_s: ArrayLike) -> NDArray[np.float64]:
+    r"""Return the chirp slope :math:`\alpha = B/T`, Hz/s."""
+    result: NDArray[np.float64] = np.asarray(bandwidth_hz, dtype=np.float64) / np.asarray(
+        chirp_duration_s, dtype=np.float64
+    )
+    return result
 
 
 @dataclass(frozen=True)
@@ -112,7 +121,7 @@ class Transmitter:
     @property
     def sweep_rate_hzps(self) -> float:
         r"""Chirp slope :math:`\alpha = B/T`, Hz/s."""
-        return self.bandwidth_hz / self.chirp_duration_s
+        return float(sweep_rate_hzps(self.bandwidth_hz, self.chirp_duration_s))
 
 
 @dataclass(frozen=True)

@@ -32,11 +32,8 @@ import pytest
 
 import radar_forge
 from radar_forge.dsp import window
-from radar_forge.signal import (
-    bistatic_range_from_beat_frequency_m,
-    range_resolution_m,
-    sweep_rate_hzps,
-)
+from radar_forge.radar import sweep_rate_hzps
+from radar_forge.signal import bistatic_range_from_beat_frequency_m, range_resolution_m
 from radar_forge.units import power_to_db
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
