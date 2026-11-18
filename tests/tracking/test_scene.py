@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 from scipy.stats import beta, binom, poisson
 
+from radar_forge.coordinates import east_north_to_range_azimuth_rad
 from radar_forge.scenario import load_scenario
 from radar_forge.tracking.scene import (
     Arc,
@@ -27,9 +28,7 @@ from radar_forge.tracking.scene import (
     detection_probability,
     measure,
     poisson_clutter_plots,
-    polar,
     resolve,
-    to_enu,
 )
 
 SEED = 20261106
@@ -189,7 +188,7 @@ def test_every_clutter_component_draws_its_intensity_times_volume() -> None:
 def test_the_oracle_intensity_sums_the_layers_a_point_lies_in() -> None:
     components = _components()
     # The rain centre at 0 s is inside the background and the rain; 3 km is ground residue too.
-    rain_r, rain_az = polar(np.array([20e3, 4e3]))
+    rain_r, rain_az = east_north_to_range_azimuth_rad(np.array([20e3, 4e3]))
     got = clutter_intensity(components, [float(rain_r), 3e3], [float(rain_az), 0.0], 0.0)
     np.testing.assert_allclose(got, [0.0021683 + 0.65048, 0.0021683 + 0.065048], rtol=1e-12)
 
@@ -250,8 +249,8 @@ NOTCH = {"HE": 0.156, "L1": 0.120, "L2": 0.130, "A4": 0.053, "A2": 0.052, "A1": 
 
 def _distance(a_m: np.ndarray, b_m: np.ndarray) -> np.ndarray:
     """Return the normalised (range, azimuth) distance d between two position tracks."""
-    range_a, az_a = polar(a_m)
-    range_b, az_b = polar(b_m)
+    range_a, az_a = east_north_to_range_azimuth_rad(a_m)
+    range_b, az_b = east_north_to_range_azimuth_rad(b_m)
     gap_az = np.mod(az_a - az_b + np.pi, 2 * np.pi) - np.pi
     return np.hypot((range_a - range_b) / ALPHA_RANGE_M, gap_az / ALPHA_AZIMUTH_RAD)
 
@@ -280,7 +279,9 @@ def test_the_scene_regenerates_its_closest_approaches(encounter: tuple) -> None:
         time_s = 4.8 * scan
         for _ in range(3):
             middle = (arcs[first].state(time_s)[0] + arcs[second].state(time_s)[0]) / 2
-            time_s = 4.8 * scan + float(polar(middle)[1]) / (2 * np.pi) * 4.8
+            time_s = (
+                4.8 * scan + float(east_north_to_range_azimuth_rad(middle)[1]) / (2 * np.pi) * 4.8
+            )
         separation = _distance(arcs[first].state(time_s)[0], arcs[second].state(time_s)[0])
         seen += bool(np.exp(-(separation**2) / 2) > 0.5)
     assert seen == n_scans
@@ -357,17 +358,3 @@ def test_a_leg_that_decelerates_past_a_stop_is_refused() -> None:
     with pytest.raises(ValueError, match="decelerates"):
         Arc(0.0, (0.0, 0.0), 0.0, 10.0, (Leg(10.0, 0.0, -2.0),))
     Arc(0.0, (0.0, 0.0), 0.0, 10.0, (Leg(5.0, 0.0, -2.0),))
-
-
-def test_polar_and_to_enu_are_the_radar_modules_convention() -> None:
-    """Range and azimuth clockwise from north, from the radar module, and back again."""
-    from radar_forge.radar import enu_to_range_azimuth_elevation_rad
-
-    rng = np.random.default_rng(SEED)
-    position_m = rng.normal(0.0, 2e4, (50, 2))
-    range_m, azimuth_rad = polar(position_m)
-    expected = enu_to_range_azimuth_elevation_rad(np.column_stack([position_m, np.zeros(50)]))
-    np.testing.assert_array_equal(range_m, expected[0])
-    np.testing.assert_array_equal(azimuth_rad, expected[1])
-    # rtol 1e-12: two trigonometric round trips.
-    np.testing.assert_allclose(to_enu(range_m, azimuth_rad), position_m, rtol=1e-12, atol=1e-8)

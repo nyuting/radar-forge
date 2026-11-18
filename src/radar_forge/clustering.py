@@ -32,6 +32,8 @@ from numpy.typing import ArrayLike, NDArray
 from scipy import sparse, spatial
 from scipy.sparse import csgraph
 
+from radar_forge._periodic import fold
+
 __all__ = ["cluster_points", "mean_shift"]
 
 # A seed that moves less than this fraction of a bandwidth has reached its mode.
@@ -218,13 +220,13 @@ def _wrapped(scaled: NDArray[np.float64], box: NDArray[np.float64] | None) -> ND
         return scaled
     wraps = box > 0.0
     inside = scaled.copy()
-    inside[:, wraps] %= box[wraps]
-    # A tiny negative coordinate can round up to exactly the period.
-    inside[:, wraps] = np.where(inside[:, wraps] >= box[wraps], 0.0, inside[:, wraps])
+    inside[:, wraps] = fold(inside[:, wraps], box[wraps], lower=0.0)
     return inside
 
 
 def _short_way(gap: NDArray[np.float64], box: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Return a difference on a circle of circumference ``box`` in ``[-box / 2, box / 2)``."""
+    """Return a difference on a circle of circumference ``box`` in ``[-box / 2, box / 2]``."""
+    # Not _periodic.fold: a sum that rounds onto the edge gives +box / 2 here and -box / 2
+    # there; kept.
     result: NDArray[np.float64] = (gap + box / 2.0) % box - box / 2.0
     return result

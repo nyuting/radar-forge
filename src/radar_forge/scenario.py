@@ -40,8 +40,9 @@ from radar_forge.array import (
     rayleigh_width,
     uniform_linear_array,
 )
+from radar_forge.coordinates import geodetic_to_enu_m
 from radar_forge.propagation import dbsm_to_m2
-from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter, geodetic_to_enu_m
+from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter
 from radar_forge.settings import (
     ArcTarget,
     CancellationSettings,

@@ -32,7 +32,10 @@ from scipy.sparse import coo_array
 from scipy.sparse.csgraph import connected_components
 from scipy.special import ellipe, ellipk
 
-from radar_forge.radar import enu_to_range_azimuth_elevation_rad, range_azimuth_elevation_to_enu_m
+from radar_forge.coordinates import (
+    east_north_to_range_azimuth_rad,
+    range_azimuth_to_east_north_m,
+)
 
 __all__ = [
     "LEAST_INTENSITY_PER_M_RAD",
@@ -46,9 +49,7 @@ __all__ = [
     "detection_probability",
     "measure",
     "poisson_clutter_plots",
-    "polar",
     "resolve",
-    "to_enu",
 ]
 
 
@@ -61,23 +62,6 @@ def _heading(heading_rad: ArrayLike) -> NDArray[np.float64]:
     """Return the unit ENU vector of a heading clockwise from north, ``(..., 2)``."""
     angle = np.asarray(heading_rad, dtype=np.float64)
     return np.stack([np.sin(angle), np.cos(angle)], axis=-1)
-
-
-def polar(position_m: ArrayLike) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Return the horizontal range and azimuth of ground-plane ENU positions ``(..., 2)``.
-
-    The radar module's conversion with no height: azimuth clockwise from north in [0, 2π).
-    """
-    ground = np.asarray(position_m, dtype=np.float64)
-    enu = np.concatenate([ground, np.zeros_like(ground[..., :1])], axis=-1)
-    range_m, azimuth_rad, _ = enu_to_range_azimuth_elevation_rad(enu)
-    return range_m, azimuth_rad
-
-
-def to_enu(range_m: ArrayLike, azimuth_rad: ArrayLike) -> NDArray[np.float64]:
-    """Return the ground-plane ENU position ``(..., 2)`` of a horizontal range and azimuth."""
-    result: NDArray[np.float64] = range_azimuth_elevation_to_enu_m(range_m, azimuth_rad, 0.0)
-    return result[..., :2]
 
 
 @dataclass(frozen=True)
@@ -221,6 +205,7 @@ def resolve(
     ranges = np.asarray(range_m, dtype=np.float64)
     azimuths = np.asarray(azimuth_rad, dtype=np.float64)
     first, second = np.triu_indices(ranges.size, k=1)
+    # Not _periodic.fold: a sum that rounds onto the edge gives +pi here and -pi there; kept.
     gap_az = np.mod(azimuths[first] - azimuths[second] + np.pi, 2 * np.pi) - np.pi
     distance = np.hypot(
         (ranges[first] - ranges[second]) / alpha_range_m, gap_az / alpha_azimuth_rad
@@ -271,9 +256,11 @@ def measure(
     ranges = np.bincount(labels, weights=np.asarray(range_m, dtype=np.float64)) / count
     # Averaged as offsets from each group's first echo, so a group across north stays together.
     reference = azimuths[np.unique(labels, return_index=True)[1]]
+    # Not _periodic.fold: a sum that rounds onto the edge gives +pi here and -pi there; kept.
     offset = np.mod(azimuths - reference[labels] + np.pi, 2 * np.pi) - np.pi
     centre = reference + np.bincount(labels, weights=offset) / count
     noise = rng.standard_normal((2, count.size))
+    # Not _periodic.fold: a tiny negative angle wraps to exactly 2 pi here and to 0 there; kept.
     measured_az = np.mod(centre + sigma_azimuth_rad * noise[1], 2 * np.pi)
     return ranges + sigma_range_m * noise[0], measured_az
 
@@ -338,7 +325,7 @@ class ClutterComponent:
         ranges = np.asarray(range_m, dtype=np.float64)
         result = (ranges >= self.range_min_m) & (ranges < self.range_max_m)
         if self.centre_enu_m is not None:
-            point = to_enu(ranges, azimuth_rad)
+            point = range_azimuth_to_east_north_m(ranges, azimuth_rad)
             result &= np.linalg.norm(point - self.centre_m(time_s), axis=-1) < self.radius_m
         return np.asarray(result, dtype=bool)
 
@@ -362,13 +349,14 @@ def poisson_clutter_plots(
             2 * np.pi,
         )
         if component.centre_enu_m is not None:
-            centre_range_m, centre_az = polar(component.centre_m(time_s))
+            centre_range_m, centre_az = east_north_to_range_azimuth_rad(component.centre_m(time_s))
             low_r = float(centre_range_m) - component.radius_m
             high_r = float(centre_range_m) + component.radius_m
             half = math.asin(min(component.radius_m / float(centre_range_m), 1.0))
             low_az, span_az = float(centre_az) - half, 2 * half
         count = rng.poisson(component.intensity_per_m_rad * (high_r - low_r) * span_az)
         draw = rng.random((count, 2))
+        # Not _periodic.fold: a tiny negative angle wraps to exactly 2 pi here and to 0 there; kept.
         ranges, azimuths = (
             low_r + draw[:, 0] * (high_r - low_r),
             np.mod(low_az + draw[:, 1] * span_az, 2 * np.pi),
@@ -408,6 +396,7 @@ class FixedDiscretes:
         reported = rng.random(self.range_m.size) < self.report_probability
         noise = rng.standard_normal((2, int(reported.sum())))
         range_m = self.range_m[reported] + sigma_range_m * noise[0]
+        # Not _periodic.fold: a tiny negative angle wraps to exactly 2 pi here and to 0 there; kept.
         return range_m, np.mod(self.azimuth_rad[reported] + sigma_azimuth_rad * noise[1], 2 * np.pi)
 
 
@@ -470,6 +459,8 @@ class ClutterMap:
         rows = np.clip(
             (np.asarray(range_m) // self.cell_range_m).astype(np.intp), 0, self.shape[0] - 1
         )
+        # Not _periodic.fold: a tiny negative angle wraps to exactly 2 pi here and to 0 there, so
+        # the last column, not the first; kept.
         columns = (np.mod(azimuth_rad, 2 * np.pi) // self.cell_azimuth_rad).astype(np.intp)
         return rows, np.minimum(columns, self.shape[1] - 1)
 

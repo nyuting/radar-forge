@@ -50,9 +50,10 @@ The filter is functions over a bank of tracks, and the hypothesiser is the gate.
 one constructor argument and no pipeline code. A branch on the type of a transform, filter or
 tracker in the filter, the tracker or `pipeline.py` breaks this. There is one `Tracker`.
 
-**Dependencies.** `tracking/` imports NumPy, SciPy and `radar.py`'s geometry helpers (the ENU ↔
-range-azimuth conversions `scene.py` uses), never `pipeline`, `scenario`, `evaluate` or `plots` at
-run time; `scans.py` names `Scenario` and `TrackingSettings` under `TYPE_CHECKING` only, because
+**Dependencies.** `tracking/` imports NumPy, SciPy, `coordinates.py` (the ENU ↔ range-azimuth
+conversions `scene.py` uses) and the private `_periodic.fold` (the one wrap of a periodic value,
+which `dsp.fold_into_period` also calls), never `dsp`, `pipeline`, `scenario`, `evaluate` or
+`plots` at run time; `scans.py` names `Scenario` and `TrackingSettings` under `TYPE_CHECKING` only, because
 `scenario.py` imports `tracking.scene`. The pipeline builds an IQ scenario's `Scan`, `scans.py` a
 plot-level one's.
 
@@ -134,11 +135,13 @@ interval at 99.9 %; covariances stay symmetric to `rtol=1e-12` with Cholesky suc
   one pairs `CartesianMotion` with a spherical or bistatic model.
 - **Spherical measurements stay spherical.** `RangeAzimuthElevationRangeRate` maps an ENU state to
   `(range_m, azimuth_rad, elevation_rad, range_rate_mps)` about a sensor pose: r = |p − pₛ|,
-  azimuth atan2(Δe, Δn) clockwise from north (periodic), elevation asin(Δu/r), range rate
-  +(p − pₛ)·v/r. The geometry is written inline (PR 77), not imported from `radar`; the model raises rather
-  than return a non-finite Jacobian at r → 0 or the zenith. Converting to Cartesian is allowed only
-  to seed a track, with the measurement-conditioned conversion of Duan, Han and Li (2004) and
-  Bordonaro, Willett and Bar-Shalom (2014).
+  azimuth atan2(Δe, Δn) clockwise from north (periodic), elevation atan2(Δu, g) with g the ground
+  range √(Δe² + Δn²), range rate +(p − pₛ)·v/r. The geometry is written inline, not imported from
+  `coordinates`, whose elevation is asin(Δu/r): the two agree to rounding but not bit for bit,
+  and atan2 keeps its accuracy near the zenith. The model raises rather than return a non-finite
+  Jacobian at r → 0 or the zenith. Converting to Cartesian is allowed only to seed a track, with
+  the measurement-conditioned conversion of Duan, Han and Li (2004) and Bordonaro, Willett and
+  Bar-Shalom (2014).
 - **Range rate is measured, not stated.** It is a row of z and h(x), so it enters S and the gate:
   a false alarm matching in position but not Doppler fails. A Cartesian state carries no range-rate
   component (redundant with velocity, and it makes the covariance singular). The pipeline unfolds a

@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 from numpy.typing import NDArray
 
+from radar_forge.coordinates import east_north_to_range_azimuth_rad
 from radar_forge.tracking.association import (
     GlobalNearestNeighbour,
     JointProbabilisticDataAssociation,
@@ -54,7 +55,6 @@ from radar_forge.tracking.scene import (
     detection_probability,
     measure,
     poisson_clutter_plots,
-    polar,
     resolve,
 )
 from radar_forge.tracking.tracker import ExistencePolicy, LifecyclePolicy, Scan, Tracker
@@ -127,7 +127,7 @@ def _beam_crossing(
         states = [target.arc.state(t) for target, t in zip(scenario.arcs, time_s, strict=True)]
         position_m = np.array([p for p, _ in states])
         # A target not yet flying is NaN; its azimuth counts as 0, the rotation's start.
-        azimuth = np.nan_to_num(polar(position_m)[1])
+        azimuth = np.nan_to_num(east_north_to_range_azimuth_rad(position_m)[1])
         time_s = start_s + azimuth / (2 * np.pi) * period_s
     return time_s, position_m, np.array([v for _, v in states])
 
@@ -155,7 +155,7 @@ def scans(
     for index in range(count):
         start_s = scenario.start_time_s + index * sensor.scan_period_s
         echo_s, position_m, velocity_mps = _beam_crossing(scenario, start_s)
-        ranges, azimuths = polar(position_m)
+        ranges, azimuths = east_north_to_range_azimuth_rad(position_m)
         rate_mps = np.sum(position_m * velocity_mps, axis=-1) / ranges
         seen = np.isfinite(ranges) & (ranges >= sensor.range_min_m) & (ranges < sensor.range_max_m)
         notch = np.abs(rate_mps) < sensor.mti_notch_mps
@@ -372,7 +372,9 @@ class PlotTracker:
         layout = bank.layout
         x, xdot, y, ydot = (bank.mean[:, layout.names.index(n)] for n in _POSITION_VELOCITY)
         dt_s = scan.time_s - bank.time_s
-        _, azimuth = polar(np.column_stack([x + xdot * dt_s, y + ydot * dt_s]))
+        _, azimuth = east_north_to_range_azimuth_rad(
+            np.column_stack([x + xdot * dt_s, y + ydot * dt_s])
+        )
         sector = np.minimum(
             azimuth // (2 * np.pi / self.sensor.n_sectors), self.sensor.n_sectors - 1
         )

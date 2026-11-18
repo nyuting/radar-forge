@@ -1,8 +1,8 @@
 r"""State layouts, motion models and measurement models, batched over leading axes.
 
 Every model takes states ``(..., n_state)``, so a bank of tracks or all its sigma points go
-through one call. :class:`StateLayout` names each coordinate and holds the package's one wrap
-of periodic values; :func:`check_covariances` is the one boundary check of a covariance.
+through one call. :class:`StateLayout` names each coordinate and wraps its periodic values;
+:func:`check_covariances` is the one boundary check of a covariance.
 Motion: :class:`CartesianMotion`, :class:`RadialConstantVelocity` and the nonlinear
 :class:`CoordinatedTurn`. Measurement:
 :class:`LinearMeasurement`, :class:`RangeAzimuthElevationRangeRate`,
@@ -38,6 +38,8 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.linalg import block_diag
 from scipy.special import factorial
+
+from radar_forge._periodic import fold
 
 __all__ = [
     "BistaticRangeRateModel",
@@ -183,11 +185,8 @@ class StateLayout:
         result = np.array(value, dtype=np.float64)
         if not self._period.size:
             return result
-        offset = self._period / 2 if interval == "centred" else np.zeros_like(self._period)
-        folded = np.mod(result[..., self._periodic] + offset, self._period)
-        # np.mod of a tiny negative number can round up to exactly one period.
-        folded = np.where(folded >= self._period, folded - self._period, folded)
-        result[..., self._periodic] = folded - offset
+        lower = -self._period / 2 if interval == "centred" else np.zeros_like(self._period)
+        result[..., self._periodic] = fold(result[..., self._periodic], self._period, lower=lower)
         return result
 
     def residual(self, a: ArrayLike, b: ArrayLike) -> NDArray[np.float64]:
@@ -625,8 +624,13 @@ class RangeAzimuthElevationRangeRate:
         offset_m = self._geometry.vector(state, "_m") - self.sensor_enu_m
         east_m, north_m, up_m = np.moveaxis(offset_m, -1, 0)
         range_m = np.linalg.norm(offset_m, axis=-1)
+        # Inline, not coordinates.enu_to_range_azimuth_elevation_rad: elevation here is
+        # atan2(up, ground), accurate near the zenith, where that function takes asin(up / r);
+        # the two differ in the last bit for about half of all directions.
         values = {
             "range_m": range_m,
+            # Not _periodic.fold: a tiny negative angle wraps to exactly 2 pi here and to 0
+            # there; kept.
             "azimuth_rad": np.mod(np.arctan2(east_m, north_m), 2 * np.pi),
             "elevation_rad": np.arctan2(up_m, np.hypot(east_m, north_m)),
         }

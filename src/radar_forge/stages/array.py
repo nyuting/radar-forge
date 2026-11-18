@@ -38,7 +38,6 @@ from radar_forge import evaluate, plots
 from radar_forge.array import (
     ArrayGeometry,
     direction_cosine,
-    directions_unit,
     enu_to_array_frame,
     forward_backward_average,
     rayleigh_width,
@@ -46,6 +45,7 @@ from radar_forge.array import (
     spatial_smoothing,
     subarray,
 )
+from radar_forge.coordinates import directions_unit
 from radar_forge.datachip import (
     ChipProcessing,
     DataChip,

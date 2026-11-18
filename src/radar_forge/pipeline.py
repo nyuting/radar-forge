@@ -36,11 +36,11 @@ from radar_forge.array import (
     ArrayGeometry,
     apply_weights,
     conventional_weights,
-    directions_unit,
     enu_to_array_frame,
     steering_vectors,
 )
 from radar_forge.clutter import CancellationResult, cancel, fill_notch
+from radar_forge.coordinates import directions_unit
 from radar_forge.detection import Detection, cfar_detect, cluster_detections
 from radar_forge.dsp import (
     batched_correlation,
@@ -702,6 +702,8 @@ class ScanTracker:
             range_m = float(ranges_m[bank.measurement_index[row]])
             if history:
                 last_m = history[-1][1]
+                # Not _periodic.fold: last_m + fold(...) adds in another order, which moves
+                # the last bit of many ranges; kept.
                 range_m = last_m + (range_m - last_m + period_m / 2) % period_m - period_m / 2
             history.append((time_s, range_m))
 
