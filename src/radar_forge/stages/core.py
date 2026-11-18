@@ -448,6 +448,7 @@ def _score(
             )
             key = (int(np.argmin(gap_m)), int(bank.track_id[row]))
             votes[key] = votes.get(key, 0) + 1
+    # Not metrics.consistency_interval(2, 1, 0.95): its (1 - 0.95)/2 rounds above 0.025.
     low, high = chi2.ppf([0.025, 0.975], 2)
     worst = dict.fromkeys(
         ("range_rmse_m", "range_rate_rmse_mps", "nees_fraction", "confirmation_latency_scans"),

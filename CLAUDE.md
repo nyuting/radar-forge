@@ -55,7 +55,7 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 | unambiguous delay, range, rate | `Radar.unambiguous_delay_s`, `.unambiguous_bistatic_range_m` (c τ, the map's range span), `.unambiguous_bistatic_range_rate_mps` (λ PRF, the whole span) (radar.py) |
 | route geometry, baseline, bistatic angle; geodesy | `Radar.geometry` -> `TargetGeometry`, `Radar.baseline_m`, `TargetGeometry.bistatic_angle_rad`; `geodetic_to_enu_m`, `enu_to_range_azimuth_elevation_rad`, `range_azimuth_elevation_to_enu_m` (radar.py) |
 | beat frequency ↔ bistatic range | `beat_frequency_hz`, `bistatic_range_from_beat_frequency_m` (signal.py) |
-| delay, phase, Doppler; stop-and-hop | `propagation_delay_s`, `propagation_phase_rad`, `doppler_shift_hz`; `PropagationPaths.bistatic_range_at_m` (propagation.py) |
+| delay and its inverse, phase, wavenumber 2πf/c, Doppler and its inverse; stop-and-hop | `propagation_delay_s`, `bistatic_range_from_delay_m`, `propagation_phase_rad`, `wavenumber_radpm`, `doppler_shift_hz`, `bistatic_range_rate_from_doppler_mps`; `PropagationPaths.bistatic_range_at_m` (propagation.py) |
 | radar equation; RCS, Swerling 0-4 | `received_power_w` (R_T² R_R²); `dbsm_to_m2`, `swerling_rcs_m2` (propagation.py) |
 | dB: a power 10 log10, an amplitude 20 log10; antenna gains linear | `power_to_db`, `db_to_power`, `amplitude_to_db`, `db_to_amplitude` (units.py); `Transmitter.gain_tx_linear`, `Receiver.gain_rx_linear` (radar.py) |
 | noise N0 = kT0F, per sample, in band | `Receiver.noise_density_w_per_hz`, `.noise_power_per_sample_w`, `Radar.noise_power_matched_w` (radar.py) |

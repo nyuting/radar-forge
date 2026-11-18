@@ -38,7 +38,10 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.signal import fftconvolve, get_window
 
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
-from radar_forge.propagation import bistatic_range_rate_from_doppler_mps
+from radar_forge.propagation import (
+    bistatic_range_from_delay_m,
+    bistatic_range_rate_from_doppler_mps,
+)
 from radar_forge.signal import range_gate_first_sample
 from radar_forge.units import db_to_amplitude, power_to_db
 
@@ -360,8 +363,7 @@ def range_bin_centers_m(
 
     beat_hz = np.arange(n_bins, dtype=np.float64) * sample_rate_hz / n_bins
     delay_s = beat_hz * chirp_duration_s / bandwidth_hz
-    result: NDArray[np.float64] = SPEED_OF_LIGHT_MPS * delay_s
-    return result
+    return bistatic_range_from_delay_m(delay_s)
 
 
 def delay_bin_centers_m(
@@ -379,6 +381,7 @@ def delay_bin_centers_m(
         raise ValueError(msg)
     first = range_gate_first_sample(range_gate_start_m, sample_rate_hz)
     sample_index = np.arange(n_bins, dtype=np.float64) + first
+    # (c n)/f_s, not bistatic_range_from_delay_m(n / f_s): the orders differ in the last bit.
     result: NDArray[np.float64] = SPEED_OF_LIGHT_MPS * sample_index / sample_rate_hz
     return result
 

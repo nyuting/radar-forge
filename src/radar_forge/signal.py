@@ -33,7 +33,12 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.signal import fftconvolve
 
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
-from radar_forge.propagation import PropagationPaths, propagation_delay_s, propagation_phase_rad
+from radar_forge.propagation import (
+    PropagationPaths,
+    bistatic_range_rate_from_doppler_mps,
+    propagation_delay_s,
+    propagation_phase_rad,
+)
 from radar_forge.radar import Radar, Transmitter, sweep_rate_hzps
 
 __all__ = [
@@ -497,6 +502,8 @@ def stream_baseband(
     spectrum = np.fft.fft(radiated)
     cycles_per_sample = np.fft.fftfreq(n_samples).astype(np.float64)
     sample_rate_hz, wavelength_m = radar.receiver.sample_rate_hz, radar.wavelength_m
+    # Delay in samples as (R f_s)/c, not propagation_delay_s(R) * f_s: the two orders differ in
+    # the last bit, and this one fixes scenario 005's code delays.
     batch_delay = (
         paths.bistatic_range_at_m(_slow_time_s(n_pulses, radar), wavelength_m)
         * sample_rate_hz
@@ -632,7 +639,8 @@ def _fast_time_s(radar: Radar) -> NDArray[np.float64]:
 
 def _warn_if_stop_and_hop_is_strained(paths: PropagationPaths, radar: Radar) -> None:
     r"""Warn when a path moves a quarter of a range bin (:math:`c/B` of route) within one chirp."""
-    fastest_mps = float(np.max(np.abs(paths.doppler_hz), initial=0.0)) * radar.wavelength_m
+    rate_mps = bistatic_range_rate_from_doppler_mps(paths.doppler_hz, radar.wavelength_m)
+    fastest_mps = float(np.max(np.abs(rate_mps), initial=0.0))
     bin_fraction = (
         fastest_mps * radar.transmitter.chirp_duration_s / (2.0 * radar.range_resolution_m)
     )

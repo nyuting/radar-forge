@@ -482,6 +482,7 @@ def _record(
     swap = ctx.record(f"{prefix}swap_fraction", _swap_fraction(scenario, run, period_s))
     latency = _mode_latency(scenario, run, period_s)
     latency = ctx.record(f"{prefix}mode_latency_median_scans", latency)
+    # Not metrics.consistency_interval(2, 1, 0.95): its (1 - 0.95)/2 rounds above 0.025.
     low, high = chi2.ppf([0.025, 0.975], 2)
     inside = [low <= value <= high for value in run.nees]
     nees_fraction = float(np.mean(inside)) if inside else math.nan

@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 __all__ = [
     "PointTarget",
     "PropagationPaths",
+    "bistatic_range_from_delay_m",
     "bistatic_range_rate_from_doppler_mps",
     "dbsm_to_m2",
     "disturbance_paths",
@@ -53,6 +54,7 @@ __all__ = [
     "received_power_w",
     "static_clutter_paths",
     "swerling_rcs_m2",
+    "wavenumber_radpm",
 ]
 
 _FOUR_PI_CUBED = (4.0 * np.pi) ** 3
@@ -123,8 +125,7 @@ class PropagationPaths:
     @property
     def bistatic_range_m(self) -> NDArray[np.float64]:
         r"""Length of each route, :math:`R_b = c\tau`, m. Monostatic, :math:`2R`."""
-        result: NDArray[np.float64] = self.delay_s * SPEED_OF_LIGHT_MPS
-        return result
+        return bistatic_range_from_delay_m(self.delay_s)
 
     def bistatic_range_at_m(
         self, slow_time_s: ArrayLike, wavelength_m: float
@@ -162,6 +163,20 @@ def propagation_delay_s(bistatic_range_m: ArrayLike) -> NDArray[np.float64]:
     r"""Return the time to travel a route, :math:`\tau = R_b/c`, s (Richards [1], §2.6.1)."""
     result: NDArray[np.float64] = (
         np.asarray(bistatic_range_m, dtype=np.float64) / SPEED_OF_LIGHT_MPS
+    )
+    return result
+
+
+def bistatic_range_from_delay_m(delay_s: ArrayLike) -> NDArray[np.float64]:
+    r"""Return the route a delay spans, :math:`R_b = c\tau`, m: the inverse of the delay."""
+    result: NDArray[np.float64] = SPEED_OF_LIGHT_MPS * np.asarray(delay_s, dtype=np.float64)
+    return result
+
+
+def wavenumber_radpm(frequency_hz: ArrayLike) -> NDArray[np.float64]:
+    r"""Return the wavenumber :math:`k = 2\pi f/c`, rad/m: phase per metre of route."""
+    result: NDArray[np.float64] = (
+        2.0 * np.pi * np.asarray(frequency_hz, dtype=np.float64) / SPEED_OF_LIGHT_MPS
     )
     return result
 
@@ -315,6 +330,7 @@ def leakage_paths(radar: Radar, lags: ArrayLike, inr_db: ArrayLike) -> Propagati
     :attr:`~radar_forge.radar.Receiver.noise_power_per_sample_w`, not over the matched band.
     """
     lags_arr = np.atleast_1d(np.asarray(lags, dtype=np.float64))
+    # (c m)/f_s, not bistatic_range_from_delay_m(m / f_s): the orders differ in the last bit.
     range_m = SPEED_OF_LIGHT_MPS * lags_arr / radar.receiver.sample_rate_hz
     return _specified_paths(radar, range_m, inr_db, 0.0)
 

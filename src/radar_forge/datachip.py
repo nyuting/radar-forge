@@ -50,7 +50,7 @@ from scipy.optimize import minimize, minimize_scalar
 
 from radar_forge._fourier import aboutanios_mulgrew, signed_cycles
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
-from radar_forge.propagation import bistatic_range_rate_from_doppler_mps
+from radar_forge.propagation import bistatic_range_rate_from_doppler_mps, wavenumber_radpm
 
 __all__ = [
     "FINE_METHODS",
@@ -303,7 +303,7 @@ def cramer_rao_bounds(
     factors = np.stack(
         [time_s**p / np.prod(np.arange(1, p + 1)) for p in range(polynomial_order + 1)]
     )
-    wavenumber = 2.0 * np.pi * carrier_frequency_hz / SPEED_OF_LIGHT_MPS
+    wavenumber = float(wavenumber_radpm(carrier_frequency_hz))
     band_spread = (2.0 * np.pi / SPEED_OF_LIGHT_MPS) ** 2 * bandwidth_hz**2 / 12.0
     size = polynomial_order + 2
     fisher = np.empty((size, size))
