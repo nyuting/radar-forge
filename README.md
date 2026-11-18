@@ -145,8 +145,8 @@ radar-forge/
 ├── tests/                      # Pytest unit and integration tests
 └── src/
     └── radar_forge/            # The import package: flat modules, signal-path order
-        ├── units.py            # Decibels: a power or an amplitude, to and from dB
         ├── constants.py        # Every physical constant, once
+        ├── units.py            # Decibels: a power or an amplitude, to and from dB
         ├── radar.py            # Transmitter, receiver, sites, bistatic geometry, WGS-84
         ├── propagation.py      # Propagation paths, the radar equation, Swerling draws
         ├── signal.py           # LFM chirp, thermal noise, FMCW and pulsed IQ synthesis
