@@ -181,7 +181,7 @@ class TestRadarLimits:
 
 
 class TestSiting:
-    """One class for both sitings: monostatic is the zero baseline, not an error."""
+    """One class for both configurations: monostatic is the zero baseline, not an error."""
 
     @pytest.mark.parametrize("rx_site", [None, DUKE], ids=["rx-site-none", "rx-site-equal"])
     def test_collocated_sites_are_monostatic_with_zero_baseline(self, rx_site: Site | None) -> None:
@@ -201,7 +201,7 @@ class TestSiting:
         # The norm of the same vector computed the other way round: a rotation apart.
         np.testing.assert_allclose(np.linalg.norm(tx_enu_m), S1_PAIR.baseline_m, rtol=1e-12)
 
-    def test_waveform_properties_do_not_depend_on_the_siting(self) -> None:
+    def test_waveform_properties_do_not_depend_on_the_configuration(self) -> None:
         for name in (
             "wavelength_m",
             "noise_power_matched_w",

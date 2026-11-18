@@ -3,7 +3,7 @@ r"""The ``doa`` stage: each detection's chip, its snapshot across channels, and 
 Every frame is mapped per receive channel (:func:`~radar_forge.pipeline.frame_products`) and
 detected on the boresight beam, as ``rd`` does. Each detection's 3-D map is cropped into a chip
 (:func:`~radar_forge.datachip.crop_range_doppler`): its beam's peak cell across channels is the
-snapshot, its cells the training set (scenario 006 D14). Range and rate are refined on a
+snapshot, its cells the training set. Range and rate are refined on a
 slow-time chip of the beam (:func:`~radar_forge.datachip.estimate_fine`), in parent coordinates.
 Each ``[doa]`` method runs on the target's detection and every other; the target's estimates are
 scored against the truth, each error over the Cramér-Rao bound at the truth for that snapshot. On
@@ -91,7 +91,7 @@ _KEYS = (
     "parent_coordinates_tolerance",
     *(f"{label}_rmse_crb_max" for label in DOA_LABELS),
 )
-# Methods that train on the chip's cells; the rest take its peak cell (D14).
+# Methods that train on the chip's cells; the rest take its peak cell.
 _TRAINED = ("capon", "music", "root_music", "esprit")
 # A detection is the target's when its peak cell is within this many bins of the truth's.
 _TARGET_BINS = 1.5

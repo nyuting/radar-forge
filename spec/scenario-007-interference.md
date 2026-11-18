@@ -415,7 +415,7 @@ and must reuse `AdaptiveWeights`.
 
 | Step | Module | Notes |
 | :--- | :--- | :--- |
-| 1 | `propagation.py` *(edit)* | Additive. `received_power_w`, which covers both sitings, untouched |
+| 1 | `propagation.py` *(edit)* | Additive. `received_power_w`, which covers both configurations, untouched |
 | 2 | `interference.py` *(new)* | Consumes `PropagationPaths` and `thermal_noise`'s conventions; adds no field to either |
 | 3–6 | `array/adaptive.py` *(new)* | One function per step of §3.5, each returning its intermediate quantities. Baselines are built and tested before the current methods that are derived from them |
 | 7 | `scenario.py`, `pipeline.py` *(edit)* | TOML order: `[scenario] [[target]] [frames] [[noise_interferer]] [site.tx] [[burst]] [receive_array] [receiver] [adaptive]`: the truth, the emitters, the transmit end, the receive end, then processing. `[receive_array]` is 006's table unchanged; a `[[target]]` with `position_enu_m` and `velocity_enu_mps` instead of `trajectory_path` is the fixed geometry, which the loader already reads |

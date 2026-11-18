@@ -242,7 +242,7 @@ def test_estimate_doa_refuses_what_a_method_cannot_take():
 def test_music_spectrum_matches_pyroomacoustics_on_an_incoherent_pair():
     """A15: pyroomacoustics' MUSIC, its azimuth phi counter-clockwise from its x axis.
 
-    The array lies on pyroomacoustics' x axis, so a source at D13's direction cosine u is at
+    The array lies on pyroomacoustics' x axis, so a source at direction cosine u is at
     phi = arccos(u) in its frame. The two spectra peak within one grid step of each other.
     """
     pra = pytest.importorskip("pyroomacoustics")

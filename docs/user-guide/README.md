@@ -11,14 +11,18 @@ stage uses what the one before it produced.
 
 ```mermaid
 flowchart LR
-    A["Where things are<br/>radar (geodesy)"] --> B["How energy travels<br/>propagation"]
-    B --> C["What the receiver samples<br/>signal"]
-    C --> D["Range-Doppler map<br/>dsp"]
-    D --> E["Detections<br/>detection"]
-    E --> F["Tracks<br/>tracking"]
-    R["What the radar is<br/>radar, propagation"] -.-> B
+    A["Where things are<br/>module: radar"] --> B["How energy travels<br/>module: propagation"]
+    B --> C["What the receiver samples<br/>module: signal"]
+    C --> D["Range-Doppler map<br/>module: dsp"]
+    D --> E["Detections<br/>module: detection"]
+    E --> F["Tracks<br/>package: tracking"]
+    R["What the radar is<br/>module: radar"] -.-> B
     R -.-> C
 ```
+
+The top line of each box is the question that stage answers; the bottom line is the module that
+answers it. `radar` appears twice because it holds both the radar's description (the dashed box,
+which every stage reads) and the geometry that places targets around it.
 
 | Page | Modules | Read it to learn |
 | :-- | :-- | :-- |

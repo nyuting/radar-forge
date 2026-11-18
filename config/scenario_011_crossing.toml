@@ -57,7 +57,7 @@ trackers = ["gnn", "jpda_star", "set", "jipda", "mht", "pmbm"]
 
 [verify]
 stages = ["multitarget"]
-# Spec 011b D29: an MHT tree holds at most k_best = 10 leaves, one per hypothesis.
+# An MHT tree holds at most k_best = 10 leaves, one per hypothesis.
 leaf_count_max = 10
 # Mean GOSPA over the 62 rotations; pins the run (323 m measured): until 41 every aircraft is
 # alone, then the crossings and the clutter discs.

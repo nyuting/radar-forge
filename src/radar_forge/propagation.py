@@ -1,7 +1,7 @@
 r"""Propagation paths: how energy gets from the transmitter, via the scene, to the receiver.
 
 Every propagation model produces a :class:`PropagationPaths` for
-:mod:`radar_forge.signal` to sample (``spec/data-001-formats.md`` D1). A path is the
+:mod:`radar_forge.signal` to sample (``spec/data-001-formats.md`` §8). A path is the
 whole route, transmitter to receiver; its delay :math:`R_b/c`, phase
 :math:`-2\pi R_b/\lambda` and Doppler :math:`-\dot R_b/\lambda` follow from its
 length :math:`R_b = R_T + R_R` and rate, positive receding. Free space only.

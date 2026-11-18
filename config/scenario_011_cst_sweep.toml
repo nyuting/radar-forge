@@ -62,7 +62,7 @@ trackers = ["gnn", "jpda_star", "set", "jipda", "mht", "pmbm"]
 
 [verify]
 stages = ["multitarget"]
-# Spec 011b D29: a tree holds at most k_best = 10 leaves, one per hypothesis of its cluster.
+# An MHT tree holds at most k_best = 10 leaves, one per hypothesis of its cluster.
 leaf_count_max = 10
 # PMBM reports both aircraft and nothing else: mean |tracks - aircraft| a rotation.
 pmbm_cardinality_error_max = 0.1

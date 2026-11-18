@@ -196,7 +196,7 @@ def test_the_likelihood_ratio_is_the_negative_log_likelihood_plus_the_log_densit
         association_cost(innovation, "negative_log_likelihood_ratio")
 
 
-# --- probabilistic association (spec 011 D28; criteria A3, A18) ---
+# --- probabilistic association ---
 
 P_D, P_G = 0.9, 0.99
 

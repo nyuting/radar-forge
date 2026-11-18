@@ -425,7 +425,7 @@ def test_a_marginal_needs_known_unique_components(names: tuple[str, ...]) -> Non
         marginal(LinearMeasurement(LAYOUT_3D, ("x_m",)), names)
 
 
-# --- CoordinatedTurn (spec 011 D26, criterion A1) ---
+# --- CoordinatedTurn ---
 
 
 def test_a_coordinated_turn_at_zero_rate_is_constant_velocity_exactly() -> None:
