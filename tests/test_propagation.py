@@ -252,7 +252,7 @@ class TestBistaticRangeAt:
         )
 
     def test_zero_jerk_leaves_the_quadratic_history_bit_for_bit(self) -> None:
-        """A15's root: the cubic term is added last, so a zero jerk adds exactly nothing."""
+        """The cubic term is added last, so a zero jerk adds exactly nothing."""
         base = line_of_sight_paths(S1_RADAR, TargetGeometry.monostatic(10.0e3, -40.0), 10.0)
         paths = dataclasses.replace(base, doppler_rate_hzps=np.array([300.0]))
         slow_time_s = np.linspace(0.0, 3.0, 7)[:, None]

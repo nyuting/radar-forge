@@ -1,6 +1,6 @@
 """The stepper's command line: three frames of a shipped scenario, its files, its exit status.
 
-Scenario 003 criterion 8 is that the pictures exist: this run draws them. S2's maps are the
+This run checks that the pictures exist: it draws them. S2's maps are the
 smallest shipped, 256 x 100 cells, so it is the cheapest scenario to draw three frames of.
 """
 
@@ -57,7 +57,7 @@ def test_three_frames_write_every_stage_file_and_exit_zero(tmp_path, capsys):
 
 
 def test_the_figures_are_drawn_with_the_visualisation_extra(tmp_path):
-    """Scenario 003 criterion 8: an rd map per frame and the range-time history exist."""
+    """An rd map per frame and the range-time history exist."""
     pytest.importorskip("matplotlib")
     status = run_scenario.main([str(SCENARIO), "--frames", "2", "--out", str(tmp_path)])
     assert status == 0

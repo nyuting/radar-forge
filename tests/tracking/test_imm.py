@@ -1,7 +1,7 @@
 """Tests for radar_forge.tracking.imm: the interacting multiple model over a bank.
 
-Ground truth is algebraic: one mode mixes to itself, so a one-mode IMM is its filter
-(spec 011 A2); the switching matrix is a matrix exponential of the generator, so it chains
+Ground truth is algebraic: one mode mixes to itself, so a one-mode IMM is its filter;
+the switching matrix is a matrix exponential of the generator, so it chains
 over steps and its rows are probabilities; with the identity for switching, mixing returns
 each mode's own estimate; a CV mode carries its absent turn rate at the stand-in prior.
 """
@@ -43,14 +43,14 @@ from radar_forge.tracking.models import (
 from radar_forge.tracking.scene import Arc, polar
 
 SEED = 20261106
-# A5's latency, as measured: 90 % of trials reach the turn mode within five scans of the onset
-# (97 % did; 87.5 % within four, 37 % within the spec's three).
+# The latency, as measured: 90 % of trials reach the turn mode within five scans of the onset
+# (97 % did; 87.5 % within four, 37 % within three).
 LATENCY_SCANS = 5
 TURN_SIGMA_RADPS = np.radians(3.0)
 
 
 def _three_modes() -> InteractingMultipleModel:
-    """Spec 011's IMM: CV quiet, coordinated turn and CV agile."""
+    """The terminal-area IMM: CV quiet, coordinated turn and CV agile."""
     return InteractingMultipleModel(
         (
             CartesianMotion("xy", sigma_acceleration_mps2=0.5),
@@ -62,8 +62,8 @@ def _three_modes() -> InteractingMultipleModel:
     )
 
 
-def test_the_switching_matrix_at_four_point_eight_seconds_is_the_specs() -> None:
-    """Spec 011 §3.4 tabulates expm(Lambda T) at T = 4.8 s to four places."""
+def test_the_switching_matrix_at_four_point_eight_seconds_is_the_tabulated_one() -> None:
+    """expm(Lambda T) at T = 4.8 s, tabulated to four places."""
     expected = [[0.9627, 0.0192, 0.0181], [0.0767, 0.8569, 0.0664], [0.1089, 0.0995, 0.7916]]
     # atol 5e-5: the table is rounded to four places.
     np.testing.assert_allclose(_three_modes().switching_matrix(4.8), expected, atol=5e-5)
@@ -134,7 +134,7 @@ CASES: dict[str, tuple[MotionModel, Linearisation]] = {
 
 @pytest.mark.parametrize("case", list(CASES))
 def test_a_one_mode_imm_is_its_filter_over_fifty_scans(case: str) -> None:
-    """Spec 011 A2: state, covariance and likelihood equal the bare filter's, 50 scans."""
+    """State, covariance and likelihood equal the bare filter's, 50 scans."""
     motion, linearisation = CASES[case]
     imm = InteractingMultipleModel((motion,), (120.0,))
     layout = motion.state_layout
@@ -192,7 +192,7 @@ def test_a_hard_update_moves_mode_probability_by_the_mode_likelihoods() -> None:
     np.testing.assert_allclose(updated.mode_probability[0], expected / expected.sum(), rtol=1e-12)
 
 
-# --- spec 011 V1 Monte Carlo: A5 (IMM consistent and switching), A11 (IMM's benefit) ---
+# --- V1 Monte Carlo: the IMM is consistent, switches, and benefits ---
 
 N_TRIALS = 200
 TURNS_S = ((166.6667, 30.0), (224.4444, 30.0))
@@ -300,9 +300,9 @@ def _turn_rmse_m(record: dict[str, NDArray[np.float64]]) -> float:
 # Slow: 200 trials through A4's turns, three motion models at three revisits (about 20 s).
 @pytest.mark.slow
 def test_the_imm_beats_both_constant_velocity_models_through_the_turns() -> None:
-    """A11, as measured: at 1.2, 2.4 and 4.8 s the IMM's RMSE through A4's turns beats both CVs.
+    """As measured: at 1.2, 2.4 and 4.8 s the IMM's RMSE through A4's turns beats both CVs.
 
-    Spec 011 also expected IMM / best CV to fall as the revisit grows; it rises instead, 0.83,
+    The design also expected IMM / best CV to fall as the revisit grows; it rises instead, 0.83,
     0.86, 0.92, because the agile CV keeps up better at a long revisit (PR report).
     """
     ratio = {}
@@ -319,7 +319,7 @@ def test_the_imm_beats_both_constant_velocity_models_through_the_turns() -> None
 # Slow: 200 trials of the IMM through A4's turns at 4.8 s.
 @pytest.mark.slow
 def test_the_imm_is_consistent_and_switches_to_its_turn_mode() -> None:
-    """A5: time-averaged NEES in its 95 % interval; turn mode over 0.5 within five scans.
+    """Time-averaged NEES in its 95 % interval; turn mode over 0.5 within five scans.
 
     The position NEES over every trial and scan from 100 to 300 s, mean of N chi-square(2)
     draws, lies in chi-square(2N) / N's 95 % interval; the turn mode passes 0.5 within

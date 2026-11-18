@@ -1,6 +1,6 @@
 """Tests for radar_forge.tracking.rfs: the PMBM tracker against the paper's update, by hand.
 
-Ground truth is analytic: the single-Bernoulli case is the Kalman filter (spec 011b A10); a
+Ground truth is analytic: the single-Bernoulli case is the Kalman filter; a
 first detection's existence, a missed Bernoulli's and two tracks' global weights are the
 update of García-Fernández et al. (2018), (21)-(24), (30), (31) and (35), written out here
 from the textbook Gaussian; the birth limit is the one every tracker shares.
@@ -52,7 +52,7 @@ def _gaussian(x: float, variance: float) -> float:
 
 
 def test_one_target_seen_every_scan_with_no_clutter_or_birth_is_the_kalman_filter() -> None:
-    """A10: one Bernoulli, Pd = 1, clutter 1e-300 and no birth after scan 0 is the KF.
+    """One Bernoulli, Pd = 1, clutter 1e-300 and no birth after scan 0 is the KF.
 
     The KF is written out here: F = [[1, T], [0, 1]], Q = q [[T³/3, T²/2], [T²/2, T]], H =
     [1, 0]. rtol 1e-9: the same arithmetic, the filter's in the Joseph form.

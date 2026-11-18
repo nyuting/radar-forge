@@ -125,7 +125,7 @@ snr_tolerance_db = 0.01
 noise_tolerance_db = 0.05
 # A noiseless echo has |a|^2 = P_r in every sample it fills.
 peak_tolerance_db = 0.01
-# Scenario 001 A1 and A2: a detection within one bin of the truth, its rate wrapped, every frame.
+# A detection within one bin of the truth, its rate wrapped, every frame.
 truth_within_bins = 1.0
 detection_fraction = 1.0
 # Noise-only maps hold 30 expected false alarms; the Poisson 99.9 % interval,
@@ -133,8 +133,8 @@ detection_fraction = 1.0
 pfa_tolerance_factor = 2.0
 # The rate a plot is read with, against the wrapped truth: within one bin, 30.591 / 256 m/s.
 rate_tolerance_mps = 0.119496
-# Scenario 003 criterion 2: range RMSE under one bin, 149.896 m. Criterion 3, a rate
-# RMSE under 2 m/s radial, is not achievable on S1 (section 14.7): this pins the
+# Range RMSE under one bin, 149.896 m. A rate
+# RMSE under 2 m/s radial is not achievable on S1: this pins the
 # 8.78 m/s measured over the window (4.39 m/s radial; 4.40 before the review fixes)
 # with 15 % margin. Range RMSE measured 23.8 m.
 range_rmse_max_m = 149.896
@@ -146,5 +146,5 @@ range_rate_rmse_max_mps = 10.0
 # range (review item 2) unfolds a scan earlier, adds 0.2 m to that bias and moves 19
 # frames across the bound (0.53 before). This pins the behaviour; it does not hide it.
 nees_fraction_min = 0.35
-# Criterion 1: 4-of-5 confirms on the fourth hit, three scans after birth.
+# 4-of-5 confirms on the fourth hit, three scans after birth.
 confirmation_latency_max_scans = 3

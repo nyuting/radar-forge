@@ -4,7 +4,7 @@ Five rules from ``CLAUDE.md`` and ``docs/conventions/style.md`` that hold for th
 library and no module can test of itself:
 
 * ``import radar_forge`` needs no extra: matplotlib, the ``visualisation`` extra, is imported
-  only inside the functions that draw (scenario 001's acceptance A8, kept here);
+  only inside the functions that draw;
 * every module declares ``__all__``, exports no private or repeated name, and every type a
   public callable returns is on its surface; array arguments are ``ArrayLike`` in, float64 out;
 * every docstring example runs and prints what it claims, and every export is documented;
@@ -255,4 +255,43 @@ def test_no_markdown_equation_uses_a_macro_github_refuses() -> None:
         text = _BLOCK_RE.sub("", (REPO / name).read_text(encoding="utf-8"))
         text = re.sub(r"`[^`\n]*`", "", text)
         found += [f"{name}: \\{match.group(1)}" for match in _REFUSED_MACRO_RE.finditer(text)]
+    assert found == []
+
+
+# What a deleted spec left in comments: a decision number, an acceptance-criterion number, a
+# numbered criterion, or a pointer into a spec that no longer exists. The 011 configs name their
+# aircraft A1 to A5, so those five count as criteria only after an opening bracket, "spec",
+# "criterion" or "acceptance", or before a colon. Ruff's codes have three digits and never match.
+_DEAD_SPEC_PATTERNS = {
+    "decision tag": re.compile(r"\bD\d{1,2}\b"),
+    "criterion tag": re.compile(
+        r"\bA(?:[6-9]|[12]\d)\b"
+        r"|(?:\(|\bspec\s+|\bcriteri(?:on|a)\s+|\bacceptance\s+)A[1-5]\b"
+        r"|\bA[1-5](?:\([a-z]\))?(?:,? (?:and )?A\d+)*:"
+        r"|\bcriteri(?:on|a) \d"
+    ),
+    "pointer into a deleted spec": re.compile(
+        r"\bspec(?:ification)?[ -]0(?:0[1-6]|1[1-9])[a-z]?\b", re.IGNORECASE
+    ),
+}
+
+
+def test_no_file_outside_spec_holds_a_decision_or_criterion_tag() -> None:
+    """A tag names a line of a spec that is deleted when its scenario lands: state the reason."""
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", ".", ":!spec", ":!uv.lock", ":!*.csv"],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=REPO,
+    ).stdout.split()
+    assert tracked, "git listed no file: the test would pass without reading anything"
+    found = []
+    for name in tracked:
+        for number, line in enumerate((REPO / name).read_text(encoding="utf-8").splitlines(), 1):
+            found += [
+                f"{name}:{number}: {kind}: {line.strip()[:90]}"
+                for kind, pattern in _DEAD_SPEC_PATTERNS.items()
+                if pattern.search(line)
+            ]
     assert found == []

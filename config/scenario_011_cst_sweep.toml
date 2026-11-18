@@ -66,9 +66,9 @@ stages = ["multitarget"]
 leaf_count_max = 10
 # PMBM reports both aircraft and nothing else: mean |tracks - aircraft| a rotation.
 pmbm_cardinality_error_max = 0.1
-# A16 (MHT clause) at this seed: MHT resolves the pair whenever JPDA does.
+# At this seed: MHT resolves the pair whenever JPDA does.
 mht_resolved_lead_min = 0.0
-# A17 at this seed: PMBM resolves the pair as often as any other tracker, less 0.05.
+# At this seed: PMBM resolves the pair as often as any other tracker, less 0.05.
 pmbm_resolved_lead_min = -0.05
 
 [[target]]

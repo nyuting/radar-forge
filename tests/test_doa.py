@@ -2,11 +2,12 @@
 
 Fast tests are analytic: noiseless one- and two-source snapshots, the Cramér-Rao bound's closed
 form, the rank a coherent pair leaves and forward-backward averaging restores, the conventional
-beam's and monopulse's response to an unresolved pair (spec 006 A3, A6, A7, A9, A17-A19). The
-slow tests are the spec's Monte Carlo on the snapshot model of section 3.5,
-``x_k = g_k A(u) s + n_k`` over a 5 x 5 chip, which A13 proves equal to the chain: A4/A5 at 400
-trials, A8/A10/A11 at 200 at F2's geometry, A14 at 200 at F3's point. Each draws its own seeded
-trials once; the bounds are the spec's.
+beam's and monopulse's response to an unresolved pair. The
+slow tests are a Monte Carlo on the snapshot model,
+``x_k = g_k A(u) s + n_k`` over a 5 x 5 chip, which the noiseless chip test proves equal to the
+chain: bias and RMSE at 400 trials, the resolved fractions and RMSE bounds at 200 at F2's
+geometry, the separation-sweep point at 200 at F3's. Each draws its own seeded trials once; the
+bounds are set from the prototype.
 """
 
 from __future__ import annotations
@@ -41,7 +42,7 @@ from radar_forge.doa import (
 WAVELENGTH_M = 0.030591067142857142
 ULA = uniform_linear_array(16, 0.5, WAVELENGTH_M)
 RAYLEIGH = 0.125
-# The prototype's F2 SNR, where A8-A11's bounds were set, and F2's far end re-derived (3.3).
+# The prototype's F2 SNR, where the bounds were set, and F2's far end re-derived.
 PROTOTYPE_SNR_DB, FAR_END_SNR_DB = 38.23, 41.24
 
 
@@ -63,7 +64,7 @@ def _local_maxima(spectrum: np.ndarray) -> np.ndarray:
 
 
 def test_root_music_and_esprit_find_one_noiseless_source_exactly():
-    """A3: one noiseless source at u = 0.2; a root-selection or rotation sign error moves it."""
+    """One noiseless source at u = 0.2; a root-selection or rotation sign error moves it."""
     r = np.outer(_a(0.2)[:, 0], _a(0.2)[:, 0].conj())
     # Exact algebra on a rank-one covariance: atol 1e-10 in u.
     np.testing.assert_allclose(root_music(r, 1, spacing_wavelengths=0.5), [0.2], atol=1e-10)
@@ -71,14 +72,14 @@ def test_root_music_and_esprit_find_one_noiseless_source_exactly():
 
 
 def test_one_source_bound_is_the_closed_form():
-    """A6: 6 sigma^2 / (pi^2 |s|^2 n (n^2 - 1)) at d = lambda/2; catches sigma^2 vs sigma^2/2."""
+    """6 sigma^2 / (pi^2 |s|^2 n (n^2 - 1)) at d = lambda/2; catches sigma^2 vs sigma^2/2."""
     bound = crb_deterministic(_a(0.13), _derivative(0.13), [np.sqrt(3.0) * 1j], 2.0)
     expected = 6.0 * 2.0 / (np.pi**2 * 3.0 * 16 * (16**2 - 1))
     np.testing.assert_allclose(bound[0, 0], expected, rtol=1e-10)
 
 
 def test_a_coherent_pairs_chip_covariance_is_rank_one():
-    """A7 on the model: every cell holds g_k (a1 s1 + a2 s2), so lambda_2 / lambda_1 < 1e-12."""
+    """On the model: every cell holds g_k (a1 s1 + a2 s2), so lambda_2 / lambda_1 < 1e-12."""
     y = _a([0.0, 0.0625]) @ np.array([1.0, np.exp(0.7j)])
     gains = np.exp(1j * np.arange(25)) * np.linspace(0.1, 1.0, 25)
     assert _lambda_ratio(sample_covariance(np.outer(gains, y))) < 1e-12
@@ -88,7 +89,7 @@ def test_a_coherent_pairs_chip_covariance_is_rank_one():
     ("phase_rad", "rank"), [(0.0, 1), (np.pi, 1), (np.pi / 2, 2)], ids=["0", "pi", "pi/2"]
 )
 def test_forward_backward_restores_the_rank_except_in_and_anti_phase(phase_rad, rank):
-    """A9: J x* = a1 + exp(-j phi) a2 is parallel to x only at phi = 0 or pi."""
+    """J x* = a1 + exp(-j phi) a2 is parallel to x only at phi = 0 or pi."""
     x = _a([-0.03125, 0.03125]) @ np.array([1.0, np.exp(1j * phase_rad)])
     ratio = _lambda_ratio(forward_backward_average(np.outer(x, x.conj()), ULA))
     # Rank one is exact up to float64 eigenvalues; rank two leaves lambda_2 near lambda_1/4 here.
@@ -97,7 +98,7 @@ def test_forward_backward_restores_the_rank_except_in_and_anti_phase(phase_rad, 
 
 @pytest.mark.parametrize("separation_rayleigh", [0.5, 0.25])
 def test_an_in_phase_pairs_beam_has_one_peak_at_the_midpoint(separation_rayleigh):
-    """A17: |a^H (a1 + a2)|^2 is symmetric about the midpoint, its one mainlobe peak there."""
+    """|a^H (a1 + a2)|^2 is symmetric about the midpoint, its one mainlobe peak there."""
     midpoint, half = 0.07, separation_rayleigh * RAYLEIGH / 2.0
     x = _a([midpoint - half, midpoint + half]).sum(axis=1)
     grid = np.arange(-4000, 4000) * 2.5e-4
@@ -110,7 +111,7 @@ def test_an_in_phase_pairs_beam_has_one_peak_at_the_midpoint(separation_rayleigh
 
 @pytest.mark.parametrize("separation_rayleigh", [0.5, 0.25])
 def test_a_weaker_incoherent_seconds_beam_peaks_near_the_power_centroid(separation_rayleigh):
-    """A18: a -6 dB second source, phase-averaged: one peak, within 0.1 du of the centroid."""
+    """A -6 dB second source, phase-averaged: one peak, within 0.1 du of the centroid."""
     separation = separation_rayleigh * RAYLEIGH
     a = _a([0.0, separation])
     r = np.outer(a[:, 0], a[:, 0].conj()) + 0.25 * np.outer(a[:, 1], a[:, 1].conj())
@@ -123,7 +124,7 @@ def test_a_weaker_incoherent_seconds_beam_peaks_near_the_power_centroid(separati
 
 
 def test_monopulse_wanders_per_look_and_points_at_the_centroid_on_average():
-    """A19: per look the indication leaves the pair; averaged over phase, within 0.1 du of it."""
+    """Per look the indication leaves the pair; averaged over phase, within 0.1 du of it."""
     pair = np.array([-0.0112, 0.0513])
     phases = np.arange(360) * np.pi / 180.0
     looks = (_a(pair) @ np.stack([np.ones(360), np.exp(1j * phases)])).T
@@ -240,7 +241,7 @@ def test_estimate_doa_refuses_what_a_method_cannot_take():
 
 
 def test_music_spectrum_matches_pyroomacoustics_on_an_incoherent_pair():
-    """A15: pyroomacoustics' MUSIC, its azimuth phi counter-clockwise from its x axis.
+    """pyroomacoustics' MUSIC, its azimuth phi counter-clockwise from its x axis.
 
     The array lies on pyroomacoustics' x axis, so a source at direction cosine u is at
     phi = arccos(u) in its frame. The two spectra peak within one grid step of each other.
@@ -278,7 +279,7 @@ def test_music_spectrum_matches_pyroomacoustics_on_an_incoherent_pair():
     np.testing.assert_allclose(ours, truths, atol=1e-2)
 
 
-# The snapshot model of spec 006 section 3.5: a pair at fractional range and Doppler offsets.
+# The snapshot model: a pair at fractional range and Doppler offsets.
 def _dirichlet(x: np.ndarray, n: int) -> np.ndarray:
     """Return a rectangular window's cell response at offset x bins, unit at zero."""
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -344,7 +345,7 @@ def _score(labels, snr_db, separation_rayleigh, n_trials, seed):
 
 @pytest.mark.slow
 def test_one_source_subspace_estimates_are_unbiased_and_near_the_bound():
-    """A4, A5: 400 trials at 20 dB, one snapshot; |bias| <= 0.25 sqrt(CRB), RMSE as the spec."""
+    """400 trials at 20 dB, one snapshot; |bias| <= 0.25 sqrt(CRB), RMSE within its bound."""
     rng = np.random.default_rng(4)
     snr = 100.0
     sigma = math.sqrt(6.0 / (np.pi**2 * snr * 16 * (16**2 - 1)))
@@ -368,22 +369,22 @@ def test_one_source_subspace_estimates_are_unbiased_and_near_the_bound():
 @pytest.mark.slow
 @pytest.mark.parametrize("snr_db", [PROTOTYPE_SNR_DB, FAR_END_SNR_DB], ids=["38.23dB", "41.24dB"])
 def test_at_f2_the_baseline_fails_and_the_current_methods_resolve_near_the_bound(snr_db):
-    """A8, A10, A11: 200 trials, half a Rayleigh width, at the prototype's and far end's SNR."""
+    """200 trials, half a Rayleigh width, at the prototype's and far end's SNR."""
     labels = ["music", "esprit", "fbss_music", "fbss_esprit", "iaa", "deterministic_ml"]
     fraction, rmse = _score(labels, snr_db, 0.5, 200, seed=8)
-    # A8: Clopper-Pearson 99.9 % upper limit at the prototype's 17 / 200 is 0.163.
+    # Clopper-Pearson 99.9 % upper limit at the prototype's 17 / 200 is 0.163.
     assert fraction["music"] <= 0.25 and fraction["esprit"] <= 0.25, fraction
-    # A10: the prototype's 1.000 for all four.
+    # The prototype's 1.000 for all four.
     assert all(fraction[m] >= 0.95 for m in labels[2:]), fraction
-    # A11: ML <= 1.3 fails a bound off by sqrt(2); the others as the spec gives.
+    # ML <= 1.3 fails a bound off by sqrt(2); the others as set from the prototype.
     assert rmse["deterministic_ml"] <= 1.3, rmse
     assert rmse["fbss_music"] <= 1.5 and rmse["fbss_esprit"] <= 1.5, rmse
     assert rmse["iaa"] <= 4.0, rmse
 
 
 @pytest.mark.slow
-def test_at_f3s_point_ml_fbss_esprit_and_iaa_resolve_as_the_spec_bounds():
-    """A14: half a Rayleigh width at 20 dB, 200 trials; 99.9 % Clopper-Pearson-backed bounds."""
+def test_at_f3s_point_ml_fbss_esprit_and_iaa_resolve_within_their_bounds():
+    """Half a Rayleigh width at 20 dB, 200 trials; 99.9 % Clopper-Pearson-backed bounds."""
     fraction, _ = _score(["fbss_esprit", "iaa", "deterministic_ml"], 20.0, 0.5, 200, seed=14)
     assert fraction["deterministic_ml"] >= 0.90, fraction
     assert fraction["fbss_esprit"] >= 0.85, fraction

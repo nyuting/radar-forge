@@ -48,7 +48,7 @@ n_gate_samples = 1024
 gain_rx_dbi = 25.0
 noise_figure_db = 3.0
 
-# Spec A3/A4's CA-CFAR along range at Pfa 1e-6: about one false alarm in the 1024 x 1024 map.
+# CA-CFAR along range at Pfa 1e-6 on both maps: about one false alarm in the 1024 x 1024 map.
 [detection]
 pfa = 1.0e-6
 n_train = 16
@@ -78,15 +78,15 @@ peak_tolerance_db = 0.01
 truth_within_bins = 1.0
 detection_fraction = 1.0
 rate_tolerance_mps = 1.49370
-# A1: 680 m/s x 20.48 ms / 0.49965 m = 27.872 bins, +-1 bin.
+# 680 m/s x 20.48 ms / 0.49965 m = 27.872 bins, +-1 bin.
 walk_bins = 27.872
 walk_tolerance_bins = 1.0
-# A2: the keystoned peak track over pulses 1 ... N-2 stays within half a bin.
+# The keystoned peak track over pulses 1 ... N-2 stays within half a bin.
 residual_walk_max_bins = 0.5
-# A3: uncorrected, the model gives -25.78 dB (-26.56 for a flat band); +-1.0 dB.
+# Uncorrected, the model gives -25.78 dB (-26.56 for a flat band); +-1.0 dB.
 uncompensated_loss_db = -25.78
 loss_tolerance_db = 1.0
-# A4: the keystone recovers all but 0.3 dB of ideal integration.
+# The keystone recovers all but 0.3 dB of ideal integration.
 compensated_loss_min_db = -0.3
-# A19 for K1: the fine rate (A&M on the chip) within three of its Cramer-Rao bounds.
+# K1: the fine rate (A&M on the chip) within three of its Cramer-Rao bounds.
 rate_error_max_crb = 3.0

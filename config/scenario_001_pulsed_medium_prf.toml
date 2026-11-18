@@ -68,11 +68,11 @@ snr_tolerance_db = 0.01
 noise_tolerance_db = 0.15
 # A noiseless echo has |a|^2 = P_r in every sample it fills.
 peak_tolerance_db = 0.01
-# Scenario 001 A3 and A4: a detection within one bin of the truth, its range wrapped, every frame.
+# A detection within one bin of the truth, its range wrapped, every frame.
 truth_within_bins = 1.0
 detection_fraction = 1.0
 # Noise-only maps hold 30 expected false alarms; the Poisson 99.9 % interval,
 # about 14 to 50, lies within a factor of two.
 pfa_tolerance_factor = 2.0
-# Scenario 001 A4: the rate within one bin, 764.78 / 256 m/s, of the truth.
+# The rate within one bin, 764.78 / 256 m/s, of the truth.
 rate_tolerance_mps = 2.98741

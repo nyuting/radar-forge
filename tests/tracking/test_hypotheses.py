@@ -1,9 +1,9 @@
 """Tests for radar_forge.tracking.hypotheses: track-oriented MHT inside the one Tracker loop.
 
 Ground truth is hand-countable: the Wald thresholds, a track score added up by hand from the
-textbook likelihood, a lifecycle scan by scan, the k = 1 case against GNN (spec 011b A4), and
+textbook likelihood, a lifecycle scan by scan, the k = 1 case against GNN, and
 the structural bounds the tree promises (leaves per tree, N-scan agreement). The causal output
-(A19) is checked through the multitarget stage on V4.
+is checked through the multitarget stage on V4.
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ def _scan(time_s: float, positions_m: list[float]) -> Scan:
 
 
 def test_the_thresholds_are_walds_at_alpha_1e_4_and_beta_0_1() -> None:
-    """ln((1 - beta)/alpha) and -ln(beta/(1 - alpha)), to the spec's four decimals."""
+    """ln((1 - beta)/alpha) and -ln(beta/(1 - alpha)), to four decimals."""
     assert pytest.approx(9.1050, abs=5e-5) == CONFIRM_SCORE
     assert pytest.approx(2.3025, abs=5e-5) == DELETE_DROP
 
@@ -113,7 +113,7 @@ def test_a_branch_confirms_at_the_threshold_and_dies_falling_the_drop_below_its_
 
 
 def test_k_best_one_n_scan_one_is_gnn_with_the_finite_non_assignment_cost() -> None:
-    """A4: MHT with n_scan 1, k_best 1 makes GNN's assignments and states on V2's 30° crossings.
+    """MHT with n_scan 1, k_best 1 makes GNN's assignments and states on V2's 30° crossings.
 
     Both pairs (X3 across range, X4 along it) are seeded at the truth 40 s before they cross
     and run through their crossing in n_gate = 1 clutter, one clutter intensity per scan so
@@ -227,7 +227,7 @@ def test_duplicate_hypotheses_merge_and_each_cluster_keeps_its_k_best() -> None:
 
 
 def test_tracks_csv_reports_each_scan_as_mht_saw_it_then(tmp_path: Path) -> None:
-    """A19: V4's tracks.csv row at scan k is MHT's reported state at scan k, recorded live.
+    """V4's tracks.csv row at scan k is MHT's reported state at scan k, recorded live.
 
     Two rotations of V4 under MHT, played once by hand and once through the stage; MHT may
     later prefer another hypothesis, but a row once written is never rewritten.
@@ -288,14 +288,14 @@ def _crossing(seed: int) -> Scenario:
 def test_a_pair_closing_across_the_beam_swaps_under_gnn_and_as_often_under_mht(
     tmp_path: Path,
 ) -> None:
-    """A15, as measured: on V2's 10 deg across-range crossing GNN swaps; MHT is no better.
+    """As measured: on V2's 10 deg across-range crossing GNN swaps; MHT is no better.
 
     A swap is the stage's: either aircraft's GOSPA track changed from the scan before the
     closest approach to five after. The pair spends 16 scans inside one resolution cell, where
     it gives one plot; 3 scans of deferral (n_scan) cannot bridge that, and both trackers'
     tracks take the merged plot and the clutter, so most swaps are tracks lost, not
     exchanged. The prototype, 200 trials: GNN 0.780, MHT 0.845, JPDA 0.850 (lost 136, 143,
-    145; exchanged 20, 26, 24). Spec 011b's GNN >= 0.2 holds; its MHT <= 0.05 does not, so
+    145; exchanged 20, 26, 24). The expected GNN >= 0.2 holds; the expected MHT <= 0.05 does not, so
     the bounds are the prototype's 99 % Clopper-Pearson limits: GNN >= 0.69, MHT <= 0.91.
     """
     swaps: dict[str, list[float]] = {

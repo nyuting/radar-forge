@@ -439,9 +439,9 @@ def test_a_coordinated_turn_at_zero_rate_is_constant_velocity_exactly() -> None:
 
 
 def test_a_coordinated_turn_near_zero_rate_differs_from_cv_by_its_first_order_term() -> None:
-    """At omega = 1e-9 F - F_CV is omega T²/2 across axes and omega T on velocity (A1, restated).
+    """At omega = 1e-9 F - F_CV is omega T²/2 across axes and omega T on velocity.
 
-    A1 asked for equality at rtol 1e-10, which no entry that is zero in CV can meet: the turn's
+    Equality at rtol 1e-10 is out of reach for any entry that is zero in CV: the turn's
     first-order term is a real 1.2e-8 there. rtol 1e-10 holds against the series instead.
     """
     rate, step = 1e-9, 4.8

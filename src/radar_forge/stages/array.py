@@ -96,7 +96,7 @@ _TRAINED = ("capon", "music", "root_music", "esprit")
 # A detection is the target's when its peak cell is within this many bins of the truth's.
 _TARGET_BINS = 1.5
 # Resolved fractions and RMSE over the bound are judged on this many frames or more; the bounds
-# were set on 200 trials (spec A8-A11, A14). Over n errors an efficient estimator's ratio is
+# were set on 200 trials. Over n errors an efficient estimator's ratio is
 # sqrt(chi2_n / n), past 1.3 with probability 0.12 at three frames and 2e-5 at fifty; a method
 # resolving with P = 0.8 misses a 0.65 bound with probability 0.10 at three, 0.006 at fifty.
 _MIN_SCORED_FRAMES = 50
@@ -342,7 +342,7 @@ def _parent_error(
     estimate: tuple[str, DoaEstimate],
     ctx: evaluate.Context,
 ) -> float:
-    """Return the largest relative gap between the chip's reading and the parent's own (A16).
+    """Return the largest relative gap between the chip's reading and the parent's own.
 
     The chip's peak cell in parent coordinates against the parent's beam peak over the same
     cells; the bin values, the cells themselves; and the first method's estimate on the
@@ -516,7 +516,7 @@ def _row(truth: TargetGeometry, k: int) -> TargetGeometry:
 def _noiseless(
     ctx: evaluate.Context, verify: dict[str, Any], array: ArrayGeometry, settings: DoaSettings
 ) -> None:
-    """On noiseless frame 0: the peak cell against the snapshot model (A13), the rank (A7).
+    """On noiseless frame 0: the peak cell against the snapshot model, the rank (one without noise).
 
     The model's :math:`g s_k` is aircraft k's own one-channel map at the peak cell, its
     steering vector the truth's: nothing of the multi-channel chain enters the prediction.

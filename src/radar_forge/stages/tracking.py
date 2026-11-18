@@ -44,10 +44,10 @@ from radar_forge.tracking.scene import to_enu
 
 __all__ = ["merged_counts", "multitarget", "pair_scores", "pair_windows", "play"]
 
-# GOSPA's settings (spec 011 §3.6): p = 2, cutoff c = 300 m, alpha = 2.
+# GOSPA's settings: p = 2, cutoff c = 300 m, alpha = 2.
 _CUTOFF_M = 300.0
 # A crossing is a pair of aircraft that come within c/2 of each other; a swap is judged from the
-# scan before it to this many after (spec 011 §3.6).
+# scan before it to this many after.
 _SWAP_SCANS = 5
 # A turn shorter than this many scans ends before an IMM can be asked to have seen it.
 _MIN_TURN_SCANS = 4
@@ -61,7 +61,7 @@ _MIN_FALSE_PLOTS, _MIN_ECHOES = 30.0, 100
 _PAIR_BINS = 8.0
 
 _CONFIRMED = (TrackStatus.CONFIRMED, TrackStatus.COASTING)
-# V3's pair is judged over its last 20 scans (spec 011b §2.1): held within c/2 in 90 % of them.
+# V3's pair is judged over its last 20 scans: held within c/2 in 90 % of them.
 _PAIR_SCANS, _HELD_FRACTION = 20, 0.9
 
 
@@ -386,7 +386,7 @@ def pair_scores(scenario: Scenario, run: Any) -> tuple[float, float]:
     Resolved: each aircraft held by one confirmed track, its own, within c/2 in at least 90 %
     of the last 20 rotations. The ratio is the mean distance between the two aircraft's
     tracks over their true separation, over the rotations both have one; 0 when never.
-    Spec 011b §2.1; NaN for a run under 20 rotations or a scene not of two aircraft.
+    NaN for a run under 20 rotations or a scene not of two aircraft.
     """
     aircraft = [k for k, t in enumerate(scenario.arcs) if t.target_class == "aircraft"]
     if len(aircraft) != 2 or len(run.assigned) < _PAIR_SCANS:

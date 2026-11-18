@@ -1,4 +1,4 @@
-"""Spec 011b V3, the separation sweep, through the multitarget stage's own code.
+"""V3, the separation sweep, through the multitarget stage's own code.
 
 Each trial is V3's scene (``config/scenario_011_cst_sweep.toml``) with the pair moved to one
 point, a separation d in resolution cells across or along range and a clutter level n_gate,
@@ -24,7 +24,7 @@ from radar_forge.stages.tracking import pair_scores, play
 from radar_forge.tracking.scene import Arc
 
 V3 = load_scenario(Path(__file__).resolve().parents[2] / "config" / "scenario_011_cst_sweep.toml")
-# The reference gate of spec 011 §3.2, m rad: n_gate expected false plots in it a scan.
+# The reference gate, m rad: n_gate expected false plots in it a scan.
 REFERENCE_GATE_M_RAD = 4.6123
 POINTS = [
     (d, n_gate, across)
@@ -109,7 +109,7 @@ def test_a_pair_four_cells_apart_in_light_clutter_is_resolved_by_every_tracker(
 def test_pmbm_resolves_a_pair_as_often_as_any_tracker_less_0_05(
     d: float, n_gate: float, across: bool
 ) -> None:
-    """A17: PMBM's P(resolved) is at least every other tracker's less 0.05, at every point.
+    """PMBM's P(resolved) is at least every other tracker's less 0.05, at every point.
 
     [14]: the others approximate PMBM's posterior; one beating it materially is a bug in one
     of them. A Monte Carlo statistic gets a confidence interval: a 100-trial paired difference
@@ -124,14 +124,14 @@ def test_pmbm_resolves_a_pair_as_often_as_any_tracker_less_0_05(
         assert _upper_lead(resolved["pmbm"], values) >= -0.05, name
 
 
-# Slow: the 100 trials of A17's point d = 1 across range at n_gate = 1, shared with it.
+# Slow: the 100 trials of the point d = 1 across range at n_gate = 1, shared with the PMBM test.
 @pytest.mark.slow
 def test_mht_resolves_the_pair_one_cell_apart_as_often_as_jpda() -> None:
-    """A16 (MHT clause): at d = 1 across range, n_gate = 1, P(resolved) for MHT >= JPDA's.
+    """MHT clause: at d = 1 across range, n_gate = 1, P(resolved) for MHT >= JPDA's.
 
     Measured while building it: every tracker 0.00 of 60 trials; 61 % of scans merge the
     pair into one plot 244 m from each aircraft, outside both 99 % gates, so the clause
-    holds without saying much. Rejected only at 99 % confidence, as A17 is.
+    holds without saying much. Rejected only at 99 % confidence, as PMBM's clause is.
     """
     resolved = _resolved(1.0, 1.0, True, 100)
     print({name: float(values.mean()) for name, values in resolved.items()})

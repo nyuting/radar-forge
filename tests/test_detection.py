@@ -223,7 +223,7 @@ def test_scenario_003_calibration_matches_its_specification():
         np.ones(shape), window["pfa"], n_train=window["n_train"], n_guard=window["n_guard"]
     )
     assert np.count_nonzero(np.isfinite(threshold_w)) == 256_000
-    # atol 1e-4 dB: the spec quotes three decimals.
+    # atol 1e-4 dB: the reference values have three decimals.
     np.testing.assert_allclose(
         10 * np.log10(threshold_w[0, [500, 0, 4, -1, 10, -11]]),
         [11.4165, 12.2676, 12.2676, 12.2676, 11.7977, 11.7977],

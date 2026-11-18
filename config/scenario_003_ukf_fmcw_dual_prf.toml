@@ -108,15 +108,15 @@ snr_tolerance_db = 0.01
 noise_tolerance_db = 0.08
 # A noiseless echo has |a|^2 = P_r in every sample it fills.
 peak_tolerance_db = 0.01
-# Scenario 001 A5: every frame detected within one bin on both maps.
+# Every frame detected within one bin on both maps.
 truth_within_bins = 1.0
 detection_fraction = 1.0
 # Noise-only maps hold 30 expected false alarms; the Poisson 99.9 % interval,
 # about 14 to 50, lies within a factor of two.
 pfa_tolerance_factor = 2.0
-# Scenario 001 A5: unfolded, within one burst-A bin of the truth.
+# Unfolded, within one burst-A bin of the truth.
 rate_tolerance_mps = 1.19496
-# Scenario 003 criteria 2 and 3: range RMSE under one bin, 149.896 m, and rate RMSE
+# Range RMSE under one bin, 149.896 m, and rate RMSE
 # under 4 m/s. Measured 5.1 m and 0.13 m/s.
 range_rmse_max_m = 149.896
 range_rate_rmse_max_mps = 4.0
@@ -124,5 +124,5 @@ range_rate_rmse_max_mps = 4.0
 # measured (102 of 118). The rest fall below it: a bin over sqrt(12) of noise
 # is pessimistic at these SNRs, as scenario 003 found of the NIS.
 nees_fraction_min = 0.8
-# 3-of-5 confirms on the third hit, two scans after birth (scenario 003 section 14.11).
+# 3-of-5 confirms on the third hit, two scans after birth.
 confirmation_latency_max_scans = 2

@@ -73,22 +73,22 @@ peak_tolerance_db = 0.01
 truth_within_bins = 1.0
 detection_fraction = 1.0
 rate_tolerance_mps = 1.49370
-# A1: the peak track's least-squares slope is the mid-dwell rate, 680 + 294.1995 x 0.01024 =
+# The peak track's least-squares slope is the mid-dwell rate, 680 + 294.1995 x 0.01024 =
 # 683.01 m/s: 683.01 x 20.48 ms / 0.49965 m = 27.995 bins, +-1 bin.
 walk_bins = 27.995
 walk_tolerance_bins = 1.0
 residual_walk_max_bins = 0.5
-# A3: uncorrected, the model gives -25.60 dB (-25.61 for a flat band); +-1.0 dB.
+# Uncorrected, the model gives -25.60 dB (-25.61 for a flat band); +-1.0 dB.
 uncompensated_loss_db = -25.60
 loss_tolerance_db = 1.0
-# A5: the keystone alone leaves the spread, -4.26 dB (model), +-0.5 dB; the true acceleration's
+# The keystone alone leaves the spread, -4.26 dB (model), +-0.5 dB; the true acceleration's
 # filter alone leaves the walk, -25.90 dB (model), +-1.0 dB.
 keystone_only_loss_db = -4.26
 keystone_only_loss_tolerance_db = 0.5
 dechirp_only_loss_db = -25.90
-# A4: keystone and Doppler-rate filter recover all but 0.3 dB.
+# Keystone and Doppler-rate filter recover all but 0.3 dB.
 compensated_loss_min_db = -0.3
-# A7: the searched acceleration within one step of the truth.
+# The searched acceleration within one step of the truth.
 acceleration_tolerance_mps2 = 10.0
 # The fine rate at pulse 0 (local GRFT on the chip) within three of its bounds.
 rate_error_max_crb = 3.0

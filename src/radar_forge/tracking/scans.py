@@ -85,7 +85,7 @@ VARIANTS: dict[
     "jipda": ("jpda", "none", True),
     "mht": ("mht", "none", False),
 }
-# A cue's spread about the truth: 50 m in position, 5 m/s in velocity (011a's A16 template).
+# A cue's spread about the truth: 50 m in position, 5 m/s in velocity, as the coalescence test's.
 _CUE_SIGMA = {"x_m": 50.0, "y_m": 50.0, "xdot_mps": 5.0, "ydot_mps": 5.0}
 
 
