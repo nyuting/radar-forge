@@ -33,7 +33,7 @@ to find out what happens when the radar starts missing.
 - Run `uv sync --extra dev --extra visualisation`.
 - `uv run python scripts/run_scenario.py config/scenario_003_tracking.toml --out out/s1`
   runs the scenario end to end and writes detections, tracks and `metrics.csv` to `out/s1`. Don't
-  commit `out/`. Read that script and the stages it runs, in `radar_forge.evaluate`, to see how
+  commit `out/`. Read that script and the stages it runs, in `radar_forge.verify`, to see how
   the pieces fit together.
 - Useful entry points:
   - `radar_forge.propagation.received_power_w`
@@ -43,7 +43,7 @@ to find out what happens when the radar starts missing.
   - `radar_forge.scenario.load_scenario`, and `radar_forge.pipeline`: `scan_iq`,
     `range_doppler_product`
   - `radar_forge.pipeline`: `scan_plots`, `ScanTracker`; the `track` stage of
-    `radar_forge.evaluate` scores the primary track
+    `radar_forge.verify` scores the primary track
 
 You should not need to change anything under `src/`. If you think you do, tell us why instead.
 

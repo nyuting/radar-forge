@@ -71,7 +71,7 @@ variant = "ca"
 merge_range_bins = 1.0
 max_bistatic_range_rate_mps = 400.0   # 200 m/s radial
 
-# What the stepper checks (radar_forge.evaluate). Every number is re-derived for
+# What the stepper checks (radar_forge.verify). Every number is re-derived for
 # bistatic range and rate, positive receding: twice the slant values.
 [verify]
 stages = ["geometry", "iq", "rd", "detect"]

@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from radar_forge import evaluate
+from radar_forge import verify
 from radar_forge.scenario import load_scenario
 from radar_forge.tracking.scans import scans
 
@@ -54,7 +54,7 @@ def test_halving_the_sector_moves_the_terminal_scenes_gospa_less_than_its_seed_s
             run = dataclasses.replace(
                 scenario, seed=20261108 + seed, sensor=sensor, tracking=tracking, verify={}
             )
-            report = evaluate.run(run, ["multitarget"], n_scans=25, out_dir=tmp_path, render=False)
+            report = verify.run(run, ["multitarget"], n_scans=25, out_dir=tmp_path, render=False)
             gospa_m[n_sectors].append(report.values["gospa_mean_m"])
     shift = abs(np.mean(gospa_m[32]) - np.mean(gospa_m[16]))
     spread = np.std(gospa_m[16], ddof=1)

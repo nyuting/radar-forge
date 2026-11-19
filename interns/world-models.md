@@ -65,14 +65,14 @@ a different false-alarm rate. Your job is to find out on a problem we control.
   weaker result than a small one that wins.
 - `uv run python scripts/run_scenario.py config/scenario_003_tracking.toml --out out/s1`
   runs the classical chain end to end. Read that script and the stages it runs, in
-  `radar_forge.evaluate`, to see how the pieces fit together. Don't commit `out/`.
+  `radar_forge.verify`, to see how the pieces fit together. Don't commit `out/`.
 - Useful entry points:
   - `radar_forge.scenario.load_scenario`, and `radar_forge.pipeline`: `scan_iq`,
     `range_doppler_product`. Each scan carries its IQ (`scan.cubes`) and the truth
     (`scan.truth.bistatic_range_m`, `scan.truth.bistatic_range_rate_mps`: unfolded, twice the
     slant values here, positive receding). The map has shape `(n_doppler, n_range)`.
   - `radar_forge.pipeline`: `scan_plots`, `ScanTracker`, and the `track` stage of
-    `radar_forge.evaluate` that scores it. This is the classical baseline.
+    `radar_forge.verify` that scores it. This is the classical baseline.
   - `radar_forge.scenario.truth_geometry`: reads each target's trajectory, resamples it onto the
     scan times and returns its geometry seen from the radar. Its steps, once `load_flight_csv`,
     `resample` and `to_radar_frame`, are private now; `radar_forge.coordinates.geodetic_to_enu_m`

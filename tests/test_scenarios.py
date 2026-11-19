@@ -20,7 +20,7 @@ from types import ModuleType
 import numpy as np
 import pytest
 
-from radar_forge import evaluate
+from radar_forge import verify
 from radar_forge.scenario import load_scenario
 
 REPO = Path(__file__).resolve().parents[1]
@@ -75,7 +75,7 @@ def short_run(request, tmp_path_factory):
     path = request.param
     out_dir = tmp_path_factory.mktemp(path.stem)
     n_scans = regen_golden.fingerprint_scans(path.stem)
-    return path.stem, evaluate.run(
+    return path.stem, verify.run(
         load_scenario(path), n_scans=n_scans, out_dir=out_dir, render=False
     )
 
@@ -119,7 +119,7 @@ def test_every_scenario_has_a_fingerprint():
 )
 def test_three_scans_of_a_shortened_config_pass_every_check(path, tmp_path):
     """The three scans the fast suite skips for a config listed in FAST_SCANS."""
-    report = evaluate.run(load_scenario(path), n_scans=3, out_dir=tmp_path, render=False)
+    report = verify.run(load_scenario(path), n_scans=3, out_dir=tmp_path, render=False)
     assert report.checks
     assert not report.failures
 
@@ -129,6 +129,6 @@ def test_three_scans_of_a_shortened_config_pass_every_check(path, tmp_path):
 @pytest.mark.parametrize("path", CONFIGS, ids=[path.stem for path in CONFIGS])
 def test_the_whole_window_passes_every_check(path, tmp_path):
     """The full window meets every criterion its [verify] table encodes."""
-    report = evaluate.run(load_scenario(path), out_dir=tmp_path, render=False)
+    report = verify.run(load_scenario(path), out_dir=tmp_path, render=False)
     assert report.checks
     assert not report.failures

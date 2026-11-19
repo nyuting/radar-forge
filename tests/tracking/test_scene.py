@@ -318,10 +318,10 @@ def test_the_iq_chain_merges_close_pairs_as_the_gaussian_resolution_model(tmp_pa
     """
     from scipy.optimize import minimize_scalar
 
-    from radar_forge import evaluate
+    from radar_forge import verify
 
     config = TERMINAL.parent / "scenario_011_iq_check.toml"
-    report = evaluate.run(
+    report = verify.run(
         load_scenario(config), ["rd", "multitarget"], out_dir=tmp_path, render=False
     )
     measured = {

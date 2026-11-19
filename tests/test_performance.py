@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from radar_forge import evaluate, migration
+from radar_forge import migration, verify
 from radar_forge.detection import cluster_detections
 from radar_forge.pipeline import scan_iq, scan_plots, scan_products
 from radar_forge.scenario import load_scenario
@@ -95,7 +95,7 @@ STAGE_BUDGET_S = {"geometry": 2.0, "iq": 2.0, "rd": 8.0, "detect": 1.0, "track":
 def test_each_stage_of_three_scans_runs_within_its_budget(tmp_path):
     """Three scans of scenario 003 over S1 through every stage, each inside its budget."""
     scenario = load_scenario(REPO / "config" / "scenario_003_tracking.toml")
-    report = evaluate.run(scenario, n_scans=3, out_dir=tmp_path, render=False)
+    report = verify.run(scenario, n_scans=3, out_dir=tmp_path, render=False)
     over = {k: t for k, t in report.wall_time_s.items() if t > STAGE_BUDGET_S[k]}
     assert set(report.wall_time_s) == set(STAGE_BUDGET_S)
     assert not over, f"stages over budget (s): {over}"

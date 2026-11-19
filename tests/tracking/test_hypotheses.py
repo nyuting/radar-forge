@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from radar_forge import evaluate
+from radar_forge import verify
 from radar_forge.coordinates import east_north_to_range_azimuth_rad
 from radar_forge.scenario import Scenario, load_scenario
 from radar_forge.tracking.association import GlobalNearestNeighbour
@@ -243,7 +243,7 @@ def test_tracks_csv_reports_each_scan_as_mht_saw_it_then(tmp_path: Path) -> None
     for rotation in scans(scenario, n_scans=2):
         live.rotation(rotation)
         seen.append(live.bank)
-    evaluate.run(scenario, ["multitarget"], n_scans=2, out_dir=tmp_path, render=False)
+    verify.run(scenario, ["multitarget"], n_scans=2, out_dir=tmp_path, render=False)
     with (tmp_path / "tracks.csv").open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
     for k, bank in enumerate(seen):
@@ -306,7 +306,7 @@ def test_a_pair_closing_across_the_beam_swaps_under_gnn_and_as_often_under_mht(
     }
     # One scene per trial: each is a run of the stage over its own seed.
     for trial in range(200):
-        report = evaluate.run(
+        report = verify.run(
             _crossing(20261110 + trial), ["multitarget"], out_dir=tmp_path, render=False
         )
         for key, values in swaps.items():

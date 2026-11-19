@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 from scipy.signal import czt
 
-from radar_forge import evaluate
+from radar_forge import verify
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.detection import cfar_detect
 from radar_forge.dsp import doppler_fft, matched_filter
@@ -427,7 +427,7 @@ def test_a_dechirp_only_loss_asked_of_a_constant_rate_config_is_measured(tmp_pat
     text = (REPO / "config" / "scenario_004_keystone_k1.toml").read_text(encoding="utf-8")
     path = tmp_path / "k1.toml"
     path.write_text(text + "dechirp_only_loss_db = -25.78\n", encoding="utf-8")
-    report = evaluate.run(
+    report = verify.run(
         load_scenario(path), ["keystone"], n_scans=1, out_dir=tmp_path, render=False
     )
     assert not report.failures

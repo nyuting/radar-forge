@@ -31,7 +31,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from radar_forge import clutter, evaluate, figures, pipeline
+from radar_forge import clutter, figures, pipeline
 from radar_forge.dsp import fold_into_period
 from radar_forge.pipeline import RangeDopplerProduct
 from radar_forge.propagation import disturbance_paths
@@ -39,6 +39,7 @@ from radar_forge.radar import TargetGeometry
 from radar_forge.scenario import Scenario
 from radar_forge.signal import cubic_amplifier, stream_baseband
 from radar_forge.units import db_to_power, power_to_db
+from radar_forge.verify import stepper
 
 __all__ = ["leakage"]
 
@@ -63,10 +64,10 @@ _KEYS = (
 )
 
 
-@evaluate.stage("leakage", *_KEYS)
-def leakage(ctx: evaluate.Context) -> evaluate.Context:
+@stepper.stage("leakage", *_KEYS)
+def leakage(ctx: stepper.Context) -> stepper.Context:
     """Cancel each scan; CA, floor rise, SINR loss and target detections; leakage.csv."""
-    scenario, verify = ctx.scenario, evaluate.thresholds(ctx, "leakage")
+    scenario, verify = ctx.scenario, stepper.thresholds(ctx, "leakage")
     radar, n_pulses, n_range_lags = scenario.radar, scenario.n_pulses[0], scenario.n_range_lags[0]
     if radar.transmitter.waveform != "noise":
         msg = "the leakage stage needs a noise burst: a stream beside the code it sent."
@@ -137,12 +138,12 @@ def leakage(ctx: evaluate.Context) -> evaluate.Context:
         rows.append(row)
         if scan.index == 0 and ctx.render and cell is not None:
             _draw(ctx, maps, cell, floor_w["clean"], scan.truth)
-    evaluate.write_csv(ctx.out_dir / "leakage.csv", rows)
+    stepper.write_csv(ctx.out_dir / "leakage.csv", rows)
     return ctx
 
 
 def _cancelled_scans(
-    ctx: evaluate.Context, n_scans: int
+    ctx: stepper.Context, n_scans: int
 ) -> Iterator[tuple[pipeline.ScanIq, clutter.CancellationResult, RangeDopplerProduct]]:
     """Yield the first scans, their cancellations and maps: rd's, kept on the context, or new."""
     if len(ctx.cancelled) >= n_scans:
@@ -165,7 +166,7 @@ def _fit_size(scenario: Scenario, n_samples: int) -> tuple[int, int]:
     return settings.n_taps * len(settings.odd_orders), n_fit
 
 
-def _check(ctx: evaluate.Context, verify: dict[str, Any], row: dict[str, Any]) -> None:
+def _check(ctx: stepper.Context, verify: dict[str, Any], row: dict[str, Any]) -> None:
     """Check one scan's row against the thresholds the scenario gives."""
     for key, tolerance_key in (
         ("cancellation_depth_db", "cancellation_tolerance_db"),
@@ -235,7 +236,7 @@ def _target_detections(
 
 
 def _draw(
-    ctx: evaluate.Context,
+    ctx: stepper.Context,
     maps: dict[str, RangeDopplerProduct],
     cell: tuple[int, int],
     floor_w: float,

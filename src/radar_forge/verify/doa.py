@@ -34,7 +34,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from radar_forge import evaluate, figures
+from radar_forge import figures
 from radar_forge.array import (
     ArrayGeometry,
     direction_cosine,
@@ -78,6 +78,7 @@ from radar_forge.radar import Radar, TargetGeometry
 from radar_forge.scenario import scattering_phase_rad
 from radar_forge.settings import DoaSettings
 from radar_forge.units import power_to_db
+from radar_forge.verify import stepper
 
 __all__ = ["doa"]
 
@@ -103,10 +104,10 @@ _TARGET_BINS = 1.5
 _MIN_SCORED_SCANS = 50
 
 
-@evaluate.stage("doa", *_KEYS)
-def doa(ctx: evaluate.Context) -> evaluate.Context:
+@stepper.stage("doa", *_KEYS)
+def doa(ctx: stepper.Context) -> stepper.Context:
     """Every configured estimator on every detection's chip; scores, checks, doa.csv, doa.png."""
-    scenario, verify = ctx.scenario, evaluate.thresholds(ctx, "doa")
+    scenario, verify = ctx.scenario, stepper.thresholds(ctx, "doa")
     settings, array = scenario.doa, scenario.array
     if settings is None or array is None:
         msg = "the doa stage needs [receive_array] and [doa] tables."
@@ -170,7 +171,7 @@ def doa(ctx: evaluate.Context) -> evaluate.Context:
     _check(ctx, verify, resolved, scaled, worst)
     if {"rank_ratio_max", "snapshot_model_tolerance"} & set(verify):
         _noiseless(ctx, verify, array, settings)
-    evaluate.write_csv(ctx.out_dir / "doa.csv", rows)
+    stepper.write_csv(ctx.out_dir / "doa.csv", rows)
     return ctx
 
 
@@ -252,7 +253,7 @@ def _estimate(
     training: NDArray[np.complex128],
     array: ArrayGeometry,
     settings: DoaSettings,
-    ctx: evaluate.Context,
+    ctx: stepper.Context,
 ) -> DoaEstimate:
     """Run one ``[doa]`` method on a chip: trained on its cells, or on its peak cell."""
     method, kind = label_parts(label)
@@ -297,7 +298,7 @@ def _bound_at_truth(
     snapshot: NDArray[np.complex128],
     truths: NDArray[np.float64],
     array: ArrayGeometry,
-    ctx: evaluate.Context,
+    ctx: stepper.Context,
 ) -> NDArray[np.float64]:
     """Return the bound's deviation at the truth, the amplitudes fitted to the snapshot there."""
     radar = ctx.scenario.radar
@@ -314,7 +315,7 @@ def _bound_at_truth(
 
 
 def _ratios(
-    ctx: evaluate.Context,
+    ctx: stepper.Context,
     training: NDArray[np.complex128],
     array: ArrayGeometry,
     settings: DoaSettings,
@@ -341,7 +342,7 @@ def _parent_error(
     chip: DataChip,
     cell: tuple[int, int],
     estimate: tuple[str, DoaEstimate],
-    ctx: evaluate.Context,
+    ctx: stepper.Context,
 ) -> float:
     """Return the largest relative gap between the chip's reading and the parent's own.
 
@@ -386,7 +387,7 @@ def _relative(value: Any, reference: Any) -> float:
 
 
 def _truth_rows(
-    ctx: evaluate.Context,
+    ctx: stepper.Context,
     index: int,
     truth: TargetGeometry,
     truth_u: NDArray[np.float64],
@@ -395,7 +396,7 @@ def _truth_rows(
     """Return doa.csv's truth rows: every aircraft's true direction, range, rate and cell SNR."""
     scenario = ctx.scenario
     radar, show = scenario.radar, figures.display_axes(scenario.radar)
-    power_w = evaluate.target_power_w(radar, truth, scenario.rcs_m2)
+    power_w = stepper.target_power_w(radar, truth, scenario.rcs_m2)
     # Per channel on an exact bin, as predicted_snr_db: P_r T N over the noise of one sample.
     gain = radar.n_samples_per_chirp * scenario.n_pulses[0]
     snr_db = power_to_db(power_w / radar.receiver.noise_power_per_sample_w * gain)
@@ -431,7 +432,7 @@ def _truth_rows(
 
 
 def _estimate_rows(
-    ctx: evaluate.Context,
+    ctx: stepper.Context,
     index: int,
     detection_id: int,
     chip: DataChip,
@@ -475,7 +476,7 @@ def _estimate_rows(
 
 
 def _check(
-    ctx: evaluate.Context,
+    ctx: stepper.Context,
     verify: dict[str, Any],
     resolved: dict[str, list[bool]],
     scaled: dict[str, list[float]],
@@ -515,14 +516,14 @@ def _row(truth: TargetGeometry, k: int) -> TargetGeometry:
 
 
 def _noiseless(
-    ctx: evaluate.Context, verify: dict[str, Any], array: ArrayGeometry, settings: DoaSettings
+    ctx: stepper.Context, verify: dict[str, Any], array: ArrayGeometry, settings: DoaSettings
 ) -> None:
     """On noiseless scan 0: the peak cell against the snapshot model, the chip's rank against one.
 
     The model's :math:`g s_k` is aircraft k's own one-channel map at the peak cell, its
     steering vector the truth's: nothing of the multi-channel chain enters the prediction.
     """
-    scenario, truth = ctx.scenario, evaluate.truth(ctx)[0]
+    scenario, truth = ctx.scenario, stepper.truth(ctx)[0]
     radar, n_pulses, rcs_m2 = scenario.radar, scenario.n_pulses[0], scenario.rcs_m2
     phase_rad = scattering_phase_rad(scenario)[0]
     clean = synthesise(
@@ -570,7 +571,7 @@ def _noiseless(
 
 
 def _figure(
-    ctx: evaluate.Context, estimates: dict[str, DoaEstimate], truths: NDArray[np.float64]
+    ctx: stepper.Context, estimates: dict[str, DoaEstimate], truths: NDArray[np.float64]
 ) -> None:
     """Draw scan 0's spectra of the target's detection, the estimates without one as markers."""
     spectra = [(label, e.spectrum) for label, e in estimates.items() if e.spectrum.size]

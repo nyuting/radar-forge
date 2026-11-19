@@ -88,7 +88,7 @@ n_reacquire_misses = 5
 reacquire_reset = ["bistatic_range_rate_mps"]
 rate_unfolding = "none"
 
-# What the stepper checks (radar_forge.evaluate). Every number is re-derived for
+# What the stepper checks (radar_forge.verify). Every number is re-derived for
 # bistatic range and rate, positive receding: twice the slant values.
 [verify]
 stages = ["geometry", "iq", "rd", "detect", "track"]

@@ -110,7 +110,7 @@ rate_unfolding = "track_aided"
 unfold_sigma_gate = 6.0
 n_slope_scans = 5
 
-# What the stepper checks (radar_forge.evaluate). Every number is re-derived for
+# What the stepper checks (radar_forge.verify). Every number is re-derived for
 # bistatic range and rate, positive receding: twice the slant values.
 [verify]
 stages = ["geometry", "iq", "rd", "detect", "track"]

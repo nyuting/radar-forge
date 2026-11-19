@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from radar_forge import clutter, evaluate
+from radar_forge import clutter, verify
 from radar_forge.clutter import (
     cancel,
     cancellation_depth_db,
@@ -38,7 +38,7 @@ from radar_forge.pipeline import RangeDopplerProduct, range_doppler_product, sca
 from radar_forge.radar import TargetGeometry
 from radar_forge.scenario import load_scenario
 from radar_forge.signal import cubic_amplifier, noise_waveform
-from radar_forge.stages.clutter import _truth_cell
+from radar_forge.verify.leakage import _truth_cell
 
 REPO = Path(__file__).resolve().parents[1]
 SAMPLE_RATE_HZ = 8.0e6
@@ -285,12 +285,12 @@ def test_bad_orders_and_block_lengths_are_refused(code, received):
 # --- Slow: scenario 005's own scans, 819 200 samples each, through one other method. ---
 
 
-def _variant(config, verify, **cancellation):
+def _variant(config, thresholds, **cancellation):
     """Return a 005 config with its [cancellation] changed and only the leakage stage checked."""
     scenario = load_scenario(REPO / "config" / config)
     settings = dataclasses.replace(scenario.cancellation, **cancellation)
     return dataclasses.replace(
-        scenario, cancellation=settings, verify={"stages": ["leakage"], **verify}
+        scenario, cancellation=settings, verify={"stages": ["leakage"], **thresholds}
     )
 
 
@@ -316,7 +316,7 @@ def test_wiener_smi_matches_least_squares_on_the_static_scene(static_scan):
 @pytest.mark.slow
 def test_96_taps_cannot_reach_the_lag_160_echo(tmp_path):
     """CA 28.680 dB and the floor 12.27 dB up; the target still detected every scan."""
-    verify = {
+    thresholds = {
         # Ten standard errors of a power over 819 200 samples.
         "cancellation_depth_db": 28.680,
         "cancellation_tolerance_db": 0.05,
@@ -326,23 +326,23 @@ def test_96_taps_cannot_reach_the_lag_160_echo(tmp_path):
         # Predicted SINR 14.4-15.0 dB: Pd >= 0.987 a scan.
         "detections_per_scan": 1,
     }
-    scenario = _variant("scenario_005_static_leakage.toml", verify, n_taps=96)
-    evaluate.run(scenario, n_scans=5, out_dir=tmp_path, render=False)
+    scenario = _variant("scenario_005_static_leakage.toml", thresholds, n_taps=96)
+    verify.run(scenario, n_scans=5, out_dir=tmp_path, render=False)
 
 
 # Slow: five scans of the distorted transmitter through a linear basis.
 @pytest.mark.slow
 def test_a_linear_basis_stops_at_the_amplifier_distortion(tmp_path):
     """CA 18.810 dB, the floor 22.14 dB up, the target found in at most one scan."""
-    verify = {
+    thresholds = {
         # 40.946 - 10 log10(1 + 12 430 x 0.013077) = 18.810 dB; |x|^6 statistics, 0.1 dB.
         "cancellation_depth_db": 18.810,
         "cancellation_tolerance_db": 0.1,
         "floor_rise_db": 22.14,
         "floor_rise_tolerance_db": 1.0,
     }
-    scenario = _variant("scenario_005_distorted_transmitter.toml", verify, odd_orders=(1,))
-    report = evaluate.run(scenario, n_scans=5, out_dir=tmp_path, render=False)
+    scenario = _variant("scenario_005_distorted_transmitter.toml", thresholds, odd_orders=(1,))
+    report = verify.run(scenario, n_scans=5, out_dir=tmp_path, render=False)
     # Predicted SINR about 5 dB, Pd <= 4.7e-3 a scan: two hits in five has P <= 2e-4.
     assert sum(report.values[f"target_detections[{k}]"] >= 1 for k in range(5)) <= 1
 
@@ -351,9 +351,9 @@ def test_a_linear_basis_stops_at_the_amplifier_distortion(tmp_path):
 @pytest.mark.slow
 def test_a_full_cpi_fit_lets_the_moving_clutter_through(tmp_path):
     """A one-bin notch, 13 % of a 30 dB echo escapes: floor 21.19 dB up, at most one hit."""
-    verify = {"floor_rise_db": 21.19, "floor_rise_tolerance_db": 1.0}
-    scenario = _variant("scenario_005_varying_clutter.toml", verify, n_samples_per_batch=0)
-    report = evaluate.run(scenario, n_scans=5, out_dir=tmp_path, render=False)
+    thresholds = {"floor_rise_db": 21.19, "floor_rise_tolerance_db": 1.0}
+    scenario = _variant("scenario_005_varying_clutter.toml", thresholds, n_samples_per_batch=0)
+    report = verify.run(scenario, n_scans=5, out_dir=tmp_path, render=False)
     # Predicted SINR about 6 dB, Pd <= 1.1e-2 a scan: two hits in five has P <= 1.2e-3.
     assert sum(report.values[f"target_detections[{k}]"] >= 1 for k in range(5)) <= 1
 
@@ -366,7 +366,7 @@ def test_the_sliding_fit_cancels_the_moving_clutter_to_the_noise(tmp_path):
     The window follows the 2 Hz phase block by block, so the moving copy keeps 8.7e-6 of its
     power (from the clipped windows at the CPI's ends); the noise loses K over each window.
     """
-    verify = {
+    thresholds = {
         # 41.738 + 0.017 - 0.038 = 41.717 dB: the ceiling with the sliding residual.
         "cancellation_depth_db": 41.717,
         "cancellation_tolerance_db": 0.05,
@@ -379,11 +379,11 @@ def test_the_sliding_fit_cancels_the_moving_clutter_to_the_noise(tmp_path):
     }
     scenario = _variant(
         "scenario_005_varying_clutter.toml",
-        verify,
+        thresholds,
         n_samples_per_batch=400,
         n_samples_extension=25_600,
     )
-    evaluate.run(scenario, n_scans=5, out_dir=tmp_path, render=False)
+    verify.run(scenario, n_scans=5, out_dir=tmp_path, render=False)
 
 
 # Slow: one scan through the batched and the sliding fits.
@@ -432,7 +432,7 @@ def test_a_target_past_the_lag_window_records_nan_and_the_stage_finishes(tmp_pat
     """
     scenario = load_scenario(REPO / "config" / "scenario_005_static_leakage.toml")
     scenario = dataclasses.replace(scenario, n_range_lags=(512,), verify={"stages": ["leakage"]})
-    report = evaluate.run(scenario, n_scans=1, out_dir=tmp_path, render=False)
+    report = verify.run(scenario, n_scans=1, out_dir=tmp_path, render=False)
     for name in ("floor_rise_db", "sinr_db", "clean_sinr_db", "uncancelled_sinr_db"):
         assert math.isnan(report.values[f"{name}[0]"]), name
     assert math.isfinite(report.values["cancellation_depth_db[0]"])

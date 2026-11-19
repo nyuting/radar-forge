@@ -6,7 +6,7 @@ A config listed in ``FAST_SCANS`` is fingerprinted over its fast scans instead.
     uv run python scripts/regen_golden.py
 
 Each row is one scenario's three-scan run through every stage its ``[verify]`` table names
-(``radar_forge.evaluate.run``): where the peak lands, how bright it and the floor are, how many
+(``radar_forge.verify.run``): where the peak lands, how bright it and the floor are, how many
 detections, and how well the tracker did. ``tests/test_scenarios.py`` compares a fresh run
 against it at rtol 1e-9, so regenerating it is a behaviour change: review the diff, and commit
 it on its own with the reason.
@@ -20,8 +20,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-from radar_forge.evaluate import run
 from radar_forge.scenario import load_scenario
+from radar_forge.verify import run
 
 REPO = Path(__file__).resolve().parent.parent
 GOLDEN = REPO / "tests" / "data" / "golden" / "fingerprints.csv"

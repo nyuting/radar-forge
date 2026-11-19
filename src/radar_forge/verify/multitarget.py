@@ -35,13 +35,14 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.stats import chi2
 
-from radar_forge import evaluate, figures
+from radar_forge import figures
 from radar_forge.coordinates import range_azimuth_to_east_north_m
 from radar_forge.scenario import Scenario
 from radar_forge.tracking.filters import TrackBank, TrackStatus, is_confirmed
 from radar_forge.tracking.metrics import gospa, nees, trajectory_gospa
 from radar_forge.tracking.rfs import PmbmTracker
 from radar_forge.tracking.scans import PlotScan, PlotTracker, scans, tracker_name
+from radar_forge.verify import stepper
 
 __all__ = ["merged_counts", "multitarget", "pair_scores", "pair_windows", "play"]
 
@@ -253,7 +254,7 @@ def _expected_false_plots(scenario: Scenario, time_s: float) -> float:
     )
 
 
-@evaluate.stage(
+@stepper.stage(
     "multitarget",
     "gospa_mean_max_m",
     "swap_fraction_max",
@@ -267,7 +268,7 @@ def _expected_false_plots(scenario: Scenario, time_s: float) -> float:
     "mht_resolved_lead_min",
     "pmbm_resolved_lead_min",
 )
-def multitarget(ctx: evaluate.Context) -> evaluate.Context:
+def multitarget(ctx: stepper.Context) -> stepper.Context:
     """Track a plot-level scene and score it, or measure an IQ chain's plot statistics.
 
     ``gospa_mean_max_m`` bounds the mean GOSPA over the rotations; ``swap_fraction_max`` the
@@ -284,16 +285,16 @@ def multitarget(ctx: evaluate.Context) -> evaluate.Context:
     """
     if ctx.scenario.sensor is None:
         return _iq_statistics(ctx)
-    scenario, verify = ctx.scenario, evaluate.thresholds(ctx, "multitarget")
+    scenario, verify = ctx.scenario, stepper.thresholds(ctx, "multitarget")
     runs, plot_rows, track_rows, false_enu, true_enu = play(scenario, ctx.n_scans, rows=True)
     first, *others = runs.items()
     _record(ctx, verify, first[1], scenario, scenario.scan_period_s)
     for name, run in others:
         _record(ctx, verify, run, scenario, scenario.scan_period_s, prefix=f"{name}_")
     _record_trackers(ctx, verify, runs, scenario)
-    evaluate.write_csv(ctx.out_dir / "plots.csv", plot_rows)
-    evaluate.write_csv(ctx.out_dir / "tracks.csv", track_rows)
-    evaluate.write_csv(
+    stepper.write_csv(ctx.out_dir / "plots.csv", plot_rows)
+    stepper.write_csv(ctx.out_dir / "tracks.csv", track_rows)
+    stepper.write_csv(
         ctx.out_dir / "gospa.csv", [r for run in runs.values() for r in run.gospa_rows]
     )
     run = first[1]
@@ -407,7 +408,7 @@ def pair_scores(scenario: Scenario, run: Any) -> tuple[float, float]:
 
 
 def _record_trackers(
-    ctx: evaluate.Context, verify: dict[str, Any], runs: dict[str, _Run], scenario: Scenario
+    ctx: stepper.Context, verify: dict[str, Any], runs: dict[str, _Run], scenario: Scenario
 ) -> None:
     """Record each tracker's tree, mixture and pair scores; check MHT's, PMBM's and the pair's."""
     resolved: dict[str, float] = {}
@@ -460,7 +461,7 @@ def _record_trackers(
 
 
 def _record(
-    ctx: evaluate.Context,
+    ctx: stepper.Context,
     verify: dict[str, Any],
     run: _Run,
     scenario: Scenario,
@@ -601,16 +602,16 @@ def _trajectory_score(scenario: Scenario, run: _Run) -> Any:
 
 
 def pair_windows(
-    ctx: evaluate.Context, scan: int, bins: float
+    ctx: stepper.Context, scan: int, bins: float
 ) -> list[tuple[list[int], float, float]]:
     """Return the IQ scene's targets grouped into pairs closer than ``bins`` range bins.
 
     Each group is its targets and, at ``scan``, the bistatic range window one bin either
     side of them in which its detections are counted; groups are fixed by scan 0.
     """
-    truth = evaluate.truth(ctx)
+    truth = stepper.truth(ctx)
     first, now = truth[0].bistatic_range_m, truth[scan].bistatic_range_m
-    _, _, bin_m = evaluate.spans(ctx.scenario, 0)
+    _, _, bin_m = stepper.spans(ctx.scenario, 0)
     order = np.argsort(first)
     groups: list[list[int]] = []
     # Targets in range order: a handful, each joining the group before it or starting one.
@@ -622,13 +623,13 @@ def pair_windows(
     return [(g, float(now[g].min() - bin_m), float(now[g].max() + bin_m)) for g in groups]
 
 
-def merged_counts(ctx: evaluate.Context) -> tuple[NDArray[np.float64], NDArray[np.int64], int]:
+def merged_counts(ctx: stepper.Context) -> tuple[NDArray[np.float64], NDArray[np.int64], int]:
     """Return each pair's bistatic separation, its scans with one detection, and the scans.
 
     A pair's detections are burst 0's clusters inside its window, whatever their pairing
     status: one is a merged group, two or more are resolved.
     """
-    truth = evaluate.truth(ctx)
+    truth = stepper.truth(ctx)
     pairs = [g for g, _, _ in pair_windows(ctx, 0, _PAIR_BINS) if len(g) == 2]
     separation = np.array([abs(np.diff(truth[0].bistatic_range_m[g])[0]) for g in pairs])
     merged = np.zeros(len(pairs), dtype=np.int64)
@@ -641,7 +642,7 @@ def merged_counts(ctx: evaluate.Context) -> tuple[NDArray[np.float64], NDArray[n
     return separation, merged, len(ctx.plots)
 
 
-def _iq_statistics(ctx: evaluate.Context) -> evaluate.Context:
+def _iq_statistics(ctx: stepper.Context) -> stepper.Context:
     """Measure an IQ chain's plot statistics: Pd, false-alarm rate, merged fraction per pair.
 
     A target is detected in a scan when a burst-0 cluster lies in its pair's window (alone or
@@ -649,7 +650,7 @@ def _iq_statistics(ctx: evaluate.Context) -> evaluate.Context:
     widened by the CFAR's training and guard cells, counted against the design Pfa times the
     cells left; the ratio is measured over design.
     """
-    scenario, verify = ctx.scenario, evaluate.thresholds(ctx, "multitarget")
+    scenario, verify = ctx.scenario, stepper.thresholds(ctx, "multitarget")
     if len(ctx.plots) != ctx.n_scans:
         msg = "the multitarget stage on an IQ scenario needs the rd stage's plots; run rd first."
         raise ValueError(msg)
@@ -661,7 +662,7 @@ def _iq_statistics(ctx: evaluate.Context) -> evaluate.Context:
         for burst, (radar, n_pulses) in enumerate(
             zip(scenario.radars, scenario.n_pulses, strict=True)
         ):
-            _, _, bin_m = evaluate.spans(scenario, burst)
+            _, _, bin_m = stepper.spans(scenario, burst)
             ranges = found.bistatic_range_m[found.burst_index == burst]
             near = np.zeros(ranges.size, dtype=bool)
             excluded_bins = 0

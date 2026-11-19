@@ -15,7 +15,7 @@ and students. Neither half is traded for the other.
 - Physical constants only from `radar_forge.constants`; never `3e8` — R4, mypy `Final`.
 - Lean NumPy docstrings: one summary line; a citation with equation number; Parameters/Returns only where a unit, shape or convention is not in the name; no Raises or Examples unless the example is the test — ruff `D`, `tests/test_conventions.py`.
 - Complete annotations, `ArrayLike` in, `NDArray` out; every module defines `__all__`; `msg = "…"` then `raise`, no `assert` — `mypy --strict`, ruff `ANN EM S101`, `tests/test_conventions.py`.
-- Broadcast, don't tile — R6. Only `scenario`, `pipeline`, `evaluate`, `figures` and `stages/` do I/O, logging or timing — R11. Modules warn
+- Broadcast, don't tile — R6. Only `scenario`, `pipeline`, `figures` and `verify/` do I/O, logging or timing — R11. Modules warn
   past 500 lines, fail past 800 — R10.
 - No generated arrays committed; golden data only in `tests/data/golden/` — pre-commit hook.
 - Conventional Commits, `feat(dsp): add Taylor taper`; PRs squash-merge — commit-msg hook, CI.
@@ -60,7 +60,7 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 | radar equation; RCS, Swerling 0-4 | `received_power_w` (R_T² R_R²); `dbsm_to_m2`, `swerling_rcs_m2` (propagation.py) |
 | dB: a power 10 log10, an amplitude 20 log10; antenna gains linear | `power_to_db`, `db_to_power`, `amplitude_to_db`, `db_to_amplitude` (units.py); `Transmitter.gain_tx_linear`, `Receiver.gain_rx_linear` (radar.py) |
 | noise N0 = kT0F, per sample, in band | `Receiver.noise_density_w_per_hz`, `.noise_power_per_sample_w`, `Radar.noise_power_matched_w` (radar.py) |
-| SNR, single pulse and integrated | `received_power_w / Radar.noise_power_matched_w`; times B T N on the map (stages/core.py geometry stage) |
+| SNR, single pulse and integrated | `received_power_w / Radar.noise_power_matched_w`; times B T N on the map (verify/chain.py, the geometry stage) |
 | thermal noise; synthesis; LFM chirp, noise code, amplifier; ambiguity | `thermal_noise`; `fmcw_deramp_baseband`, `pulsed_baseband`, `stream_baseband`; `lfm_chirp`, `noise_waveform`, `cubic_amplifier`; `ambiguity_function` (signal.py) |
 | leakage, near clutter; LS / Wiener-SMI cancellation; CA bound, notch | `leakage_paths`, `static_clutter_paths` (propagation.py); `least_squares_cancel`, `wiener_smi`, `delay_basis_gram`; `expected_cancellation_depth_db`, `doppler_notch_response_linear` (clutter.py) |
 | windows, coherent gain, processing loss | `window`, `apply_window`, `coherent_gain_linear`, `processing_loss_db` (dsp.py) |
@@ -91,5 +91,5 @@ No function yet: Pd (Swerling detection curves).
 | `src/radar_forge/constants.py` | Every physical constant, defined once |
 | `docs/conventions/` | `style.md`, `testing.md`, `review.md` (also `/pr-review`), `commits.md` |
 | `.githooks/`,`Makefile`, `scripts/check_conventions.py` | Hooks; every gate defined once; rules R1–R12 |
-| `config/*.toml`, `scripts/run_scenario.py` | Scenarios with their `[verify]` numbers; the stepper (`evaluate.py`) runs them |
+| `config/*.toml`, `scripts/run_scenario.py` | Scenarios with their `[verify]` numbers; the stepper (`radar_forge.verify`, `verify/stepper.py`) runs them |
 | `spec/` | Unimplemented scenarios, data-001 formats, tracker-001 architecture |

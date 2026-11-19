@@ -4,7 +4,7 @@ A scenario is data. ``[site.tx]`` and an optional ``[site.rx]`` (absent: monosta
 ``[[burst]]`` per coherent processing interval and ``[receiver]`` make the radar; each
 ``[[target]]`` is a recorded trajectory or a constant velocity, played over ``[scans]``;
 ``[detection]`` and ``[tracking]`` set the processing (:mod:`radar_forge.pipeline`); ``[verify]``
-is read by :mod:`radar_forge.evaluate`. A pulsed ``[[burst]]`` may record a range gate, and
+is read by :mod:`radar_forge.verify`. A pulsed ``[[burst]]`` may record a range gate, and
 ``[migration]`` corrects range migration (:mod:`radar_forge.migration`). A noise burst adds
 ``[leakage]``, ``[[clutter]]``, ``[transmitter_distortion]`` and ``[cancellation]``. A
 plot-level scenario (scenario 011) has a ``[sensor]`` instead of the site, bursts and

@@ -1,7 +1,7 @@
 r"""The stepper: a scenario run as named stages, each printing, checking and writing one step.
 
-The stages live in :mod:`radar_forge.stages` and run in that package's import order;
-:mod:`radar_forge.stages.core` holds ``geometry``, ``iq``, ``rd``, ``detect`` and ``track``.
+The stages live in the modules of :mod:`radar_forge.verify` and run in its import order;
+:mod:`radar_forge.verify.chain` holds ``geometry``, ``iq``, ``rd``, ``detect`` and ``track``.
 Each prints its intermediate quantities and wall time, checks the thresholds the scenario's
 ``[verify]`` table gives, and writes its files under the run directory
 (``spec/data-001-formats.md``). ``[verify]`` holds ``stages`` and thresholds:
@@ -14,23 +14,23 @@ stage not listed does not run, a threshold not given is not checked, and :func:`
 halved (:func:`~radar_forge.figures.display_axes`); everything else is bistatic. The helpers
 below are what a stage module shares.
 
-:mod:`radar_forge.stages.migration` holds ``keystone`` (scenario 004): ``walk_bins`` with
+:mod:`radar_forge.verify.keystone` holds ``keystone`` (scenario 004): ``walk_bins`` with
 ``walk_tolerance_bins``, ``residual_walk_max_bins``, ``uncompensated_loss_db``,
 ``keystone_only_loss_db`` and ``dechirp_only_loss_db`` with ``loss_tolerance_db`` (the
 keystone's own ``keystone_only_loss_tolerance_db``), ``compensated_loss_min_db``,
 ``fold_factor``, ``acceleration_tolerance_mps2`` and ``rate_error_max_crb``.
 
-:mod:`radar_forge.stages.clutter` holds ``leakage`` (scenario 005): ``cancellation_depth_db``
+:mod:`radar_forge.verify.leakage` holds ``leakage`` (scenario 005): ``cancellation_depth_db``
 with ``cancellation_tolerance_db``, ``floor_rise_db`` with ``floor_rise_tolerance_db``,
 ``sinr_loss_db`` with ``sinr_loss_tolerance_db``, ``detections_per_scan``,
 ``uncancelled_detections_per_scan`` and ``acceptance_scans``.
 
-:mod:`radar_forge.stages.tracking` holds ``multitarget`` (scenario 011): ``gospa_mean_max_m``,
+:mod:`radar_forge.verify.multitarget` holds ``multitarget`` (scenario 011): ``gospa_mean_max_m``,
 ``swap_fraction_max``, ``mode_latency_max_scans``, ``nees_fraction_min``, ``pd_min``,
 ``false_alarm_rate_max`` and ``merged_fraction_max``; 011b's ``leaf_count_max``,
 ``pmbm_cardinality_error_max``, ``mht_resolved_lead_min`` and ``pmbm_resolved_lead_min``.
 
-:mod:`radar_forge.stages.array` holds ``doa`` (scenario 006): ``direction_cosine_tolerance``,
+:mod:`radar_forge.verify.doa` holds ``doa`` (scenario 006): ``direction_cosine_tolerance``,
 ``resolved_fraction_min`` with ``resolved_methods``, ``baseline_resolved_fraction_max`` with
 ``baseline_methods``, ``<method>_rmse_crb_max`` for each :data:`~radar_forge.doa.DOA_LABELS`
 name, ``rank_ratio_max``, ``snapshot_model_tolerance`` and ``parent_coordinates_tolerance``.
@@ -262,6 +262,3 @@ def run(
     if ctx.report.failures:
         raise VerificationError(ctx.report)
     return ctx.report
-
-
-import radar_forge.stages  # noqa: E402, F401  -- the stages register themselves on import

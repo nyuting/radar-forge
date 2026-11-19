@@ -4,7 +4,7 @@ Ground truth is closed form wherever the test can compute it apart from the code
 bistatic route length |p - tx| + |p| and its rate v . (u_T + u_R), the map bin of an exact
 range and rate, the noise of every range cell, and a rate that folds in both bursts of a pair.
 The tier-3 scene is four targets at mixed range, rate and cross-section, monostatic and
-bistatic, run three scans through ``evaluate.run``.
+bistatic, run three scans through ``verify.run``.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from radar_forge import evaluate, figures
+from radar_forge import figures, verify
 from radar_forge import pipeline as pipeline_module
 from radar_forge.clutter import cancel
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
@@ -38,7 +38,7 @@ from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter
 from radar_forge.scenario import RangeGate, load_scenario, truth_geometry
 from radar_forge.settings import CancellationSettings, Target
 from radar_forge.signal import noise_waveform, thermal_noise
-from radar_forge.stages import core
+from radar_forge.verify import chain
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -89,7 +89,7 @@ def _closed_form(tx_enu_m: np.ndarray, time_s: float) -> tuple[np.ndarray, np.nd
 def scene_run(request, write_scene, tmp_path):
     """The four-target scene, three scans through every stage, and its run directory."""
     scenario = write_scene(SCENE, bistatic=request.param, n_scans=3, extra=SCENE_SETTINGS)
-    report = evaluate.run(scenario, out_dir=tmp_path / "run", render=False)
+    report = verify.run(scenario, out_dir=tmp_path / "run", render=False)
     return scenario, report, tmp_path / "run"
 
 
@@ -240,10 +240,14 @@ def test_an_unknown_key_or_a_wrong_type_is_refused(tmp_path):
 
 def test_a_failed_check_names_every_failure(one_scan_scenario, tmp_path):
     """VerificationError lists each failed check, not only the first."""
-    verify = {"stages": ["geometry"], "expected_snr_db": 0.0, "truth_in_map_fraction": [2.0, 3.0]}
-    scenario = dataclasses.replace(one_scan_scenario, verify=verify)
-    with pytest.raises(evaluate.VerificationError) as caught:
-        evaluate.run(scenario, out_dir=tmp_path / "run")
+    thresholds = {
+        "stages": ["geometry"],
+        "expected_snr_db": 0.0,
+        "truth_in_map_fraction": [2.0, 3.0],
+    }
+    scenario = dataclasses.replace(one_scan_scenario, verify=thresholds)
+    with pytest.raises(verify.VerificationError) as caught:
+        verify.run(scenario, out_dir=tmp_path / "run")
     assert len(caught.value.report.failures) == 2
     assert all(c.name in str(caught.value) for c in caught.value.report.failures)
     assert math.isfinite(caught.value.report.values["predicted_snr_db"])
@@ -334,19 +338,19 @@ def test_a_contradictory_or_unknown_tracking_choice_is_refused_at_load(
 
 def test_a_second_stage_of_the_same_name_is_refused():
     """Catches a later stage module silently replacing a core stage and its [verify] keys."""
-    keys = evaluate.VERIFY_KEYS["geometry"]
+    keys = verify.stepper.VERIFY_KEYS["geometry"]
     with pytest.raises(ValueError, match="'geometry' is already registered"):
-        evaluate.stage("geometry", "detection_fraction")(lambda ctx: ctx)
-    assert evaluate.STAGES["geometry"] is core.geometry
-    assert evaluate.VERIFY_KEYS["geometry"] == keys
+        verify.stepper.stage("geometry", "detection_fraction")(lambda ctx: ctx)
+    assert verify.STAGES["geometry"] is chain.geometry
+    assert verify.stepper.VERIFY_KEYS["geometry"] == keys
 
 
 def test_an_unknown_verify_key_is_refused_before_any_stage(one_scan_scenario, tmp_path):
     """A misspelt threshold raises, naming it, instead of being skipped in silence."""
-    verify = {"stages": ["geometry"], "nees_fraction_mn": 0.5}
-    scenario = dataclasses.replace(one_scan_scenario, verify=verify)
+    thresholds = {"stages": ["geometry"], "nees_fraction_mn": 0.5}
+    scenario = dataclasses.replace(one_scan_scenario, verify=thresholds)
     with pytest.raises(ValueError, match="nees_fraction_mn"):
-        evaluate.run(scenario, out_dir=tmp_path / "run")
+        verify.run(scenario, out_dir=tmp_path / "run")
     assert not (tmp_path / "run" / "truth.csv").exists()
 
 
@@ -551,9 +555,9 @@ def test_the_leakage_stage_reuses_rds_scans(tmp_path, monkeypatch):
 
     monkeypatch.setattr(pipeline_module, "scan_iq", counted)
     scenario = load_scenario(NOISE_CONFIG)
-    together = evaluate.run(scenario, ["rd", "leakage"], n_scans=1, out_dir=tmp_path, render=False)
+    together = verify.run(scenario, ["rd", "leakage"], n_scans=1, out_dir=tmp_path, render=False)
     assert calls == []
-    alone = evaluate.run(scenario, ["leakage"], n_scans=1, out_dir=tmp_path, render=False)
+    alone = verify.run(scenario, ["leakage"], n_scans=1, out_dir=tmp_path, render=False)
     assert calls == [1]
     # The same seed, the same scan: the same numbers either way.
     for key in ("cancellation_depth_db[0]", "floor_rise_db[0]", "sinr_loss_db[0]"):
@@ -643,7 +647,7 @@ def test_a_detection_across_a_gated_window_is_not_a_hit_on_its_far_side():
     for range_index, expected in ((99.6, False), (0.5, True)):
         detection = Detection((4, int(range_index)), (4.0, range_index), 1.0, 1.0, 1)
         found = dataclasses.replace(_one_plot(1000.0, 0.0), detections=(detection,))
-        assert core._hits(found, 0, product, truth, 1.0) == [expected]
+        assert chain._hits(found, 0, product, truth, 1.0) == [expected]
 
 
 def test_only_a_target_given_an_acceleration_carries_its_routes_acceleration(tmp_path):

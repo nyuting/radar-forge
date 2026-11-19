@@ -50,7 +50,7 @@ Nothing conformal is implemented in `radar-forge`. You will write it in your own
 - Use this repository at the latest `main`, and record the commit hash you used in your report.
 - Run `uv sync --extra dev --extra visualisation`. Add `--extra ml` only for the optional learned model.
 - `uv run python scripts/run_scenario.py config/scenario_003_tracking.toml --out out/s1`
-  runs the chain end to end. Read that script and the stages it runs, in `radar_forge.evaluate`,
+  runs the chain end to end. Read that script and the stages it runs, in `radar_forge.verify`,
   to see how the pieces fit together. Don't commit `out/`.
 - Two filters in the one `Tracker` gate by chi-square:
   - `scenario_003_tracking.toml` runs the linear Kalman filter (`linearisation = "taylor"`);
@@ -60,7 +60,7 @@ Nothing conformal is implemented in `radar-forge`. You will write it in your own
 - Useful entry points:
   - `radar_forge.pipeline`: `ScanTracker(scenario)` and its `scan`, fed by `scan_plots`. Each
     scan returns a `TrackBank`, whose rows carry each track's `mean`, `covariance` and `nis`.
-    The `track` stage of `radar_forge.evaluate` scores each target's primary track into
+    The `track` stage of `radar_forge.verify` scores each target's primary track into
     `metrics.csv` (RMSE, NEES fraction, latency); nothing reports the mean NIS any more.
   - `radar_forge.scenario.load_scenario` and `radar_forge.pipeline.scan_iq`. Each scan carries
     the truth (`scan.truth.bistatic_range_m`, `scan.truth.bistatic_range_rate_mps`: twice the

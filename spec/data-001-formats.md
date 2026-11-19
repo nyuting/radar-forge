@@ -1,7 +1,7 @@
 # Data 001 — Files a run writes
 
 > Status: schema version **2.0.0**. This is the contract for what the stepper
-> (`radar_forge.evaluate`, run by `scripts/run_scenario.py`) writes into a run directory. Each
+> (`radar_forge.verify`, run by `scripts/run_scenario.py`) writes into a run directory. Each
 > stage writes its own files; the columns are the keys of the rows each stage builds.
 
 | § | Section |
@@ -58,7 +58,7 @@ runs/<name>/               # --out overrides it
 ```
 
 A stage that the scenario's `[verify]` table does not list writes nothing. The run's checks and
-measured values are printed, and returned by `evaluate.run` as a `Report`; they are not written.
+measured values are printed, and returned by `verify.run` as a `Report`; they are not written.
 
 ## 5. Conventions every file shares
 

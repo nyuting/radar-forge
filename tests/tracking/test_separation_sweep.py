@@ -2,7 +2,7 @@
 
 Each trial is V3's scene (``config/scenario_011_cst_sweep.toml``) with the pair moved to one
 point, a separation d in resolution cells across or along range and a clutter level n_gate,
-and given its own seed; ``stages.tracking.play`` plays it once into all seven trackers and
+and given its own seed; ``verify.multitarget.play`` plays it once into all seven trackers and
 ``pair_scores`` judges each. The sweep is 30 points of 100 trials, ``slow``; two points run
 unmarked, over one seeded trial of 20 rotations.
 """
@@ -20,8 +20,8 @@ from numpy.typing import NDArray
 from scipy.stats import norm
 
 from radar_forge.scenario import ArcTarget, Scenario, load_scenario
-from radar_forge.stages.tracking import pair_scores, play
 from radar_forge.tracking.scene import Arc
+from radar_forge.verify.multitarget import pair_scores, play
 
 V3 = load_scenario(Path(__file__).resolve().parents[2] / "config" / "scenario_011_cst_sweep.toml")
 # The reference gate, m rad: n_gate expected false plots in it a scan.

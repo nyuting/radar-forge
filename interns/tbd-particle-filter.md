@@ -48,7 +48,7 @@ it costs.
    [floor and the ceiling](track-before-detect.md#the-bounds). Then, at a power where your filter
    declares and the DBT chain struggles, compare its range error and its time to a confirmed
    track with the scenario 003 tracker's (`ScanTracker` in `radar_forge.pipeline`, scored by
-   the `track` stage of `radar_forge.evaluate`).
+   the `track` stage of `radar_forge.verify`).
 
 ## Deliverables
 

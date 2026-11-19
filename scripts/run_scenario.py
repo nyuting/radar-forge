@@ -3,8 +3,8 @@
 
     uv run python scripts/run_scenario.py config/scenario_001_fmcw_low_prf.toml --scans 3
 
-Thin by design: the stages live in ``radar_forge.stages`` and register with
-``radar_forge.evaluate``; the scenario's ``[verify]`` table says which run and what they check.
+Thin by design: the stages live in ``radar_forge.verify`` and register with its
+``stepper``; the scenario's ``[verify]`` table says which run and what they check.
 The exit status is 1 when a check fails.
 """
 
@@ -15,8 +15,8 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from radar_forge.evaluate import STAGES, VerificationError, run
 from radar_forge.scenario import load_scenario
+from radar_forge.verify import STAGES, VerificationError, run
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

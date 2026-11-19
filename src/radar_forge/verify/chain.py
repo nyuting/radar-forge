@@ -1,6 +1,6 @@
 r"""The five stages every scenario runs: ``geometry``, ``iq``, ``rd``, ``detect``, ``track``.
 
-Each takes and returns the run's :class:`~radar_forge.evaluate.Context`: it prints and records
+Each takes and returns the run's :class:`~radar_forge.verify.stepper.Context`: it prints and records
 what it measured, checks the ``[verify]`` thresholds it registered, and writes its files.
 ``geometry`` writes ``truth.csv``; ``iq`` checks each burst's noise and noiseless peak;
 ``rd`` forms, detects and draws every scan's maps and measures the false-alarm rate on noise;
@@ -22,7 +22,7 @@ from typing import Any
 import numpy as np
 from scipy.stats import chi2
 
-from radar_forge import evaluate, figures
+from radar_forge import figures
 from radar_forge.array import enu_to_array_frame
 from radar_forge.clutter import cancel
 from radar_forge.coordinates import directions_unit
@@ -44,6 +44,7 @@ from radar_forge.signal import thermal_noise
 from radar_forge.tracking.filters import TrackStatus, is_confirmed
 from radar_forge.tracking.metrics import nees
 from radar_forge.units import power_to_db
+from radar_forge.verify import stepper
 
 __all__ = ["detect", "geometry", "iq", "rd", "track"]
 
@@ -54,17 +55,17 @@ _FALSE_ALARMS = 30.0
 _MAX_CELLS = 4_000_000
 
 
-@evaluate.stage("geometry", "truth_in_map_fraction", "expected_snr_db", "snr_tolerance_db")
-def geometry(ctx: evaluate.Context) -> evaluate.Context:
+@stepper.stage("geometry", "truth_in_map_fraction", "expected_snr_db", "snr_tolerance_db")
+def geometry(ctx: stepper.Context) -> stepper.Context:
     """Truth for every scan; link budget, baseline and unambiguous limits; truth.csv."""
     scenario, radar, verify, truths = (
         ctx.scenario,
         ctx.scenario.radar,
-        evaluate.thresholds(ctx, "geometry"),
-        evaluate.truth(ctx),
+        stepper.thresholds(ctx, "geometry"),
+        stepper.truth(ctx),
     )
     rcs_m2 = list(scenario.rcs_m2)
-    power_w = float(evaluate.target_power_w(radar, truths[0], rcs_m2)[0])
+    power_w = float(stepper.target_power_w(radar, truths[0], rcs_m2)[0])
     # Integrated over one chirp's samples and every pulse: P T N / N0, on an exact bin.
     gain = radar.n_samples_per_chirp * scenario.n_pulses[0]
     snr_db = float(power_to_db(power_w / radar.receiver.noise_power_per_sample_w * gain))
@@ -81,7 +82,7 @@ def geometry(ctx: evaluate.Context) -> evaluate.Context:
     ):
         ctx.record(name, value)
     # Inside the map unfolded: one burst's spans, or the larger span and the dual-PRF bound.
-    spans = [evaluate.spans(scenario, k) for k in range(len(scenario.radars))]
+    spans = [stepper.spans(scenario, k) for k in range(len(scenario.radars))]
     half_rate_mps = (
         scenario.detection.max_bistatic_range_rate_mps if len(spans) == 2 else spans[0][1] / 2
     )
@@ -117,14 +118,14 @@ def geometry(ctx: evaluate.Context) -> evaluate.Context:
                 row["direction_cosine_x"] = in_array[k, 0]
                 row["azimuth_boresight_deg"] = math.degrees(math.asin(in_array[k, 0]))  # asin(u)
             rows.append(row)
-    evaluate.write_csv(ctx.out_dir / "truth.csv", rows)
+    stepper.write_csv(ctx.out_dir / "truth.csv", rows)
     return ctx
 
 
-@evaluate.stage("iq", "noise_tolerance_db", "peak_tolerance_db")
-def iq(ctx: evaluate.Context) -> evaluate.Context:
+@stepper.stage("iq", "noise_tolerance_db", "peak_tolerance_db")
+def iq(ctx: stepper.Context) -> stepper.Context:
     """Noise per sample of a target-free cube, and scan 0's noiseless peak, every burst."""
-    scenario, verify, first = ctx.scenario, evaluate.thresholds(ctx, "iq"), evaluate.truth(ctx)[0]
+    scenario, verify, first = ctx.scenario, stepper.thresholds(ctx, "iq"), stepper.truth(ctx)[0]
     rcs_m2 = np.array(scenario.rcs_m2)
     noise_errors_db, peak_errors_db = [], []
     for k, (radar, n_pulses) in enumerate(zip(scenario.radars, scenario.n_pulses, strict=True)):
@@ -142,7 +143,7 @@ def iq(ctx: evaluate.Context) -> evaluate.Context:
         )
         # The strongest target's power: exact for one target, a lower bound for several.
         peak_errors_db.append(
-            abs(peak_db - float(power_to_db(evaluate.target_power_w(radar, first, rcs_m2).max())))
+            abs(peak_db - float(power_to_db(stepper.target_power_w(radar, first, rcs_m2).max())))
         )
         if k == 0:
             ctx.record("iq_noise_power_dbw", noise_db)
@@ -188,10 +189,10 @@ def _hits(
     return list(np.any(near_rate & near_range, axis=1))
 
 
-@evaluate.stage("rd", "truth_within_bins", "detection_fraction", "pfa_tolerance_factor")
-def rd(ctx: evaluate.Context) -> evaluate.Context:
+@stepper.stage("rd", "truth_within_bins", "detection_fraction", "pfa_tolerance_factor")
+def rd(ctx: stepper.Context) -> stepper.Context:
     """Map, CFAR and cluster every scan; detections near truth; Pfa on noise; rd PNGs."""
-    scenario, verify = ctx.scenario, evaluate.thresholds(ctx, "rd")
+    scenario, verify = ctx.scenario, stepper.thresholds(ctx, "rd")
     bins, hits = float(verify.get("truth_within_bins", 1.0)), []
     for scan in scan_iq(scenario, n_scans=ctx.n_scans):
         # A noise scan is cancelled once, here; the map and the leakage stage both use it.
@@ -201,7 +202,7 @@ def rd(ctx: evaluate.Context) -> evaluate.Context:
             else None
         )
         products = scan_products(scenario, scan, cancellation=cancellation)
-        if cancellation is not None and scan.index < evaluate.n_cached_scans(ctx):
+        if cancellation is not None and scan.index < stepper.n_cached_scans(ctx):
             ctx.cancelled.append((scan, cancellation, products[0]))
         found = scan_plots(products, scenario.detection)
         ctx.plots.append(found)
@@ -268,14 +269,14 @@ def _false_alarm_ratio(scenario: Scenario, burst: int) -> float:
     return float(np.mean(detected) / settings.pfa)
 
 
-@evaluate.stage("detect", "truth_within_bins", "rate_tolerance_mps")
-def detect(ctx: evaluate.Context) -> evaluate.Context:
+@stepper.stage("detect", "truth_within_bins", "rate_tolerance_mps")
+def detect(ctx: stepper.Context) -> stepper.Context:
     """Rate of the plot nearest each target against its truth; plot counts; detections.csv."""
-    scenario, verify, truths = ctx.scenario, evaluate.thresholds(ctx, "detect"), evaluate.truth(ctx)
+    scenario, verify, truths = ctx.scenario, stepper.thresholds(ctx, "detect"), stepper.truth(ctx)
     if len(ctx.plots) != ctx.n_scans:
         msg = "the detect stage needs the rd stage's plots; run rd first."
         raise ValueError(msg)
-    range_span_m, rate_span_mps, range_bin_m = evaluate.spans(scenario, 0)
+    range_span_m, rate_span_mps, range_bin_m = stepper.spans(scenario, 0)
     within_m = float(verify.get("truth_within_bins", 1.0)) * range_bin_m
     errors_mps, show, rows = [], figures.display_axes(scenario.radar), []
     # A noise burst's lags are a window: a gap in range is not taken the short way round.
@@ -317,22 +318,22 @@ def detect(ctx: evaluate.Context) -> evaluate.Context:
     error_mps = ctx.record("rate_error_max_mps", max(errors_mps, default=math.nan))
     if "rate_tolerance_mps" in verify:
         ctx.check("detect", "rate_error_max_mps", error_mps, 0.0, verify["rate_tolerance_mps"])
-    evaluate.write_csv(ctx.out_dir / "detections.csv", rows)
+    stepper.write_csv(ctx.out_dir / "detections.csv", rows)
     return ctx
 
 
-@evaluate.stage(
+@stepper.stage(
     "track",
     "range_rmse_max_m",
     "range_rate_rmse_max_mps",
     "nees_fraction_min",
     "confirmation_latency_max_scans",
 )
-def track(ctx: evaluate.Context) -> evaluate.Context:
+def track(ctx: stepper.Context) -> stepper.Context:
     """Track every scan; score each target's primary track; tracks, metrics and track.png."""
     scenario, verify, settings = (
         ctx.scenario,
-        evaluate.thresholds(ctx, "track"),
+        stepper.thresholds(ctx, "track"),
         ctx.scenario.tracking,
     )
     if len(ctx.plots) != ctx.n_scans or settings is None:
@@ -365,7 +366,7 @@ def track(ctx: evaluate.Context) -> evaluate.Context:
             measured = bank.measurement_index[r]
             row["detection_id"] = accepted[measured] if measured >= 0 else ""
             rows.append(row)
-    evaluate.write_csv(ctx.out_dir / "tracks.csv", rows)
+    stepper.write_csv(ctx.out_dir / "tracks.csv", rows)
     scores, metric_rows, tracks = _score(ctx, period_m)
     for name, value in scores.items():
         ctx.record(name, value)
@@ -377,7 +378,7 @@ def track(ctx: evaluate.Context) -> evaluate.Context:
     for row in metric_rows:
         if row["metric"] in shown:
             row["metric"], row["value"] = shown[row["metric"]], row["value"] * show.scale
-    evaluate.write_csv(ctx.out_dir / "metrics.csv", metric_rows)
+    stepper.write_csv(ctx.out_dir / "metrics.csv", metric_rows)
     # A run shorter than two confirmation windows scores too few scans to judge a tracker.
     if ctx.n_scans < 2 * settings.n_confirm_scans:
         print(f"  under {2 * settings.n_confirm_scans} scans: too short to check a tracker")
@@ -401,7 +402,7 @@ def track(ctx: evaluate.Context) -> evaluate.Context:
             if key in verify:
                 ctx.check("track", name, scores[name], low, high)
     if ctx.render:
-        truths = evaluate.truth(ctx)
+        truths = stepper.truth(ctx)
         accepted_m = [found.bistatic_range_m[found.accepted] for found in ctx.plots]
         # broadcast-exempt: one scan time per accepted plot, for a scatter.
         plot_time_s = np.repeat(scenario.scan_times_s[: ctx.n_scans], [r.size for r in accepted_m])
@@ -423,7 +424,7 @@ def track(ctx: evaluate.Context) -> evaluate.Context:
 
 
 def _score(
-    ctx: evaluate.Context, period_m: float
+    ctx: stepper.Context, period_m: float
 ) -> tuple[dict[str, float], list[dict[str, Any]], list[Any]]:
     """Score each target's primary track, the one nearest it in the most confirmed scans.
 
@@ -432,7 +433,7 @@ def _score(
     §5.4.2); latency is scans from a track's first row to its confirmation. Over targets the
     worst of each is reported. Returns the scores, the metrics.csv rows and the tracks drawn.
     """
-    truths = evaluate.truth(ctx)
+    truths = stepper.truth(ctx)
     confirmed = [is_confirmed(b.status) for b, _ in ctx.banks]
     votes: dict[tuple[int, int], int] = {}
     # Each scan's confirmed tracks vote for the target nearest in range: a few rows a scan.
