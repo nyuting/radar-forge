@@ -3,7 +3,8 @@ r"""Decibels: a power or an amplitude to and from dB, each conversion written on
 A power ratio is :math:`10\log_{10}` of itself and an amplitude ratio (a voltage, a field, a
 magnitude) :math:`20\log_{10}`, so a signal's power and its amplitude are the same number of
 decibels [1]. MATLAB calls the pairs ``pow2db``/``db2pow`` and ``mag2db``/``db2mag``. A power in
-W gives dBW. Zero is ``-inf`` dB; a negative or nan value has no decibel value and raises.
+W gives dBW. Zero is ``-inf`` dB and nan stays nan, an absent value; a negative value has no
+decibel value and raises.
 
 References
 ----------
@@ -44,9 +45,9 @@ def db_to_amplitude(value_db: ArrayLike) -> NDArray[np.float64]:
 def _decibels(value_linear: ArrayLike, factor: float) -> NDArray[np.float64]:
     """Return ``factor`` times the base-10 logarithm of a non-negative value; zero is -inf."""
     value_arr = np.asarray(value_linear, dtype=np.float64)
-    # `not x >= 0` rather than `x < 0`, so nan is refused too.
-    if not np.all(value_arr >= 0.0):
-        msg = "value_linear must be non-negative and not nan: only those have a decibel value."
+    # x < 0 rather than not x >= 0: nan is no estimate, and stays nan.
+    if np.any(value_arr < 0.0):
+        msg = "value_linear must be non-negative: a negative value has no decibel value."
         raise ValueError(msg)
     with np.errstate(divide="ignore"):  # errstate-exempt: log10(0) is -inf, zero's decibels
         result: NDArray[np.float64] = factor * np.log10(value_arr)

@@ -386,6 +386,9 @@ class TestCrossSection:
         with pytest.raises(ValueError, match="strictly positive"):
             m2_to_dbsm(0.0)
 
+    def test_an_absent_area_stays_nan(self) -> None:
+        assert np.isnan(m2_to_dbsm(np.nan))
+
     def test_point_target_round_trips_through_dbsm(self) -> None:
         target = PointTarget.from_dbsm(13.0, name="light-aircraft")
         np.testing.assert_allclose(target.rcs_dbsm, 13.0, rtol=1e-12)

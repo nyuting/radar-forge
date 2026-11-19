@@ -425,6 +425,19 @@ def test_cancellation_depth_is_infinite_for_a_silent_residual_and_refused_withou
         cancellation_depth_db(np.zeros(4), np.zeros(4))
 
 
+def test_a_target_past_the_lag_window_records_nan_and_the_stage_finishes(tmp_path):
+    """Regression: with no truth cell the floor is nan, and each ratio in dB of it stays nan.
+
+    The static scene's target sits past lag 512; one frame of the leakage stage, about 2 s.
+    """
+    scenario = load_scenario(REPO / "config" / "scenario_005_static_leakage.toml")
+    scenario = dataclasses.replace(scenario, n_range_lags=(512,), verify={"stages": ["leakage"]})
+    report = evaluate.run(scenario, n_frames=1, out_dir=tmp_path, render=False)
+    for name in ("floor_rise_db", "sinr_db", "clean_sinr_db", "uncancelled_sinr_db"):
+        assert math.isnan(report.values[f"{name}[0]"]), name
+    assert math.isfinite(report.values["cancellation_depth_db[0]"])
+
+
 def test_a_target_past_the_lag_window_has_no_truth_cell():
     """Off the window, or within half a lag of its end, the target has no cell (no IndexError)."""
     lags = SPEED_OF_LIGHT_MPS * np.arange(8) / SAMPLE_RATE_HZ

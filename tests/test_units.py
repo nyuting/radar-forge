@@ -55,10 +55,16 @@ class TestEdges:
             assert to_db(0.0) == -np.inf
             assert to_db([0.0, 1.0]).tolist() == [-np.inf, 0.0]
 
-    @pytest.mark.parametrize("value", [-1e-30, math.nan, [1.0, -2.0]])
-    def test_a_negative_or_nan_value_raises(self, to_db, value) -> None:
+    @pytest.mark.parametrize("value", [-1e-30, [1.0, -2.0], [math.nan, -1.0]])
+    def test_a_negative_value_raises(self, to_db, value) -> None:
         with pytest.raises(ValueError, match="value_linear must be non-negative"):
             to_db(value)
+
+    def test_nan_is_no_value_and_stays_nan_without_a_warning(self, to_db) -> None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert math.isnan(to_db(math.nan))
+            np.testing.assert_array_equal(to_db([math.nan, 1.0]), [math.nan, 0.0])
 
     def test_infinity_is_infinite_decibels(self, to_db) -> None:
         assert to_db(np.inf) == np.inf
@@ -70,3 +76,10 @@ class TestEdges:
 def test_minus_infinity_decibels_is_nothing() -> None:
     assert db_to_power(-np.inf) == 0.0
     assert db_to_amplitude(-np.inf) == 0.0
+
+
+@pytest.mark.parametrize("from_db", [db_to_power, db_to_amplitude])
+def test_nan_decibels_stay_nan(from_db) -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert math.isnan(from_db(math.nan))
