@@ -312,7 +312,7 @@ def _radial_scan(time_s: float, detections: Any) -> Scan:
 
 
 def test_a_pair_that_fails_its_rate_gate_is_kept_through_range_alone() -> None:
-    """Spec §5.4's retry: a wrong fold costs the rate, not the range."""
+    """Tracker-001 §5.4's retry: a wrong fold costs the rate, not the range."""
     plain = _radial()
     retrying = _radial(
         cost="negative_log_likelihood_ratio",
@@ -351,8 +351,8 @@ def test_the_retry_reports_the_nis_of_the_model_it_passed() -> None:
 
 
 def test_nis_costs_of_two_dimensions_in_one_scan_are_refused_and_change_nothing() -> None:
-    """Spec §5.1: a 1-D NIS undercuts a 2-D one. One detection gates at two components, the other
-    through range alone."""
+    """Tracker-001 §5.1: a 1-D NIS undercuts a 2-D one. One detection gates at two components,
+    the other through range alone."""
     tracker = _radial(model_selector=_full_then_range)
     bank = tracker.bank
     with pytest.raises(ValueError, match="likelihood ratio"):
@@ -522,7 +522,7 @@ def test_a_target_keeps_one_track_through_clutter_and_missed_detections(
 
 
 def test_unscented_and_taylor_trackers_agree_on_a_linear_scene() -> None:
-    """On linear models the UKF is the KF (spec §3), so the whole loop gives the same banks."""
+    """On linear models the UKF is the KF (tracker-001 §3): the whole loop gives the same banks."""
     banks = []
     for linearisation in (TaylorLinearisation(), UnscentedTransform()):
         tracker = _one_axis(linearisation=linearisation)

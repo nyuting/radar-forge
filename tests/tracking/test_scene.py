@@ -2,8 +2,8 @@
 
 Ground truth is closed form where there is one (a turn's radius v/omega, a straight leg's
 kinematics, a disc's volume in m rad), a binomial or Poisson interval for every random
-draw (spec 011 A6, A7), and the scene's own encounter table and notch fractions, which the
-spec states and the configured arcs must regenerate (A8).
+draw, and the scene's own encounter table and notch fractions, which the
+configured arcs must regenerate.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 from scipy.stats import beta, binom, poisson
 
+from radar_forge.coordinates import east_north_to_range_azimuth_rad
 from radar_forge.scenario import load_scenario
 from radar_forge.tracking.scene import (
     Arc,
@@ -27,9 +28,7 @@ from radar_forge.tracking.scene import (
     detection_probability,
     measure,
     poisson_clutter_plots,
-    polar,
     resolve,
-    to_enu,
 )
 
 SEED = 20261106
@@ -83,7 +82,7 @@ def test_an_echo_in_the_notch_takes_the_notch_pd() -> None:
 
 @pytest.mark.parametrize("separation", [0.5, 1.0, 2.0])
 def test_a_pair_merges_with_the_gaussian_resolution_probability(separation: float) -> None:
-    """A7: 10 000 seeded pairs at d resolution units; merged fraction in its 99.9 % interval.
+    """10 000 seeded pairs at d resolution units; merged fraction in its 99.9 % interval.
 
     Pairs lie 10^6 m apart in range, so only the intended partners can merge; half are offset
     in range and half in azimuth.
@@ -135,7 +134,7 @@ def test_a_merged_plot_lies_at_its_echoes_centroid_even_across_north() -> None:
 
 
 def _components() -> list[ClutterComponent]:
-    """Spec 011 §3.2's V4 layers: background, ground residue, the drifting rain cell."""
+    """V4's layers: background, ground residue, the drifting rain cell."""
     return list(load_scenario(TERMINAL).clutter_plots.components)
 
 
@@ -168,7 +167,7 @@ def test_a_disc_of_clutter_has_the_volume_of_its_integral_of_one_over_range(
 
 
 def test_every_clutter_component_draws_its_intensity_times_volume() -> None:
-    """A6: each layer's plots over 125 scans in the 99 % Poisson interval of lambda V.
+    """Each layer's plots over 125 scans in the 99 % Poisson interval of lambda V.
 
     Catches an intensity per square metre where one per (m rad) was meant: the counts would be
     off by the range, thousands of times.
@@ -189,7 +188,7 @@ def test_every_clutter_component_draws_its_intensity_times_volume() -> None:
 def test_the_oracle_intensity_sums_the_layers_a_point_lies_in() -> None:
     components = _components()
     # The rain centre at 0 s is inside the background and the rain; 3 km is ground residue too.
-    rain_r, rain_az = polar(np.array([20e3, 4e3]))
+    rain_r, rain_az = east_north_to_range_azimuth_rad(np.array([20e3, 4e3]))
     got = clutter_intensity(components, [float(rain_r), 3e3], [float(rain_az), 0.0], 0.0)
     np.testing.assert_allclose(got, [0.0021683 + 0.65048, 0.0021683 + 0.065048], rtol=1e-12)
 
@@ -235,7 +234,7 @@ def test_an_empty_clutter_map_holds_its_prior_then_its_floor() -> None:
     )
 
 
-# --- A8: the scene regenerates spec 011's encounter table and notch fractions ---
+# --- the scene regenerates the encounter table and notch fractions ---
 
 ENCOUNTERS = [
     # (pair, minimum d, at s, ground separation m, track angle deg, scans with P_u > 0.5)
@@ -250,15 +249,15 @@ NOTCH = {"HE": 0.156, "L1": 0.120, "L2": 0.130, "A4": 0.053, "A2": 0.052, "A1": 
 
 def _distance(a_m: np.ndarray, b_m: np.ndarray) -> np.ndarray:
     """Return the normalised (range, azimuth) distance d between two position tracks."""
-    range_a, az_a = polar(a_m)
-    range_b, az_b = polar(b_m)
+    range_a, az_a = east_north_to_range_azimuth_rad(a_m)
+    range_b, az_b = east_north_to_range_azimuth_rad(b_m)
     gap_az = np.mod(az_a - az_b + np.pi, 2 * np.pi) - np.pi
     return np.hypot((range_a - range_b) / ALPHA_RANGE_M, gap_az / ALPHA_AZIMUTH_RAD)
 
 
 @pytest.mark.parametrize("encounter", ENCOUNTERS, ids=["-".join(e[0]) for e in ENCOUNTERS])
 def test_the_scene_regenerates_its_closest_approaches(encounter: tuple) -> None:
-    """A8: min d to 0.01, its first time to 0.1 s, separation to 1 m, angle to 1 deg, scans exact.
+    """Min d to 0.01, its first time to 0.1 s, separation to 1 m, angle to 1 deg, scans exact.
 
     A scan's beam crosses the pair at its mean azimuth, found by fixed point from the rotation's
     start.
@@ -280,14 +279,16 @@ def test_the_scene_regenerates_its_closest_approaches(encounter: tuple) -> None:
         time_s = 4.8 * scan
         for _ in range(3):
             middle = (arcs[first].state(time_s)[0] + arcs[second].state(time_s)[0]) / 2
-            time_s = 4.8 * scan + float(polar(middle)[1]) / (2 * np.pi) * 4.8
+            time_s = (
+                4.8 * scan + float(east_north_to_range_azimuth_rad(middle)[1]) / (2 * np.pi) * 4.8
+            )
         separation = _distance(arcs[first].state(time_s)[0], arcs[second].state(time_s)[0])
         seen += bool(np.exp(-(separation**2) / 2) > 0.5)
     assert seen == n_scans
 
 
 def test_the_scene_regenerates_its_notch_fractions() -> None:
-    """A8: the fraction of each aircraft's life with |range rate| < 4 m/s, to 0.001."""
+    """The fraction of each aircraft's life with |range rate| < 4 m/s, to 0.001."""
     grid_s = np.arange(0.0, 600.0001, 0.1)
     for target in load_scenario(TERMINAL).arcs:
         position_m, velocity_mps = target.arc.state(grid_s)
@@ -305,11 +306,11 @@ def test_the_scene_regenerates_its_notch_fractions() -> None:
 # Slow: 120 frames of scenario 001's S3 chain, two FFTs and CFAR a burst, about three minutes.
 @pytest.mark.slow
 def test_the_iq_chain_merges_close_pairs_as_the_gaussian_resolution_model(tmp_path: Path) -> None:
-    """A14: V5's one-detection fraction at four separations against the plot model's.
+    """V5's one-detection fraction at four separations against the plot model's.
 
     A pair gives one detection when it merges and is seen, or is resolved and one member is
     missed: P_u (1 - (1 - p)^2) + (1 - P_u) 2 p (1 - p), P_u = exp(-(dr / alpha_r)^2 / 2) and p
-    the Pd the plot model is given for V5, 0.99 (A13). At 6 bins only the second term is left:
+    the Pd the plot model is given for V5, 0.99. At 6 bins only the second term is left:
     there the chain's one detection is a member masked by its partner in the CFAR's training
     cells, a miss the plot model draws at random. alpha_r is fitted by maximum likelihood to the
     four binomial counts; each measured fraction must lie in its 99 % Clopper-Pearson interval
@@ -357,17 +358,3 @@ def test_a_leg_that_decelerates_past_a_stop_is_refused() -> None:
     with pytest.raises(ValueError, match="decelerates"):
         Arc(0.0, (0.0, 0.0), 0.0, 10.0, (Leg(10.0, 0.0, -2.0),))
     Arc(0.0, (0.0, 0.0), 0.0, 10.0, (Leg(5.0, 0.0, -2.0),))
-
-
-def test_polar_and_to_enu_are_the_radar_modules_convention() -> None:
-    """Range and azimuth clockwise from north, from the radar module, and back again."""
-    from radar_forge.radar import enu_to_range_azimuth_elevation_rad
-
-    rng = np.random.default_rng(SEED)
-    position_m = rng.normal(0.0, 2e4, (50, 2))
-    range_m, azimuth_rad = polar(position_m)
-    expected = enu_to_range_azimuth_elevation_rad(np.column_stack([position_m, np.zeros(50)]))
-    np.testing.assert_array_equal(range_m, expected[0])
-    np.testing.assert_array_equal(azimuth_rad, expected[1])
-    # rtol 1e-12: two trigonometric round trips.
-    np.testing.assert_allclose(to_enu(range_m, azimuth_rad), position_m, rtol=1e-12, atol=1e-8)

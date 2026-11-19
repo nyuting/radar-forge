@@ -70,7 +70,7 @@ def _doppler_rate_mps(radar: Radar, doppler_bin: int, n_pulses: int = N_PULSES) 
 
 
 def _fmcw_bistatic_range_m(range_bin: int) -> float:
-    """S1's bistatic range at the centre of a fast-time FFT bin: R_b = c f_b / alpha."""
+    """S1's range (scenario_001_fmcw_low_prf) at a fast-time FFT bin's centre: c f_b / alpha."""
     beat_hz = range_bin * S1_RADAR.receiver.sample_rate_hz / S1_RADAR.n_samples_per_pri
     return SPEED_OF_LIGHT_MPS * beat_hz / S1_RADAR.transmitter.sweep_rate_hzps
 

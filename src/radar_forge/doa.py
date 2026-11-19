@@ -49,6 +49,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.optimize import minimize, minimize_scalar
 
+from radar_forge._periodic import fold
 from radar_forge.array import (
     ArrayGeometry,
     beam_power,
@@ -720,5 +721,5 @@ def _peaks(
         )
         found.append(float(best.x))
     # A half-wavelength array sees u and u + 2 alike: fold back into [-1, 1).
-    result: NDArray[np.float64] = np.sort(np.mod(np.asarray(found) + 1.0, 2.0) - 1.0)
+    result: NDArray[np.float64] = np.sort(fold(found, 2.0, lower=-1.0))
     return result

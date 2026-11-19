@@ -2,7 +2,7 @@
 # received on a 16-channel array at the Duke Receiver. The variants share every block but
 # [second_aircraft], F3 also its cross-sections, and [verify]. Every range and rate on the map is
 # bistatic, positive receding: monostatic, twice the slant range and twice the radial velocity.
-# Aircraft B is built in the array's coordinates (spec section 4.3): aircraft A's ranges, rate and
+# Aircraft B is built in the array's coordinates: aircraft A's ranges, rate and
 # elevation, its direction cosine u moved right by separation_rayleigh Rayleigh widths, 0.125 in u.
 
 [scenario]
@@ -81,7 +81,7 @@ half_width_bins = 2
 [verify]
 stages = ["geometry", "iq", "rd", "detect", "doa"]
 # Per channel: P_r T N / (k T0 F) on an exact bin at frame 0 (17,560.7 m slant), 20 dBi: S1's
-# 52.01 dB less 10 dB. The window spans 41.24 to 42.95 dB (spec section 3.3).
+# 52.01 dB less 10 dB. The window spans 41.24 to 42.95 dB.
 expected_snr_db = 42.01
 snr_tolerance_db = 0.01
 # S1 folds the rate at +-15.3 m/s: 20 of 120 frames lie inside.
@@ -92,14 +92,16 @@ noise_tolerance_db = 0.05
 truth_within_bins = 1.0
 detection_fraction = 1.0
 rate_tolerance_mps = 0.119496
-# A10: FBSS-MUSIC, FBSS-ESPRIT, IAA and ML resolve the pair, P >= 0.95. A8, A10 and A11 are
-# statistics of 200 trials: the stage judges them from 50 frames on, so on the whole window.
+# FBSS-MUSIC, FBSS-ESPRIT, IAA and ML resolve the pair, P >= 0.95. The resolved fractions and RMSE
+# bounds are statistics of 200 trials: the stage judges them from 50 frames on, so on the whole
+# window.
 resolved_methods = ["fbss_music", "fbss_esprit", "iaa", "deterministic_ml"]
 resolved_fraction_min = 0.95
-# A8: MUSIC and ESPRIT on the raw chip covariance fail, P <= 0.25.
+# MUSIC and ESPRIT on the raw chip covariance fail, P <= 0.25.
 baseline_methods = ["music", "esprit"]
 baseline_resolved_fraction_max = 0.25
-# A11: RMSE over the bound's deviation at the truth, set from the prototype at 38.23 dB.
+# RMSE over the bound's deviation at the truth, set from a 200-trial run of the snapshot model
+# (tests/test_doa.py) at 38.23 dB.
 deterministic_ml_rmse_crb_max = 1.3
 fbss_music_rmse_crb_max = 1.5
 fbss_esprit_rmse_crb_max = 1.5
@@ -107,9 +109,9 @@ iaa_rmse_crb_max = 4.0
 # ML within this of both truths every frame: six deviations of the bound at its worst in the
 # window, 41.24 dB less 7.84 dB of scalloping, at the worst relative phase, 0.00252 each.
 direction_cosine_tolerance = 0.016
-# A7: the noiseless chip's raw covariance is rank one.
+# The noiseless chip's raw covariance is rank one.
 rank_ratio_max = 1e-12
-# A13: the noiseless peak cell equals g A(u) s per channel.
+# The noiseless peak cell equals g A(u) s per channel.
 snapshot_model_tolerance = 1e-9
-# A16: the chip's cell, bins and estimates equal the uncropped map's.
+# The chip's cell, bins and estimates equal the uncropped map's.
 parent_coordinates_tolerance = 1e-12

@@ -40,7 +40,8 @@ from radar_forge.units import power_to_db
 
 __all__ = ["keystone_stage"]
 
-# The pulses either end of the dwell that DFT interpolation leaves ringing (spec A2).
+# The pulses either end of the dwell that DFT interpolation leaves ringing: the residual walk
+# leaves them out.
 _RINGING_PULSES = 1
 # Range bins either side of the target that keystone.png shows.
 _PLOT_HALF_WIDTH = 120

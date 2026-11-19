@@ -22,7 +22,6 @@ from radar_forge.array import (
     beam_power,
     conventional_weights,
     direction_cosine,
-    directions_unit,
     enu_to_array_frame,
     forward_backward_average,
     is_centro_symmetric,
@@ -35,6 +34,7 @@ from radar_forge.array import (
     subarray,
     uniform_linear_array,
 )
+from radar_forge.coordinates import directions_unit
 from radar_forge.pipeline import range_doppler_product, synthesise
 from radar_forge.propagation import line_of_sight_paths
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter
@@ -54,7 +54,7 @@ def _toward(u: float) -> np.ndarray:
 
 
 def test_broadside_steering_vector_is_all_ones_of_norm_n_rx():
-    """A1: a(u = 0) is all ones, ||a||^2 = n_rx."""
+    """a(u = 0) is all ones, ||a||^2 = n_rx."""
     a = steering_vectors(ULA, _toward(0.0), WAVELENGTH_M)[:, 0]
     # A few float64 operations from exp(0): rtol 1e-12.
     np.testing.assert_allclose(a, np.ones(16), rtol=1e-12)
@@ -62,7 +62,7 @@ def test_broadside_steering_vector_is_all_ones_of_norm_n_rx():
 
 
 def test_endfire_phase_step_is_pi_and_the_element_at_larger_x_leads():
-    """A2: at u = +1 adjacent elements step by +pi at d = lambda/2; for u > 0, larger x leads."""
+    """At u = +1 adjacent elements step by +pi at d = lambda/2; for u > 0, larger x leads."""
     a = steering_vectors(ULA, _toward(1.0), WAVELENGTH_M)[:, 0]
     # Each step is a(n+1)/a(n) = exp(+j pi): rtol 1e-12 on the complex ratio.
     np.testing.assert_allclose(a[1:] / a[:-1], -np.ones(15), rtol=1e-12)
@@ -139,7 +139,7 @@ def test_forward_backward_keeps_one_source_and_refuses_an_uncentred_array():
 
 
 def test_mvdr_is_distortionless_and_white_noise_mvdr_is_the_conventional_beam():
-    """A20: w(u0)^H a(u0) = 1; with R = sigma^2 I, MVDR equals the conventional weights."""
+    """w(u0)^H a(u0) = 1; with R = sigma^2 I, MVDR equals the conventional weights."""
     a = steering_vectors(ULA, np.concatenate([_toward(0.1), _toward(-0.3)]), WAVELENGTH_M)
     interference = steering_vectors(ULA, _toward(0.4), WAVELENGTH_M)
     r = 1e3 * interference @ interference.conj().T + 2.0 * np.eye(16)
@@ -221,7 +221,7 @@ def _one(paths, p: int) -> dict:
 
 
 def test_a_zero_scattering_phase_is_the_default_bit_for_bit(radars):
-    """A12 at the generator: zero phase and no response leave the one-channel cube as it was."""
+    """At the generator: zero phase and no response leave the one-channel cube as it was."""
     fmcw, _ = radars
     geometry = TargetGeometry.monostatic([6000.0, 6100.0], [-40.0, 25.0], azimuth_rad=[0.1, 0.25])
     default = line_of_sight_paths(fmcw, geometry, [10.0, 4.0])
@@ -290,7 +290,7 @@ def test_a_channel_map_keeps_the_channel_axis_and_detects_on_its_boresight_beam(
 
 
 def test_aircraft_b_shares_aircraft_as_range_and_rate_at_half_a_rayleigh_width():
-    """Spec 4.3: B has A's ranges, rate and elevation, and u + 0.5 x 0.125."""
+    """B has A's ranges, rate and elevation, and u + 0.5 x 0.125."""
     scenario = load_scenario(F2)
     for frame in truth_geometry(scenario)[:5]:
         np.testing.assert_array_equal(frame.bistatic_range_m[1], frame.bistatic_range_m[0])

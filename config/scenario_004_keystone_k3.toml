@@ -72,19 +72,19 @@ truth_within_bins = 1.0
 detection_fraction = 1.0
 # The folded rate, -670.45 m/s, within one bin.
 rate_tolerance_mps = 1.49370
-# A1: 2200 m/s x 20.48 ms / 0.49965 m = 90.174 bins, +-1 bin.
+# 2200 m/s x 20.48 ms / 0.49965 m = 90.174 bins, +-1 bin.
 walk_bins = 90.174
 walk_tolerance_bins = 1.0
-# A2: with fold factor 1 the keystoned peak track stays within half a bin.
+# With fold factor 1 the keystoned peak track stays within half a bin.
 residual_walk_max_bins = 0.5
-# A3: uncorrected, the model gives -34.67 dB (-36.78 for a flat band); +-1.0 dB.
+# Uncorrected, the model gives -34.67 dB (-36.78 for a flat band); +-1.0 dB.
 uncompensated_loss_db = -34.67
 loss_tolerance_db = 1.0
-# A6: the wrong fold factor 0 keystones the alias, leaving 62.7 of the 90.2 bins of walk:
+# The wrong fold factor 0 keystones the alias, leaving 62.7 of the 90.2 bins of walk:
 # -31.21 dB (model), +-1.0 dB, 3.5 dB better than no keystone, 31 dB short of fold factor 1.
 keystone_only_loss_db = -31.21
 fold_factor = 1
 compensated_loss_min_db = -0.3
-# A19: the fine rate, unfolded by the searched fold factor, within three of its bounds of
+# The fine rate, unfolded by the searched fold factor, within three of its bounds of
 # -2200 m/s, not at the folded -670.45 m/s.
 rate_error_max_crb = 3.0

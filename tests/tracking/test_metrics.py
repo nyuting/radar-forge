@@ -60,11 +60,11 @@ def test_the_consistency_interval_rejects_an_impossible_setting(dim: int, n: int
         consistency_interval(dim, n, p)
 
 
-# --- GOSPA and trajectory GOSPA (spec 011 criterion A9) ---
+# --- GOSPA and trajectory GOSPA ---
 
 
 def test_gospa_of_one_missed_truth_is_c_over_root_two() -> None:
-    """A9: no estimate, one truth: (c^p / 2)^(1/p) = 300 / sqrt(2) m, all of it missed."""
+    """No estimate, one truth: (c^p / 2)^(1/p) = 300 / sqrt(2) m, all of it missed."""
     score = gospa(np.zeros((0, 2)), [[1e3, 2e3]], cutoff_m=300.0)
     assert score.distance_m == pytest.approx(300.0 / np.sqrt(2.0), rel=1e-15)
     assert (score.n_missed, score.n_false, score.missed_m, score.false_m) == (
@@ -76,14 +76,14 @@ def test_gospa_of_one_missed_truth_is_c_over_root_two() -> None:
 
 
 def test_gospa_of_one_false_estimate_is_c_over_root_two() -> None:
-    """A9: one estimate, no truth: the same 212.13 m, all of it false."""
+    """One estimate, no truth: the same 212.13 m, all of it false."""
     score = gospa([[1e3, 2e3]], np.zeros((0, 2)), cutoff_m=300.0)
     assert score.distance_m == pytest.approx(300.0 / np.sqrt(2.0), rel=1e-15)
     assert (score.n_missed, score.n_false) == (0, 1)
 
 
 def test_gospa_of_one_localisation_error_is_that_error() -> None:
-    """A9: a 3-4-5 error of 50 m inside the cutoff is the distance itself; a 400 m one is c."""
+    """A 3-4-5 error of 50 m inside the cutoff is the distance itself; a 400 m one is c."""
     near = gospa([[30.0, 40.0]], [[0.0, 0.0]], cutoff_m=300.0)
     assert near.distance_m == pytest.approx(50.0, rel=1e-15)
     assert near.localisation_m == pytest.approx(50.0, rel=1e-15)

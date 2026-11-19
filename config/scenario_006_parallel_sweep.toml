@@ -1,15 +1,17 @@
-# Scenario 006 F3 -- the separation sweep's point that the suite checks (spec A14): aircraft B half
+# Scenario 006 F3 -- the separation sweep's point that the suite checks: aircraft B half
 # a Rayleigh width right of aircraft A at 20 dB per channel. The sweep itself, P(resolved) and
 # RMSE over the bound against SNR, runs on the snapshot model, x_k = g_k A(u) s + n_k over the
-# chip's cells, which A13 proves equal to this chain: tests/test_doa.py checks A14 there at 200
-# trials. This file is a scenario at that point, not a parameter file: the stages run the IQ
+# chip's cells, which F2's noiseless check (snapshot_model_tolerance in
+# scenario_006_parallel_subrayleigh.toml) proves equal to this chain at the peak cell:
+# tests/test_doa.py checks the sweep point there at 200 trials. This file is a scenario at that
+# point, not a parameter file: the stages run the IQ
 # chain on its frames, as F1 and F2 do. It differs from F2 in [second_aircraft]'s and the target's
 # cross-sections only, -12 dBsm each, 22 dB below F2's, for 20.0 dB per channel at frame 0.
 # Every range and rate on the map is bistatic, positive receding.
 
 [scenario]
 name = "scenario-006-parallel-sweep"
-description = "F3: the sweep point A14 checks, F2's pair at 20 dB per channel. ML, FBSS-ESPRIT and IAA resolve it at P = 0.97, 0.91 and 0.80 on the snapshot model; the chain shows the same on its frames."
+description = "F3: the sweep point the suite checks, F2's pair at 20 dB per channel. ML, FBSS-ESPRIT and IAA resolve it at P = 0.97, 0.91 and 0.80 on the snapshot model; the chain shows the same on its frames."
 seed = 20261106
 
 [[target]]
@@ -91,9 +93,10 @@ noise_tolerance_db = 0.05
 truth_within_bins = 1.0
 detection_fraction = 1.0
 rate_tolerance_mps = 0.119496
-# A14 on the chain's frames: the loosest of its three bounds, IAA's 0.65, over the three methods.
-# Their own bounds, ML >= 0.90 and FBSS-ESPRIT >= 0.85, are checked at 200 trials in tests/test_doa.py.
+# On the chain's frames: the loosest of the sweep point's three bounds, IAA's 0.65, over the three
+# methods. Their own bounds, ML >= 0.90 and FBSS-ESPRIT >= 0.85, are checked at 200 trials in
+# tests/test_doa.py.
 resolved_methods = ["deterministic_ml", "fbss_esprit", "iaa"]
 resolved_fraction_min = 0.65
-# A16 holds at any SNR: the chip's cell, bins and estimates equal the uncropped map's.
+# This holds at any SNR: the chip's cell, bins and estimates equal the uncropped map's.
 parent_coordinates_tolerance = 1e-12

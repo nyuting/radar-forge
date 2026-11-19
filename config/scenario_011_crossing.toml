@@ -5,7 +5,7 @@
 # radius 2.5 km, 983.7 m rad: about 213 false plots a disc a scan. Outside the
 # discs there is no clutter, so tracks start clean and meet the clutter later.
 # A 10 deg crossing closing across range spends about sixteen scans inside one
-# resolution cell (spec 011 §2.2): GNN swaps there and JPDA coalesces.
+# resolution cell: GNN swaps there and JPDA coalesces.
 
 [scenario]
 name = "scenario-011-crossing"
@@ -51,7 +51,7 @@ initial_speed_sigma_mps = 150.0
 # A track whose position sigma passes 300 m after its update is deleted
 # (tracker-001 §5.4): a gate that wide holds 85 rain plots at 20 km.
 max_position_sigma_m = 300.0
-# Spec 011b: the same plots also scored by GNN, JPDA*, Set-JPDA, JIPDA, MHT and
+# The same plots also scored by GNN, JPDA*, Set-JPDA, JIPDA, MHT and
 # PMBM, each score prefixed by its name; the checks below are JPDA's.
 trackers = ["gnn", "jpda_star", "set", "jipda", "mht", "pmbm"]
 
@@ -62,8 +62,9 @@ leaf_count_max = 10
 # Mean GOSPA over the 62 rotations; pins the run (323 m measured): until 41 every aircraft is
 # alone, then the crossings and the clutter discs.
 gospa_mean_max_m = 400.0
-# Spec 011 V2: crossings after which either aircraft's GOSPA track changed, JPDA, 2 of 7
-# measured; A15 bounds GNN and MHT in 011b, JPDA is reported, not bounded: this pins it.
+# V2: the fraction of crossings after which either aircraft's GOSPA track changed, under JPDA:
+# 2 of 7 measured, and this pins it with margin (4 of 7 pass). GNN's and MHT's swap rates are
+# bounded over 200 trials in tests/tracking/test_hypotheses.py.
 swap_fraction_max = 0.6
 nees_fraction_min = 0.9           # 0.95 measured
 pd_min = 0.8704                 # Pd 0.9: 99 % binomial lower bound over 710 echoes

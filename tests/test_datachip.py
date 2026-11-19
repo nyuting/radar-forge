@@ -1,8 +1,8 @@
 """The data chip, the tone interpolators, the polynomial-phase estimators and their bound.
 
 Fast tests use noiseless tones and chips built from the range-frequency model, where the
-truth is exact. The slow tests are spec 004's Monte Carlo: the chip of scenario 004's own
-noiseless chain plus compressed noise, 500 trials (A8, A9), and the jerk (A14). A trial adds
+truth is exact. The slow tests are a Monte Carlo: the chip of scenario 004's own
+noiseless chain plus compressed noise, 500 trials, and the jerk. A trial adds
 white noise matched-filtered along range, the chip's noise statistics (the keystone and the
 Doppler-rate filter resample slow time near-unitarily); the chain itself runs once.
 """
@@ -39,7 +39,7 @@ CARRIER_HZ, BANDWIDTH_HZ, CHIRP_S = 9.8e9, 500.0e6, 0.5e-6
 SAMPLE_RATE_HZ, PRF_HZ, N_PULSES = 600.0e6, 50.0e3, 1024
 WAVELENGTH_M = SPEED_OF_LIGHT_MPS / CARRIER_HZ
 BIN_M = SPEED_OF_LIGHT_MPS / SAMPLE_RATE_HZ
-# The nominal integrated SNR, 28.886 dB, and the spec's lowest asserted one.
+# The nominal integrated SNR, 28.886 dB: the 004 configs' expected_snr_db.
 NOMINAL_SNR = 10 ** (28.886 / 10)
 TONE_METHODS = FINE_METHODS[:5]
 
@@ -109,7 +109,7 @@ def _settings_fields(scenario: object) -> dict[str, object]:
 
 class TestChip:
     def test_slow_time_chip_round_trips_exactly_and_clips_at_the_edge(self) -> None:
-        """A10: integer cells map back with ==, metres are the parent's values, an edge clips."""
+        """Integer cells map back with ==, metres are the parent's values, an edge clips."""
         parent = np.arange(8 * 40).reshape(8, 40) * (1 + 1j)
         range_m = delay_bin_centers_m(40, SAMPLE_RATE_HZ, range_gate_start_m=4800.0)
         rate_mps = doppler_bin_centers_mps(8, 1 / PRF_HZ, WAVELENGTH_M)
@@ -130,7 +130,7 @@ class TestChip:
         np.testing.assert_array_equal(chip.rate_bin_centers_mps, rate_mps)
 
     def test_doppler_chip_wraps_across_the_fold_and_keeps_the_parents_rates(self) -> None:
-        """A10: a Doppler crop through bin 0 takes the circle's far end, rate jump included."""
+        """A Doppler crop through bin 0 takes the circle's far end, rate jump included."""
         parent = np.arange(16 * 40).reshape(16, 40) + 0j
         range_m = delay_bin_centers_m(40, SAMPLE_RATE_HZ)
         rate_mps = doppler_bin_centers_mps(16, 1 / PRF_HZ, WAVELENGTH_M)
@@ -151,7 +151,7 @@ class TestChip:
         np.testing.assert_array_equal(chip.rate_bin_centers_mps, rate_mps[parent_rows[:, 0]])
 
     def test_a_sixteen_bin_chip_keeps_the_target_energy(self) -> None:
-        """A11: +-16 range bins keep all but 0.05 dB of a compressed echo, worst offset.
+        """+-16 range bins keep all but 0.05 dB of a compressed echo, worst offset.
 
         The echo is the chirp's own autocorrelation at 41 sub-bin offsets (computed -0.040 dB;
         +-4 bins would lose 0.144 dB).
@@ -180,7 +180,7 @@ class TestTone:
         [("quinn", 2e-6), ("jacobsen", 2e-6), ("candan", 1e-6), ("aboutanios_mulgrew", 1e-9)],
     )
     def test_interpolator_bias_on_a_noiseless_tone(self, method: str, bound: float) -> None:
-        """A12: the largest error over offsets in [-0.5, 0.5] on a 1024-point tone.
+        """The largest error over offsets in [-0.5, 0.5] on a 1024-point tone.
 
         Quinn and Jacobsen are biased O(1/N^2) (computed 1.18e-6), Candan corrects most of it
         (3.9e-7), and two Aboutanios-Mulgrew iterations reach rounding (5e-13).
@@ -192,7 +192,7 @@ class TestTone:
         assert max(errors) <= bound
 
     def test_parabolic_interpolation_is_biased_by_a_fifth_of_a_bin(self) -> None:
-        """A12: the vertex through |X| misses a rectangular-window tone by up to 0.234 bins."""
+        """The vertex through |X| misses a rectangular-window tone by up to 0.234 bins."""
         errors = [
             abs(estimate_tone(_tone(o), method="parabolic") - 100 - o)
             for o in np.linspace(-0.5, 0.5, 101)
@@ -200,7 +200,7 @@ class TestTone:
         assert max(errors) > 0.1
 
     def test_parabolic_is_bias_limited_while_aboutanios_mulgrew_reaches_the_bound(self) -> None:
-        """A13: at 28.89 dB integrated SNR, parabolic RMSE exceeds 3 CRB; A&M stays <= 1.15.
+        """At 28.89 dB integrated SNR, parabolic RMSE exceeds 3 CRB; A&M stays <= 1.15.
 
         400 trials, offsets uniform over a bin: the RMSE ratio is known to about 3.5 %.
         """
@@ -297,7 +297,7 @@ class TestEstimate:
         assert found.method == method
 
     def test_fold_factor_unfolds_the_reported_rate(self) -> None:
-        """A19 in small: a chip keystoned with F = 1 reports the folded rate less lambda PRF."""
+        """A small chip keystoned with F = 1 reports the folded rate less lambda PRF."""
         folded_mps = -670.45
         chip = crop_slow_time(
             _model_chip(16.2, folded_mps),
@@ -410,7 +410,7 @@ def _bound(snr_linear: float, order: int) -> object:
 @pytest.mark.slow
 @pytest.mark.parametrize("snr_db", [20.0, 28.886])
 def test_aboutanios_mulgrew_range_and_rate_reach_the_bound_on_k1(scenario_chips, snr_db):
-    """A8: A&M on K1's chip, RMSE / CRB <= 1.15 for range and rate, 500 trials.
+    """A&M on K1's chip, RMSE / CRB <= 1.15 for range and rate, 500 trials.
 
     500 trials know an RMSE to about 3 % (1/sqrt(1000)); 1.15 is about 4 sigma above the 1.01
     a pure tone reaches.
@@ -428,7 +428,7 @@ def test_aboutanios_mulgrew_range_and_rate_reach_the_bound_on_k1(scenario_chips,
 # Slow: 500 trials of three phase estimators.
 @pytest.mark.slow
 def test_grft_and_cpf_acceleration_approach_the_bound_on_k2(scenario_chips):
-    """A9: on K2's chip, acceleration RMSE / CRB: local GRFT <= 1.2, CPF <= 1.5, HAF finite.
+    """On K2's chip, acceleration RMSE / CRB: local GRFT <= 1.2, CPF <= 1.5, HAF finite.
 
     CPF's bound follows O'Shea: its phase-rate MSE is within 50 % of the bound at high SNR,
     1.22 in RMSE, with margin. HAF is the baseline, reported and not bounded.
@@ -449,7 +449,7 @@ def test_grft_and_cpf_acceleration_approach_the_bound_on_k2(scenario_chips):
 @pytest.mark.slow
 @pytest.mark.parametrize("variant", ["k1", "k2", "k3"])
 def test_jerk_is_consistent_with_zero_where_the_dwell_cannot_see_it(scenario_chips, variant):
-    """A14: the cubic fit's jerk lies within 3 CRB of zero in >= 99 % of 100 trials.
+    """The cubic fit's jerk lies within 3 CRB of zero in >= 99 % of 100 trials.
 
     At this dwell jerk is unobservable: its bound is 4574 m/s^3, while 600 m/s^3 puts 0.02 rad
     at the dwell's edges about its centre.
@@ -463,7 +463,7 @@ def test_jerk_is_consistent_with_zero_where_the_dwell_cannot_see_it(scenario_chi
 # Slow: 200 cubic-model fits.
 @pytest.mark.slow
 def test_jerk_is_recovered_where_it_is_observable():
-    """A14: on a model chip with 44 rad of cubic phase, CPF + ML recover jerk within 1.5 CRB.
+    """On a model chip with 44 rad of cubic phase, CPF + ML recover jerk within 1.5 CRB.
 
     -1.5e5 m/s^3 is 33 of the cubic model's bounds at 28.89 dB; 200 trials. The chip's peak is
     unit amplitude, so N / rho of noise per cell gives that SNR.

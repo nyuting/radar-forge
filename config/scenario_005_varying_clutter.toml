@@ -109,12 +109,13 @@ expected_snr_db = 28.03
 snr_tolerance_db = 0.01
 # Five standard errors of a mean over 819 200 complex samples, 5 x 4.343 / sqrt(N) dB.
 noise_tolerance_db = 0.025
-# Scenario 005 A8: the CFAR peak within one bin of the truth on both axes, every frame: one
+# The CFAR peak within one bin of the truth on both axes, every frame: one
 # lag, c / f_s = 37.474 m bistatic, and one Doppler bin, lambda / CPI = 0.29874 m/s bistatic.
 truth_within_bins = 1.0
 detection_fraction = 1.0
 rate_tolerance_mps = 0.298741
-# Not a spec criterion; derived as A6. The 2 Hz copy shares clutter 1's route, so it starts in
+# P1's ceiling, (1 + INR) / (1 - K/N), taken per batch and divided by 1 + INR_unc, what a batch
+# leaves of the moving copy. The 2 Hz copy shares clutter 1's route, so it starts in
 # phase with it and turns 0.205 of a cycle over the CPI: the pair's mean power is
 # 2 + 2 sin(theta)/theta = 3.492 times 30 dB, theta = 2 pi 2 Hz x 0.1024 s, and the total INR
 # 14 922 (41.738 dB). Each 51 200-sample batch removes K/N_B = 0.375 % of the noise and leaves
@@ -122,19 +123,18 @@ rate_tolerance_mps = 0.298741
 # 2 Hz: INR_unc 0.539. CA = 41.738 + 0.016 - 1.872 = 39.883 dB.
 cancellation_depth_db = 39.883
 cancellation_tolerance_db = 0.05
-# Scenario 005 A9, re-derived: 10 log10((1 - K/N_B)(1 + INR_unc)) = -0.016 + 1.872 = 1.86 dB
-# (the spec's 1.89 rounds 1 - |D|^2 differently).
+# 10 log10((1 - K/N_B)(1 + INR_unc)) = -0.016 + 1.872 = 1.86 dB.
 floor_rise_db = 1.86
 floor_rise_tolerance_db = 1.0
-# Scenario 005 A10: within 1.0 dB of the predicted loss, 10 log10(1 + INR_unc) = 1.87 dB: the
+# Within 1.0 dB of the predicted loss, 10 log10(1 + INR_unc) = 1.87 dB: the
 # peak is not projected away (the target lies past the last tap), the floor is.
 sinr_loss_db = 1.87
 sinr_loss_tolerance_db = 1.0
-# Scenario 005 A11: batched least squares detects the target every frame (SINR 24.7-25.4 dB).
+# Batched least squares detects the target every frame (SINR 24.7-25.4 dB).
 detections_per_frame = 1
 uncancelled_detections_per_frame = 0
-# Scenario 005 §3.4: the leakage checks hold on its five acceptance frames, 0-4, where the
-# target sits on a Doppler bin at 26.5-27.2 dB clean SINR, the level the tolerances above were
-# derived at (the rd and detect stages check A8 over the whole window). Past them the clean SINR
-# falls to 18.9 dB with straddle, and the residual's swing in the peak cell outgrows 1.0 dB.
+# The leakage checks hold on the five acceptance frames, 0-4, where the target sits on a Doppler
+# bin at 26.5-27.2 dB clean SINR, the level the tolerances above were derived at (the rd and detect
+# stages check the target within one bin over the whole window). Past them the clean SINR falls to
+# 18.9 dB with straddle, and the residual's swing in the peak cell outgrows 1.0 dB.
 acceptance_frames = 5

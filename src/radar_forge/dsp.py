@@ -37,6 +37,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.signal import fftconvolve, get_window
 
+from radar_forge._periodic import fold
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.propagation import (
     bistatic_range_from_delay_m,
@@ -455,7 +456,7 @@ def fold_into_period(
     if np.any(period_arr <= 0.0):
         msg = "period must be strictly positive."
         raise ValueError(msg)
-    return _wrap(np.asarray(value, dtype=np.float64), period_arr, lower)
+    return fold(value, period_arr, lower=lower)
 
 
 def unfold_dual_period(
@@ -505,10 +506,10 @@ def unfold_dual_period(
     # Start A at the bottom fold of the bounds, so every reading has candidates
     # k = 0, 1, ...; the candidate axis broadcasts last, (..., n_candidates).
     fold_index = np.arange(int(np.ceil((upper_bound - lower_bound) / period_a)) + 1)
-    candidate = _wrap(reading_a, period_a, lower_bound)[..., None] + fold_index * period_a
+    candidate = fold(reading_a, period_a, lower=lower_bound)[..., None] + fold_index * period_a
 
     # Compare on the circle: just below a fold edge and just above it are neighbours.
-    miss = np.abs(_wrap(candidate - reading_b[..., None], period_b, -period_b / 2.0))
+    miss = np.abs(fold(candidate - reading_b[..., None], period_b, lower=-period_b / 2.0))
     miss = np.where(candidate <= upper_bound, miss, np.inf)
     best = np.argmin(miss, axis=-1)[..., None]
     residual = np.take_along_axis(miss, best, axis=-1)[..., 0]
@@ -599,17 +600,6 @@ def unfold_range_dual_prf(
         upper_bound=max_range_m,
         tolerance=tolerance_m,
     )
-
-
-def _wrap(value: NDArray[np.float64], period: ArrayLike, lower: ArrayLike) -> NDArray[np.float64]:
-    """Return ``value`` folded into ``[lower, lower + period)``, unchecked."""
-    lower_arr = np.asarray(lower, dtype=np.float64)
-    upper_arr = lower_arr + np.asarray(period, dtype=np.float64)
-    wrapped = np.mod(value - lower_arr, period) + lower_arr
-    # np.mod of a tiny negative offset rounds up to the divisor itself, which would
-    # land on the open top edge; that point is the bottom of the next fold.
-    result: NDArray[np.float64] = np.where(wrapped >= upper_arr, lower_arr, wrapped)
-    return result
 
 
 def _taylor_nbar(depth_db: float) -> int:

@@ -204,7 +204,7 @@ def test_reference_cell_count_matches_the_explicit_footprint():
     assert cfar_reference_cell_count(16, 4) == 32
 
 
-def test_scenario_003_calibration_matches_its_specification():
+def test_scenario_003_calibration_matches_its_closed_forms():
     """config/scenario_003_tracking.toml's CFAR: cells tested, and alpha inside and at the ends.
 
     CA along range, N = 16, guard 4, pfa = 1e-5 on (256, 1000). Interior M = 32:
@@ -223,7 +223,7 @@ def test_scenario_003_calibration_matches_its_specification():
         np.ones(shape), window["pfa"], n_train=window["n_train"], n_guard=window["n_guard"]
     )
     assert np.count_nonzero(np.isfinite(threshold_w)) == 256_000
-    # atol 1e-4 dB: the spec quotes three decimals.
+    # atol 1e-4 dB: the expected values are the docstring's closed forms, rounded to four decimals.
     np.testing.assert_allclose(
         10 * np.log10(threshold_w[0, [500, 0, 4, -1, 10, -11]]),
         [11.4165, 12.2676, 12.2676, 12.2676, 11.7977, 11.7977],
