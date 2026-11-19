@@ -122,7 +122,7 @@ $$\tau = \frac{2R}{c}, \qquad f_d = -\frac{2\dot R}{\lambda}$$
 `propagation_phase_rad`, `doppler_shift_hz`), and a monostatic and a bistatic radar call the
 same functions. The range-Doppler map keeps $R_b$ and $\dot R_b$ on its axes too. Only a display
 halves them:
-`plots.display_axes(radar)` gives a monostatic radar a scale of 0.5 and the names `range_m` and
+`figures.display_axes(radar)` gives a monostatic radar a scale of 0.5 and the names `range_m` and
 `range_rate_mps`, which the figures and the stepper's CSVs use. A bistatic display keeps $R_b$.
 
 ## How it works, step by step
@@ -175,7 +175,7 @@ from radar_forge.coordinates import (
     geodetic_to_ecef_m,
     geodetic_to_enu_m,
 )
-from radar_forge.plots import display_axes
+from radar_forge.figures import display_axes
 from radar_forge.propagation import line_of_sight_paths
 from radar_forge.scenario import load_scenario, truth_geometry
 
@@ -304,7 +304,7 @@ once per chirp: −1835.9 Hz folds to +164.1 Hz, a bistatic rate of −5.02 m/s,
 
 **The map's arrays put the S1 target at 35121.4 m, twice its range.** The map, `TargetGeometry`
 and `PropagationPaths` all carry $R_b = R_T + R_R$, which for one site is $2R$. The figure and
-the CSVs halve it through `plots.display_axes`, so they read 17.56 km. A bistatic map is not
+the CSVs halve it through `figures.display_axes`, so they read 17.56 km. A bistatic map is not
 halved: surfaces of constant $R_b$ are ellipsoids with the two sites at the foci, and half of
 $R_b$ is not a distance from either site.
 

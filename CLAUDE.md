@@ -15,7 +15,7 @@ and students. Neither half is traded for the other.
 - Physical constants only from `radar_forge.constants`; never `3e8` — R4, mypy `Final`.
 - Lean NumPy docstrings: one summary line; a citation with equation number; Parameters/Returns only where a unit, shape or convention is not in the name; no Raises or Examples unless the example is the test — ruff `D`, `tests/test_conventions.py`.
 - Complete annotations, `ArrayLike` in, `NDArray` out; every module defines `__all__`; `msg = "…"` then `raise`, no `assert` — `mypy --strict`, ruff `ANN EM S101`, `tests/test_conventions.py`.
-- Broadcast, don't tile — R6. Only `scenario`, `pipeline`, `evaluate`, `plots` and `stages/` do I/O, logging or timing — R11. Modules warn
+- Broadcast, don't tile — R6. Only `scenario`, `pipeline`, `evaluate`, `figures` and `stages/` do I/O, logging or timing — R11. Modules warn
   past 500 lines, fail past 800 — R10.
 - No generated arrays committed; golden data only in `tests/data/golden/` — pre-commit hook.
 - Conventional Commits, `feat(dsp): add Taylor taper`; PRs squash-merge — commit-msg hook, CI.
@@ -42,7 +42,7 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 
 ## Conventions you cannot grep for
 
-- Range rate is the time derivative of range, positive receding; Doppler = -rate/wavelength, written once in `propagation.doppler_shift_hz`. Map axes and tracker states are bistatic, R_T + R_R and its rate (2R monostatic); only `plots.display_axes` halves them, for figures and CSVs.
+- Range rate is the time derivative of range, positive receding; Doppler = -rate/wavelength, written once in `propagation.doppler_shift_hz`. Map axes and tracker states are bistatic, R_T + R_R and its rate (2R monostatic); only `figures.display_axes` halves them, for figures and CSVs.
 - The FMCW generator relies on a down-sweep.
 - British spelling (`normalise`, `visualisation`) except where mirroring an outside API.
   SI units internally; dB only at API boundaries, named `_db*`, converted by `radar_forge.units`.

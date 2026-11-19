@@ -300,7 +300,7 @@ def test_the_hot_path_allows_warnings_and_non_clock_time_names() -> None:
         "scenario.py",
         "pipeline.py",
         "evaluate.py",
-        "plots.py",
+        "figures.py",
         "stages/__init__.py",
         "stages/core.py",
         "stages/scenario_007/doa.py",

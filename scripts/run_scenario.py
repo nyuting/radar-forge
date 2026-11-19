@@ -25,7 +25,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--scans", type=int, default=None, help="scans to run (default: all)")
     parser.add_argument("--stop-after", choices=list(STAGES), help="last stage to run")
     parser.add_argument("--save-iq", action="store_true", help="write iq_NNNNN.npz per scan")
-    parser.add_argument("--no-plots", action="store_true", help="skip the PNG figures")
+    parser.add_argument("--no-figures", action="store_true", help="skip the PNG figures")
     parser.add_argument("--out", type=Path, help="run directory (default: runs/<name>)")
     return parser.parse_args(argv)
 
@@ -44,7 +44,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             n_scans=args.scans,
             out_dir=args.out or Path("runs") / args.scenario.stem,
             save_iq=args.save_iq,
-            render=not args.no_plots,
+            render=not args.no_figures,
         )
     except VerificationError as error:
         print(error, file=sys.stderr)

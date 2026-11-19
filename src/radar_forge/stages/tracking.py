@@ -35,7 +35,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.stats import chi2
 
-from radar_forge import evaluate, plots
+from radar_forge import evaluate, figures
 from radar_forge.coordinates import range_azimuth_to_east_north_m
 from radar_forge.scenario import Scenario
 from radar_forge.tracking.filters import TrackBank, TrackStatus, is_confirmed
@@ -300,7 +300,7 @@ def multitarget(ctx: evaluate.Context) -> evaluate.Context:
     if ctx.render:
         times_s = scenario.start_time_s + np.arange(0.0, ctx.n_scans * scenario.scan_period_s, 1.0)
         truth = _truth(scenario, times_s)
-        figure = plots.render_scene(
+        figure = figures.render_scene(
             [(t.name, truth[k]) for k, t in enumerate(scenario.arcs)],
             plot_enu_m=np.concatenate([*false_enu, *true_enu]),
             plot_is_false=np.concatenate(
@@ -312,7 +312,7 @@ def multitarget(ctx: evaluate.Context) -> evaluate.Context:
             tracks=[(str(k), np.array(path)) for k, path in run.track_paths.items()],
             title=scenario.name,
         )
-        plots.save_figure(figure, ctx.out_dir / "scene.png")
+        figures.save_figure(figure, ctx.out_dir / "scene.png")
     return ctx
 
 

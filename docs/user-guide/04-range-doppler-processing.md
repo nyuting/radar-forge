@@ -28,7 +28,7 @@ Both axes are **bistatic**. Range is $R_b = R_T + R_R$, the length of the route,
 range for a monostatic radar; rate is its time derivative $\dot R_b$, **positive receding**. The
 Doppler FFT measures $f_d = -\dot R_b / \lambda$ (written once, in `propagation.doppler_shift_hz`),
 so the rate axis falls as the bin index rises. A monostatic figure or CSV halves both and calls
-them range and radial velocity (`plots.display_axes`); nothing before the display does.
+them range and radial velocity (`figures.display_axes`); nothing before the display does.
 
 A pulsed radar has one extra step first: a **matched filter** compresses each long pulse into a
 short peak. Two more tools sit beside the chain. An **MTI** (moving-target indicator) filter
@@ -148,7 +148,7 @@ two bursts:
 ```python
 import numpy as np
 
-from radar_forge import dsp, plots
+from radar_forge import dsp, figures
 from radar_forge.pipeline import range_doppler_product, scan_iq
 from radar_forge.scenario import load_scenario
 from radar_forge.units import power_to_db
@@ -158,7 +158,7 @@ scan = next(scan_iq(s1, n_scans=1))
 product = range_doppler_product(scan.cubes[0], s1.radar)  # FMCW: range FFT, then Doppler FFT
 range_m, rate_mps = product.range_axis_m, product.rate_axis_mps
 gain_db = power_to_db(product.rd_map.size)
-show = plots.display_axes(s1.radar)
+show = figures.display_axes(s1.radar)
 print(f"map {product.rd_map.shape}, gain of the two FFTs {gain_db:.2f} dB")
 print(f"range bins {product.range_bin_m:.4f} m apart; bin N/2 at {range_m[500]:.1f} m")
 print(f"rate step {product.rate_bin_mps:+.6f} m/s, {rate_mps[0]:+.4f} down to {rate_mps[-1]:+.4f}")

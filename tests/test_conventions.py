@@ -57,7 +57,7 @@ def test_package_imports_and_has_version():
 def test_importing_the_library_does_not_pull_in_matplotlib():
     """Regression: one convenience import of pyplot at module level costs every user the extra."""
     code = (
-        "import sys, radar_forge, radar_forge.plots, radar_forge.evaluate; "
+        "import sys, radar_forge, radar_forge.figures, radar_forge.evaluate; "
         "assert 'matplotlib' not in sys.modules, 'matplotlib imported'"
     )
     result = subprocess.run(

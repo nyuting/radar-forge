@@ -11,7 +11,7 @@ Each prints its intermediate quantities and wall time, checks the thresholds the
 ``range_rate_rmse_max_mps``, ``nees_fraction_min`` and ``confirmation_latency_max_scans``. A
 stage not listed does not run, a threshold not given is not checked, and :func:`run` raises
 :class:`VerificationError` naming every failure. CSVs show a monostatic radar's range and rate
-halved (:func:`~radar_forge.plots.display_axes`); everything else is bistatic. The helpers
+halved (:func:`~radar_forge.figures.display_axes`); everything else is bistatic. The helpers
 below are what a stage module shares.
 
 :mod:`radar_forge.stages.migration` holds ``keystone`` (scenario 004): ``walk_bins`` with

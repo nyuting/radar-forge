@@ -13,7 +13,7 @@ there too, but may move. Modules, in signal-path order:
 ``dsp``, ``clutter``, ``detection``, ``clustering``, ``tracking``
     Range-Doppler processing; leakage and clutter cancellation; CFAR and clustering of cells;
     clustering of points; batched multi-target tracking.
-``scenario``, ``pipeline``, ``evaluate``, ``stages``, ``plots``
+``scenario``, ``pipeline``, ``evaluate``, ``stages``, ``figures``
     A scenario file, the chain from it to tracks, the stepper that checks each stage, the
     stages it runs, and figures (the ``visualisation`` extra, imported only when drawing).
 """

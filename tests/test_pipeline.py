@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from radar_forge import evaluate, plots
+from radar_forge import evaluate, figures
 from radar_forge import pipeline as pipeline_module
 from radar_forge.clutter import cancel
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
@@ -519,7 +519,7 @@ def test_the_cancellation_figure_labels_truth_once_and_draws_without_it():
     rd_map = np.ones((8, 16), dtype=complex)
     range_m = SPEED_OF_LIGHT_MPS * np.arange(16) / 8.0e6
     rate_mps = np.linspace(10.0, -10.0, 8, endpoint=False)
-    figure = plots.render_cancellation(
+    figure = figures.render_cancellation(
         rd_map,
         rd_map,
         range_m,
@@ -531,7 +531,7 @@ def test_the_cancellation_figure_labels_truth_once_and_draws_without_it():
     )
     labels = [t.get_text() for t in figure.axes[1].get_legend().get_texts()]
     assert labels == ["truth"]
-    bare = plots.render_cancellation(rd_map, rd_map, range_m, rate_mps, radar, floor_w=1.0)
+    bare = figures.render_cancellation(rd_map, rd_map, range_m, rate_mps, radar, floor_w=1.0)
     assert bare.axes[1].get_legend() is None
     pyplot = pytest.importorskip("matplotlib.pyplot")
     pyplot.close(figure)

@@ -50,11 +50,11 @@ bytes).
 runs/<name>/               # --out overrides it
 ├── truth.csv              # §6.4, geometry stage
 ├── iq_00000.npz …         # §6.7, iq stage, only with --save-iq
-├── rd{suffix}_00000.png … # §6.8, rd stage, unless --no-plots
+├── rd{suffix}_00000.png … # §6.8, rd stage, unless --no-figures
 ├── detections.csv         # §6.5, detect stage
 ├── tracks.csv             # §6.6, track stage
 ├── metrics.csv            # §6.9, track stage
-└── track.png              # §6.8, track stage, unless --no-plots
+└── track.png              # §6.8, track stage, unless --no-figures
 ```
 
 A stage that the scenario's `[verify]` table does not list writes nothing. The run's checks and
@@ -68,7 +68,7 @@ measured values are printed, and returned by `evaluate.run` as a `Report`; they 
 | **Scan** | `scan` is a zero-based integer counting revisits of the scene: a full rotation, a full electronic scan pattern or, for a staring radar, one transmission of all its bursts (TI and radarsimpy say *frame*). With `time_s` it is the join key across files. A *burst* is one coherent processing interval inside a scan |
 | **Frames of reference** | Geodetic WGS-84 → ECEF → local ENU tangent plane, per `radar_forge/coordinates.py`. The ENU origin is the receiver site, which is the radar's when monostatic |
 | **Angles** | `azimuth_deg` is a compass bearing from true north, increasing clockwise; `elevation_deg` is up from the local horizontal. Radians inside the library, degrees in files |
-| **Range and range rate** | **Range rate is the time derivative of range, positive receding; Doppler = -rate/wavelength.** `range_m` is the slant range for a monostatic radar and the bistatic range `R_T + R_R` (`bistatic_range_m`) for a bistatic one, and its rate is `bistatic_range_rate_mps = d(bistatic_range_m)/dt`, so `doppler_hz = -bistatic_range_rate_mps / wavelength_m`. The range-Doppler axes and the tracker's state carry bistatic range and rate; the files of a monostatic run halve both and name them `range_m` and `range_rate_mps` (`plots.display_axes`), and a bistatic run writes `bistatic_range_m` and `bistatic_range_rate_mps`. Every rate column follows it |
+| **Range and range rate** | **Range rate is the time derivative of range, positive receding; Doppler = -rate/wavelength.** `range_m` is the slant range for a monostatic radar and the bistatic range `R_T + R_R` (`bistatic_range_m`) for a bistatic one, and its rate is `bistatic_range_rate_mps = d(bistatic_range_m)/dt`, so `doppler_hz = -bistatic_range_rate_mps / wavelength_m`. The range-Doppler axes and the tracker's state carry bistatic range and rate; the files of a monostatic run halve both and name them `range_m` and `range_rate_mps` (`figures.display_axes`), and a bistatic run writes `bistatic_range_m` and `bistatic_range_rate_mps`. Every rate column follows it |
 | **Units** | The `style.md` §2 suffix table. Compound units: `_m2`, `_m2ps2`, `_mps2` |
 | **Identifiers** | `track_id` is an integer, never reused. `detection_id` is an integer unique within a scan, so `(scan, detection_id)` is the detection key |
 | **Vocabulary** | A *detection* is the CFAR-derived point: a connected group of threshold crossings in one burst's range-Doppler map (`radar_forge.detection.Detection`); `detections.csv` holds them in physical units. A *track* is a filtered state built from detections over scans |

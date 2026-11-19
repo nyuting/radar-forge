@@ -47,7 +47,7 @@ The [Quickstart](#quickstart) below runs on today's `main`.
 | Area | What it covers |
 | :--- | :--- |
 | **The radar chain** | `radar` (sites, transmitter, receiver, bistatic geometry), `propagation` (the radar equation, Swerling models), `signal` (FMCW and pulsed waveforms, IQ), `dsp` (range-Doppler processing, windows, MTI, dual-PRF unfolding), `detection` (CFAR and clustering), `tracking/` (KF, EKF and UKF over a batched track bank) |
-| **Scenarios** | `scenario` (a TOML file and its truth), `pipeline` (scans to tracks), `evaluate` (the stepper, which checks each stage against the file's `[verify]` table), `stages/` (the stepper's stages), `plots` |
+| **Scenarios** | `scenario` (a TOML file and its truth), `pipeline` (scans to tracks), `evaluate` (the stepper, which checks each stage against the file's `[verify]` table), `stages/` (the stepper's stages), `figures` |
 | **`array`** | Phased array geometries (linear, planar, circular, conformal), Taylor/Chebyshev tapering, beam and null steering, phase quantization, DoA estimation |
 | **`raytracing`** | A single scene abstraction over pluggable ray-tracing backends (RadarSimPy, Mitsuba/Dr.Jit, NVIDIA Omniverse RTX), all optional extras |
 | **Datasets** | ML dataset synthesis, with COCO-annotation and range-Doppler-cube exporters plus PyTorch dataset wrappers (planned) |
@@ -126,7 +126,7 @@ print(round(range_axis_m[range_bin], 1), round(rate_axis_mps[rate_bin], 2))  # 2
 
 The map's axes carry the bistatic range R_T + R_R and its rate, positive receding: twice the
 slant range and the radial velocity for a monostatic radar, which only a display halves
-(`radar_forge.plots.display_axes`). A second site is `rf.Radar(transmitter, receiver,
+(`radar_forge.figures.display_axes`). A second site is `rf.Radar(transmitter, receiver,
 tx_site, rx_site)`, and nothing else changes.
 
 ---
@@ -165,7 +165,7 @@ radar-forge/
         ├── pipeline.py         # IQ scans, range-Doppler products, plots, ScanTracker
         ├── evaluate.py         # The stepper: runs the stages, checks [verify]
         ├── stages/             # The stepper's stages: geometry, iq, rd, detect, track, ...
-        └── plots.py            # Figures (the visualisation extra)
+        └── figures.py          # Figures (the visualisation extra)
 ```
 
 ---
@@ -190,7 +190,7 @@ much can be borrowed — GPL-licensed code is treated as a **reference to reimpl
 | [torchcvnn](https://github.com/torchcvnn/torchcvnn) | MIT | Complex-valued PyTorch layers, transforms and SAR dataset loaders — MSTAR, SAMPLE, PolSF, ALOS2, UAVSAR SLC, S1SLC (CentraleSupélec, IJCNN '25) | Reference layout for complex radar data in a planned `datasets` module; usable directly as an optional `cvnn` extra |
 | [complexPyTorch](https://github.com/wavefrontshaping/complexPyTorch) | MIT | Complex-valued layers, activations and batch normalisation after Trabelsi et al. (ICLR '18) | Complex batch-norm formulation and minimal layer set; the library Steinmetz builds on |
 | [Steinmetz Neural Networks](https://github.com/shyamven/SteinmetzNeuralNetworks) | *(no licence declared)* | Complex-valued networks keeping I/Q as an analytic pair (AISTATS '25) by the RASPNet author; ships a RASPNet regression notebook | Reference for the complex-valued I/Q feature convention in a planned `datasets` module; paired with RASPNet as a dataset-plus-model benchmark |
-| [RadarSim (GUI)](https://github.com/SpaceEngineerSS/RadarSim) | MIT | Educational pulse-Doppler visualizer with real-time PySide6 scopes | Blueprint for interactive scopes beside `plots` (A-Scope, B-Scope, PPI, RHI) |
+| [RadarSim (GUI)](https://github.com/SpaceEngineerSS/RadarSim) | MIT | Educational pulse-Doppler visualizer with real-time PySide6 scopes | Blueprint for interactive scopes beside `figures` (A-Scope, B-Scope, PPI, RHI) |
 | [Stone Soup](https://github.com/dstl/Stone-Soup) | MIT | Dstl's target-tracking and state-estimation framework: filters, gaters, data associators, initiators, OSPA/GOSPA metrics | The architectural reference for `tracking/` — its predictor/updater/associator seams and its `Detection`/`Track`/`Hypothesis` vocabulary, at a fraction of the surface area; the reference for JPDA and IMM when those arrive |
 | [FilterPy](https://github.com/rlabbe/filterpy) | MIT | Kalman, extended, unscented and particle filters, with the *Kalman and Bayesian Filters in Python* companion text | Reference formulation for the constant-velocity KF and the `Q_discrete_white_noise` process-noise construction, reimplemented in `tracking/` from the cited papers rather than depended on |
 | [motpy](https://github.com/wmuron/motpy) | MIT | Minimal tracking-by-detection multi-object tracker: predict, Hungarian match, update, prune | Shape reference for the scan loop: one scan in, the current tracks out, as `tracking.Tracker.process(scan)` |

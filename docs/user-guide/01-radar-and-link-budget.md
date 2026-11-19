@@ -336,7 +336,7 @@ and the map centres it on zero.
 **S1's limits, 149.9 km and 30.59 m/s, are twice what a monostatic textbook gives.** They
 bound $R_T + R_R$ and its rate, which for one site are $2R$ and twice the radial velocity. B1,
 with the same waveform on two sites, has the same two limits, because they bound the same
-route length. A monostatic figure or CSV halves them (`plots.display_axes`).
+route length. A monostatic figure or CSV halves them (`figures.display_axes`).
 
 ## Limits
 

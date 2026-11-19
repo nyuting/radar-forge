@@ -31,7 +31,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from radar_forge import clutter, evaluate, pipeline, plots
+from radar_forge import clutter, evaluate, figures, pipeline
 from radar_forge.dsp import fold_into_period
 from radar_forge.pipeline import RangeDopplerProduct
 from radar_forge.propagation import disturbance_paths
@@ -246,7 +246,7 @@ def _draw(
     n_rate, n_lags = product.rd_map.shape
     rows = slice(max(0, cell[0] - _FIGURE_ROWS), min(n_rate, cell[0] + _FIGURE_ROWS + 1))
     lags = slice(max(0, cell[1] - _FIGURE_LAGS), min(n_lags, cell[1] + _FIGURE_LAGS + 1))
-    figure = plots.render_cancellation(
+    figure = figures.render_cancellation(
         maps["uncancelled"].rd_map[rows, lags],
         maps["cancelled"].rd_map[rows, lags],
         product.range_axis_m[lags],
@@ -258,4 +258,4 @@ def _draw(
         title=f"{ctx.scenario.name}, scan 0",
         dynamic_range_db=_FIGURE_RANGE_DB,
     )
-    plots.save_figure(figure, ctx.out_dir / "cancellation.png")
+    figures.save_figure(figure, ctx.out_dir / "cancellation.png")

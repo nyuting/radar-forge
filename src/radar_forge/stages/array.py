@@ -34,7 +34,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from radar_forge import evaluate, plots
+from radar_forge import evaluate, figures
 from radar_forge.array import (
     ArrayGeometry,
     direction_cosine,
@@ -394,7 +394,7 @@ def _truth_rows(
 ) -> list[dict[str, Any]]:
     """Return doa.csv's truth rows: every aircraft's true direction, range, rate and cell SNR."""
     scenario = ctx.scenario
-    radar, show = scenario.radar, plots.display_axes(scenario.radar)
+    radar, show = scenario.radar, figures.display_axes(scenario.radar)
     power_w = evaluate.target_power_w(radar, truth, scenario.rcs_m2)
     # Per channel on an exact bin, as predicted_snr_db: P_r T N over the noise of one sample.
     gain = radar.n_samples_per_chirp * scenario.n_pulses[0]
@@ -442,7 +442,7 @@ def _estimate_rows(
 ) -> list[dict[str, Any]]:
     """Return doa.csv's rows for one detection: a row per method per source."""
     scenario = ctx.scenario
-    radar, show = scenario.radar, plots.display_axes(scenario.radar)
+    radar, show = scenario.radar, figures.display_axes(scenario.radar)
     rate_bin, range_bin = (int(i) for i in chip.parent_index(*cell))
     noise_w = _cell_noise_w(radar, scenario.n_pulses[0])
     rate_mps = float(
@@ -576,11 +576,11 @@ def _figure(
     spectra = [(label, e.spectrum) for label, e in estimates.items() if e.spectrum.size]
     grid = next((e.grid for e in estimates.values() if e.grid.size), np.zeros(0))
     markers = [(label, e.direction_cosine_x) for label, e in estimates.items() if not e.grid.size]
-    figure = plots.render_doa_spectra(
+    figure = figures.render_doa_spectra(
         grid,
         spectra,
         estimates=markers,
         truth_direction_cosine=truths,
         title=f"{ctx.scenario.name}, scan 0, the target's detection",
     )
-    plots.save_figure(figure, ctx.out_dir / "doa.png")
+    figures.save_figure(figure, ctx.out_dir / "doa.png")

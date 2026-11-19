@@ -20,7 +20,7 @@ enough to report, or gone for good?
 The scenarios' state is the map's own: bistatic range $R_b = R_T + R_R$ and its rate
 $\dot R_b$, the time derivative, **positive receding**. For a monostatic radar $R_b$ is twice
 the slant range. Nothing in the tracker halves it; only a figure or a CSV does
-(`plots.display_axes`). So every rate and acceleration in `[tracking]` is of bistatic range,
+(`figures.display_axes`). So every rate and acceleration in `[tracking]` is of bistatic range,
 twice the radial value when monostatic.
 
 ### What's in the package
@@ -380,7 +380,7 @@ from here.
 
 - **A track's range is twice the target's distance.** The state is bistatic range,
   $R_T + R_R$: $2R$ for a monostatic radar. `tracks.csv` shows it halved, as `range_m`, through
-  `plots.display_axes`; the bank never is.
+  `figures.display_axes`; the bank never is.
 - **A receding target has a positive rate but a negative Doppler.** The rate is the range's
   time derivative, so $F$ has $+T$, and $f_d = -\dot R_b / \lambda$.
 - **The gate is a number, not a distance in metres.** It bounds $d^2$, which has no unit, and

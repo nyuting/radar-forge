@@ -51,7 +51,7 @@ scenario to try it in, things that look like bugs but aren't, limits, and refere
   $R_b = R_T + R_R$, twice the slant range for a monostatic radar, and its rate is its time
   derivative: a target moving away has a positive rate and a negative Doppler shift,
   $f_d = -\dot R_b / \lambda$ (`propagation.doppler_shift_hz`). Only a display halves a
-  monostatic radar's values (`plots.display_axes`), and so do the stepper's CSVs.
+  monostatic radar's values (`figures.display_axes`), and so do the stepper's CSVs.
 - **Physical constants come from `radar_forge.constants`**: c is `SPEED_OF_LIGHT_MPS`,
   k is `BOLTZMANN_JPK`. Never type 3e8. It is 0.07 % high, which puts a target 70 cm out at
   1 km.

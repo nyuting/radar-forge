@@ -37,10 +37,10 @@ run_scenario = _load_script()
 def test_three_scans_write_every_stage_file_and_exit_zero(tmp_path, capsys):
     """Every stage runs, prints its wall time, and writes its files; the checks pass.
 
-    ``--no-plots``, so it runs without the visualisation extra, as the fast CI job does.
+    ``--no-figures``, so it runs without the visualisation extra, as the fast CI job does.
     """
     status = run_scenario.main(
-        [str(SCENARIO), "--scans", "3", "--save-iq", "--no-plots", "--out", str(tmp_path)]
+        [str(SCENARIO), "--scans", "3", "--save-iq", "--no-figures", "--out", str(tmp_path)]
     )
     printed = capsys.readouterr().out
     assert status == 0
@@ -69,7 +69,16 @@ def test_the_figures_are_drawn_with_the_visualisation_extra(tmp_path):
 def test_stop_after_runs_only_the_stages_up_to_it(tmp_path, capsys):
     """``--stop-after rd`` runs geometry, iq and rd, and nothing downstream of them."""
     status = run_scenario.main(
-        [str(SCENARIO), "--scans", "1", "--stop-after", "rd", "--no-plots", "--out", str(tmp_path)]
+        [
+            str(SCENARIO),
+            "--scans",
+            "1",
+            "--stop-after",
+            "rd",
+            "--no-figures",
+            "--out",
+            str(tmp_path),
+        ]
     )
     printed = capsys.readouterr().out
     assert status == 0

@@ -23,7 +23,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from radar_forge import evaluate, plots
+from radar_forge import evaluate, figures
 from radar_forge.datachip import ChipProcessing, FineMethod, crop_slow_time, estimate_fine
 from radar_forge.migration import (
     CompensatedPulses,
@@ -128,13 +128,13 @@ def keystone_stage(ctx: evaluate.Context) -> evaluate.Context:
             panels.append((label, compensated.data_rfst))
         elif compensated.fold_factor != 0:
             panels.append((f"keystone, F = {compensated.fold_factor}", compensated.data_rfst))
-        figure = plots.render_range_slow_time(
+        figure = figures.render_range_slow_time(
             [(label, data[:, window]) for label, data in panels],
             range_axis_m[window],
             radar,
             title=f"{scenario.name}, scan 0, noiseless",
         )
-        plots.save_figure(figure, ctx.out_dir / "keystone.png")
+        figures.save_figure(figure, ctx.out_dir / "keystone.png")
     return ctx
 
 

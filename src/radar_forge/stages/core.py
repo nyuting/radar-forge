@@ -22,7 +22,7 @@ from typing import Any
 import numpy as np
 from scipy.stats import chi2
 
-from radar_forge import evaluate, plots
+from radar_forge import evaluate, figures
 from radar_forge.array import enu_to_array_frame
 from radar_forge.clutter import cancel
 from radar_forge.coordinates import directions_unit
@@ -100,7 +100,7 @@ def geometry(ctx: evaluate.Context) -> evaluate.Context:
         ctx.check(
             "geometry", "predicted_snr_db", snr_db, expected - tolerance, expected + tolerance
         )
-    show, rows, array = plots.display_axes(radar), [], scenario.array
+    show, rows, array = figures.display_axes(radar), [], scenario.array
     # One row per truth row per scan, a scenario-006 aircraft B included: a few hundred.
     for index, truth in enumerate(truths):
         if array is not None:
@@ -209,7 +209,7 @@ def rd(ctx: evaluate.Context) -> evaluate.Context:
             hits += _hits(found, k, product, scan.truth, bins)
             if ctx.render:
                 mine = found.burst_index == k
-                figure = plots.render_range_doppler(
+                figure = figures.render_range_doppler(
                     product.rd_map,
                     product.range_axis_m,
                     product.rate_axis_mps,
@@ -221,7 +221,7 @@ def rd(ctx: evaluate.Context) -> evaluate.Context:
                     title=f"{scenario.name}, scan {scan.index}, burst {k}",
                 )
                 suffix = "" if len(products) == 1 else f"_burst{k}"
-                plots.save_figure(figure, ctx.out_dir / f"rd{suffix}_{scan.index:05d}.png")
+                figures.save_figure(figure, ctx.out_dir / f"rd{suffix}_{scan.index:05d}.png")
         if scan.index == 0:
             power_w = np.abs(products[0].rd_map) ** 2
             rate_bin, range_bin = np.unravel_index(int(np.argmax(power_w)), power_w.shape)
@@ -277,7 +277,7 @@ def detect(ctx: evaluate.Context) -> evaluate.Context:
         raise ValueError(msg)
     range_span_m, rate_span_mps, range_bin_m = evaluate.spans(scenario, 0)
     within_m = float(verify.get("truth_within_bins", 1.0)) * range_bin_m
-    errors_mps, show, rows = [], plots.display_axes(scenario.radar), []
+    errors_mps, show, rows = [], figures.display_axes(scenario.radar), []
     # A noise burst's lags are a window: a gap in range is not taken the short way round.
     wraps = math.isfinite(scenario.radar.unambiguous_bistatic_range_m)
     # A scan's plots against its targets: a handful of each.
@@ -339,7 +339,7 @@ def track(ctx: evaluate.Context) -> evaluate.Context:
         msg = "the track stage needs a [tracking] table and the rd stage's plots."
         raise ValueError(msg)
     tracker = ScanTracker(scenario)
-    period_m, show, rows = tracker.range_period_m, plots.display_axes(scenario.radar), []
+    period_m, show, rows = tracker.range_period_m, figures.display_axes(scenario.radar), []
     # Scans are sequential: each one's tracks are the next one's prior.
     for index, found in enumerate(ctx.plots):
         bank, accepted = tracker.scan(found, float(scenario.scan_times_s[index]))
@@ -405,7 +405,7 @@ def track(ctx: evaluate.Context) -> evaluate.Context:
         accepted_m = [found.bistatic_range_m[found.accepted] for found in ctx.plots]
         # broadcast-exempt: one scan time per accepted plot, for a scatter.
         plot_time_s = np.repeat(scenario.scan_times_s[: ctx.n_scans], [r.size for r in accepted_m])
-        figure = plots.render_range_time_history(
+        figure = figures.render_range_time_history(
             scenario.scan_times_s[: ctx.n_scans],
             np.array([truth.bistatic_range_m for truth in truths]),
             np.array([truth.bistatic_range_rate_mps for truth in truths]),
@@ -418,7 +418,7 @@ def track(ctx: evaluate.Context) -> evaluate.Context:
             else None,
             title=scenario.name,
         )
-        plots.save_figure(figure, ctx.out_dir / "track.png")
+        figures.save_figure(figure, ctx.out_dir / "track.png")
     return ctx
 
 

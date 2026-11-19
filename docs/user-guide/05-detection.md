@@ -274,7 +274,7 @@ uv run python scripts/run_scenario.py config/scenario_003_tracking.toml --scans 
 over the design $P_{fa}$ on noise-only maps, which `[verify]` holds within a factor of two.
 `[detect]` checks the rate of the plot nearest each target against the truth, folded as the
 map folds it, and writes `runs/scenario_003_tracking/detections.csv`, one row per detection. A
-monostatic radar's CSV shows range and rate halved (`plots.display_axes`), so `range_m` is the
+monostatic radar's CSV shows range and rate halved (`figures.display_axes`), so `range_m` is the
 slant range and `sigma_range_m` is 21.64 m.
 
 **Knob:** in a copy of the TOML in `config/`, change `pfa = 1e-5` to `pfa = 1e-4` in
@@ -324,7 +324,7 @@ estimate is noisier and the factor rises to hold the same $P_{fa}$.
 also falls with bin index, because $f_d = -\dot R_b / \lambda$ and the Doppler axis rises.
 
 **A plot's range is twice the target's distance.** The map's range is bistatic,
-$R_T + R_R$; for a monostatic radar that is twice the slant range. Only `plots.display_axes`
+$R_T + R_R$; for a monostatic radar that is twice the slant range. Only `figures.display_axes`
 halves it, for a figure or a CSV.
 
 **A measured false-alarm rate comes out above `pfa` on a real map.** The closed forms assume
