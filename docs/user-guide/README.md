@@ -31,7 +31,7 @@ target's route; `coordinates` turns latitude and longitude into the local frame 
 | [2. Geometry and propagation](02-geometry-and-propagation.md) | `coordinates` (geodesy), `radar` (`Radar.geometry`), `propagation` | How a latitude and longitude become a range and an angle, and how a target's position and motion become a delay and a Doppler shift |
 | [3. Waveforms and signals](03-waveforms-and-signals.md) | `signal` | The chirp, how range turns into a beat frequency, and how the library builds the complex samples a receiver records |
 | [4. Range-Doppler processing](04-range-doppler-processing.md) | `dsp`, and `pipeline.range_doppler_product` | How two FFTs turn those samples into a map of range against velocity, what a taper costs, and how two PRFs undo folding |
-| [5. Detection](05-detection.md) | `detection`, and `pipeline.frame_plots` | How CFAR decides which cells of the map hold a target, at a false-alarm rate you choose |
+| [5. Detection](05-detection.md) | `detection`, and `pipeline.scan_plots` | How CFAR decides which cells of the map hold a target, at a false-alarm rate you choose |
 | [6. Tracking](06-tracking.md) | `tracking/`, and `pipeline.ScanTracker` | How detections from scan after scan become tracks |
 
 Every page has the same sections in the same order: what the stage does, a table of quantities
@@ -92,6 +92,25 @@ Each symbol means the same thing on every page.
 
 A page may add a symbol of its own. When it does, it defines it in its own table.
 
+Each word below means one thing on every page and in the code. The last column is what a
+MATLAB, Stone Soup, TI or radarsimpy reader would look for.
+
+| Word | Meaning | Elsewhere |
+| :-- | :-- | :-- |
+| scan | One revisit of the scene: a full rotation, a full electronic scan pattern or, for a staring radar, one transmission of all its bursts. `[scans] scan_period_s` sets how often | TI and radarsimpy: frame; MATLAB: update |
+| burst | One coherent processing interval (CPI) at one PRF | MATLAB: CPI, and its dwell is a scan's set of bursts; TI: burst of chirps |
+| pulse, chirp | The repeated waveform unit, counted by `n_pulses`; a chirp is an LFM sweep, `chirp_duration_s` long | MATLAB `NumPulses`; radarsimpy `pulses` |
+| detection | A CFAR cluster, in map cells | |
+| plot | What reaches the tracker, in physical units, after dual-PRF pairing and unfolding | MATLAB and Stone Soup call our plot a detection; ASTERIX says plot |
+| measurement | A plot's vector and covariance inside the filter | |
+| figure | A picture; "plot" is kept for the tracker's input | |
+| range rate | The time derivative of a route's length, positive receding | TI and radarsimpy: radial velocity, used here only for the halved monostatic display; MATLAB's "speed" is positive approaching |
+| period | The whole width of a circular axis before a value folds: a map's unambiguous range or range rate, in route units | Most sources give the one-sided monostatic limits, c / 2 PRF and ±λ PRF / 4 |
+| trajectory, track | The true path of a target; a track is the tracker's estimate of it | MATLAB `waypointTrajectory`; Stone Soup: ground truth path |
+| clutter density | False plots per unit of measurement space. "Intensity" is kept for the PMBM birth process | MATLAB `ClutterDensity`; Stone Soup `clutter_spatial_density` |
+| monostatic or bistatic | Spelled out; "geometry" where a noun is needed | MATLAB: `Mode` |
+| geodetic | Latitude, longitude and height above the WGS-84 ellipsoid | pymap3d, MATLAB; NavPy and Stone Soup: lla |
+
 ## Which scenario to try each page in
 
 The scenarios in `config/` are complete, runnable set-ups built from these modules. Each is
@@ -100,12 +119,12 @@ guide ends by sending you to one of them, with one setting to change and what to
 
 | Scenario | Pages it exercises | Run it with |
 | :-- | :-- | :-- |
-| [001, X-band](../../config/scenario_001_fmcw_low_prf.toml): one site, three waveforms | 1, 2, 3, 4 | `uv run python scripts/run_scenario.py config/scenario_001_fmcw_low_prf.toml --frames 3` |
-| [002, bistatic](../../config/scenario_002_bistatic_xband.toml): two sites | 1, 2, 3 | `uv run python scripts/run_scenario.py config/scenario_002_bistatic_xband.toml --frames 3` |
-| [003, tracking](../../config/scenario_003_tracking.toml): detection and tracking | 5, 6 | `uv run python scripts/run_scenario.py config/scenario_003_tracking.toml --frames 3` |
+| [001, X-band](../../config/scenario_001_fmcw_low_prf.toml): one site, three waveforms | 1, 2, 3, 4 | `uv run python scripts/run_scenario.py config/scenario_001_fmcw_low_prf.toml --scans 3` |
+| [002, bistatic](../../config/scenario_002_bistatic_xband.toml): two sites | 1, 2, 3 | `uv run python scripts/run_scenario.py config/scenario_002_bistatic_xband.toml --scans 3` |
+| [003, tracking](../../config/scenario_003_tracking.toml): detection and tracking | 5, 6 | `uv run python scripts/run_scenario.py config/scenario_003_tracking.toml --scans 3` |
 
 Set up once with `uv sync --extra dev --extra visualisation`. A run writes `runs/<name>/`; drop
-`--frames` for the whole window, and add `--stop-after rd` to stop after a stage.
+`--scans` for the whole window, and add `--stop-after rd` to stop after a stage.
 
 Want an open problem to work on? See the [intern research tasks](../../interns/README.md). Each
 page links to the tasks that build on it.

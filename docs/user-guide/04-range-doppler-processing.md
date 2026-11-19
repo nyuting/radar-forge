@@ -149,13 +149,13 @@ two bursts:
 import numpy as np
 
 from radar_forge import dsp, plots
-from radar_forge.pipeline import frames, range_doppler_product
+from radar_forge.pipeline import range_doppler_product, scan_iq
 from radar_forge.scenario import load_scenario
 from radar_forge.units import power_to_db
 
 s1 = load_scenario("config/scenario_001_fmcw_low_prf.toml")
-frame = next(frames(s1, n_frames=1))
-product = range_doppler_product(frame.cubes[0], s1.radar)  # FMCW: range FFT, then Doppler FFT
+scan = next(scan_iq(s1, n_scans=1))
+product = range_doppler_product(scan.cubes[0], s1.radar)  # FMCW: range FFT, then Doppler FFT
 range_m, rate_mps = product.range_axis_m, product.rate_axis_mps
 gain_db = power_to_db(product.rd_map.size)
 show = plots.display_axes(s1.radar)
@@ -164,8 +164,8 @@ print(f"range bins {product.range_bin_m:.4f} m apart; bin N/2 at {range_m[500]:.
 print(f"rate step {product.rate_bin_mps:+.6f} m/s, {rate_mps[0]:+.4f} down to {rate_mps[-1]:+.4f}")
 print(f"shown as {show.range_name} and {show.rate_name}, times {show.scale}")
 
-truth_m = frame.truth.bistatic_range_m[0]
-truth_mps = frame.truth.bistatic_range_rate_mps[0]
+truth_m = scan.truth.bistatic_range_m[0]
+truth_mps = scan.truth.bistatic_range_rate_mps[0]
 folded_mps = dsp.fold_velocity_mps(truth_mps, product.rate_period_mps)
 print(f"truth {truth_m:.1f} m, {truth_mps:+.4f} m/s, folded {folded_mps:+.4f} m/s")
 rate_bin, range_bin = np.unravel_index(np.abs(product.rd_map).argmax(), product.rd_map.shape)
@@ -213,7 +213,7 @@ coarser burst (B's bins are 1.4340 m/s apart).
 Use [scenario 001](../../config/scenario_001_fmcw_low_prf.toml), S1:
 
 ```bash
-uv run python scripts/run_scenario.py config/scenario_001_fmcw_low_prf.toml --frames 10
+uv run python scripts/run_scenario.py config/scenario_001_fmcw_low_prf.toml --scans 10
 ```
 
 **Knob:** in a copy of the TOML in `config/`, set `n_pulses = 64` (was 256) in `[[burst]]`, and
@@ -224,12 +224,12 @@ run it with `--out runs/s1_64`. Then compare `rd_00009.png` in the two run folde
   0.0597 → 0.2390 m/s. The map's rows look coarser, and `sigma_rate_mps` in `detections.csv`, a
   bin over √12, grows from 0.0172 to 0.0690 m/s.
 - $v_{ua}$ does not change: it is set by the PRF, not the dwell. Both figures still run
-  ±7.65 m/s, and the peak still sits on the dashed crosshair of the folded truth (at frame 9 the
+  ±7.65 m/s, and the peak still sits on the dashed crosshair of the folded truth (at scan 9 the
   target recedes at 39.32 m/s, which folds to −6.57 m/s).
-- `[rd]` prints frame 0's peak and median cell. The peak stands 51.71 dB above the median with
+- `[rd]` prints scan 0's peak and median cell. The peak stands 51.71 dB above the median with
   256 chirps (−36.75 against −88.47 dBW) and 42.10 dB with 64 (−52.31 against −94.40 dBW). That
   is 6.02 dB from a quarter of the Doppler integration gain, and most of the other 3.6 dB is
-  straddle loss: frame 0's folded rate, −5.019 m/s, lies 10.50 of the wider bins from zero,
+  straddle loss: scan 0's folded rate, −5.019 m/s, lies 10.50 of the wider bins from zero,
   halfway between two of them.
 - The copy ends `1 check(s) failed`: `[geometry]` predicts 45.99 dB of SNR, and `[verify]`
   holds 52.01 dB, the figure for 256 chirps. The check is right to fail; a TOML's numbers belong
@@ -275,7 +275,7 @@ FFT that was taken.
 - MTI has only the two- and three-pulse cancellers. No staggered PRI, so blind rates stay, and no
   Doppler filter bank.
 - No range migration correction. Over S1's 256 ms CPI the target's route changes by at most
-  0.19 of a bin in the 120-frame window.
+  0.19 of a bin in the 120-scan window.
 - Dual-PRF unfolding assumes one target per range. Two targets give ghost pairings, and the
   answer degrades sharply once noise nears half a bin. A target outside the bounds you pass can
   come back as a confident wrong answer: on S3, +600 m/s comes back as −317.73 m/s.

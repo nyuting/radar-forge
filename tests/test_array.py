@@ -292,12 +292,12 @@ def test_a_channel_map_keeps_the_channel_axis_and_detects_on_its_boresight_beam(
 def test_aircraft_b_shares_aircraft_as_range_and_rate_at_half_a_rayleigh_width():
     """B has A's ranges, rate and elevation, and u + 0.5 x 0.125."""
     scenario = load_scenario(F2)
-    for frame in truth_geometry(scenario)[:5]:
-        np.testing.assert_array_equal(frame.bistatic_range_m[1], frame.bistatic_range_m[0])
+    for truth in truth_geometry(scenario)[:5]:
+        np.testing.assert_array_equal(truth.bistatic_range_m[1], truth.bistatic_range_m[0])
         np.testing.assert_array_equal(
-            frame.bistatic_range_rate_mps[1], frame.bistatic_range_rate_mps[0]
+            truth.bistatic_range_rate_mps[1], truth.bistatic_range_rate_mps[0]
         )
-        u = direction_cosine(scenario.array, frame.aoa_rad)
+        u = direction_cosine(scenario.array, truth.aoa_rad)
         assert u[1] - u[0] == pytest.approx(0.0625, rel=1e-12)
     phases = scattering_phase_rad(scenario)
     assert phases.shape == (120, 2) and not phases[:, 0].any()
@@ -305,8 +305,8 @@ def test_aircraft_b_shares_aircraft_as_range_and_rate_at_half_a_rayleigh_width()
 
 
 def test_truth_csv_carries_both_aircraft_and_their_direction_cosines(tmp_path):
-    """The geometry stage writes a row per aircraft per frame, u and the off-boresight azimuth."""
-    evaluate.run(load_scenario(F2), ["geometry"], n_frames=2, out_dir=tmp_path, render=False)
+    """The geometry stage writes a row per aircraft per scan, u and the off-boresight azimuth."""
+    evaluate.run(load_scenario(F2), ["geometry"], n_scans=2, out_dir=tmp_path, render=False)
     with (tmp_path / "truth.csv").open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     assert [row["target"] for row in rows] == ["aircraft-a", "aircraft-b"] * 2
@@ -335,7 +335,7 @@ def test_the_loader_refuses_an_array_off_fmcw_and_aircraft_b_without_one(tmp_pat
 
 
 def test_doa_csv_truth_rows_carry_the_link_budgets_cell_snr(tmp_path):
-    """Truth rows' snr_db is the per-channel cell SNR, F2's 42.01 dB at frame 0 for both."""
+    """Truth rows' snr_db is the per-channel cell SNR, F2's 42.01 dB at scan 0 for both."""
     scenario = load_scenario(F2)
     ctx = evaluate.Context(scenario, tmp_path, 1, False, evaluate.Report(scenario.name))
     truth = truth_geometry(dataclasses.replace(scenario, duration_s=1.0))[0]

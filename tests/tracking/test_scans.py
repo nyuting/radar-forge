@@ -22,9 +22,9 @@ TERMINAL = Path(__file__).resolve().parents[2] / "config" / "scenario_011_termin
 def test_a_plot_level_rotation_holds_its_echoes_clutter_and_discretes() -> None:
     """One V4 rotation: every plot timed within its rotation and batched by its azimuth."""
     scenario = load_scenario(TERMINAL)
-    rotation = next(scans(scenario, n_frames=1))
+    rotation = next(scans(scenario, n_scans=1))
     assert scenario.sensor is not None
-    period_s = scenario.sensor.scan_period_s
+    period_s = scenario.scan_period_s
     assert np.all((rotation.time_s >= 0.0) & (rotation.time_s < period_s))
     sector = np.floor(rotation.azimuth_rad / (2 * np.pi / scenario.sensor.n_sectors))
     np.testing.assert_array_equal(
@@ -54,7 +54,7 @@ def test_halving_the_sector_moves_the_terminal_scenes_gospa_less_than_its_seed_s
             run = dataclasses.replace(
                 scenario, seed=20261108 + seed, sensor=sensor, tracking=tracking, verify={}
             )
-            report = evaluate.run(run, ["multitarget"], n_frames=25, out_dir=tmp_path, render=False)
+            report = evaluate.run(run, ["multitarget"], n_scans=25, out_dir=tmp_path, render=False)
             gospa_m[n_sectors].append(report.values["gospa_mean_m"])
     shift = abs(np.mean(gospa_m[32]) - np.mean(gospa_m[16]))
     spread = np.std(gospa_m[16], ddof=1)
@@ -71,7 +71,7 @@ def test_gnn_clutter_density_follows_the_drifting_rain_cell() -> None:
     scenario = load_scenario(TERMINAL)
     tracker = PlotTracker(scenario)
     assert tracker.mean_intensity(0.0) != tracker.mean_intensity(600.0)
-    rotations = scans(scenario, n_frames=2)
+    rotations = scans(scenario, n_scans=2)
     next(rotations)
     second = next(rotations)
     tracker.rotation(second)

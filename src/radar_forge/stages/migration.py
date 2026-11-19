@@ -1,10 +1,10 @@
-r"""The ``keystone`` stage: range migration measured, corrected and estimated on frame 0.
+r"""The ``keystone`` stage: range migration measured, corrected and estimated on scan 0.
 
-On frame 0's noiseless cube (the generator's ``rng=None`` path) it measures the walk, the
+On scan 0's noiseless cube (the generator's ``rng=None`` path) it measures the walk, the
 loss of the uncorrected map, the keystone alone and the dechirp alone, then runs ``[migration]``
 and measures its searches, residual walk and loss. A loss is the map's peak, off the bin grid,
 over :math:`N^2` times pulse 0's compressed peak: 0 dB is ideal integration, :math:`10\log_{10}N`
-above one pulse's SNR. On frame 0 with noise, the frame the ``rd`` stage mapped, it crops a
+above one pulse's SNR. On scan 0 with noise, the scan the ``rd`` stage mapped, it crops a
 chip at the corrected map's peak and estimates range, rate and acceleration against their
 Cramér-Rao bounds. Writes ``migration.csv`` and ``keystone.png``.
 
@@ -33,7 +33,7 @@ from radar_forge.migration import (
     keystone,
     pulse_compress,
 )
-from radar_forge.pipeline import frames, map_axes, synthesise
+from radar_forge.pipeline import map_axes, scan_iq, synthesise
 from radar_forge.radar import Radar
 from radar_forge.settings import MigrationSettings
 from radar_forge.units import power_to_db
@@ -63,7 +63,7 @@ _PLOT_HALF_WIDTH = 120
     "rate_error_max_crb",
 )
 def keystone_stage(ctx: evaluate.Context) -> evaluate.Context:
-    """Walk, losses, searches and fine estimates of the first target on frame 0.
+    """Walk, losses, searches and fine estimates of the first target on scan 0.
 
     ``[verify]``: ``walk_bins`` within ``walk_tolerance_bins``; ``residual_walk_max_bins``;
     ``uncompensated_loss_db``, ``keystone_only_loss_db`` and ``dechirp_only_loss_db`` within
@@ -81,7 +81,7 @@ def keystone_stage(ctx: evaluate.Context) -> evaluate.Context:
         synthesise(radar, truth, rcs_m2, n_pulses, rng=None, gate=gate), radar, gate=gate
     )
     reference_w = integrated_peak(clean[:1]).power_linear * n_pulses**2
-    row: dict[str, Any] = {"frame": 0}
+    row: dict[str, Any] = {"scan": 0}
 
     def loss(name: str, data: NDArray[np.complex128]) -> float:
         row[name] = ctx.record(
@@ -132,7 +132,7 @@ def keystone_stage(ctx: evaluate.Context) -> evaluate.Context:
             [(label, data[:, window]) for label, data in panels],
             range_axis_m[window],
             radar,
-            title=f"{scenario.name}, frame 0, noiseless",
+            title=f"{scenario.name}, scan 0, noiseless",
         )
         plots.save_figure(figure, ctx.out_dir / "keystone.png")
     return ctx
@@ -160,11 +160,11 @@ def _searches(
 
 
 def _estimates(ctx: evaluate.Context) -> dict[str, Any]:
-    """Correct frame 0 with noise as configured, crop a chip at its peak, estimate on it."""
+    """Correct scan 0 with noise as configured, crop a chip at its peak, estimate on it."""
     scenario = ctx.scenario
     radar, n_pulses, gate = scenario.radar, scenario.n_pulses[0], scenario.gates[0]
-    frame = next(frames(scenario, n_frames=1))
-    noisy = pulse_compress(frame.cubes[0], radar, gate=gate)
+    scan = next(scan_iq(scenario, n_scans=1))
+    noisy = pulse_compress(scan.cubes[0], radar, gate=gate)
     compensated = _compensate(noisy, radar, scenario.migration)
     range_axis_m, rate_axis_mps = map_axes(radar, n_pulses, gate=gate)
     peak = integrated_peak(compensated.data_rfst, refine_range=False)
@@ -177,7 +177,7 @@ def _estimates(ctx: evaluate.Context) -> dict[str, Any]:
     )
     method: FineMethod = "grft" if compensated.rate is not None else "aboutanios_mulgrew"
     estimate = estimate_fine(chip, method=method)
-    truth, crb = frame.truth, estimate.crb
+    truth, crb = scan.truth, estimate.crb
     errors = {
         "range": (estimate.bistatic_range_m - truth.bistatic_range_m[0], crb.bistatic_range_m),
         "rate": (

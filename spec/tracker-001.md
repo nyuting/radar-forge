@@ -247,7 +247,7 @@ Built with scenario 011a (`config/scenario_011_*.toml`); none changes the loop.
 
 ## 7. Integration, performance and validation
 
-**Data flow.** `detection.Detection` (cell indices, W) is converted by `pipeline.frame_plots` to
+**Data flow.** `detection.Detection` (cell indices, W) is converted by `pipeline.scan_plots` to
 plots (bistatic m and m/s, positive receding), which `pipeline.ScanTracker` builds into a `Scan`
 and passes to `Tracker.process(scan)`; that returns the bank, each row with its NIS and the
 measurement it took. The stepper's track stage (`evaluate.py`) writes `tracks.csv` and

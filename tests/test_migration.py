@@ -326,7 +326,7 @@ class TestIntegratedPeak:
 
 @pytest.fixture(scope="module")
 def full_size(request: pytest.FixtureRequest) -> dict[str, object]:
-    """Scenario 004's three variants at frame 0: radar, gate, and the noiseless compressed cube."""
+    """Scenario 004's three variants at scan 0: radar, gate, and the noiseless compressed cube."""
     found: dict[str, object] = {}
     for variant in ("k1", "k2", "k3"):
         scenario = load_scenario(REPO / "config" / f"scenario_004_keystone_{variant}.toml")
@@ -416,7 +416,7 @@ def test_k3_fold_factor_is_found_in_every_noisy_trial(full_size):
     assert found == [1] * 200
 
 
-# Slow: the keystone stage on a full 1024-pulse frame.
+# Slow: the keystone stage on a full 1024-pulse scan.
 @pytest.mark.slow
 def test_a_dechirp_only_loss_asked_of_a_constant_rate_config_is_measured(tmp_path):
     """Regression: K1 asking for dechirp_only_loss_db once raised KeyError in the check.
@@ -428,7 +428,7 @@ def test_a_dechirp_only_loss_asked_of_a_constant_rate_config_is_measured(tmp_pat
     path = tmp_path / "k1.toml"
     path.write_text(text + "dechirp_only_loss_db = -25.78\n", encoding="utf-8")
     report = evaluate.run(
-        load_scenario(path), ["keystone"], n_frames=1, out_dir=tmp_path, render=False
+        load_scenario(path), ["keystone"], n_scans=1, out_dir=tmp_path, render=False
     )
     assert not report.failures
     # atol 1e-9 dB: the identity filter is one FFT round trip of the same cube.

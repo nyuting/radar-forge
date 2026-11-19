@@ -8,7 +8,7 @@ intermediates; nothing is modified in place. The work is done in the range spect
 along range, unshifted, whose **signed** frequency :math:`f` makes the radio frequency
 :math:`f_0 + f`. There a point echo reads :math:`|P(f)|^2 e^{-j 2\pi (f_0 + f) R_b(t)/c}`:
 the :math:`f R_b` term walks in range, the :math:`f_0 R_b` term is the Doppler phase [1]_.
-Slow time :math:`t = m/\mathrm{PRF}` is zero at pulse 0, the frame's truth time and the
+Slow time :math:`t = m/\mathrm{PRF}` is zero at pulse 0, the scan's truth time and the
 keystone's reference. :math:`R_b` is bistatic and its rate positive receding, so
 :math:`f_D = -\dot R_b/\lambda` (:func:`~radar_forge.propagation.doppler_shift_hz`).
 :func:`pulse_compress` makes ``data_rfst`` from a cube, through its range gate, and
@@ -582,7 +582,7 @@ def _rows(values: NDArray[np.complex128], ndim: int) -> NDArray[np.complex128]:
 
 
 # One plan is kept, 16 M (2N + L) bytes: 128 MiB for 1024 pulses and 2048 range frequencies.
-# Every frame of a scenario keystones on one grid, and building the plan is most of the cost;
+# Every scan of a scenario keystones on one grid, and building the plan is most of the cost;
 # a second grid (another scenario, or the second-order keystone) replaces it.
 @lru_cache(maxsize=1)
 def _chirp_z_plan(

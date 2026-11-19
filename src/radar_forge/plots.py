@@ -4,7 +4,7 @@ Matplotlib is the ``visualisation`` extra and is imported inside each drawing fu
 ``import radar_forge`` needs no extra. :func:`display_axes` is the one place a monostatic
 radar's bistatic range and rate are halved and relabelled range and radial velocity, for a
 figure or a CSV column; a bistatic radar keeps :math:`R_T + R_R` and its rate. Every rate is
-positive receding. Magnitudes are shown in decibels relative to the frame's own peak.
+positive receding. Magnitudes are shown in decibels relative to the scan's own peak.
 
 References
 ----------
@@ -125,7 +125,7 @@ def magnitude_db(
 
 
 def save_figure(figure: Any, path: Path | str, *, dpi: int = 100) -> None:
-    """Write a figure and close it: a run draws one per frame, and pyplot keeps them all open."""
+    """Write a figure and close it: a run draws one per scan, and pyplot keeps them all open."""
     figure.savefig(path, dpi=dpi, bbox_inches="tight")
     _pyplot().close(figure)
 
@@ -267,7 +267,7 @@ def render_range_time_history(
     range_period_m: float | None = None,
     title: str | None = None,
 ) -> Any:
-    """Draw range and rate against time: truth ``(n_frames, n_targets)``, detections, tracks.
+    """Draw range and rate against time: truth ``(n_scans, n_targets)``, detections, tracks.
 
     Each track is ``(label, time_s, range_m, rate_mps)``. With ``range_period_m`` every range
     is shown modulo it, the way the map sees it, and a line is broken where it wraps.

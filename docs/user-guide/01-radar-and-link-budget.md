@@ -63,7 +63,7 @@ make a different choice.
 | Baseline | $L_b$ | distance between the two sites | `Radar.baseline_m` | 0.0 m |
 | Bistatic angle | $\beta$ | $\cos\beta = (R_T^2 + R_R^2 - L_b^2) / (2 R_T R_R)$ | `TargetGeometry.bistatic_angle_rad` | 0 |
 
-The S1 received power and SNR are for the target's true range at frame 0, 17 560.7 m, from
+The S1 received power and SNR are for the target's true range at scan 0, 17 560.7 m, from
 `truth_geometry`. S1 is monostatic, so $R_T = R_R$, $L_b = 0$ and $\beta = 0$. Scenario 002
 (B1) flies the S1 waveform over a 19 601.4 m baseline. Its $R_{b,ua}$ is the same 149.896 km,
 because $c\,\tau_{ua}$ does not depend on where the antennas stand. Its range resolution grows
@@ -122,7 +122,7 @@ three forms differ by convention, not by physics. A designer uses the number thr
   the product needed to $c\lambda$ says how far they must stretch it.
 - **To compare bands.** $c\lambda = c^2/f_c$, so at 2.8 GHz it is 3.5 times what it is at
   9.8 GHz. Scenario 002 shows it: the same waveform and the same flight fold the rate in 107 of
-  120 frames at X-band and in 42 at S-band.
+  120 scans at X-band and in 42 at S-band.
 
 No single burst reaches more than $c\lambda$, and one can reach less. An FMCW receiver reads
 range from the beat frequency, which its sample rate limits to a delay of $f_s/\alpha$; and an
@@ -172,7 +172,7 @@ the second's.
 
 ## Try it
 
-This loads S1, computes its link budget at the target's frame-0 range and prints its limits:
+This loads S1, computes its link budget at the target's scan-0 range and prints its limits:
 
 ```python
 from radar_forge.propagation import received_power_w
@@ -183,7 +183,7 @@ scenario = load_scenario("config/scenario_001_fmcw_low_prf.toml")
 radar = scenario.radar  # one Transmitter and one Receiver; no [site.rx], so monostatic
 tx, rx = radar.transmitter, radar.receiver
 target = scenario.targets[0]
-truth = truth_geometry(scenario)[0]  # frame 0
+truth = truth_geometry(scenario)[0]  # scan 0
 power_w = received_power_w(
     transmit_power_w=tx.transmit_power_w,
     gain_tx_linear=tx.gain_tx_linear,
@@ -282,10 +282,10 @@ combined. (The scenario itself searches only ±400 m/s, its `max_bistatic_range_
 ## Try it in a scenario
 
 The scenario file is [scenario 001](../../config/scenario_001_fmcw_low_prf.toml). Run three
-frames of S1; the run goes to `runs/scenario_001_fmcw_low_prf/`:
+scans of S1; the run goes to `runs/scenario_001_fmcw_low_prf/`:
 
 ```bash
-uv run python scripts/run_scenario.py config/scenario_001_fmcw_low_prf.toml --frames 3
+uv run python scripts/run_scenario.py config/scenario_001_fmcw_low_prf.toml --scans 3
 ```
 
 Each stage prints what it measured, checks it against the TOML's `[verify]` table, and gives its

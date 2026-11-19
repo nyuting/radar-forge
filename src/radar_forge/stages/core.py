@@ -3,7 +3,7 @@ r"""The five stages every scenario runs: ``geometry``, ``iq``, ``rd``, ``detect`
 Each takes and returns the run's :class:`~radar_forge.evaluate.Context`: it prints and records
 what it measured, checks the ``[verify]`` thresholds it registered, and writes its files.
 ``geometry`` writes ``truth.csv``; ``iq`` checks each burst's noise and noiseless peak;
-``rd`` forms, detects and draws every frame's maps and measures the false-alarm rate on noise;
+``rd`` forms, detects and draws every scan's maps and measures the false-alarm rate on noise;
 ``detect`` writes ``detections.csv``; ``track`` writes ``tracks.csv``, ``metrics.csv`` and
 ``track.png``.
 
@@ -32,10 +32,10 @@ from radar_forge.pipeline import (
     Plots,
     RangeDopplerProduct,
     ScanTracker,
-    frame_plots,
-    frame_products,
-    frames,
     range_doppler_product,
+    scan_iq,
+    scan_plots,
+    scan_products,
     synthesise,
 )
 from radar_forge.radar import TargetGeometry
@@ -56,19 +56,19 @@ _MAX_CELLS = 4_000_000
 
 @evaluate.stage("geometry", "truth_in_map_fraction", "expected_snr_db", "snr_tolerance_db")
 def geometry(ctx: evaluate.Context) -> evaluate.Context:
-    """Truth for every frame; link budget, baseline and unambiguous limits; truth.csv."""
-    scenario, radar, verify, truth = (
+    """Truth for every scan; link budget, baseline and unambiguous limits; truth.csv."""
+    scenario, radar, verify, truths = (
         ctx.scenario,
         ctx.scenario.radar,
         evaluate.thresholds(ctx, "geometry"),
         evaluate.truth(ctx),
     )
     rcs_m2 = list(scenario.rcs_m2)
-    power_w = float(evaluate.target_power_w(radar, truth[0], rcs_m2)[0])
+    power_w = float(evaluate.target_power_w(radar, truths[0], rcs_m2)[0])
     # Integrated over one chirp's samples and every pulse: P T N / N0, on an exact bin.
     gain = radar.n_samples_per_chirp * scenario.n_pulses[0]
     snr_db = float(power_to_db(power_w / radar.receiver.noise_power_per_sample_w * gain))
-    beta_deg = np.degrees([frame.bistatic_angle_rad for frame in truth])
+    beta_deg = np.degrees([truth.bistatic_angle_rad for truth in truths])
     for name, value in (
         ("received_power_dbw", float(power_to_db(power_w))),
         ("noise_power_per_sample_dbw", float(power_to_db(radar.receiver.noise_power_per_sample_w))),
@@ -90,7 +90,7 @@ def geometry(ctx: evaluate.Context) -> evaluate.Context:
         np.all(
             (t.bistatic_range_m < max_range_m) & (np.abs(t.bistatic_range_rate_mps) < half_rate_mps)
         )
-        for t in truth
+        for t in truths
     ]
     fraction = ctx.record("truth_in_map_fraction", float(np.mean(inside)))
     if "truth_in_map_fraction" in verify:
@@ -101,18 +101,18 @@ def geometry(ctx: evaluate.Context) -> evaluate.Context:
             "geometry", "predicted_snr_db", snr_db, expected - tolerance, expected + tolerance
         )
     show, rows, array = plots.display_axes(radar), [], scenario.array
-    # One row per truth row per frame, a scenario-006 aircraft B included: a few hundred.
-    for index, frame in enumerate(truth):
+    # One row per truth row per scan, a scenario-006 aircraft B included: a few hundred.
+    for index, truth in enumerate(truths):
         if array is not None:
-            in_array = enu_to_array_frame(array, directions_unit(*frame.aoa_rad.T))
+            in_array = enu_to_array_frame(array, directions_unit(*truth.aoa_rad.T))
         for k, name in enumerate(scenario.truth_names):
-            row = {"frame": index, "time_s": scenario.frame_times_s[index], "target": name}
-            row[show.range_name] = frame.bistatic_range_m[k] * show.scale
-            row[show.rate_name] = frame.bistatic_range_rate_mps[k] * show.scale
-            row["azimuth_deg"], row["elevation_deg"] = np.degrees(frame.aoa_rad[k])
+            row = {"scan": index, "time_s": scenario.scan_times_s[index], "target": name}
+            row[show.range_name] = truth.bistatic_range_m[k] * show.scale
+            row[show.rate_name] = truth.bistatic_range_rate_mps[k] * show.scale
+            row["azimuth_deg"], row["elevation_deg"] = np.degrees(truth.aoa_rad[k])
             if not radar.is_monostatic:
-                row["range_tx_m"], row["range_rx_m"] = frame.range_tx_m[k], frame.range_rx_m[k]
-                row["bistatic_angle_deg"] = math.degrees(frame.bistatic_angle_rad[k])
+                row["range_tx_m"], row["range_rx_m"] = truth.range_tx_m[k], truth.range_rx_m[k]
+                row["bistatic_angle_deg"] = math.degrees(truth.bistatic_angle_rad[k])
             if array is not None:
                 row["direction_cosine_x"] = in_array[k, 0]
                 row["azimuth_boresight_deg"] = math.degrees(math.asin(in_array[k, 0]))  # asin(u)
@@ -123,12 +123,12 @@ def geometry(ctx: evaluate.Context) -> evaluate.Context:
 
 @evaluate.stage("iq", "noise_tolerance_db", "peak_tolerance_db")
 def iq(ctx: evaluate.Context) -> evaluate.Context:
-    """Noise per sample of a target-free cube, and frame 0's noiseless peak, every burst."""
+    """Noise per sample of a target-free cube, and scan 0's noiseless peak, every burst."""
     scenario, verify, first = ctx.scenario, evaluate.thresholds(ctx, "iq"), evaluate.truth(ctx)[0]
     rcs_m2 = np.array(scenario.rcs_m2)
     noise_errors_db, peak_errors_db = [], []
     for k, (radar, n_pulses) in enumerate(zip(scenario.radars, scenario.n_pulses, strict=True)):
-        # A generator of its own, so the frames' noise does not depend on whether this ran.
+        # A generator of its own, so the scans' noise does not depend on whether this ran.
         rng, gate = np.random.default_rng([scenario.seed, 1, k]), scenario.gates[k]
         noise_w = np.mean(
             np.abs(synthesise(radar, first, 0.0 * rcs_m2, n_pulses, rng=rng, gate=gate)) ** 2
@@ -152,10 +152,10 @@ def iq(ctx: evaluate.Context) -> evaluate.Context:
     if "peak_tolerance_db" in verify:
         ctx.check("iq", "peak_error_db", max(peak_errors_db), 0.0, verify["peak_tolerance_db"])
     if ctx.save_iq:
-        # One file per frame: the cubes stream through and none is held.
-        for frame in frames(scenario, n_frames=ctx.n_frames):
-            cubes = {f"burst{k}": cube for k, cube in enumerate(frame.cubes)}
-            np.savez_compressed(ctx.out_dir / f"iq_{frame.index:05d}.npz", **cubes)  # type: ignore[arg-type]
+        # One file per scan: the cubes stream through and none is held.
+        for scan in scan_iq(scenario, n_scans=ctx.n_scans):
+            cubes = {f"burst{k}": cube for k, cube in enumerate(scan.cubes)}
+            np.savez_compressed(ctx.out_dir / f"iq_{scan.index:05d}.npz", **cubes)  # type: ignore[arg-type]
     return ctx
 
 
@@ -190,23 +190,23 @@ def _hits(
 
 @evaluate.stage("rd", "truth_within_bins", "detection_fraction", "pfa_tolerance_factor")
 def rd(ctx: evaluate.Context) -> evaluate.Context:
-    """Map, CFAR and cluster every frame; detections near truth; Pfa on noise; rd PNGs."""
+    """Map, CFAR and cluster every scan; detections near truth; Pfa on noise; rd PNGs."""
     scenario, verify = ctx.scenario, evaluate.thresholds(ctx, "rd")
     bins, hits = float(verify.get("truth_within_bins", 1.0)), []
-    for frame in frames(scenario, n_frames=ctx.n_frames):
-        # A noise frame is cancelled once, here; the map and the leakage stage both use it.
+    for scan in scan_iq(scenario, n_scans=ctx.n_scans):
+        # A noise scan is cancelled once, here; the map and the leakage stage both use it.
         cancellation = (
-            cancel(frame.references[0], frame.cubes[0], scenario.cancellation)
-            if frame.references
+            cancel(scan.references[0], scan.cubes[0], scenario.cancellation)
+            if scan.references
             else None
         )
-        products = frame_products(scenario, frame, cancellation=cancellation)
-        if cancellation is not None and frame.index < evaluate.cached_frames(ctx):
-            ctx.cancelled.append((frame, cancellation, products[0]))
-        found = frame_plots(products, scenario.detection)
+        products = scan_products(scenario, scan, cancellation=cancellation)
+        if cancellation is not None and scan.index < evaluate.n_cached_scans(ctx):
+            ctx.cancelled.append((scan, cancellation, products[0]))
+        found = scan_plots(products, scenario.detection)
         ctx.plots.append(found)
         for k, product in enumerate(products):
-            hits += _hits(found, k, product, frame.truth, bins)
+            hits += _hits(found, k, product, scan.truth, bins)
             if ctx.render:
                 mine = found.burst_index == k
                 figure = plots.render_range_doppler(
@@ -216,13 +216,13 @@ def rd(ctx: evaluate.Context) -> evaluate.Context:
                     scenario.radars[k],
                     detection_range_m=found.bistatic_range_m[mine],
                     detection_rate_mps=found.folded_rate_mps[mine],
-                    truth_range_m=frame.truth.bistatic_range_m,
-                    truth_rate_mps=frame.truth.bistatic_range_rate_mps,
-                    title=f"{scenario.name}, frame {frame.index}, burst {k}",
+                    truth_range_m=scan.truth.bistatic_range_m,
+                    truth_rate_mps=scan.truth.bistatic_range_rate_mps,
+                    title=f"{scenario.name}, scan {scan.index}, burst {k}",
                 )
                 suffix = "" if len(products) == 1 else f"_burst{k}"
-                plots.save_figure(figure, ctx.out_dir / f"rd{suffix}_{frame.index:05d}.png")
-        if frame.index == 0:
+                plots.save_figure(figure, ctx.out_dir / f"rd{suffix}_{scan.index:05d}.png")
+        if scan.index == 0:
             power_w = np.abs(products[0].rd_map) ** 2
             rate_bin, range_bin = np.unravel_index(int(np.argmax(power_w)), power_w.shape)
             ctx.record("rd_peak_range_index", float(range_bin))
@@ -271,8 +271,8 @@ def _false_alarm_ratio(scenario: Scenario, burst: int) -> float:
 @evaluate.stage("detect", "truth_within_bins", "rate_tolerance_mps")
 def detect(ctx: evaluate.Context) -> evaluate.Context:
     """Rate of the plot nearest each target against its truth; plot counts; detections.csv."""
-    scenario, verify, truth = ctx.scenario, evaluate.thresholds(ctx, "detect"), evaluate.truth(ctx)
-    if len(ctx.plots) != ctx.n_frames:
+    scenario, verify, truths = ctx.scenario, evaluate.thresholds(ctx, "detect"), evaluate.truth(ctx)
+    if len(ctx.plots) != ctx.n_scans:
         msg = "the detect stage needs the rd stage's plots; run rd first."
         raise ValueError(msg)
     range_span_m, rate_span_mps, range_bin_m = evaluate.spans(scenario, 0)
@@ -280,11 +280,11 @@ def detect(ctx: evaluate.Context) -> evaluate.Context:
     errors_mps, show, rows = [], plots.display_axes(scenario.radar), []
     # A noise burst's lags are a window: a gap in range is not taken the short way round.
     wraps = math.isfinite(scenario.radar.unambiguous_bistatic_range_m)
-    # A frame's plots against its targets: a handful of each.
-    for index, (found, frame) in enumerate(zip(ctx.plots, truth, strict=True)):
+    # A scan's plots against its targets: a handful of each.
+    for index, (found, truth) in enumerate(zip(ctx.plots, truths, strict=True)):
         accepted = found.accepted
-        for k, rate_mps in enumerate(frame.bistatic_range_rate_mps):
-            gap_m = found.bistatic_range_m[accepted] - frame.bistatic_range_m[k]
+        for k, rate_mps in enumerate(truth.bistatic_range_rate_mps):
+            gap_m = found.bistatic_range_m[accepted] - truth.bistatic_range_m[k]
             if wraps:
                 gap_m = fold_into_period(gap_m, range_span_m, lower=-range_span_m / 2.0)
             gap_m = np.abs(gap_m)
@@ -301,7 +301,7 @@ def detect(ctx: evaluate.Context) -> evaluate.Context:
                     abs(unfolded_mps - rate_mps if unfolded_mps == unfolded_mps else folded_gap_mps)
                 )
         for j, detection in enumerate(found.detections):
-            row = {"frame": index, "time_s": scenario.frame_times_s[index], "detection_id": j}
+            row = {"scan": index, "time_s": scenario.scan_times_s[index], "detection_id": j}
             row["burst_index"], row["status"] = found.burst_index[j], found.status[j]
             row[show.range_name] = found.bistatic_range_m[j] * show.scale
             row[show.rate_name + "_folded"] = found.folded_rate_mps[j] * show.scale
@@ -329,25 +329,25 @@ def detect(ctx: evaluate.Context) -> evaluate.Context:
     "confirmation_latency_max_scans",
 )
 def track(ctx: evaluate.Context) -> evaluate.Context:
-    """Track every frame; score each target's primary track; tracks, metrics and track.png."""
+    """Track every scan; score each target's primary track; tracks, metrics and track.png."""
     scenario, verify, settings = (
         ctx.scenario,
         evaluate.thresholds(ctx, "track"),
         ctx.scenario.tracking,
     )
-    if len(ctx.plots) != ctx.n_frames or settings is None:
+    if len(ctx.plots) != ctx.n_scans or settings is None:
         msg = "the track stage needs a [tracking] table and the rd stage's plots."
         raise ValueError(msg)
     tracker = ScanTracker(scenario)
     period_m, show, rows = tracker.range_period_m, plots.display_axes(scenario.radar), []
     # Scans are sequential: each one's tracks are the next one's prior.
     for index, found in enumerate(ctx.plots):
-        bank, accepted = tracker.scan(found, float(scenario.frame_times_s[index]))
+        bank, accepted = tracker.scan(found, float(scenario.scan_times_s[index]))
         ctx.banks.append((bank, accepted))
         for r in range(bank.n_tracks):
             row = {
-                "frame": index,
-                "time_s": scenario.frame_times_s[index],
+                "scan": index,
+                "time_s": scenario.scan_times_s[index],
                 "track_id": bank.track_id[r],
             }
             row["status"] = TrackStatus(bank.status[r]).name.lower()
@@ -378,9 +378,9 @@ def track(ctx: evaluate.Context) -> evaluate.Context:
         if row["metric"] in shown:
             row["metric"], row["value"] = shown[row["metric"]], row["value"] * show.scale
     evaluate.write_csv(ctx.out_dir / "metrics.csv", metric_rows)
-    # A run shorter than two confirmation windows scores too few frames to judge a tracker.
-    if ctx.n_frames < 2 * settings.n_confirm_scans:
-        print(f"  under {2 * settings.n_confirm_scans} frames: too short to check a tracker")
+    # A run shorter than two confirmation windows scores too few scans to judge a tracker.
+    if ctx.n_scans < 2 * settings.n_confirm_scans:
+        print(f"  under {2 * settings.n_confirm_scans} scans: too short to check a tracker")
     else:
         for key, name, low, high in (
             ("range_rmse_max_m", "range_rmse_m", 0.0, verify.get("range_rmse_max_m")),
@@ -401,22 +401,20 @@ def track(ctx: evaluate.Context) -> evaluate.Context:
             if key in verify:
                 ctx.check("track", name, scores[name], low, high)
     if ctx.render:
-        truth = evaluate.truth(ctx)
+        truths = evaluate.truth(ctx)
         accepted_m = [found.bistatic_range_m[found.accepted] for found in ctx.plots]
-        # broadcast-exempt: one frame time per accepted plot, for a scatter.
-        plot_time_s = np.repeat(
-            scenario.frame_times_s[: ctx.n_frames], [r.size for r in accepted_m]
-        )
+        # broadcast-exempt: one scan time per accepted plot, for a scatter.
+        plot_time_s = np.repeat(scenario.scan_times_s[: ctx.n_scans], [r.size for r in accepted_m])
         figure = plots.render_range_time_history(
-            scenario.frame_times_s[: ctx.n_frames],
-            np.array([frame.bistatic_range_m for frame in truth]),
-            np.array([frame.bistatic_range_rate_mps for frame in truth]),
+            scenario.scan_times_s[: ctx.n_scans],
+            np.array([truth.bistatic_range_m for truth in truths]),
+            np.array([truth.bistatic_range_rate_mps for truth in truths]),
             scenario.radar,
             tracks=tracks,
             detection_time_s=plot_time_s,
             detection_range_m=np.concatenate(accepted_m),
             range_period_m=period_m
-            if max(np.max(f.bistatic_range_m) for f in truth) >= period_m
+            if max(np.max(t.bistatic_range_m) for t in truths) >= period_m
             else None,
             title=scenario.name,
         )
@@ -427,22 +425,22 @@ def track(ctx: evaluate.Context) -> evaluate.Context:
 def _score(
     ctx: evaluate.Context, period_m: float
 ) -> tuple[dict[str, float], list[dict[str, Any]], list[Any]]:
-    """Score each target's primary track, the one nearest it in the most confirmed frames.
+    """Score each target's primary track, the one nearest it in the most confirmed scans.
 
     Errors are truth minus estimate, range the short way round the map's span; the NEES
-    fraction counts frames inside chi-square(2)'s two-sided 95 % interval (Bar-Shalom [2]
+    fraction counts scans inside chi-square(2)'s two-sided 95 % interval (Bar-Shalom [2]
     §5.4.2); latency is scans from a track's first row to its confirmation. Over targets the
     worst of each is reported. Returns the scores, the metrics.csv rows and the tracks drawn.
     """
-    truth = evaluate.truth(ctx)
+    truths = evaluate.truth(ctx)
     confirmed = [is_confirmed(b.status) for b, _ in ctx.banks]
     votes: dict[tuple[int, int], int] = {}
-    # Each frame's confirmed tracks vote for the target nearest in range: a few rows a frame.
-    for (bank, _), mask, frame in zip(ctx.banks, confirmed, truth, strict=True):
+    # Each scan's confirmed tracks vote for the target nearest in range: a few rows a scan.
+    for (bank, _), mask, truth in zip(ctx.banks, confirmed, truths, strict=True):
         for row in np.flatnonzero(mask):
             gap_m = np.abs(
                 fold_into_period(
-                    frame.bistatic_range_m - bank.mean[row, 0], period_m, lower=-period_m / 2.0
+                    truth.bistatic_range_m - bank.mean[row, 0], period_m, lower=-period_m / 2.0
                 )
             )
             key = (int(np.argmin(gap_m)), int(bank.track_id[row]))
@@ -464,11 +462,11 @@ def _score(
         mean = np.array([ctx.banks[i][0].mean[rows[i][0]] for i in scored])
         covariance = np.array([ctx.banks[i][0].covariance[rows[i][0]] for i in scored])
         range_error_m = fold_into_period(
-            [truth[i].bistatic_range_m[target] for i in scored] - mean[:, 0],
+            [truths[i].bistatic_range_m[target] for i in scored] - mean[:, 0],
             period_m,
             lower=-period_m / 2.0,
         )
-        rate_error_mps = [truth[i].bistatic_range_rate_mps[target] for i in scored] - mean[:, 1]
+        rate_error_mps = [truths[i].bistatic_range_rate_mps[target] for i in scored] - mean[:, 1]
         error = np.column_stack([range_error_m, rate_error_mps])
         inside = (low <= (scaled := nees(np.zeros(2), covariance, error))) & (scaled <= high)
         born = next(i for i, r in enumerate(rows) if r.size)
@@ -484,8 +482,8 @@ def _score(
                     "metric": metric,
                     "target": name,
                     "track_id": track_id,
-                    "frame_start": scored[0],
-                    "frame_end": scored[-1],
+                    "scan_start": scored[0],
+                    "scan_end": scored[-1],
                     "value": value,
                 }
             )
@@ -494,7 +492,7 @@ def _score(
                 value if math.isnan(worst[metric]) else float(pick(worst[metric], value))
             )
         tracks.append(
-            (f"track {track_id}", ctx.scenario.frame_times_s[scored], mean[:, 0], mean[:, 1])
+            (f"track {track_id}", ctx.scenario.scan_times_s[scored], mean[:, 0], mean[:, 1])
         )
     worst["n_confirmed_tracks"] = float(len({track_id for _, track_id in votes}))
     return worst, metric_rows, tracks

@@ -22,8 +22,8 @@ keystone's own ``keystone_only_loss_tolerance_db``), ``compensated_loss_min_db``
 
 :mod:`radar_forge.stages.clutter` holds ``leakage`` (scenario 005): ``cancellation_depth_db``
 with ``cancellation_tolerance_db``, ``floor_rise_db`` with ``floor_rise_tolerance_db``,
-``sinr_loss_db`` with ``sinr_loss_tolerance_db``, ``detections_per_frame``,
-``uncancelled_detections_per_frame`` and ``acceptance_frames``.
+``sinr_loss_db`` with ``sinr_loss_tolerance_db``, ``detections_per_scan``,
+``uncancelled_detections_per_scan`` and ``acceptance_scans``.
 
 :mod:`radar_forge.stages.tracking` holds ``multitarget`` (scenario 011): ``gospa_mean_max_m``,
 ``swap_fraction_max``, ``mode_latency_max_scans``, ``nees_fraction_min``, ``pd_min``,
@@ -50,7 +50,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from radar_forge.clutter import CancellationResult
-from radar_forge.pipeline import Frame, Plots, RangeDopplerProduct, map_axes
+from radar_forge.pipeline import Plots, RangeDopplerProduct, ScanIq, map_axes
 from radar_forge.propagation import received_power_w
 from radar_forge.radar import Radar, TargetGeometry
 from radar_forge.scenario import Scenario, truth_geometry
@@ -63,7 +63,7 @@ __all__ = [
     "Context",
     "Report",
     "VerificationError",
-    "cached_frames",
+    "n_cached_scans",
     "run",
     "spans",
     "stage",
@@ -124,7 +124,7 @@ class Context:
 
     scenario: Scenario
     out_dir: Path
-    n_frames: int
+    n_scans: int
     save_iq: bool
     report: Report
     render: bool = True
@@ -132,7 +132,7 @@ class Context:
     plots: list[Plots] = field(default_factory=list)
     banks: list[tuple[TrackBank, NDArray[np.intp]]] = field(default_factory=list)
     stages: tuple[str, ...] = ()
-    cancelled: list[tuple[Frame, CancellationResult, RangeDopplerProduct]] = field(
+    cancelled: list[tuple[ScanIq, CancellationResult, RangeDopplerProduct]] = field(
         default_factory=list
     )
 
@@ -178,7 +178,7 @@ def thresholds(ctx: Context, stage_name: str) -> dict[str, Any]:
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     """Write dict rows under the first row's keys; a nan is written as an empty cell."""
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]) if rows else ["frame"])
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]) if rows else ["scan"])
         writer.writeheader()
         writer.writerows(
             {k: "" if isinstance(v, float) and math.isnan(v) else v for k, v in row.items()}
@@ -209,21 +209,21 @@ def spans(scenario: Scenario, burst: int) -> tuple[float, float, float]:
     return range_axis_m.size * range_bin_m, rate_span_mps, range_bin_m
 
 
-def cached_frames(ctx: Context) -> int:
-    """Return how many noise frames ``rd`` keeps, cancelled, for ``leakage``: its acceptance frames.
+def n_cached_scans(ctx: Context) -> int:
+    """Return how many noise scans ``rd`` keeps, cancelled, for ``leakage``: its acceptance scans.
 
     Each holds a stream, its code, the residual and the map, about 72 MB at 005's size; none is
     kept unless ``leakage`` runs.
     """
     if "leakage" not in ctx.stages:
         return 0
-    return min(ctx.n_frames, int(ctx.scenario.verify.get("acceptance_frames", ctx.n_frames)))
+    return min(ctx.n_scans, int(ctx.scenario.verify.get("acceptance_scans", ctx.n_scans)))
 
 
 def truth(ctx: Context) -> list[TargetGeometry]:
-    """Return every frame's truth, from the geometry stage or computed now."""
+    """Return every scan's truth, from the geometry stage or computed now."""
     if not ctx.truth:
-        ctx.truth = truth_geometry(ctx.scenario)[: ctx.n_frames]
+        ctx.truth = truth_geometry(ctx.scenario)[: ctx.n_scans]
     return ctx.truth
 
 
@@ -231,7 +231,7 @@ def run(
     scenario: Scenario,
     stages: Sequence[str] | None = None,
     *,
-    n_frames: int | None = None,
+    n_scans: int | None = None,
     out_dir: Path | str,
     save_iq: bool = False,
     render: bool = True,
@@ -249,9 +249,9 @@ def run(
         raise ValueError(msg)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    count = scenario.n_frames if n_frames is None else min(n_frames, scenario.n_frames)
+    count = scenario.n_scans if n_scans is None else min(n_scans, scenario.n_scans)
     ctx = Context(scenario, out, count, save_iq, Report(scenario.name), render, stages=tuple(names))
-    print(f"{scenario.name}: {count} frame(s), {len(scenario.radars)} burst(s) -> {out}")
+    print(f"{scenario.name}: {count} scan(s), {len(scenario.radars)} burst(s) -> {out}")
     for name, function in STAGES.items():
         if name in names:
             print(f"[{name}]")

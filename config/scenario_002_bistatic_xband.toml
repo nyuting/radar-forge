@@ -18,10 +18,10 @@ altitude_m = 1500.0    # the CSV has no altitude column; held constant
 # The 120 s window that maximises the mean bistatic angle over the track:
 # beta runs 109.9-129.3 deg, so the geometry is strongly bistatic throughout.
 # Scenario 001's window would give 40.7-44.1 deg, where little is exercised.
-[frames]
+[scans]
 start_time_s = 13329.0
 duration_s = 120.0
-frame_rate_hz = 1.0
+scan_period_s = 1.0
 
 # The transmitter. Delete [site.rx] and the same file is a monostatic
 # scenario at Raleigh-Durham.
@@ -55,7 +55,7 @@ gain_rx_dbi = 30.0
 noise_figure_db = 3.0
 
 # Cell-averaging CFAR along range, which wraps, as scenario 003 runs it. At
-# pfa = 1e-5, S1's map of 256 x 1000 cells holds about 2.6 false alarms a frame.
+# pfa = 1e-5, S1's map of 256 x 1000 cells holds about 2.6 false alarms a scan.
 [detection]
 pfa = 1e-5
 n_train = 16
@@ -68,10 +68,10 @@ max_bistatic_range_rate_mps = 400.0   # 200 m/s radial
 # bistatic range and rate, positive receding: twice the slant values.
 [verify]
 stages = ["geometry", "iq", "rd", "detect"]
-# Fraction of frames whose true range and rate lie inside the map, unfolded.
+# Fraction of scans whose true range and rate lie inside the map, unfolded.
 # B1 folds the rate at +-15.3 m/s, about 8.6 times over the window.
 truth_in_map_fraction = [0.0, 0.25]
-# P_r T N / (k T0 F) on an exact bin at frame 0's ranges (R_T = 14,800.6 m, R_R = 7,523.6 m), from the
+# P_r T N / (k T0 F) on an exact bin at scan 0's ranges (R_T = 14,800.6 m, R_R = 7,523.6 m), from the
 # radar equation by hand: P_r = -134.198 dBW.
 expected_snr_db = 60.86
 snr_tolerance_db = 0.01
@@ -79,7 +79,7 @@ snr_tolerance_db = 0.01
 noise_tolerance_db = 0.05
 # A noiseless echo has |a|^2 = P_r in every sample it fills.
 peak_tolerance_db = 0.01
-# A detection within one bin of the range and wrapped rate, every frame.
+# A detection within one bin of the range and wrapped rate, every scan.
 truth_within_bins = 1.0
 detection_fraction = 1.0
 # Noise-only maps hold 30 expected false alarms; the Poisson 99.9 % interval,

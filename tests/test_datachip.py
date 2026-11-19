@@ -326,7 +326,7 @@ class TestEstimate:
 
 @pytest.fixture(scope="module")
 def scenario_chips() -> dict[str, tuple[DataChip, object]]:
-    """Each variant's noiseless chain at frame 0 to a chip at its peak, with the truth."""
+    """Each variant's noiseless chain at scan 0 to a chip at its peak, with the truth."""
     found = {}
     for variant in ("k1", "k2", "k3"):
         scenario = load_scenario(REPO / "config" / f"scenario_004_keystone_{variant}.toml")

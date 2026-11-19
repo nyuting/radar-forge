@@ -317,7 +317,7 @@ def cluster_detections(
     if len(shapes) > 1:
         msg = f"mask {flags.shape}, power_w {values_w.shape} and threshold_w do not match."
         raise ValueError(msg)
-    # Only the flagged cells, in C order: a frame's map has 10^5 cells, its clusters a few.
+    # Only the flagged cells, in C order: a scan's map has 10^5 cells, its clusters a few.
     cells, label_of, n_groups = _label_cells(flags, connectivity, wrap_axes)
     if n_groups == 0:
         return []

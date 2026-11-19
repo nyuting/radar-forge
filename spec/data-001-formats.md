@@ -39,8 +39,8 @@ bytes).
 | Data | Format | Why |
 | :--- | :--- | :--- |
 | Scenario, radar and waveform inputs | TOML | The project's configuration format, read with stdlib `tomllib` by `radar_forge/scenario.py` |
-| Tables: trajectory, truth, detections, tracks, metrics | CSV (RFC 4180, UTF-8), one row per entity per frame | Opens in every tool including a spreadsheet; no dependency |
-| Arrays: raw IQ | NumPy `.npz`, one file per frame | The core stack reads and writes it; no dependency |
+| Tables: trajectory, truth, detections, tracks, metrics | CSV (RFC 4180, UTF-8), one row per entity per scan | Opens in every tool including a spreadsheet; no dependency |
+| Arrays: raw IQ | NumPy `.npz`, one file per scan | The core stack reads and writes it; no dependency |
 | Run metadata and provenance | JSON | Machine output, not configuration |
 | Figures | PNG, MP4 | For people, never parsed back |
 
@@ -64,13 +64,13 @@ measured values are printed, and returned by `evaluate.run` as a `Report`; they 
 
 | Topic | Convention |
 | :--- | :--- |
-| **Time** | `time_s` is seconds on the trajectory files' own time base, float64, monotonic within a file: every target's file and the frame times share it, and a file is never rebased to its first fix. There is no absolute epoch and no `time_utc` |
-| **Frame** | `frame` is a zero-based integer, one revisit (a *scan* to the tracker). With `time_s` it is the join key across files. A *burst* is one coherent processing interval inside a frame |
+| **Time** | `time_s` is seconds on the trajectory files' own time base, float64, monotonic within a file: every target's file and the scan times share it, and a file is never rebased to its first fix. There is no absolute epoch and no `time_utc` |
+| **Scan** | `scan` is a zero-based integer counting revisits of the scene: a full rotation, a full electronic scan pattern or, for a staring radar, one transmission of all its bursts (TI and radarsimpy say *frame*). With `time_s` it is the join key across files. A *burst* is one coherent processing interval inside a scan |
 | **Frames of reference** | Geodetic WGS-84 → ECEF → local ENU tangent plane, per `radar_forge/coordinates.py`. The ENU origin is the receiver site, which is the radar's when monostatic |
 | **Angles** | `azimuth_deg` is a compass bearing from true north, increasing clockwise; `elevation_deg` is up from the local horizontal. Radians inside the library, degrees in files |
 | **Range and range rate** | **Range rate is the time derivative of range, positive receding; Doppler = -rate/wavelength.** `range_m` is the slant range for a monostatic radar and the bistatic range `R_T + R_R` (`bistatic_range_m`) for a bistatic one, and its rate is `bistatic_range_rate_mps = d(bistatic_range_m)/dt`, so `doppler_hz = -bistatic_range_rate_mps / wavelength_m`. The range-Doppler axes and the tracker's state carry bistatic range and rate; the files of a monostatic run halve both and name them `range_m` and `range_rate_mps` (`plots.display_axes`), and a bistatic run writes `bistatic_range_m` and `bistatic_range_rate_mps`. Every rate column follows it |
 | **Units** | The `style.md` §2 suffix table. Compound units: `_m2`, `_m2ps2`, `_mps2` |
-| **Identifiers** | `track_id` is an integer, never reused. `detection_id` is an integer unique within a frame, so `(frame, detection_id)` is the detection key |
+| **Identifiers** | `track_id` is an integer, never reused. `detection_id` is an integer unique within a scan, so `(scan, detection_id)` is the detection key |
 | **Vocabulary** | A *detection* is the CFAR-derived point: a connected group of threshold crossings in one burst's range-Doppler map (`radar_forge.detection.Detection`); `detections.csv` holds them in physical units. A *track* is a filtered state built from detections over scans |
 | **Missing values** | An empty cell means not applicable or not yet known (an unfolded rate before a fold is selected). `NaN` means computed and invalid. They are never interchanged |
 | **Booleans** | `0` / `1` |
@@ -100,16 +100,16 @@ scenario file may contain.
 A CSV, one row per fix, read by `radar_forge/scenario.py`: `time_s` (s), `latitude_deg` and
 `longitude_deg` (WGS-84), and optionally `altitude_m` (above the ellipsoid; otherwise the
 `[[target]]`'s `altitude_m` holds for every fix). Times must increase strictly, and are read
-as written: two targets' files on one clock play in step, and `[frames].start_time_s` is on it too.
+as written: two targets' files on one clock play in step, and `[scans].start_time_s` is on it too.
 
 ### 6.4 `truth.csv`
 
-One row per target per frame, a constructed `[second_aircraft]` included: the true, unfolded
+One row per target per scan, a constructed `[second_aircraft]` included: the true, unfolded
 geometry.
 
 | Column | dtype | Unit | Req. | Meaning |
 | :--- | :--- | :--- | :--- | :--- |
-| `frame`, `time_s` | int, float64 | —, s | R | |
+| `scan`, `time_s` | int, float64 | —, s | R | |
 | `target` | string | — | R | The `[[target]]` name |
 | `<range>` | float64 | m | R | Route length R_T + R_R, halved monostatic |
 | `<rate>` | float64 | m/s | R | Its time derivative, positive receding, halved monostatic |
@@ -121,13 +121,13 @@ geometry.
 
 ### 6.5 `detections.csv`
 
-One row per detection per frame, every burst's. The vocabulary follows the ASTERIX CAT048 target
+One row per detection per scan, every burst's. The vocabulary follows the ASTERIX CAT048 target
 report; the units are SI.
 
 | Column | dtype | Unit | Req. | Meaning |
 | :--- | :--- | :--- | :--- | :--- |
-| `frame`, `time_s` | int, float64 | —, s | R | |
-| `detection_id` | int | — | R | Unique within the frame; `pipeline.Plots` row order |
+| `scan`, `time_s` | int, float64 | —, s | R | |
+| `detection_id` | int | — | R | Unique within the scan; `pipeline.Plots` row order |
 | `burst_index` | int | — | R | The burst whose map the detection came from |
 | `status` | enum | — | R | `accepted` (reaches the tracker from burst 0) or, for a dual-PRF pair, `missing_pair`, `ambiguous_pair`, `unresolved_rate` |
 | `<range>` | float64 | m | R | Power-weighted centroid range, folded if the map folds |
@@ -142,12 +142,12 @@ report; the units are SI.
 
 ### 6.6 `tracks.csv`
 
-One row per track per frame, tentative and coasting tracks included, and a deleted track once. The
+One row per track per scan, tentative and coasting tracks included, and a deleted track once. The
 vocabulary follows the ASTERIX CAT062 system track. The state is range and rate.
 
 | Column | dtype | Unit | Req. | Meaning |
 | :--- | :--- | :--- | :--- | :--- |
-| `frame`, `time_s` | int, float64 | —, s | R | |
+| `scan`, `time_s` | int, float64 | —, s | R | |
 | `track_id` | int | — | R | |
 | `status` | enum | — | R | `tentative`, `confirmed`, `coasting` or `deleted` |
 | `<range>`, `<rate>` | float64 | m, m/s | R | The state; range wrapped into the map's span |
@@ -159,7 +159,7 @@ vocabulary follows the ASTERIX CAT062 system track. The state is range and rate.
 
 ### 6.7 `iq_NNNNN.npz`
 
-One compressed NumPy archive per frame (`np.savez_compressed`), with one array per burst named
+One compressed NumPy archive per scan (`np.savez_compressed`), with one array per burst named
 `burst0`, `burst1`, … Each array is `(n_pulses, n_samples)` complex128 in `sqrt(W)`, so `|a|²` is
 watts; the bursts of a dual-PRF run differ in shape. The archive carries no axes or units: the
 scenario file defines them. Raw IQ is by far the largest output and is regenerable from the
@@ -167,20 +167,20 @@ scenario file and seed.
 
 ### 6.8 Figures
 
-`rd{suffix}_NNNNN.png`, one per frame and burst, where `suffix` is empty for a single burst and
+`rd{suffix}_NNNNN.png`, one per scan and burst, where `suffix` is empty for a single burst and
 `_burst{i}` for each burst of a multi-burst run, and one `track.png`. They are decibel renderings
 for people, and nothing reads them back.
 
 ### 6.9 `metrics.csv`
 
 Tidy and long, one row per metric per target's primary track (the track nearest it in the most
-confirmed frames). The unit is in the metric's name.
+confirmed scans). The unit is in the metric's name.
 
 | Column | dtype | Req. | Meaning |
 | :--- | :--- | :--- | :--- |
-| `metric` | string | R | `<range>`'s `_rmse_m` (`range_rmse_m` monostatic, halved), `<rate>`'s `_rmse_mps`, `nees_fraction` (frames inside χ²₂'s 95 % interval), `confirmation_latency_scans` |
+| `metric` | string | R | `<range>`'s `_rmse_m` (`range_rmse_m` monostatic, halved), `<rate>`'s `_rmse_mps`, `nees_fraction` (scans inside χ²₂'s 95 % interval), `confirmation_latency_scans` |
 | `target`, `track_id` | string, int | R | |
-| `frame_start`, `frame_end` | int | R | The inclusive frame window the metric covers |
+| `scan_start`, `scan_end` | int | R | The inclusive scan window the metric covers |
 | `value` | float64 | R | |
 
 ## 7. Versioning

@@ -336,10 +336,10 @@ As scenario-001 §3.6, plus a `/stap` group in `products.h5`:
 
 | Dataset | Shape | Meaning |
 | :--- | :--- | :--- |
-| `/stap/burst{k}/data` | `(n_frames, n_doppler_bins, n_range_bins)` complex128 | the STAP output `data_stap_rv`; attr `method`, `n_training`, `n_guard` |
-| `/stap/burst{k}/sinr_loss_db` | `(n_frames, n_doppler_bins)` float64 | the SINR-loss curve at the look angle; attr `covariance` = `"clairvoyant"` or `"estimated"` |
-| `/stap/burst{k}/clutter_eigenvalues_linear` | `(n_frames, n_rx·n_pulses)` float64 | descending, normalised by σ² |
-| `/stap/burst{k}/weights` | `(n_frames, n_doppler_bins, n_rx·n_pulses)` complex128 | only if `save_weights = true`; stacked per D17 |
+| `/stap/burst{k}/data` | `(n_scans, n_doppler_bins, n_range_bins)` complex128 | the STAP output `data_stap_rv`; attr `method`, `n_training`, `n_guard` |
+| `/stap/burst{k}/sinr_loss_db` | `(n_scans, n_doppler_bins)` float64 | the SINR-loss curve at the look angle; attr `covariance` = `"clairvoyant"` or `"estimated"` |
+| `/stap/burst{k}/clutter_eigenvalues_linear` | `(n_scans, n_rx·n_pulses)` float64 | descending, normalised by σ² |
+| `/stap/burst{k}/weights` | `(n_scans, n_doppler_bins, n_rx·n_pulses)` complex128 | only if `save_weights = true`; stacked per D17 |
 
 `truth.csv` gains `doppler_normalized` (ω, dimensionless) and `spatial_frequency_normalized`
 (θ_s) per target, so every test can read the target's place on the ridge without re-deriving it.

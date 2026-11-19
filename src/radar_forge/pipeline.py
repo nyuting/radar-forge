@@ -1,11 +1,11 @@
-r"""The chain from a scenario to tracks: frames of IQ, range-Doppler maps, plots and scans.
+r"""The chain from a scenario to tracks: each scan's IQ, range-Doppler maps, plots and tracks.
 
-:func:`frames` plays a :class:`~radar_forge.scenario.Scenario` back one frame at a time, each
+:func:`scan_iq` plays a :class:`~radar_forge.scenario.Scenario` back one scan at a time, each
 burst's cube synthesised from line-of-sight paths; a noise burst's stream also carries its
 leakage and near clutter, beside the code it sent. :func:`range_doppler_product` makes each
 cube a :class:`RangeDopplerProduct`, a pulsed cube through its range gate and ``[migration]``
 (:mod:`radar_forge.migration`), a noise stream once :func:`~radar_forge.clutter.cancel` has
-cleaned it; :func:`frame_plots` runs CFAR along range, clusters, and pairs two bursts by dual
+cleaned it; :func:`scan_plots` runs CFAR along range, clusters, and pairs two bursts by dual
 PRF into :class:`Plots`; :class:`ScanTracker` feeds the accepted plots to a
 :class:`~radar_forge.tracking.Tracker`. The map axes carry bistatic range :math:`R_T + R_R`
 and its rate, positive receding; nothing here halves them. An FMCW scenario with a receive array
@@ -79,15 +79,15 @@ from radar_forge.tracking.models import LinearMeasurement, RadialConstantVelocit
 from radar_forge.tracking.tracker import Scan, Tracker
 
 __all__ = [
-    "Frame",
     "Plots",
     "RangeDopplerProduct",
+    "ScanIq",
     "ScanTracker",
-    "frame_plots",
-    "frame_products",
-    "frames",
     "map_axes",
     "range_doppler_product",
+    "scan_iq",
+    "scan_plots",
+    "scan_products",
     "synthesise",
 ]
 
@@ -151,8 +151,8 @@ def synthesise(
 
 
 @dataclass(frozen=True)
-class Frame:
-    """One frame: its time, the targets' true geometry, and one cube per burst.
+class ScanIq:
+    """One scan: its time, the targets' true geometry, and one cube per burst.
 
     A noise burst's cube is its received stream cut into batches, and ``references`` holds
     the code it sent, the same shape; empty for the other waveforms.
@@ -165,20 +165,20 @@ class Frame:
     references: tuple[NDArray[np.complex128], ...] = ()
 
 
-def frames(scenario: Scenario, *, n_frames: int | None = None) -> Iterator[Frame]:
-    """Play a scenario back one frame at a time, every burst drawing noise from one generator.
+def scan_iq(scenario: Scenario, *, n_scans: int | None = None) -> Iterator[ScanIq]:
+    """Play a scenario back one scan at a time, every burst drawing noise from one generator.
 
-    A generator, so a run holds one frame's cubes at a time. Consumed in order it replays bit
-    for bit; skipping a frame changes the noise of every frame after it.
+    A generator, so a run holds one scan's cubes at a time. Consumed in order it replays bit
+    for bit; skipping a scan changes the noise of every scan after it.
     """
-    truths = truth_geometry(scenario)[:n_frames]
+    truths = truth_geometry(scenario)[:n_scans]
     rng = np.random.default_rng(scenario.seed)
     rcs_m2 = list(scenario.rcs_m2)
     array, phase_rad = scenario.array, scattering_phase_rad(scenario)
     radar, distortion = scenario.radar, scenario.transmitter_distortion
     disturbance = disturbance_paths(radar, scenario.leakage, scenario.clutter)
     amplifier = None if distortion is None else functools.partial(cubic_amplifier, a3=distortion.a3)
-    # A loop over frames is the point: each frame is built and handed out before the next.
+    # A loop over scans is the point: each scan is built and handed out before the next.
     for index, truth in enumerate(truths):
         if radar.transmitter.waveform == "noise":
             n_pulses = scenario.n_pulses[0]
@@ -194,7 +194,7 @@ def frames(scenario: Scenario, *, n_frames: int | None = None) -> Iterator[Frame
                 amplifier=amplifier,
             )
             references = (code.reshape(n_pulses, -1),)
-            yield Frame(index, float(scenario.frame_times_s[index]), truth, (stream,), references)
+            yield ScanIq(index, float(scenario.scan_times_s[index]), truth, (stream,), references)
             continue
         cubes = tuple(
             synthesise(
@@ -211,7 +211,7 @@ def frames(scenario: Scenario, *, n_frames: int | None = None) -> Iterator[Frame
                 scenario.radars, scenario.n_pulses, scenario.gates, strict=True
             )
         )
-        yield Frame(index, float(scenario.frame_times_s[index]), truth, cubes)
+        yield ScanIq(index, float(scenario.scan_times_s[index]), truth, cubes)
 
 
 def map_axes(
@@ -378,21 +378,21 @@ def range_doppler_product(
     return RangeDopplerProduct(rd_map, *axes, circle_m)
 
 
-def frame_products(
-    scenario: Scenario, frame: Frame, *, cancellation: CancellationResult | None = None
+def scan_products(
+    scenario: Scenario, scan: ScanIq, *, cancellation: CancellationResult | None = None
 ) -> list[RangeDopplerProduct]:
-    """Return each burst's map of one frame, through its range gate and ``[migration]``.
+    """Return each burst's map of one scan, through its range gate and ``[migration]``.
 
     A noise stream is cancelled first, by ``[cancellation]`` unless ``cancellation`` is given,
     and the canceller's notch, exactly empty, is set to the map's noise level before CFAR sees
     it (:func:`~radar_forge.clutter.fill_notch`).
     """
-    if not frame.references:
+    if not scan.references:
         return [
             range_doppler_product(cube, radar, gate=gate, migration=scenario.migration)
-            for cube, radar, gate in zip(frame.cubes, scenario.radars, scenario.gates, strict=True)
+            for cube, radar, gate in zip(scan.cubes, scenario.radars, scenario.gates, strict=True)
         ]
-    code, stream = frame.references[0], frame.cubes[0]
+    code, stream = scan.references[0], scan.cubes[0]
     result = cancellation or cancel(code, stream, scenario.cancellation)
     residual = result.residual.reshape(stream.shape)
     radar, n_range_lags = scenario.radar, scenario.n_range_lags[0]
@@ -405,7 +405,7 @@ def frame_products(
 
 @dataclass(frozen=True)
 class Plots:
-    """Every detection of one frame, every burst's, as columns ``(n_plots,)``.
+    """Every detection of one scan, every burst's, as columns ``(n_plots,)``.
 
     ``bistatic_range_m`` and ``folded_rate_mps`` are as the burst's map shows them;
     ``bistatic_range_rate_mps`` is the unfolded rate, nan until a fold is known. The sigmas are
@@ -543,8 +543,8 @@ def _pair(
     return Plots(detections=first.detections + second.detections, status=tuple(status), **columns)
 
 
-def frame_plots(products: Sequence[RangeDopplerProduct], settings: DetectionSettings) -> Plots:
-    """Return one frame's plots from each burst's map, a dual-PRF pair paired and unfolded."""
+def scan_plots(products: Sequence[RangeDopplerProduct], settings: DetectionSettings) -> Plots:
+    """Return one scan's plots from each burst's map, a dual-PRF pair paired and unfolded."""
     max_rate_mps = settings.max_bistatic_range_rate_mps
     plots = [_detect(p, settings, k, max_rate_mps) for k, p in enumerate(products)]
     return plots[0] if len(plots) == 1 else _pair(plots[0], plots[1], products, max_rate_mps)
@@ -575,10 +575,7 @@ class ScanTracker:
         rate_bin_mps = float(rate_axis_mps[0] - rate_axis_mps[1])
         self.range_period_m = range_axis_m.size * range_bin_m
         self.fold_span_mps = rate_axis_mps.size * rate_bin_mps
-        self.scan_interval_s, self.n_slope_scans = (
-            1.0 / scenario.frame_rate_hz,
-            settings.n_slope_scans,
-        )
+        self.scan_period_s, self.n_slope_scans = scenario.scan_period_s, settings.n_slope_scans
         sigma_range_m, sigma_rate_mps = (
             range_bin_m / math.sqrt(12.0),
             rate_bin_mps / math.sqrt(12.0),
@@ -609,9 +606,7 @@ class ScanTracker:
         }
         density[_RANGE] = 1.0 / self.range_period_m
         n_scans = np.arange(2, 1000)
-        slope_sigma_mps = (
-            sigma_range_m / self.scan_interval_s * np.sqrt(12 / (n_scans**3 - n_scans))
-        )
+        slope_sigma_mps = sigma_range_m / self.scan_period_s * np.sqrt(12 / (n_scans**3 - n_scans))
         enough = n_scans[slope_sigma_mps < self.fold_span_mps / settings.unfold_sigma_gate]
         if track_aided and not enough.size:
             msg = "the range slope never resolves the fold within 1000 scans; widen the gate."
@@ -640,7 +635,7 @@ class ScanTracker:
                 settings.n_delete_misses,
                 settings.n_reacquire_misses,
                 # The miss count deletes; the coast-time limit is set past it, never to fire.
-                max_coast_time_s=(n_lives + 1) * self.scan_interval_s,
+                max_coast_time_s=(n_lives + 1) * self.scan_period_s,
                 reacquire_reset=settings.reacquire_reset,
             ),
             settings.cost,
@@ -709,7 +704,7 @@ class ScanTracker:
             history.append((time_s, range_m))
 
     def scan(self, plots: Plots, time_s: float) -> tuple[TrackBank, NDArray[np.intp]]:
-        """Track a frame's accepted plots; return the bank and the plot behind each measurement."""
+        """Track a scan's accepted plots; return the bank and the plot behind each measurement."""
         accepted = plots.accepted
         rate_mps = plots.bistatic_range_rate_mps[accepted]
         if self.n_unfold_scans is not None:

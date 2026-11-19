@@ -1,19 +1,19 @@
 r"""The ``doa`` stage: each detection's chip, its snapshot across channels, and the estimators.
 
-Every frame is mapped per receive channel (:func:`~radar_forge.pipeline.frame_products`) and
+Every scan is mapped per receive channel (:func:`~radar_forge.pipeline.scan_products`) and
 detected on the boresight beam, as ``rd`` does. Each detection's 3-D map is cropped into a chip
 (:func:`~radar_forge.datachip.crop_range_doppler`): its beam's peak cell across channels is the
 snapshot, its cells the training set. Range and rate are refined on a
 slow-time chip of the beam (:func:`~radar_forge.datachip.estimate_fine`), in parent coordinates.
 Each ``[doa]`` method runs on the target's detection and every other; the target's estimates are
 scored against the truth, each error over the Cramér-Rao bound at the truth for that snapshot. On
-noiseless frame 0 it checks the chain against the snapshot model and the coherent covariance's
+noiseless scan 0 it checks the chain against the snapshot model and the coherent covariance's
 rank. Writes ``doa.csv`` (``method = "truth"`` rows carry both aircraft) and ``doa.png``.
 
 ``[verify]``: ``direction_cosine_tolerance``, deterministic ML within it of both truths every
-frame; ``resolved_fraction_min`` over ``resolved_methods``; ``baseline_resolved_fraction_max``
+scan; ``resolved_fraction_min`` over ``resolved_methods``; ``baseline_resolved_fraction_max``
 over ``baseline_methods``; ``<method>_rmse_crb_max``, RMSE over the bound's deviation (these
-three judged from 50 scored frames on, the statistics their bounds were set for);
+three judged from 50 scored scans on, the statistics their bounds were set for);
 ``rank_ratio_max``, :math:`\lambda_2/\lambda_1` of the noiseless chip's raw covariance;
 ``snapshot_model_tolerance``, the noiseless peak cell against :math:`g A(u) s`, over its
 largest channel;
@@ -68,10 +68,10 @@ from radar_forge.doa import (
 from radar_forge.dsp import fold_velocity_mps
 from radar_forge.pipeline import (
     RangeDopplerProduct,
-    frame_plots,
-    frame_products,
-    frames,
     range_doppler_product,
+    scan_iq,
+    scan_plots,
+    scan_products,
     synthesise,
 )
 from radar_forge.radar import Radar, TargetGeometry
@@ -96,11 +96,11 @@ _KEYS = (
 _TRAINED = ("capon", "music", "root_music", "esprit")
 # A detection is the target's when its peak cell is within this many bins of the truth's.
 _TARGET_BINS = 1.5
-# Resolved fractions and RMSE over the bound are judged on this many frames or more; the bounds
+# Resolved fractions and RMSE over the bound are judged on this many scans or more; the bounds
 # were set on 200 trials. Over n errors an efficient estimator's ratio is
-# sqrt(chi2_n / n), past 1.3 with probability 0.12 at three frames and 2e-5 at fifty; a method
+# sqrt(chi2_n / n), past 1.3 with probability 0.12 at three scans and 2e-5 at fifty; a method
 # resolving with P = 0.8 misses a 0.65 bound with probability 0.10 at three, 0.006 at fifty.
-_MIN_SCORED_FRAMES = 50
+_MIN_SCORED_SCANS = 50
 
 
 @evaluate.stage("doa", *_KEYS)
@@ -121,16 +121,16 @@ def doa(ctx: evaluate.Context) -> evaluate.Context:
     worst: dict[str, float] = {"ml_error": 0.0, "parent": 0.0}
     n_targets_found = 0
     rows: list[dict[str, Any]] = []
-    for frame in frames(scenario, n_frames=ctx.n_frames):
-        product = frame_products(scenario, frame)[0]
-        # The beam's range profiles, its map's inverse Doppler transform, once a frame.
+    for scan in scan_iq(scenario, n_scans=ctx.n_scans):
+        product = scan_products(scenario, scan)[0]
+        # The beam's range profiles, its map's inverse Doppler transform, once a scan.
         profiles = np.fft.ifft(np.fft.ifftshift(product.rd_map, axes=0), axis=0)
-        found = frame_plots([product], scenario.detection)
-        truth_u = direction_cosine(array, frame.truth.aoa_rad)
-        target = _target(found.detections, product, frame.truth)
-        rows += _truth_rows(ctx, frame.index, frame.truth, truth_u, array)
-        print(f"  frame {frame.index}: u_true = {np.round(truth_u, 6)}, target detection {target}")
-        # Each detection's chip and estimators: a handful of detections a frame.
+        found = scan_plots([product], scenario.detection)
+        truth_u = direction_cosine(array, scan.truth.aoa_rad)
+        target = _target(found.detections, product, scan.truth)
+        rows += _truth_rows(ctx, scan.index, scan.truth, truth_u, array)
+        print(f"  scan {scan.index}: u_true = {np.round(truth_u, 6)}, target detection {target}")
+        # Each detection's chip and estimators: a handful of detections a scan.
         for j, detection in enumerate(found.detections):
             chip, cell = _chip(product, detection, settings, radar, scenario.n_pulses[0])
             centre = int(chip.parent_index(*cell)[1])
@@ -141,12 +141,12 @@ def doa(ctx: evaluate.Context) -> evaluate.Context:
                 label: _estimate(label, snapshot, training, array, settings, ctx)
                 for label in settings.methods
             }
-            rows += _estimate_rows(ctx, frame.index, j, chip, cell, fine, estimates, array)
+            rows += _estimate_rows(ctx, scan.index, j, chip, cell, fine, estimates, array)
             if j != target:
                 continue
             n_targets_found += 1
             truths = np.sort(truth_u[[0, -1]])
-            _ratios(ctx, training, array, settings, frame.index)
+            _ratios(ctx, training, array, settings, scan.index)
             bound = _bound_at_truth(snapshot, truths, array, ctx)
             for label, estimate in estimates.items():
                 found_u = estimate.direction_cosine_x
@@ -158,13 +158,13 @@ def doa(ctx: evaluate.Context) -> evaluate.Context:
                 worst["ml_error"] = max(worst["ml_error"], float(error.max()))
             first = next(iter(estimates.items()))
             worst["parent"] = max(worst["parent"], _parent_error(product, chip, cell, first, ctx))
-            if frame.index == 0 and ctx.render:
+            if scan.index == 0 and ctx.render:
                 _figure(ctx, estimates, truths)
-        # A frame whose target went undetected resolves nothing.
+        # A scan whose target went undetected resolves nothing.
         for label in settings.methods:
-            resolved[label] += [False] * (frame.index + 1 - len(resolved[label]))
-    if n_targets_found < ctx.n_frames:
-        # A frame without the target's detection has no estimate: no tolerance holds.
+            resolved[label] += [False] * (scan.index + 1 - len(resolved[label]))
+    if n_targets_found < ctx.n_scans:
+        # A scan without the target's detection has no estimate: no tolerance holds.
         worst["ml_error"] = worst["parent"] = math.inf
     worst["n_scored"] = n_targets_found
     _check(ctx, verify, resolved, scaled, worst)
@@ -320,7 +320,7 @@ def _ratios(
     settings: DoaSettings,
     index: int,
 ) -> None:
-    """Print, and on frame 0 record, lambda_2/lambda_1 of the raw, FB and FBSS covariances."""
+    """Print, and on scan 0 record, lambda_2/lambda_1 of the raw, FB and FBSS covariances."""
     raw = sample_covariance(training)
     length = settings.n_subarray_elements
     for name, covariance in (
@@ -411,8 +411,8 @@ def _truth_rows(
     for source, k in enumerate(np.argsort(truth_u)):
         rows.append(
             {
-                "frame": index,
-                "time_s": scenario.frame_times_s[index],
+                "scan": index,
+                "time_s": scenario.scan_times_s[index],
                 "detection_id": "",
                 "method": "truth",
                 "source_index": source,
@@ -455,8 +455,8 @@ def _estimate_rows(
             off_boresight_deg = math.degrees(math.asin(min(1.0, max(-1.0, float(u)))))
             rows.append(
                 {
-                    "frame": index,
-                    "time_s": scenario.frame_times_s[index],
+                    "scan": index,
+                    "time_s": scenario.scan_times_s[index],
                     "detection_id": detection_id,
                     "method": label,
                     "source_index": source,
@@ -495,8 +495,8 @@ def _check(
     if "parent_coordinates_tolerance" in verify:
         tolerance = verify["parent_coordinates_tolerance"]
         ctx.check("doa", "parent_coordinates_error", parent, 0.0, tolerance)
-    if worst["n_scored"] < _MIN_SCORED_FRAMES:
-        print(f"  under {_MIN_SCORED_FRAMES} scored frames: too few to judge fractions or RMSE")
+    if worst["n_scored"] < _MIN_SCORED_SCANS:
+        print(f"  under {_MIN_SCORED_SCANS} scored scans: too few to judge fractions or RMSE")
         return
     for label in verify.get("resolved_methods", ()):
         low = verify.get("resolved_fraction_min", 1.0)
@@ -517,7 +517,7 @@ def _row(truth: TargetGeometry, k: int) -> TargetGeometry:
 def _noiseless(
     ctx: evaluate.Context, verify: dict[str, Any], array: ArrayGeometry, settings: DoaSettings
 ) -> None:
-    """On noiseless frame 0: the peak cell against the snapshot model, the chip's rank against one.
+    """On noiseless scan 0: the peak cell against the snapshot model, the chip's rank against one.
 
     The model's :math:`g s_k` is aircraft k's own one-channel map at the peak cell, its
     steering vector the truth's: nothing of the multi-channel chain enters the prediction.
@@ -530,7 +530,7 @@ def _noiseless(
     )
     product = range_doppler_product(clean, radar)
     if product.channels is None:
-        msg = "the noiseless frame has no channel axis."
+        msg = "the noiseless scan has no channel axis."
         raise ValueError(msg)
     cell = np.unravel_index(int(np.argmax(np.abs(product.rd_map))), product.rd_map.shape)
     rate_bin, range_bin = int(cell[0]), int(cell[1])
@@ -572,7 +572,7 @@ def _noiseless(
 def _figure(
     ctx: evaluate.Context, estimates: dict[str, DoaEstimate], truths: NDArray[np.float64]
 ) -> None:
-    """Draw frame 0's spectra of the target's detection, the estimates without one as markers."""
+    """Draw scan 0's spectra of the target's detection, the estimates without one as markers."""
     spectra = [(label, e.spectrum) for label, e in estimates.items() if e.spectrum.size]
     grid = next((e.grid for e in estimates.values() if e.grid.size), np.zeros(0))
     markers = [(label, e.direction_cosine_x) for label, e in estimates.items() if not e.grid.size]
@@ -581,6 +581,6 @@ def _figure(
         spectra,
         estimates=markers,
         truth_direction_cosine=truths,
-        title=f"{ctx.scenario.name}, frame 0, the target's detection",
+        title=f"{ctx.scenario.name}, scan 0, the target's detection",
     )
     plots.save_figure(figure, ctx.out_dir / "doa.png")

@@ -34,7 +34,7 @@ POINTS = [
 ]
 
 
-def _scene(d: float, n_gate: float, across: bool, seed: int, n_frames: int = 40) -> Scenario:
+def _scene(d: float, n_gate: float, across: bool, seed: int, n_scans: int = 40) -> Scenario:
     """Return V3 with its pair d cells apart, across range (azimuth) or along it, at 20 km."""
     assert V3.sensor is not None
     if across:
@@ -56,7 +56,7 @@ def _scene(d: float, n_gate: float, across: bool, seed: int, n_frames: int = 40)
         V3,
         arcs=arcs,
         clutter_plots=dataclasses.replace(V3.clutter_plots, components=(disc,)),
-        duration_s=n_frames * V3.sensor.scan_period_s,
+        duration_s=n_scans * V3.scan_period_s,
         seed=seed,
         verify={},
     )
@@ -93,7 +93,7 @@ def test_a_pair_four_cells_apart_in_light_clutter_is_resolved_by_every_tracker(
     """A pair 4 cells apart merges in 0.03 % of scans (P_u(4) = e^-8) and n_gate = 0.1 clutter
     rarely draws a track off: every tracker, from its cue at the truth, holds both aircraft.
     One seeded trial of the 20 rotations a pair is judged over."""
-    scenario = _scene(4.0, 0.1, across, 20261109, n_frames=20)
+    scenario = _scene(4.0, 0.1, across, 20261109, n_scans=20)
     resolved = {name: pair_scores(scenario, run)[0] for name, run in play(scenario)[0].items()}
     assert resolved == dict.fromkeys(resolved, 1.0)
     assert set(resolved) == {"jpda", "gnn", "jpda_star", "set", "jipda", "mht", "pmbm"}

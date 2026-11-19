@@ -7,7 +7,7 @@
 #
 # The window starts at 663 s rather than 0 s. The range rate is a property of
 # the site-to-track geometry: from 0 s the target's rate swings 44 m/s of
-# bistatic rate inside the ten frames the unfolding bootstrap needs, which no
+# bistatic rate inside the ten scans the unfolding bootstrap needs, which no
 # fold selector can survive. 663 s is the earliest window that still crosses a
 # fold boundary -- the thing this scenario exists to show -- while holding the
 # rate steady enough either side of the crossing for the range-slope estimator
@@ -29,10 +29,10 @@ rcs_dbsm = 10.0        # 10 m^2, Swerling 0 (non-fluctuating)
 trajectory_path = "../data/flight_coordinates.csv"
 altitude_m = 1500.0    # the CSV has no altitude column; held constant
 
-[frames]
+[scans]
 start_time_s = 663.0
 duration_s = 120.0
-frame_rate_hz = 1.0
+scan_period_s = 1.0
 
 [site.tx]
 # The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna.
@@ -57,7 +57,7 @@ noise_figure_db = 3.0
 
 # Cell-averaging CFAR along range, which wraps. At pfa = 1e-5 over the
 # 256,000 cells of the map about 2.56 false alarms reach the associator every
-# frame -- enough to exercise gating and assignment continuously, while leaving
+# scan -- enough to exercise gating and assignment continuously, while leaving
 # a spurious *confirmed* track about a once-in-three-hundred-runs event.
 [detection]
 pfa = 1e-5
@@ -83,7 +83,7 @@ linearisation = "taylor"
 process_noise = "dwna"
 # Twice the 5.0 m/s^2 the target's radial range needs. The target is
 # synthesised from a CSV whose fixes are 2-3 s apart and carry ADS-B position
-# noise, so the simulated target's rate moves 6.8 m/s between frames and by as
+# noise, so the simulated target's rate moves 6.8 m/s between scans and by as
 # much as 22 m/s; the filter has to track the target as simulated.
 sigma_acceleration_mps2 = 10.0
 # A new track is seeded from range alone: the rate of the detection it is
@@ -114,10 +114,10 @@ n_slope_scans = 5
 # bistatic range and rate, positive receding: twice the slant values.
 [verify]
 stages = ["geometry", "iq", "rd", "detect", "track"]
-# Fraction of frames whose true range and rate lie inside the map, unfolded.
+# Fraction of scans whose true range and rate lie inside the map, unfolded.
 # This window's rate, +29 to +79 m/s receding, never lies inside S1's +-15.3 m/s.
 truth_in_map_fraction = [0.0, 0.0]
-# P_r T N / (k T0 F) on an exact bin at frame 0's ranges (R = 18,158.2 m), from the
+# P_r T N / (k T0 F) on an exact bin at scan 0's ranges (R = 18,158.2 m), from the
 # radar equation by hand: P_r = -143.627 dBW.
 expected_snr_db = 51.43
 snr_tolerance_db = 0.01
@@ -125,7 +125,7 @@ snr_tolerance_db = 0.01
 noise_tolerance_db = 0.05
 # A noiseless echo has |a|^2 = P_r in every sample it fills.
 peak_tolerance_db = 0.01
-# A detection within one bin of the truth, its rate wrapped, every frame.
+# A detection within one bin of the truth, its rate wrapped, every scan.
 truth_within_bins = 1.0
 detection_fraction = 1.0
 # Noise-only maps hold 30 expected false alarms; the Poisson 99.9 % interval,
@@ -139,12 +139,12 @@ rate_tolerance_mps = 0.119496
 # 4.40 before the review fixes) with 15 % margin.
 range_rmse_max_m = 149.896
 range_rate_rmse_max_mps = 10.0
-# Fraction of confirmed frames with NEES inside chi2(2)'s 95 % interval: 0.37
+# Fraction of confirmed scans with NEES inside chi2(2)'s 95 % interval: 0.37
 # measured (43 of 117). The other 74 lie above it: through the manoeuvre and on wrong
 # folds the track is overconfident, and after it carries a 12-19 m range bias that its
 # covariance does not admit, so its NEES rides the 7.38 bound. Counting the birth's
 # range (review item 2) unfolds a scan earlier, adds 0.2 m to that bias and moves 19
-# frames across the bound (0.53 before). This pins the behaviour; it does not hide it.
+# scans across the bound (0.53 before). This pins the behaviour; it does not hide it.
 nees_fraction_min = 0.35
 # 4-of-5 confirms on the fourth hit, three scans after birth.
 confirmation_latency_max_scans = 3

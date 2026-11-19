@@ -31,7 +31,7 @@ from radar_forge.dsp import (
     range_fft,
     window,
 )
-from radar_forge.pipeline import frames, range_doppler_product
+from radar_forge.pipeline import range_doppler_product, scan_iq
 from radar_forge.propagation import (
     doppler_shift_hz,
     line_of_sight_paths,
@@ -75,7 +75,6 @@ __all__ = [
     "doppler_fft",
     "doppler_shift_hz",
     "fmcw_deramp_baseband",
-    "frames",
     "lfm_chirp",
     "line_of_sight_paths",
     "load_scenario",
@@ -88,6 +87,7 @@ __all__ = [
     "range_doppler_product",
     "range_fft",
     "received_power_w",
+    "scan_iq",
     "swerling_rcs_m2",
     "thermal_noise",
     "window",

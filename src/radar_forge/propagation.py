@@ -5,7 +5,7 @@ Every propagation model produces a :class:`PropagationPaths` for
 whole route, transmitter to receiver; its delay :math:`R_b/c`, phase
 :math:`-2\pi R_b/\lambda` and Doppler :math:`-\dot R_b/\lambda` follow from its
 length :math:`R_b = R_T + R_R` and rate, positive receding. Free space only.
-Per-frame inputs are not validated: zero cross-section gives zero power. Leakage and near
+Per-scan inputs are not validated: zero cross-section gives zero power. Leakage and near
 clutter are specified as levels at the ADC rather than derived from a cross-section.
 
 References

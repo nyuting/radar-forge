@@ -46,7 +46,7 @@ __all__ = [
 class Target:
     r"""One point target: a trajectory CSV at a fixed altitude, or a constant ENU motion.
 
-    ``position_enu_m`` is at the first frame, in the receiver site's east, north, up frame; the
+    ``position_enu_m`` is at the first scan, in the receiver site's east, north, up frame; the
     target then follows :math:`p + v t + a t^2/2`. Without ``acceleration_enu_mps2`` its
     route's :math:`\ddot R_b` is not modelled (zero), as for a trajectory.
     """
@@ -172,13 +172,12 @@ class TrackingSettings:
 class SensorSettings:
     """``[sensor]``: a rotating surveillance radar's plots, z = (horizontal range, azimuth).
 
-    The beam crosses azimuth a at ``scan start + a / (2π) scan_period_s``; a rotation reaches
-    the tracker in ``n_sectors`` batches, each at its centre time. Echoes merge within the
-    resolution cell ``range_cell_m`` by ``beamwidth_azimuth_deg``.
+    The beam crosses azimuth a at ``scan start + a / (2π) scan_period_s``, the period
+    ``[scans]`` gives; a scan reaches the tracker in ``n_sectors`` batches, each at its centre
+    time. Echoes merge within the resolution cell ``range_cell_m`` by ``beamwidth_azimuth_deg``.
     """
 
     carrier_frequency_hz: float = 2.8e9
-    scan_period_s: float = 4.8
     beamwidth_azimuth_deg: float = 1.4
     range_cell_m: float = 115.75
     range_min_m: float = 1000.0

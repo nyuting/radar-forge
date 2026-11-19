@@ -5,13 +5,13 @@
 # scenario_006_parallel_subrayleigh.toml) proves equal to this chain at the peak cell:
 # tests/test_doa.py checks the sweep point there at 200 trials. This file is a scenario at that
 # point, not a parameter file: the stages run the IQ
-# chain on its frames, as F1 and F2 do. It differs from F2 in [second_aircraft]'s and the target's
-# cross-sections only, -12 dBsm each, 22 dB below F2's, for 20.0 dB per channel at frame 0.
+# chain on its scans, as F1 and F2 do. It differs from F2 in [second_aircraft]'s and the target's
+# cross-sections only, -12 dBsm each, 22 dB below F2's, for 20.0 dB per channel at scan 0.
 # Every range and rate on the map is bistatic, positive receding.
 
 [scenario]
 name = "scenario-006-parallel-sweep"
-description = "F3: the sweep point the suite checks, F2's pair at 20 dB per channel. ML, FBSS-ESPRIT and IAA resolve it at P = 0.97, 0.91 and 0.80 on the snapshot model; the chain shows the same on its frames."
+description = "F3: the sweep point the suite checks, F2's pair at 20 dB per channel. ML, FBSS-ESPRIT and IAA resolve it at P = 0.97, 0.91 and 0.80 on the snapshot model; the chain shows the same on its scans."
 seed = 20261106
 
 [[target]]
@@ -24,12 +24,12 @@ altitude_m = 1500.0    # the CSV has no altitude column; held constant
 name = "aircraft-b"
 separation_rayleigh = 0.5
 rcs_dbsm = -12.0
-scattering_phase = "uniform"   # a new phase each frame, from default_rng([seed, 6])
+scattering_phase = "uniform"   # a new phase each scan, from default_rng([seed, 6])
 
-[frames]
+[scans]
 start_time_s = 0.0
-duration_s = 120.0     # 120 frames, t = 0 ... 119 s
-frame_rate_hz = 1.0
+duration_s = 120.0     # 120 scans, t = 0 ... 119 s
+scan_period_s = 1.0
 
 [site.tx]
 # The Duke Receiver. With no [site.rx] the array stands here too: monostatic.
@@ -50,7 +50,7 @@ sample_rate_hz = 1.0e6
 n_pulses = 256
 
 # 16 channels half a wavelength apart (15.2955 mm; aperture 0.24473 m), centred on the phase
-# centre. Boresight: the circular mean of aircraft A's bearing over the window's 120 frames.
+# centre. Boresight: the circular mean of aircraft A's bearing over the window's 120 scans.
 [receive_array]
 n_rx = 16
 element_spacing_wavelengths = 0.5
@@ -84,16 +84,16 @@ half_width_bins = 2
 
 [verify]
 stages = ["geometry", "iq", "rd", "detect", "doa"]
-# Per channel at frame 0: F2's 42.01 dB less 22 dB. The window spans 19.24 to 20.95 dB.
+# Per channel at scan 0: F2's 42.01 dB less 22 dB. The window spans 19.24 to 20.95 dB.
 expected_snr_db = 20.01
 snr_tolerance_db = 0.01
 truth_in_map_fraction = [0.0, 0.25]
 noise_tolerance_db = 0.05
-# The beam's 12 dB of array gain still detects the pair every frame: 32 dB on the beam map.
+# The beam's 12 dB of array gain still detects the pair every scan: 32 dB on the beam map.
 truth_within_bins = 1.0
 detection_fraction = 1.0
 rate_tolerance_mps = 0.119496
-# On the chain's frames: the loosest of the sweep point's three bounds, IAA's 0.65, over the three
+# On the chain's scans: the loosest of the sweep point's three bounds, IAA's 0.65, over the three
 # methods. Their own bounds, ML >= 0.90 and FBSS-ESPRIT >= 0.85, are checked at 200 trials in
 # tests/test_doa.py.
 resolved_methods = ["deterministic_ml", "fbss_esprit", "iaa"]

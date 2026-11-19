@@ -14,10 +14,10 @@ rcs_dbsm = 10.0        # 10 m^2, Swerling 0 (non-fluctuating)
 trajectory_path = "../data/flight_coordinates.csv"
 altitude_m = 1500.0    # the CSV has no altitude column; held constant
 
-[frames]
+[scans]
 start_time_s = 0.0
-duration_s = 120.0     # the full track is ~16,500 frames; this window is opt-out
-frame_rate_hz = 1.0
+duration_s = 120.0     # the full track is ~16,500 scans; this window is opt-out
+scan_period_s = 1.0
 
 [site.tx]
 # The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna. With
@@ -44,7 +44,7 @@ gain_rx_dbi = 30.0
 noise_figure_db = 3.0
 
 # Cell-averaging CFAR along range, which wraps, as scenario 003 runs it. At
-# pfa = 1e-5, S1's map of 256 x 1000 cells holds about 2.6 false alarms a frame.
+# pfa = 1e-5, S1's map of 256 x 1000 cells holds about 2.6 false alarms a scan.
 [detection]
 pfa = 1e-5
 n_train = 16
@@ -57,10 +57,10 @@ max_bistatic_range_rate_mps = 400.0   # 200 m/s radial
 # bistatic range and rate, positive receding: twice the slant values.
 [verify]
 stages = ["geometry", "iq", "rd", "detect"]
-# Fraction of frames whose true range and rate lie inside the map, unfolded.
+# Fraction of scans whose true range and rate lie inside the map, unfolded.
 # S2 folds range at 11.99 km, and the target is at 33-37 km: never inside.
 truth_in_map_fraction = [0.0, 0.0]
-# P_r T N / (k T0 F) on an exact bin at frame 0's ranges (R = 17,560.7 m), from the
+# P_r T N / (k T0 F) on an exact bin at scan 0's ranges (R = 17,560.7 m), from the
 # radar equation by hand: P_r = -133.046 dBW.
 expected_snr_db = 42.01
 snr_tolerance_db = 0.01
@@ -68,7 +68,7 @@ snr_tolerance_db = 0.01
 noise_tolerance_db = 0.15
 # A noiseless echo has |a|^2 = P_r in every sample it fills.
 peak_tolerance_db = 0.01
-# A detection within one bin of the truth, its range wrapped, every frame.
+# A detection within one bin of the truth, its range wrapped, every scan.
 truth_within_bins = 1.0
 detection_fraction = 1.0
 # Noise-only maps hold 30 expected false alarms; the Poisson 99.9 % interval,
