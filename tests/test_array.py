@@ -22,7 +22,6 @@ from radar_forge.array import (
     beam_power,
     conventional_weights,
     direction_cosine,
-    directions_unit,
     enu_to_array_frame,
     forward_backward_average,
     is_centro_symmetric,
@@ -35,6 +34,7 @@ from radar_forge.array import (
     subarray,
     uniform_linear_array,
 )
+from radar_forge.coordinates import directions_unit
 from radar_forge.pipeline import range_doppler_product, synthesise
 from radar_forge.propagation import line_of_sight_paths
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter

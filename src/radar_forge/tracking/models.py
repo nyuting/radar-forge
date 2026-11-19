@@ -1,8 +1,8 @@
 r"""State layouts, motion models and measurement models, batched over leading axes.
 
 Every model takes states ``(..., n_state)``, so a bank of tracks or all its sigma points go
-through one call. :class:`StateLayout` names each coordinate and holds the package's one wrap
-of periodic values; :func:`check_covariances` is the one boundary check of a covariance.
+through one call. :class:`StateLayout` names each coordinate and wraps its periodic values;
+:func:`check_covariances` is the one boundary check of a covariance.
 Motion: :class:`CartesianMotion`, :class:`RadialConstantVelocity` and the nonlinear
 :class:`CoordinatedTurn`. Measurement:
 :class:`LinearMeasurement`, :class:`RangeAzimuthElevationRangeRate`,
@@ -38,6 +38,8 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.linalg import block_diag
 from scipy.special import factorial
+
+from radar_forge._periodic import fold
 
 __all__ = [
     "BistaticRangeRateModel",
@@ -183,11 +185,8 @@ class StateLayout:
         result = np.array(value, dtype=np.float64)
         if not self._period.size:
             return result
-        offset = self._period / 2 if interval == "centred" else np.zeros_like(self._period)
-        folded = np.mod(result[..., self._periodic] + offset, self._period)
-        # np.mod of a tiny negative number can round up to exactly one period.
-        folded = np.where(folded >= self._period, folded - self._period, folded)
-        result[..., self._periodic] = folded - offset
+        lower = -self._period / 2 if interval == "centred" else np.zeros_like(self._period)
+        result[..., self._periodic] = fold(result[..., self._periodic], self._period, lower=lower)
         return result
 
     def residual(self, a: ArrayLike, b: ArrayLike) -> NDArray[np.float64]:
@@ -579,7 +578,8 @@ class RangeAzimuthElevationRangeRate:
     r"""A monostatic radar's range, azimuth, elevation and range rate, chosen by name.
 
     With :math:`d = p - p_s`, :math:`r = |d|`, :math:`u = d / r` and ground range g: azimuth
-    atan2(d_e, d_n) clockwise from north in [0, 2π), elevation atan2(d_u, g), and range rate
+    atan2(d_e, d_n) clockwise from north in [0, 2π] (2π itself only when a tiny negative angle
+    rounds up), elevation atan2(d_u, g), and range rate
     :math:`u \cdot v`, positive receding. Jacobian rows on position: :math:`u^T`,
     :math:`(d_n, -d_e, 0)/g^2`, :math:`(-d_e d_u, -d_n d_u, g^2)/(r^2 g)` and
     :math:`(v - u (u \cdot v))^T / r`; the rate's row on velocity is :math:`u^T`. The site,
@@ -625,8 +625,14 @@ class RangeAzimuthElevationRangeRate:
         offset_m = self._geometry.vector(state, "_m") - self.sensor_enu_m
         east_m, north_m, up_m = np.moveaxis(offset_m, -1, 0)
         range_m = np.linalg.norm(offset_m, axis=-1)
+        # Inline, not coordinates.enu_to_range_azimuth_elevation_rad: elevation here is
+        # atan2(up, ground), where that function takes asin(up / r). About half of all
+        # directions differ, by up to a few hundred ulp (1e-13 rad), and near the zenith
+        # asin(up / r) is off by up to 2e-8 rad where atan2 is not.
         values = {
             "range_m": range_m,
+            # Unguarded: a tiny negative angle rounds up to exactly 2 pi, where _periodic.fold
+            # gives 0.
             "azimuth_rad": np.mod(np.arctan2(east_m, north_m), 2 * np.pi),
             "elevation_rad": np.arctan2(up_m, np.hypot(east_m, north_m)),
         }

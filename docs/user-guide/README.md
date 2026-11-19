@@ -11,7 +11,7 @@ stage uses what the one before it produced.
 
 ```mermaid
 flowchart LR
-    A["Where things are<br/>module: radar"] --> B["How energy travels<br/>module: propagation"]
+    A["Where things are<br/>module: coordinates, radar"] --> B["How energy travels<br/>module: propagation"]
     B --> C["What the receiver samples<br/>module: signal"]
     C --> D["Range-Doppler map<br/>module: dsp"]
     D --> E["Detections<br/>module: detection"]
@@ -21,13 +21,14 @@ flowchart LR
 ```
 
 The top line of each box is the question that stage answers; the bottom line is the module that
-answers it. `radar` appears twice because it holds both the radar's description (the box with
-dashed arrows, which the later stages read) and the geometry that places targets around it.
+answers it. `radar` appears in two boxes because it holds both the radar's description (the
+box with dashed arrows, which the later stages read) and `Radar.geometry`, which measures each
+target's route; `coordinates` turns latitude and longitude into the local frame it works in.
 
 | Page | Modules | Read it to learn |
 | :-- | :-- | :-- |
 | [1. The radar and its link budget](01-radar-and-link-budget.md) | `constants`, `radar`, `propagation` (the radar equation, targets) | How much power comes back, how much noise it competes with, and the two limits (range and velocity) that decide what a radar can see |
-| [2. Geometry and propagation](02-geometry-and-propagation.md) | `radar` (geodesy, `Radar.geometry`), `propagation` | How a latitude and longitude become a range and an angle, and how a target's position and motion become a delay and a Doppler shift |
+| [2. Geometry and propagation](02-geometry-and-propagation.md) | `coordinates` (geodesy), `radar` (`Radar.geometry`), `propagation` | How a latitude and longitude become a range and an angle, and how a target's position and motion become a delay and a Doppler shift |
 | [3. Waveforms and signals](03-waveforms-and-signals.md) | `signal` | The chirp, how range turns into a beat frequency, and how the library builds the complex samples a receiver records |
 | [4. Range-Doppler processing](04-range-doppler-processing.md) | `dsp`, and `pipeline.range_doppler_product` | How two FFTs turn those samples into a map of range against velocity, what a taper costs, and how two PRFs undo folding |
 | [5. Detection](05-detection.md) | `detection`, and `pipeline.frame_plots` | How CFAR decides which cells of the map hold a target, at a false-alarm rate you choose |

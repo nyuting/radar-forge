@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 
 from radar_forge import evaluate
+from radar_forge.coordinates import east_north_to_range_azimuth_rad
 from radar_forge.scenario import Scenario, load_scenario
 from radar_forge.tracking.association import GlobalNearestNeighbour
 from radar_forge.tracking.filters import TaylorLinearisation, TrackStatus
@@ -41,7 +42,6 @@ from radar_forge.tracking.scene import (
     detect,
     measure,
     poisson_clutter_plots,
-    polar,
     resolve,
 )
 from radar_forge.tracking.tracker import Scan, Tracker
@@ -160,7 +160,7 @@ def test_k_best_one_n_scan_one_is_gnn_with_the_finite_non_assignment_cost() -> N
     for scan in range(1, 18):
         for pair in (0, 1):
             time_s = start_s + 4.8 * scan + 0.8 * pair
-            ranges, azimuths = polar(
+            ranges, azimuths = east_north_to_range_azimuth_rad(
                 np.array([arcs[2 * pair + k].state(time_s)[0] for k in (0, 1)])
             )
             group = resolve(

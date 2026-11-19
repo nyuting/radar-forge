@@ -16,6 +16,7 @@ import pytest
 from numpy.typing import NDArray
 from scipy.stats import chi2
 
+from radar_forge.coordinates import east_north_to_range_azimuth_rad
 from radar_forge.scenario import load_scenario
 from radar_forge.tracking.filters import (
     Linearisation,
@@ -40,7 +41,7 @@ from radar_forge.tracking.models import (
     MotionModel,
     RangeAzimuthElevationRangeRate,
 )
-from radar_forge.tracking.scene import Arc, polar
+from radar_forge.tracking.scene import Arc
 
 SEED = 20261106
 # The latency, as measured: 90 % of trials reach the turn mode within five scans of the onset
@@ -247,7 +248,10 @@ def _run_v1(
     while rotation * period_s < 300.0:
         time_s = rotation * period_s
         for _ in range(3):
-            time_s = rotation * period_s + polar(arc.state(time_s)[0])[1] / (2 * np.pi) * period_s
+            time_s = (
+                rotation * period_s
+                + east_north_to_range_azimuth_rad(arc.state(time_s)[0])[1] / (2 * np.pi) * period_s
+            )
         truth_m, truth_mps = arc.state(time_s)
         bank = (
             predict(bank, motion, linearisation, time_s)
@@ -256,9 +260,9 @@ def _run_v1(
         )
         rate = truth_m @ truth_mps / np.linalg.norm(truth_m)
         seen = rng.random(N_TRIALS) < (0.3 if abs(rate) < 4.0 else 0.9)
-        z = np.column_stack(polar(truth_m))[0] + rng.normal(0.0, 1.0, (N_TRIALS, 2)) * np.sqrt(
-            np.diag(noise)
-        )
+        z = np.column_stack(east_north_to_range_azimuth_rad(truth_m))[0] + rng.normal(
+            0.0, 1.0, (N_TRIALS, 2)
+        ) * np.sqrt(np.diag(noise))
         weights = np.zeros((N_TRIALS, N_TRIALS + 1))
         weights[np.arange(N_TRIALS), np.where(seen, np.arange(N_TRIALS), N_TRIALS)] = 1.0
         if imm is None:
