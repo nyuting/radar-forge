@@ -303,13 +303,13 @@ def cramer_rao_bounds(
     factors = np.stack(
         [time_s**p / np.prod(np.arange(1, p + 1)) for p in range(polynomial_order + 1)]
     )
-    wavenumber = float(wavenumber_radpm(carrier_frequency_hz))
+    carrier_wavenumber_radpm = float(wavenumber_radpm(carrier_frequency_hz))
     band_spread = (2.0 * np.pi / SPEED_OF_LIGHT_MPS) ** 2 * bandwidth_hz**2 / 12.0
     size = polynomial_order + 2
     fisher = np.empty((size, size))
     fisher[0, 0] = 1.0
-    fisher[0, 1:] = fisher[1:, 0] = -wavenumber * factors.mean(axis=1)
-    fisher[1:, 1:] = (wavenumber**2 + band_spread) * (factors @ factors.T) / n_pulses
+    fisher[0, 1:] = fisher[1:, 0] = -carrier_wavenumber_radpm * factors.mean(axis=1)
+    fisher[1:, 1:] = (carrier_wavenumber_radpm**2 + band_spread) * (factors @ factors.T) / n_pulses
     fisher *= 2.0 * snr_linear
     scale = 1.0 / np.sqrt(np.diag(fisher))
     covariance = scale[:, None] * np.linalg.inv(scale[:, None] * fisher * scale) * scale

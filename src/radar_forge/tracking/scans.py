@@ -35,8 +35,8 @@ from radar_forge.tracking.association import (
 from radar_forge.tracking.filters import (
     TaylorLinearisation,
     TrackBank,
-    TrackStatus,
     UnscentedTransform,
+    is_confirmed,
 )
 from radar_forge.tracking.hypotheses import TrackOrientedMHT
 from radar_forge.tracking.imm import InteractingMultipleModel
@@ -421,7 +421,7 @@ class PlotTracker:
                 association = self.tracker.last_association
             else:
                 bank = self.tracker.process(scan)
-            confirmed = np.isin(bank.status, (TrackStatus.CONFIRMED, TrackStatus.COASTING))
+            confirmed = is_confirmed(bank.status)
             used = bank.measurement_index[confirmed & (bank.measurement_index >= 0)]
             taken[mine[used]] = True
             results.append((bank, association))

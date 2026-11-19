@@ -537,9 +537,9 @@ def _rate_phase_rad(
     r"""Return :math:`H`'s phase per unit acceleration and per unit jerk, ``(n_pulses, n_f)``."""
     tau_s = (np.arange(n_pulses, dtype=np.float64) / prf_hz)[:, None]
     scale = _keystone_scale(range_frequency_hz, carrier_frequency_hz)
-    wavenumber_rad_per_m = float(wavenumber_radpm(carrier_frequency_hz))
-    quadratic = wavenumber_rad_per_m * scale * tau_s**2 / 2.0
-    cubic = wavenumber_rad_per_m * scale**2 * tau_s**3 / 6.0
+    carrier_wavenumber_radpm = float(wavenumber_radpm(carrier_frequency_hz))
+    quadratic = carrier_wavenumber_radpm * scale * tau_s**2 / 2.0
+    cubic = carrier_wavenumber_radpm * scale**2 * tau_s**3 / 6.0
     return quadratic, cubic
 
 

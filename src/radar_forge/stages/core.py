@@ -41,7 +41,7 @@ from radar_forge.pipeline import (
 from radar_forge.radar import TargetGeometry
 from radar_forge.scenario import Scenario
 from radar_forge.signal import thermal_noise
-from radar_forge.tracking.filters import TrackStatus
+from radar_forge.tracking.filters import TrackStatus, is_confirmed
 from radar_forge.tracking.metrics import nees
 from radar_forge.units import power_to_db
 
@@ -435,9 +435,7 @@ def _score(
     worst of each is reported. Returns the scores, the metrics.csv rows and the tracks drawn.
     """
     truth = evaluate.truth(ctx)
-    confirmed = [
-        np.isin(b.status, (TrackStatus.CONFIRMED, TrackStatus.COASTING)) for b, _ in ctx.banks
-    ]
+    confirmed = [is_confirmed(b.status) for b, _ in ctx.banks]
     votes: dict[tuple[int, int], int] = {}
     # Each frame's confirmed tracks vote for the target nearest in range: a few rows a frame.
     for (bank, _), mask, frame in zip(ctx.banks, confirmed, truth, strict=True):

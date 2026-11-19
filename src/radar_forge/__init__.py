@@ -3,10 +3,10 @@
 The public API is what this module re-exports; a name reached through its module path is
 there too, but may move. Modules, in signal-path order:
 
-``units``
-    A power or an amplitude to and from decibels, each conversion written once.
 ``constants``
     Every physical constant, defined once.
+``units``
+    A power or an amplitude to and from decibels, each conversion written once.
 ``coordinates``, ``radar``, ``propagation``, ``signal``
     Geodetic and ENU conversions; the radar and its sites; propagation paths and the radar
     equation; waveforms and IQ.

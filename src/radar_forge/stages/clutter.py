@@ -111,6 +111,8 @@ def leakage(ctx: evaluate.Context) -> evaluate.Context:
         # The ceiling on the frame's own disturbance: paths on one route add in phase.
         row["disturbance_inr_db"] = float(power_to_db(np.mean(np.abs(echo) ** 2) / noise_w))
         row["cancellation_depth_db"] = clutter.cancellation_depth_db(stream, result.residual)
+        # Through dB and back, not the ratio itself: the golden bound was made from the
+        # rounded value.
         row["cancellation_depth_bound_db"] = (
             clutter.expected_cancellation_depth_db(
                 float(db_to_power(row["disturbance_inr_db"])), n_basis, n_fit
