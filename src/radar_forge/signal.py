@@ -52,7 +52,6 @@ __all__ = [
     "noise_waveform",
     "pulsed_baseband",
     "range_gate_first_sample",
-    "range_resolution_m",
     "stream_baseband",
     "thermal_noise",
 ]
@@ -67,14 +66,6 @@ _BYTES_PER_COMPLEX = 16
 _WHOLE_SAMPLE = 1e-9
 # Relative amplitude at which a moving path's delay series stops: -200 dB of the path.
 _DELAY_TOLERANCE = 1e-10
-
-
-def range_resolution_m(bandwidth_hz: ArrayLike) -> NDArray[np.float64]:
-    r"""Return the monostatic range resolution :math:`c/2B`, m (Richards [1], §4.6.1)."""
-    result: NDArray[np.float64] = SPEED_OF_LIGHT_MPS / (
-        2.0 * np.asarray(bandwidth_hz, dtype=np.float64)
-    )
-    return result
 
 
 def beat_frequency_hz(
@@ -503,7 +494,7 @@ def stream_baseband(
     cycles_per_sample = np.fft.fftfreq(n_samples).astype(np.float64)
     sample_rate_hz, wavelength_m = radar.receiver.sample_rate_hz, radar.wavelength_m
     # Delay in samples as (R f_s)/c, not propagation_delay_s(R) * f_s: the two orders differ in
-    # the last bit, and this one fixes scenario 005's code delays.
+    # the last bit, and scenario 005's golden values were made with this one.
     batch_delay = (
         paths.bistatic_range_at_m(_slow_time_s(n_pulses, radar), wavelength_m)
         * sample_rate_hz

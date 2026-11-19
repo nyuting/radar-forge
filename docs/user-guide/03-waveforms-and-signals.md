@@ -49,8 +49,8 @@ generator for you; `pipeline.frames` does that for every frame of a scenario.
 | Quantity | Symbol | Equation | In the code | Scenario 001 S1 |
 | :-- | :-- | :-- | :-- | :-- |
 | Band swept | — | $f_c \pm B/2$ | `Transmitter.carrier_frequency_hz`, `bandwidth_hz` | 9.799 to 9.801 GHz |
-| Sweep rate | $\alpha$ | $\alpha = B / T_c$ | `signal.sweep_rate_hzps`, `Transmitter.sweep_rate_hzps` | 2.0000e9 Hz/s |
-| Range resolution | $\Delta R$ | $\Delta R = c / 2B$ | `signal.range_resolution_m`, `Radar.range_resolution_m` | 74.9481 m |
+| Sweep rate | $\alpha$ | $\alpha = B / T_c$ | `radar.sweep_rate_hzps`, `Transmitter.sweep_rate_hzps` | 2.0000e9 Hz/s |
+| Range resolution | $\Delta R$ | $\Delta R = c / 2B$ | `radar.range_resolution_m`, `Radar.range_resolution_m` | 74.9481 m |
 | The same, in bistatic range | $\Delta R_b$ | $\Delta R_b = c / B$ | the bin spacing of `dsp.range_bin_centers_m` | 149.8962 m |
 | Time-bandwidth product | — | $B T_c$ | `signal.lfm_chirp` | 2000 |
 | Bistatic range | $R_b$ | $R_b = R_T + R_R$, $2R$ monostatic | `TargetGeometry.bistatic_range_m` | 35121.4 m at $R$ = 17560.7 m |
@@ -101,8 +101,8 @@ The noise in one sample fills the band the sampler sees, $f_s$ wide, not the swe
 
 ## How it works, step by step
 
-1. **Pick the waveform.** `signal.sweep_rate_hzps(bandwidth_hz, chirp_duration_s)` and
-   `signal.range_resolution_m(bandwidth_hz)` give $\alpha$ and $\Delta R$. `Transmitter` and
+1. **Pick the waveform.** `radar.sweep_rate_hzps(bandwidth_hz, chirp_duration_s)` and
+   `radar.range_resolution_m(bandwidth_hz)` give $\alpha$ and $\Delta R$. `Transmitter` and
    `Radar` expose both as properties.
 2. **Map bistatic range to beat frequency, and back.** `signal.beat_frequency_hz(bistatic_range_m,
    bandwidth_hz, chirp_duration_s)` gives $f_b$ for a stationary target.

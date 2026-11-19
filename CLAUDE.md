@@ -51,7 +51,7 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 
 | Relation | Function (file under `src/radar_forge/`) |
 | :--- | :--- |
-| wavelength; PRI, duty cycle, sweep rate; range resolution c/2B | `Transmitter.wavelength_m`; `.pulse_repetition_interval_s`, `.duty_cycle_linear`, `.sweep_rate_hzps` and `sweep_rate_hzps`; `Radar.range_resolution_m` (radar.py); `range_resolution_m` (signal.py) |
+| wavelength; PRI, duty cycle, sweep rate; range resolution c/2B | `Transmitter.wavelength_m`; `.pulse_repetition_interval_s`, `.duty_cycle_linear`, `.sweep_rate_hzps` and `sweep_rate_hzps`; `Radar.range_resolution_m` and `range_resolution_m` (radar.py) |
 | unambiguous delay, range, rate | `Radar.unambiguous_delay_s`, `.unambiguous_bistatic_range_m` (c τ, the map's range span), `.unambiguous_bistatic_range_rate_mps` (λ PRF, the whole span) (radar.py) |
 | route geometry, baseline, bistatic angle | `Radar.geometry` -> `TargetGeometry`, `Radar.baseline_m`, `TargetGeometry.bistatic_angle_rad` (radar.py) |
 | geodesy: geodetic, ECEF, ENU, range-azimuth-elevation; on the ground plane; unit direction | `geodetic_to_ecef_m`, `ecef_to_enu_m`, `geodetic_to_enu_m`, `enu_to_range_azimuth_elevation_rad`, `range_azimuth_elevation_to_enu_m`; `east_north_to_range_azimuth_rad`, `range_azimuth_to_east_north_m`; `directions_unit` (coordinates.py) |

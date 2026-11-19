@@ -18,7 +18,15 @@ from scipy.signal import fftconvolve
 
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.propagation import PropagationPaths, line_of_sight_paths
-from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter, sweep_rate_hzps
+from radar_forge.radar import (
+    Radar,
+    Receiver,
+    Site,
+    TargetGeometry,
+    Transmitter,
+    range_resolution_m,
+    sweep_rate_hzps,
+)
 from radar_forge.signal import (
     ambiguity_function,
     beat_frequency_hz,
@@ -29,7 +37,6 @@ from radar_forge.signal import (
     noise_waveform,
     pulsed_baseband,
     range_gate_first_sample,
-    range_resolution_m,
     stream_baseband,
     thermal_noise,
 )
