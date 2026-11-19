@@ -267,7 +267,7 @@ print("F(1 s) =", motion.jacobian(np.zeros(2), step_s).tolist())
 print("Q(1 s) =", motion.process_noise(np.zeros(2), step_s).round(3).tolist())
 
 # Measurement noise: one bin of the map's own axes over sqrt(12).
-range_axis_m, rate_axis_mps = map_axes(scenario.radar, scenario.n_pulses[0])
+range_axis_m, rate_axis_mps = map_axes(scenario.radar, scenario.n_pulses_per_burst[0])
 range_bin_m = range_axis_m[1] - range_axis_m[0]
 rate_bin_mps = rate_axis_mps[0] - rate_axis_mps[1]  # the rate axis falls with index
 print(f"sigma_range = {range_bin_m:.3f} / sqrt(12) = {range_bin_m / np.sqrt(12):.2f} m")

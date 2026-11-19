@@ -45,10 +45,10 @@ undo that.
 | Processing loss of a window | $L$ | $L = -10\log_{10}\frac{(\sum_n w[n])^2}{N\sum_n w[n]^2}$ | `dsp.processing_loss_db` | 0 dB (the pipeline applies no window); Hann 1.78 dB, 60 dB Taylor 1.89 dB over 256 chirps |
 | Pulse compression gain | — | $B T_c$ | `dsp.matched_filter` | — (S1 is FMCW; S2's pulse has $B T_c = 20$, 13.0 dB) |
 | Range bins | $N_s$ | $N_s = f_s / \mathrm{PRF}$ | `Radar.n_samples_per_pri` | 1000 |
-| Range bin spacing | $\Delta R_b$ | $\Delta R_b = \frac{c f_s T_c}{B N_s}$ | `dsp.range_bin_centers_m`, `RangeDopplerProduct.range_bin_m` | 149.8962 m (74.9481 m slant) |
+| Range bin spacing | $\Delta R_b$ | $\Delta R_b = \frac{c f_s T_c}{B N_s}$ | `dsp.range_bin_centres_m`, `RangeDopplerProduct.range_bin_m` | 149.8962 m (74.9481 m slant) |
 | Range span | $R_{\mathrm{span}}$ | $\frac{c f_s T_c}{B}$ | `RangeDopplerProduct.range_period_m`, `Radar.unambiguous_bistatic_range_m` | 149 896.2 m (74 948.1 m slant) |
-| Doppler bins | $N$ | one per chirp | `Scenario.n_pulses` | 256 |
-| Rate resolution | $\Delta v$ | $\Delta v = \frac{\lambda}{N T_{\mathrm{PRI}}}$ | `dsp.doppler_bin_centers_mps`, `RangeDopplerProduct.rate_bin_mps` | 0.119496 m/s (0.059748 m/s radial) |
+| Doppler bins | $N$ | one per chirp | `Scenario.n_pulses_per_burst` | 256 |
+| Rate resolution | $\Delta v$ | $\Delta v = \frac{\lambda}{N T_{\mathrm{PRI}}}$ | `dsp.doppler_bin_centres_mps`, `RangeDopplerProduct.rate_bin_mps` | 0.119496 m/s (0.059748 m/s radial) |
 | Unambiguous rate | $v_{ua}$ | $v_{ua} = \lambda\,\mathrm{PRF}/2$; the map spans $(-v_{ua}, +v_{ua}]$ | `RangeDopplerProduct.rate_period_mps` $/2$ | 15.2955 m/s (7.6478 m/s radial) |
 | Folded rate | — | $\dot R_b$ wrapped into $(-v_{ua}, +v_{ua}]$ | `dsp.fold_range_rate_mps` | +160 m/s (receding at 80 m/s) reads as +7.0447 m/s |
 | Integration gain of the two FFTs | — | $N_s N$ | `dsp.range_doppler_map` | 256 000, 54.08 dB |
@@ -118,15 +118,15 @@ $$L = -10\log_{10}\frac{\left(\sum_n w[n]\right)^2}{N\sum_n w[n]^2}.$$
    closing targets at indices above it, and a figure draws row 0, $+v_{ua}$, at the top.
    `dsp.range_doppler_map(cube, fast_time_weights=..., slow_time_weights=...)` runs steps 3 and
    4 in one call.
-5. **Label the axes.** `dsp.range_bin_centers_m(n_bins, bandwidth_hz, chirp_duration_s,
+5. **Label the axes.** `dsp.range_bin_centres_m(n_bins, bandwidth_hz, chirp_duration_s,
    sample_rate_hz)` gives `(n_range_bins,)` bistatic ranges, not halved;
-   `dsp.doppler_bin_centers_mps(n_bins, pulse_repetition_interval_s, wavelength_m)` gives
+   `dsp.doppler_bin_centres_mps(n_bins, pulse_repetition_interval_s, wavelength_m)` gives
    `(n_doppler_bins,)` rates, from $+v_{ua}$ down. `pipeline.map_axes(radar, n_pulses)` returns
    both for a burst (a pulsed range bin is one sample of delay, $c/f_s$).
    `pipeline.range_doppler_product(cube, radar)` does steps 2 to 5 and returns a
    `RangeDopplerProduct` holding `rd_map`, `range_axis_m` and `rate_axis_mps`, with each axis's
    span as `range_period_m` and `rate_period_mps`.
-6. **MTI (optional).** `dsp.mti_filter(cube, n_pulses=2, axis=0)` differences neighbouring
+6. **MTI (optional).** `dsp.mti_filter(cube, n_taps=2, axis=0)` differences neighbouring
    chirps: $x[m+1] - x[m]$, or $x[m+2] - 2x[m+1] + x[m]$ for three. `axis` has no default.
    Stationary echoes cancel. The slow-time axis gets `n_pulses - 1` shorter, and targets at
    multiples of the blind rate $\lambda\,\mathrm{PRF}$ cancel too.
@@ -171,7 +171,7 @@ print(f"truth {truth_m:.1f} m, {truth_mps:+.4f} m/s, folded {folded_mps:+.4f} m/
 rate_bin, range_bin = np.unravel_index(np.abs(product.rd_map).argmax(), product.rd_map.shape)
 print(f"peak ({rate_bin}, {range_bin}): {range_m[range_bin]:.1f} m, {rate_mps[rate_bin]:+.4f} m/s")
 for name, level in (("rectangular", None), ("hann", None), ("taylor", -60.0)):
-    w = dsp.window(name, s1.n_pulses[0], sidelobe_level_db=level)
+    w = dsp.window(name, s1.n_pulses_per_burst[0], sidelobe_level_db=level)
     gain, loss = dsp.coherent_gain_linear(w), dsp.processing_loss_db(w)
     print(f"{name:<11} gain {gain:.3f}  loss {loss:.2f} dB")
 
@@ -243,7 +243,7 @@ Intern task: [Can an unrolled solver beat a taper?](../../interns/unrolled-spars
 
 ## Things that look like bugs and aren't
 
-**The rate axis runs backwards.** `doppler_bin_centers_mps` falls with index, from exactly
+**The rate axis runs backwards.** `doppler_bin_centres_mps` falls with index, from exactly
 $+v_{ua}$ at bin 0 to $-v_{ua} + \Delta v$ at the last bin. The FFT index rises with Doppler, and
 Doppler is minus the rate over $\lambda$. So the interval is $(-v_{ua}, +v_{ua}]$, closed at the
 top, and `fold_range_rate_mps` folds into the same one.

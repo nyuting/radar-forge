@@ -215,14 +215,14 @@ class LeakageSettings:
     ``inr_db`` is each path's power over the noise in one sample, not over the matched band.
     """
 
-    lags: tuple[int, ...] = ()
+    lags_samples: tuple[int, ...] = ()
     inr_db: tuple[float, ...] = ()
 
     def __post_init__(self) -> None:
         """Require one non-negative whole lag per level."""
-        lags_ok = all(type(lag) is int and lag >= 0 for lag in self.lags)
-        if not (self.lags and lags_ok and len(self.lags) == len(self.inr_db)):
-            msg = "[leakage] needs lags, non-negative integers, and one inr_db for each."
+        lags_ok = all(type(lag) is int and lag >= 0 for lag in self.lags_samples)
+        if not (self.lags_samples and lags_ok and len(self.lags_samples) == len(self.inr_db)):
+            msg = "[leakage] needs lags_samples, non-negative integers, and one inr_db for each."
             raise ValueError(msg)
         object.__setattr__(self, "inr_db", tuple(float(value) for value in self.inr_db))
 

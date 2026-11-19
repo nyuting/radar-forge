@@ -34,7 +34,11 @@ def _cube_bytes(path: Path) -> int:
     return n_rx * sum(
         16 * n * (gate.n_samples(r) * (2 if lags else 1) + lags)
         for r, n, gate, lags in zip(
-            scenario.radars, scenario.n_pulses, scenario.gates, scenario.n_range_lags, strict=True
+            scenario.radars,
+            scenario.n_pulses_per_burst,
+            scenario.gates,
+            scenario.n_range_lags,
+            strict=True,
         )
     )
 
@@ -51,7 +55,7 @@ def _migration_bytes(path: Path) -> int:
         return 0
     total = 0
     for radar, n_pulses, gate in zip(
-        scenario.radars, scenario.n_pulses, scenario.gates, strict=True
+        scenario.radars, scenario.n_pulses_per_burst, scenario.gates, strict=True
     ):
         n_range_fft = 2 ** math.ceil(math.log2(2 * gate.n_samples(radar)))
         n_convolution = 2 ** math.ceil(math.log2(2 * n_pulses - 1))

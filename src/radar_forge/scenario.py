@@ -94,7 +94,7 @@ class Scenario:
     description: str
     seed: int
     radars: tuple[Radar, ...]
-    n_pulses: tuple[int, ...]
+    n_pulses_per_burst: tuple[int, ...]
     targets: tuple[Target, ...]
     start_time_s: float
     duration_s: float
@@ -121,7 +121,9 @@ class Scenario:
         bursts = len(self.radars)
         plot_level = self.sensor is not None and bursts == 0 and self.arcs and not self.targets
         if not plot_level and not (
-            1 <= bursts <= 2 and len(self.n_pulses) == bursts and min(self.n_pulses) >= 1
+            1 <= bursts <= 2
+            and len(self.n_pulses_per_burst) == bursts
+            and min(self.n_pulses_per_burst) >= 1
         ):
             msg = f"need one burst or a dual-PRF pair, each with n_pulses >= 1; got {bursts}."
             raise ValueError(msg)
@@ -157,7 +159,10 @@ class Scenario:
         if not self.n_range_lags:
             object.__setattr__(self, "n_range_lags", (0,) * len(self.radars))
         noise = [radar.transmitter.waveform == "noise" for radar in self.radars]
-        span = [n * r.n_samples_per_chirp for n, r in zip(self.n_pulses, self.radars, strict=True)]
+        span = [
+            n * r.n_samples_per_chirp
+            for n, r in zip(self.n_pulses_per_burst, self.radars, strict=True)
+        ]
         lags_ok = [
             (1 <= lags <= samples) if is_noise else lags == 0
             for lags, samples, is_noise in zip(self.n_range_lags, span, noise, strict=True)
@@ -384,7 +389,7 @@ def _plot_level(document: Mapping[str, Any], path: Path) -> Scenario:
         description=str(head.get("description", "")),
         seed=int(head["seed"]),
         radars=(),
-        n_pulses=(),
+        n_pulses_per_burst=(),
         targets=(),
         start_time_s=float(window["start_time_s"]),
         duration_s=float(window["duration_s"]),
@@ -423,7 +428,7 @@ def load_scenario(path: Path | str) -> Scenario:
         description=str(scenario.get("description", "")),
         seed=int(scenario["seed"]),
         radars=tuple(_radar(b, document["receiver"], document["site"]) for b in document["burst"]),
-        n_pulses=tuple(int(burst["n_pulses"]) for burst in document["burst"]),
+        n_pulses_per_burst=tuple(int(burst["n_pulses"]) for burst in document["burst"]),
         targets=tuple(_target(t, toml_path.parent) for t in document["target"]),
         start_time_s=float(window["start_time_s"]),
         duration_s=float(window["duration_s"]),

@@ -74,7 +74,7 @@ def keystone(ctx: stepper.Context) -> stepper.Context:
     any method it is asked of: with no acceleration the filter changes nothing.
     """
     scenario, verify = ctx.scenario, stepper.thresholds(ctx, "keystone")
-    radar, n_pulses, gate = scenario.radar, scenario.n_pulses[0], scenario.gates[0]
+    radar, n_pulses, gate = scenario.radar, scenario.n_pulses_per_burst[0], scenario.gates[0]
     truth = stepper.truth(ctx)[0]
     rcs_m2 = [target.rcs_m2 for target in scenario.targets]
     clean = pulse_compress(
@@ -162,7 +162,7 @@ def _searches(
 def _estimates(ctx: stepper.Context) -> dict[str, Any]:
     """Correct scan 0 with noise as configured, crop a chip at its peak, estimate on it."""
     scenario = ctx.scenario
-    radar, n_pulses, gate = scenario.radar, scenario.n_pulses[0], scenario.gates[0]
+    radar, n_pulses, gate = scenario.radar, scenario.n_pulses_per_burst[0], scenario.gates[0]
     scan = next(scan_iq(scenario, n_scans=1))
     noisy = pulse_compress(scan.cubes[0], radar, gate=gate)
     compensated = _compensate(noisy, radar, scenario.migration)
@@ -171,22 +171,25 @@ def _estimates(ctx: stepper.Context) -> dict[str, Any]:
     chip = crop_slow_time(
         compensated.data_rfst,
         int(peak.range_bin),
-        range_bin_centers_m=range_axis_m,
-        rate_bin_centers_mps=rate_axis_mps,
+        range_bin_centres_m=range_axis_m,
+        rate_bin_centres_mps=rate_axis_mps,
         processing=_processing(radar, compensated, scenario.migration.method != "none"),
     )
     method: FineMethod = "grft" if compensated.rate is not None else "aboutanios_mulgrew"
     estimate = estimate_fine(chip, method=method)
     truth, crb = scan.truth, estimate.crb
     errors = {
-        "range": (estimate.bistatic_range_m - truth.bistatic_range_m[0], crb.bistatic_range_m),
+        "range": (
+            estimate.bistatic_range_m - truth.bistatic_range_m[0],
+            crb.sigma_bistatic_range_m,
+        ),
         "rate": (
             estimate.bistatic_range_rate_mps - truth.bistatic_range_rate_mps[0],
-            crb.bistatic_range_rate_mps,
+            crb.sigma_bistatic_range_rate_mps,
         ),
         "acceleration": (
             estimate.bistatic_range_acceleration_mps2 - truth.bistatic_range_acceleration_mps2[0],
-            crb.bistatic_range_acceleration_mps2,
+            crb.sigma_bistatic_range_acceleration_mps2,
         ),
     }
     found: dict[str, Any] = {

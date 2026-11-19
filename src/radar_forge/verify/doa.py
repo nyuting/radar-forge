@@ -133,9 +133,9 @@ def doa(ctx: stepper.Context) -> stepper.Context:
         print(f"  scan {scan.index}: u_true = {np.round(truth_u, 6)}, target detection {target}")
         # Each detection's chip and estimators: a handful of detections a scan.
         for j, detection in enumerate(found.detections):
-            chip, cell = _chip(product, detection, settings, radar, scenario.n_pulses[0])
+            chip, cell = _chip(product, detection, settings, radar, scenario.n_pulses_per_burst[0])
             centre = int(chip.parent_index(*cell)[1])
-            fine = _fine(profiles, product, centre, radar, scenario.n_pulses[0])
+            fine = _fine(profiles, product, centre, radar, scenario.n_pulses_per_burst[0])
             snapshot = chip.data[cell]
             training = chip.data.reshape(-1, array.n_rx)
             estimates = {
@@ -188,7 +188,7 @@ def _processing(radar: Radar, noise_power_w: float) -> ChipProcessing:
         prf_hz=transmitter.prf_hz,
         noise_power_w=noise_power_w,
         band_centre_hz=-sample_rate_hz / 2.0,
-        band_width_hz=sample_rate_hz,
+        band_extent_hz=sample_rate_hz,
     )
 
 
@@ -213,8 +213,8 @@ def _chip(
         product.channels,
         rate_bin,
         range_bin,
-        range_bin_centers_m=product.range_axis_m,
-        rate_bin_centers_mps=product.rate_axis_mps,
+        range_bin_centres_m=product.range_axis_m,
+        rate_bin_centres_mps=product.rate_axis_mps,
         processing=_processing(radar, _cell_noise_w(radar, n_pulses)),
         half_width_bins=settings.half_width_bins,
     )
@@ -240,8 +240,8 @@ def _fine(
     chip = crop_slow_time(
         profiles,
         centre_range_bin,
-        range_bin_centers_m=product.range_axis_m,
-        rate_bin_centers_mps=product.rate_axis_mps,
+        range_bin_centres_m=product.range_axis_m,
+        rate_bin_centres_mps=product.rate_axis_mps,
         processing=_processing(radar, noise_w),
     )
     return estimate_fine(chip)
@@ -270,7 +270,7 @@ def _estimate(
         n_subarray_elements=settings.n_subarray_elements,
         n_grid=settings.n_grid,
         n_iterations=iterations.get(method),
-        noise_power_w=_cell_noise_w(radar, ctx.scenario.n_pulses[0]),
+        noise_power_w=_cell_noise_w(radar, ctx.scenario.n_pulses_per_burst[0]),
     )
 
 
@@ -305,7 +305,7 @@ def _bound_at_truth(
     a = steering_u(array, truths, radar.wavelength_m)
     amplitude, *_ = np.linalg.lstsq(a, snapshot, rcond=None)
     derivative = steering_derivative_u(array, truths, radar.wavelength_m)
-    noise_w = _cell_noise_w(radar, ctx.scenario.n_pulses[0])
+    noise_w = _cell_noise_w(radar, ctx.scenario.n_pulses_per_burst[0])
     variance = np.diag(crb_deterministic(a, derivative, amplitude, noise_w))
     for k, s in enumerate(amplitude):
         ctx.record(f"source_{k}_cell_snr_db", float(power_to_db(abs(s) ** 2 / noise_w)))
@@ -373,8 +373,8 @@ def _parent_error(
     )
     return max(
         float(rows[peak] != rate_bin) + float(columns[peak] != range_bin),
-        _relative(chip.range_bin_centers_m[cell[1]], product.range_axis_m[range_bin]),
-        _relative(chip.rate_bin_centers_mps[cell[0]], product.rate_axis_mps[rate_bin]),
+        _relative(chip.range_bin_centres_m[cell[1]], product.range_axis_m[range_bin]),
+        _relative(chip.rate_bin_centres_mps[cell[0]], product.rate_axis_mps[rate_bin]),
         _relative(chip.data, parent_cells),
         _relative(found.direction_cosine_x, again.direction_cosine_x),
     )
@@ -398,7 +398,7 @@ def _truth_rows(
     radar, show = scenario.radar, figures.display_axes(scenario.radar)
     power_w = stepper.target_power_w(radar, truth, scenario.rcs_m2)
     # Per channel on an exact bin, as predicted_snr_db: P_r T N over the noise of one sample.
-    gain = radar.n_samples_per_chirp * scenario.n_pulses[0]
+    gain = radar.n_samples_per_chirp * scenario.n_pulses_per_burst[0]
     snr_db = power_to_db(power_w / radar.receiver.noise_power_per_sample_w * gain)
     in_array = enu_to_array_frame(array, directions_unit(truth.aoa_rad[:, 0], truth.aoa_rad[:, 1]))
     # Folded as the map reads it, beside the estimates' folded rates.
@@ -445,7 +445,7 @@ def _estimate_rows(
     scenario = ctx.scenario
     radar, show = scenario.radar, figures.display_axes(scenario.radar)
     rate_bin, range_bin = (int(i) for i in chip.parent_index(*cell))
-    noise_w = _cell_noise_w(radar, scenario.n_pulses[0])
+    noise_w = _cell_noise_w(radar, scenario.n_pulses_per_burst[0])
     rate_mps = float(
         fold_range_rate_mps(fine.bistatic_range_rate_mps, radar.unambiguous_bistatic_range_rate_mps)
     )
@@ -524,7 +524,7 @@ def _noiseless(
     steering vector the truth's: nothing of the multi-channel chain enters the prediction.
     """
     scenario, truth = ctx.scenario, stepper.truth(ctx)[0]
-    radar, n_pulses, rcs_m2 = scenario.radar, scenario.n_pulses[0], scenario.rcs_m2
+    radar, n_pulses, rcs_m2 = scenario.radar, scenario.n_pulses_per_burst[0], scenario.rcs_m2
     phase_rad = scattering_phase_rad(scenario)[0]
     clean = synthesise(
         radar, truth, rcs_m2, n_pulses, rng=None, array=array, scattering_phase_rad=phase_rad
@@ -557,8 +557,8 @@ def _noiseless(
         product.channels,
         rate_bin,
         range_bin,
-        range_bin_centers_m=product.range_axis_m,
-        rate_bin_centers_mps=product.rate_axis_mps,
+        range_bin_centres_m=product.range_axis_m,
+        rate_bin_centres_mps=product.rate_axis_mps,
         processing=_processing(radar, _cell_noise_w(radar, n_pulses)),
         half_width_bins=settings.half_width_bins,
     )

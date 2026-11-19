@@ -23,10 +23,10 @@ from __future__ import annotations
 from radar_forge.clustering import cluster_points, mean_shift
 from radar_forge.detection import Detection, cfar_detect, cfar_detect_2d, cluster_detections
 from radar_forge.dsp import (
-    doppler_bin_centers_mps,
+    doppler_bin_centres_mps,
     doppler_fft,
     matched_filter,
-    range_bin_centers_m,
+    range_bin_centres_m,
     range_doppler_map,
     range_fft,
     window,
@@ -71,7 +71,7 @@ __all__ = [
     "cluster_points",
     "db_to_amplitude",
     "db_to_power",
-    "doppler_bin_centers_mps",
+    "doppler_bin_centres_mps",
     "doppler_fft",
     "doppler_shift_hz",
     "fmcw_deramp_baseband",
@@ -82,7 +82,7 @@ __all__ = [
     "mean_shift",
     "power_to_db",
     "pulsed_baseband",
-    "range_bin_centers_m",
+    "range_bin_centres_m",
     "range_doppler_map",
     "range_doppler_product",
     "range_fft",

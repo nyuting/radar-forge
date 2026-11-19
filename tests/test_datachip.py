@@ -26,7 +26,7 @@ from radar_forge.datachip import (
     estimate_fine,
     estimate_tone,
 )
-from radar_forge.dsp import delay_bin_centers_m, doppler_bin_centers_mps, matched_filter
+from radar_forge.dsp import delay_bin_centres_m, doppler_bin_centres_mps, matched_filter
 from radar_forge.migration import compensate_migration, integrated_peak, pulse_compress
 from radar_forge.pipeline import synthesise
 from radar_forge.scenario import load_scenario, truth_geometry
@@ -111,13 +111,13 @@ class TestChip:
     def test_slow_time_chip_round_trips_exactly_and_clips_at_the_edge(self) -> None:
         """Integer cells map back with ==, metres are the parent's values, an edge clips."""
         parent = np.arange(8 * 40).reshape(8, 40) * (1 + 1j)
-        range_m = delay_bin_centers_m(40, SAMPLE_RATE_HZ, range_gate_start_m=4800.0)
-        rate_mps = doppler_bin_centers_mps(8, 1 / PRF_HZ, WAVELENGTH_M)
+        range_m = delay_bin_centres_m(40, SAMPLE_RATE_HZ, range_gate_start_m=4800.0)
+        rate_mps = doppler_bin_centres_mps(8, 1 / PRF_HZ, WAVELENGTH_M)
         chip = crop_slow_time(
             parent,
             2,
-            range_bin_centers_m=range_m,
-            rate_bin_centers_mps=rate_mps,
+            range_bin_centres_m=range_m,
+            rate_bin_centres_mps=rate_mps,
             processing=_processing(),
             half_width_bins=4,
         )
@@ -125,21 +125,21 @@ class TestChip:
         rows, cols = np.meshgrid(np.arange(8), np.arange(7), indexing="ij")
         parent_rows, parent_cols = chip.parent_index(rows, cols)
         np.testing.assert_array_equal(parent[parent_rows, parent_cols], chip.data)
-        np.testing.assert_array_equal(chip.range_bin_centers_m, range_m[:7])
+        np.testing.assert_array_equal(chip.range_bin_centres_m, range_m[:7])
         np.testing.assert_allclose(chip.range_at_m(3.25), range_m[0] + 3.25 * BIN_M, rtol=1e-12)
-        np.testing.assert_array_equal(chip.rate_bin_centers_mps, rate_mps)
+        np.testing.assert_array_equal(chip.rate_bin_centres_mps, rate_mps)
 
     def test_doppler_chip_wraps_across_the_fold_and_keeps_the_parents_rates(self) -> None:
         """A Doppler crop through bin 0 takes the circle's far end, rate jump included."""
         parent = np.arange(16 * 40).reshape(16, 40) + 0j
-        range_m = delay_bin_centers_m(40, SAMPLE_RATE_HZ)
-        rate_mps = doppler_bin_centers_mps(16, 1 / PRF_HZ, WAVELENGTH_M)
+        range_m = delay_bin_centres_m(40, SAMPLE_RATE_HZ)
+        rate_mps = doppler_bin_centres_mps(16, 1 / PRF_HZ, WAVELENGTH_M)
         chip = crop_range_doppler(
             parent,
             1,
             38,
-            range_bin_centers_m=range_m,
-            rate_bin_centers_mps=rate_mps,
+            range_bin_centres_m=range_m,
+            rate_bin_centres_mps=rate_mps,
             processing=_processing(),
             half_width_bins=3,
         )
@@ -148,7 +148,7 @@ class TestChip:
         parent_rows, parent_cols = chip.parent_index(rows, cols)
         np.testing.assert_array_equal(parent_rows[:, 0], [14, 15, 0, 1, 2, 3, 4])
         np.testing.assert_array_equal(parent[parent_rows, parent_cols], chip.data)
-        np.testing.assert_array_equal(chip.rate_bin_centers_mps, rate_mps[parent_rows[:, 0]])
+        np.testing.assert_array_equal(chip.rate_bin_centres_mps, rate_mps[parent_rows[:, 0]])
 
     def test_a_sixteen_bin_chip_keeps_the_target_energy(self) -> None:
         """+-16 range bins keep all but 0.05 dB of a compressed echo, worst offset.
@@ -244,13 +244,13 @@ class TestBound:
         d = k0**2 * time_s.var() + spread * np.mean(time_s**2)
         range_m = np.sqrt(d / (2 * NOMINAL_SNR * spread * (d - spread * time_s.mean() ** 2)))
         rate_mps = 1 / np.sqrt(2 * NOMINAL_SNR * (k0**2 + spread) * time_s.var())
-        np.testing.assert_allclose(bound.bistatic_range_m, range_m, rtol=1e-9)
-        np.testing.assert_allclose(bound.bistatic_range_rate_mps, rate_mps, rtol=1e-9)
+        np.testing.assert_allclose(bound.sigma_bistatic_range_m, range_m, rtol=1e-9)
+        np.testing.assert_allclose(bound.sigma_bistatic_range_rate_mps, rate_mps, rtol=1e-9)
         tone_mps = (
             WAVELENGTH_M * PRF_HZ / (2 * np.pi) * np.sqrt(6 / (NOMINAL_SNR * (N_PULSES**2 - 1)))
         )
-        np.testing.assert_allclose(bound.bistatic_range_rate_mps, tone_mps, rtol=2e-4)
-        assert np.isnan(bound.bistatic_range_acceleration_mps2)
+        np.testing.assert_allclose(bound.sigma_bistatic_range_rate_mps, tone_mps, rtol=2e-4)
+        assert np.isnan(bound.sigma_bistatic_range_acceleration_mps2)
 
     def test_acceleration_bound_is_peleg_porats_quadratic_coefficient(self) -> None:
         """var(c2) >= 90 / (rho N^4) for large N, so std(a) = lambda/(pi T^2) sqrt(90/(rho N^4))."""
@@ -264,7 +264,9 @@ class TestBound:
         )
         expected = WAVELENGTH_M * PRF_HZ**2 / np.pi * np.sqrt(90 / (NOMINAL_SNR * N_PULSES**4))
         # rtol 1e-2: the large-N form drops terms of order 1/N.
-        np.testing.assert_allclose(bound.bistatic_range_acceleration_mps2, expected, rtol=1e-2)
+        np.testing.assert_allclose(
+            bound.sigma_bistatic_range_acceleration_mps2, expected, rtol=1e-2
+        )
 
 
 class TestEstimate:
@@ -279,8 +281,8 @@ class TestEstimate:
             0,
             100,
             (N_PULSES, 1024),
-            delay_bin_centers_m(1024, SAMPLE_RATE_HZ, range_gate_start_m=4800.0)[100:133],
-            doppler_bin_centers_mps(N_PULSES, 1 / PRF_HZ, WAVELENGTH_M),
+            delay_bin_centres_m(1024, SAMPLE_RATE_HZ, range_gate_start_m=4800.0)[100:133],
+            doppler_bin_centres_mps(N_PULSES, 1 / PRF_HZ, WAVELENGTH_M),
             _processing(),
         )
         found = estimate_fine(chip, method=method)
@@ -291,9 +293,12 @@ class TestEstimate:
             bandwidth_hz=BANDWIDTH_HZ,
             prf_hz=PRF_HZ,
         )
-        truth_m = chip.range_bin_centers_m[0] + delay * BIN_M
-        assert abs(found.bistatic_range_m - truth_m) < 0.05 * bound.bistatic_range_m
-        assert abs(found.bistatic_range_rate_mps - rate_mps) < 0.05 * bound.bistatic_range_rate_mps
+        truth_m = chip.range_bin_centres_m[0] + delay * BIN_M
+        assert abs(found.bistatic_range_m - truth_m) < 0.05 * bound.sigma_bistatic_range_m
+        assert (
+            abs(found.bistatic_range_rate_mps - rate_mps)
+            < 0.05 * bound.sigma_bistatic_range_rate_mps
+        )
         assert found.method == method
 
     def test_fold_factor_unfolds_the_reported_rate(self) -> None:
@@ -302,8 +307,8 @@ class TestEstimate:
         chip = crop_slow_time(
             _model_chip(16.2, folded_mps),
             16,
-            range_bin_centers_m=delay_bin_centers_m(33, SAMPLE_RATE_HZ),
-            rate_bin_centers_mps=doppler_bin_centers_mps(N_PULSES, 1 / PRF_HZ, WAVELENGTH_M),
+            range_bin_centres_m=delay_bin_centres_m(33, SAMPLE_RATE_HZ),
+            rate_bin_centres_mps=doppler_bin_centres_mps(N_PULSES, 1 / PRF_HZ, WAVELENGTH_M),
             processing=_processing(fold_factor=1),
         )
         found = estimate_fine(chip)
@@ -316,8 +321,8 @@ class TestEstimate:
             np.ones((16, 40), complex),
             3,
             20,
-            range_bin_centers_m=np.arange(40.0),
-            rate_bin_centers_mps=np.arange(16.0),
+            range_bin_centres_m=np.arange(40.0),
+            rate_bin_centres_mps=np.arange(16.0),
             processing=_processing(),
         )
         with pytest.raises(ValueError, match="slow-time chip"):
@@ -352,10 +357,10 @@ def scenario_chips() -> dict[str, tuple[DataChip, object]]:
         chip = crop_slow_time(
             compensated.data_rfst,
             int(peak.range_bin),
-            range_bin_centers_m=delay_bin_centers_m(
+            range_bin_centres_m=delay_bin_centres_m(
                 1024, SAMPLE_RATE_HZ, range_gate_start_m=4800.0
             ),
-            rate_bin_centers_mps=doppler_bin_centers_mps(N_PULSES, 1 / PRF_HZ, WAVELENGTH_M),
+            rate_bin_centres_mps=doppler_bin_centres_mps(N_PULSES, 1 / PRF_HZ, WAVELENGTH_M),
             processing=processing,
         )
         found[variant] = (chip, truth)
@@ -379,8 +384,8 @@ def _trials(
             chip.axis0_offset,
             chip.range_offset,
             chip.parent_shape,
-            chip.range_bin_centers_m,
-            chip.rate_bin_centers_mps,
+            chip.range_bin_centres_m,
+            chip.rate_bin_centres_mps,
             chip.processing,
         )
         found = estimate_fine(noisy, **options)  # type: ignore[arg-type]
@@ -421,8 +426,8 @@ def test_aboutanios_mulgrew_range_and_rate_reach_the_bound_on_k1(scenario_chips,
     bound = _bound(snr, 1)
     range_error = found[:, 0] - truth.bistatic_range_m[0]
     rate_error = found[:, 1] - truth.bistatic_range_rate_mps[0]
-    assert np.sqrt(np.mean(range_error**2)) / bound.bistatic_range_m <= 1.15
-    assert np.sqrt(np.mean(rate_error**2)) / bound.bistatic_range_rate_mps <= 1.15
+    assert np.sqrt(np.mean(range_error**2)) / bound.sigma_bistatic_range_m <= 1.15
+    assert np.sqrt(np.mean(rate_error**2)) / bound.sigma_bistatic_range_rate_mps <= 1.15
 
 
 # Slow: 500 trials of three phase estimators.
@@ -434,7 +439,7 @@ def test_grft_and_cpf_acceleration_approach_the_bound_on_k2(scenario_chips):
     1.22 in RMSE, with margin. HAF is the baseline, reported and not bounded.
     """
     chip, truth = scenario_chips["k2"]
-    bound = _bound(NOMINAL_SNR, 2).bistatic_range_acceleration_mps2
+    bound = _bound(NOMINAL_SNR, 2).sigma_bistatic_range_acceleration_mps2
     ratio = {}
     for method in ("grft", "cpf", "haf"):
         found = _trials(chip, NOMINAL_SNR, 500, 9, method=method)
@@ -456,7 +461,7 @@ def test_jerk_is_consistent_with_zero_where_the_dwell_cannot_see_it(scenario_chi
     """
     chip, _ = scenario_chips[variant]
     found = _trials(chip, NOMINAL_SNR, 100, 14, method="grft", polynomial_order=3)
-    bound = _bound(NOMINAL_SNR, 3).bistatic_range_jerk_mps3
+    bound = _bound(NOMINAL_SNR, 3).sigma_bistatic_range_jerk_mps3
     assert np.mean(np.abs(found[:, 3]) <= 3 * bound) >= 0.99
 
 
@@ -475,12 +480,12 @@ def test_jerk_is_recovered_where_it_is_observable():
         0,
         0,
         (N_PULSES, 33),
-        delay_bin_centers_m(33, SAMPLE_RATE_HZ),
-        doppler_bin_centers_mps(N_PULSES, 1 / PRF_HZ, WAVELENGTH_M),
+        delay_bin_centres_m(33, SAMPLE_RATE_HZ),
+        doppler_bin_centres_mps(N_PULSES, 1 / PRF_HZ, WAVELENGTH_M),
         _processing(noise_power_w=N_PULSES / NOMINAL_SNR),
     )
     found = _trials(chip, NOMINAL_SNR, 200, 15, method="grft", polynomial_order=3)
-    bound = _bound(NOMINAL_SNR, 3).bistatic_range_jerk_mps3
+    bound = _bound(NOMINAL_SNR, 3).sigma_bistatic_range_jerk_mps3
     assert np.sqrt(np.mean((found[:, 3] - jerk_mps3) ** 2)) / bound <= 1.5
 
 
@@ -493,7 +498,7 @@ def test_an_fmcw_chip_is_ranged_where_its_one_sided_band_lies():
     n_samples, n_pulses, sample_rate_hz = 1000, 64, 1.0e6
     centred = ChipProcessing(9.8e9, 2.0e6, sample_rate_hz, 1.0e3, 1.0)
     one_sided = dataclasses.replace(
-        centred, band_centre_hz=-sample_rate_hz / 2.0, band_width_hz=sample_rate_hz
+        centred, band_centre_hz=-sample_rate_hz / 2.0, band_extent_hz=sample_rate_hz
     )
     sample, pulse = np.arange(n_samples), np.arange(n_pulses)[:, None]
     errors: dict[str, list[float]] = {"centred": [], "one_sided": []}
@@ -505,8 +510,8 @@ def test_an_fmcw_chip_is_ranged_where_its_one_sided_band_lies():
             chip = crop_slow_time(
                 profiles,
                 400,
-                range_bin_centers_m=np.arange(n_samples) * 149.896229,
-                rate_bin_centers_mps=np.arange(n_pulses) * 0.1,
+                range_bin_centres_m=np.arange(n_samples) * 149.896229,
+                rate_bin_centres_mps=np.arange(n_pulses) * 0.1,
                 processing=processing,
             )
             found = estimate_fine(chip).range_index + chip.range_offset

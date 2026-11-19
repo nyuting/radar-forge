@@ -119,8 +119,8 @@ detected, threshold_w = rf.cfar_detect(np.abs(rd_map) ** 2, 1e-4, n_train=8, n_g
 
 # 5. The brightest cell in physical units: bistatic range R_T + R_R and its rate.
 rate_bin, range_bin = np.unravel_index(np.abs(rd_map).argmax(), rd_map.shape)
-range_axis_m = rf.range_bin_centers_m(rd_map.shape[1], 2.0e6, 1.0e-3, 1.0e6)
-rate_axis_mps = rf.doppler_bin_centers_mps(rd_map.shape[0], 1.0e-3, radar.wavelength_m)
+range_axis_m = rf.range_bin_centres_m(rd_map.shape[1], 2.0e6, 1.0e-3, 1.0e6)
+rate_axis_mps = rf.doppler_bin_centres_mps(rd_map.shape[0], 1.0e-3, radar.wavelength_m)
 print(round(range_axis_m[range_bin], 1), round(rate_axis_mps[rate_bin], 2))  # 23983.4 11.95
 ```
 

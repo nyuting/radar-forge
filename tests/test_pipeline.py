@@ -123,7 +123,7 @@ def _predicted_bins(scenario, scan: int) -> np.ndarray:
     tx_enu_m = radar.tx_site.enu_m(radar.rx_site or radar.tx_site)
     bistatic_m, rate_mps = _closed_form(tx_enu_m, float(scan))
     range_bin_m = SPEED_OF_LIGHT_MPS / radar.transmitter.bandwidth_hz
-    n_pulses = scenario.n_pulses[0]
+    n_pulses = scenario.n_pulses_per_burst[0]
     rate_bin_mps = radar.wavelength_m * radar.transmitter.prf_hz / n_pulses
     # Rate falls with Doppler index: zero at n / 2, receding below it.
     return np.column_stack([n_pulses / 2 - rate_mps / rate_bin_mps, bistatic_m / range_bin_m])
@@ -189,7 +189,7 @@ def test_a_dual_prf_pair_unfolds_a_rate_neither_burst_resolves(rng):
     geometry = TargetGeometry.monostatic(15_000.0, 150.0)
     products = [
         range_doppler_product(synthesise(r, geometry, [10.0], n, rng=rng), r)
-        for r, n in zip(scenario.radars, scenario.n_pulses, strict=True)
+        for r, n in zip(scenario.radars, scenario.n_pulses_per_burst, strict=True)
     ]
     assert all(p.rate_period_mps / 2.0 < 300.0 for p in products)
     plots = scan_plots(products, scenario.detection)
@@ -206,7 +206,7 @@ def test_the_radars_unambiguous_limits_are_the_maps_periods(path: Path) -> None:
     A noise burst's lags are a window that folds nothing: its delay period is infinite.
     """
     scenario = load_scenario(path)
-    bursts = zip(scenario.radars, scenario.n_pulses, scenario.n_range_lags, strict=True)
+    bursts = zip(scenario.radars, scenario.n_pulses_per_burst, scenario.n_range_lags, strict=True)
     for radar, n_pulses, n_range_lags in bursts:
         range_m, rate_mps = map_axes(radar, n_pulses, n_range_lags=n_range_lags)
         assert min(range_m.size, rate_mps.size) > 1, f"{path.stem}: an axis of one bin has no step"
@@ -428,7 +428,7 @@ def test_noise_tables_need_a_noise_burst(tmp_path):
     """[leakage] and the rest describe a noise burst; a scenario without one refuses them."""
     text = (REPO / "config" / "scenario_001_fmcw_low_prf.toml").read_text(encoding="utf-8")
     path = tmp_path / "fmcw_with_leakage.toml"
-    path.write_text(text + "\n[leakage]\nlags = [0]\ninr_db = [40.0]\n", encoding="utf-8")
+    path.write_text(text + "\n[leakage]\nlags_samples = [0]\ninr_db = [40.0]\n", encoding="utf-8")
     with pytest.raises(ValueError, match="noise burst"):
         load_scenario(path)
 
@@ -454,7 +454,7 @@ def test_each_noise_scan_carries_its_code_beside_the_stream():
 def _short_noise_scenario():
     """P1 cut to 64 batches and 64 lags: the same chain, 25 600 samples a scan."""
     scenario = load_scenario(NOISE_CONFIG)
-    return dataclasses.replace(scenario, n_pulses=(64,), n_range_lags=(64,))
+    return dataclasses.replace(scenario, n_pulses_per_burst=(64,), n_range_lags=(64,))
 
 
 def test_a_noise_maps_lags_do_not_wrap():

@@ -67,7 +67,7 @@ def geometry(ctx: stepper.Context) -> stepper.Context:
     rcs_m2 = list(scenario.rcs_m2)
     power_w = float(stepper.target_power_w(radar, truths[0], rcs_m2)[0])
     # Integrated over one chirp's samples and every pulse: P T N / N0, on an exact bin.
-    gain = radar.n_samples_per_chirp * scenario.n_pulses[0]
+    gain = radar.n_samples_per_chirp * scenario.n_pulses_per_burst[0]
     snr_db = float(power_to_db(power_w / radar.receiver.noise_power_per_sample_w * gain))
     beta_deg = np.degrees([truth.bistatic_angle_rad for truth in truths])
     for name, value in (
@@ -128,7 +128,9 @@ def iq(ctx: stepper.Context) -> stepper.Context:
     scenario, verify, first = ctx.scenario, stepper.thresholds(ctx, "iq"), stepper.truth(ctx)[0]
     rcs_m2 = np.array(scenario.rcs_m2)
     noise_errors_db, peak_errors_db = [], []
-    for k, (radar, n_pulses) in enumerate(zip(scenario.radars, scenario.n_pulses, strict=True)):
+    for k, (radar, n_pulses) in enumerate(
+        zip(scenario.radars, scenario.n_pulses_per_burst, strict=True)
+    ):
         # A generator of its own, so the scans' noise does not depend on whether this ran.
         rng, gate = np.random.default_rng([scenario.seed, 1, k]), scenario.gates[k]
         noise_w = np.mean(
@@ -247,7 +249,11 @@ def rd(ctx: stepper.Context) -> stepper.Context:
 
 def _false_alarm_ratio(scenario: Scenario, burst: int) -> float:
     """Return measured over design Pfa on one burst's noise-only maps (Richards [1] §6.5)."""
-    settings, radar, n_pulses = scenario.detection, scenario.radars[burst], scenario.n_pulses[burst]
+    settings, radar, n_pulses = (
+        scenario.detection,
+        scenario.radars[burst],
+        scenario.n_pulses_per_burst[burst],
+    )
     gate = scenario.gates[burst]
     n_cells = n_pulses * gate.n_samples(radar)
     n_maps = max(1, min(math.ceil(_FALSE_ALARMS / (settings.pfa * n_cells)), _MAX_CELLS // n_cells))

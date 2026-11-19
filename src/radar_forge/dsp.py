@@ -52,15 +52,15 @@ __all__ = [
     "apply_window",
     "batched_correlation",
     "coherent_gain_linear",
-    "delay_bin_centers_m",
-    "doppler_bin_centers_mps",
+    "delay_bin_centres_m",
+    "doppler_bin_centres_mps",
     "doppler_fft",
     "fold_into_period",
     "fold_range_rate_mps",
     "matched_filter",
     "mti_filter",
     "processing_loss_db",
-    "range_bin_centers_m",
+    "range_bin_centres_m",
     "range_doppler_map",
     "range_fft",
     "unfold_doppler_dual_prf",
@@ -223,7 +223,7 @@ def range_fft(
     weights: ArrayLike | None = None,
     axis: int = -1,
 ) -> NDArray[np.complex128]:
-    r"""Transform fast time into range bins; label them with :func:`range_bin_centers_m`.
+    r"""Transform fast time into range bins; label them with :func:`range_bin_centres_m`.
 
     Unshifted (bin 0 is zero delay) and unnormalised, so
     :math:`\sum_k |X_k|^2 = N_{\mathrm{fft}} \sum_n |w_n x_n|^2`. Padding to ``n_fft``
@@ -252,7 +252,7 @@ def doppler_fft(
     weights: ArrayLike | None = None,
     axis: int = 0,
 ) -> NDArray[np.complex128]:
-    """Transform slow time into Doppler bins; label them with :func:`doppler_bin_centers_mps`.
+    """Transform slow time into Doppler bins; label them with :func:`doppler_bin_centres_mps`.
 
     Shifted, zero Doppler at index ``n_fft // 2``: index rises with :math:`f_d`, so it
     falls with range rate. Unnormalised; Parseval as :func:`range_fft`.
@@ -344,7 +344,7 @@ def range_doppler_map(
     return doppler_fft(profiles, n_fft=n_doppler_fft, weights=slow_time_weights, axis=axes[1])
 
 
-def range_bin_centers_m(
+def range_bin_centres_m(
     n_bins: int, bandwidth_hz: float, chirp_duration_s: float, sample_rate_hz: float
 ) -> NDArray[np.float64]:
     r"""Return the **bistatic range** :math:`c\tau = R_T + R_R` of each range bin, in metres.
@@ -367,7 +367,7 @@ def range_bin_centers_m(
     return bistatic_range_from_delay_m(delay_s)
 
 
-def delay_bin_centers_m(
+def delay_bin_centres_m(
     n_bins: int, sample_rate_hz: float, *, range_gate_start_m: float = 0.0
 ) -> NDArray[np.float64]:
     r"""Return the **bistatic range** :math:`c (n_0 + n)/f_s` of each compressed pulsed bin, m.
@@ -387,7 +387,7 @@ def delay_bin_centers_m(
     return result
 
 
-def doppler_bin_centers_mps(
+def doppler_bin_centres_mps(
     n_bins: int, pulse_repetition_interval_s: float, wavelength_m: float
 ) -> NDArray[np.float64]:
     r"""Return the **bistatic range rate, positive receding**, of each shifted Doppler bin.
@@ -403,7 +403,7 @@ def doppler_bin_centers_mps(
 
     Examples
     --------
-    >>> [float(r) for r in doppler_bin_centers_mps(4, 1e-3, 0.03)]
+    >>> [float(r) for r in doppler_bin_centres_mps(4, 1e-3, 0.03)]
     [15.0, 7.5, 0.0, -7.5]
     """
     if n_bins < 1 or not all(x > 0.0 for x in (pulse_repetition_interval_s, wavelength_m)):
@@ -419,12 +419,12 @@ def doppler_bin_centers_mps(
     return result
 
 
-def mti_filter(samples: ArrayLike, *, n_pulses: int = 2, axis: int) -> NDArray[np.complex128]:
-    """Cancel stationary returns with :math:`H(z) = (1 - z^{-1})^{n-1}`, ``n = n_pulses``.
+def mti_filter(samples: ArrayLike, *, n_taps: int = 2, axis: int) -> NDArray[np.complex128]:
+    """Cancel stationary returns with :math:`H(z) = (1 - z^{-1})^{n-1}`, ``n = n_taps``.
 
     Exact nulls at zero Doppler and every multiple of the PRF, gain :math:`2^{n-1}` midway.
     ``np.diff`` is this causal canceller with its transient dropped, so ``axis`` shortens
-    by ``n_pulses - 1`` and the two-pulse output is :math:`x[m+1] - x[m]`.
+    by ``n_taps - 1`` and the two-pulse output is :math:`x[m+1] - x[m]`.
 
     Parameters
     ----------
@@ -436,10 +436,10 @@ def mti_filter(samples: ArrayLike, *, n_pulses: int = 2, axis: int) -> NDArray[n
     Richards [1]_, §5.2.1.
     """
     samples_arr = np.asarray(samples, dtype=np.complex128)
-    if n_pulses not in (2, 3) or np.moveaxis(samples_arr, axis, 0).shape[0] < n_pulses:
-        msg = f"n_pulses ({n_pulses}) must be 2 or 3, and no more than the pulses along axis."
+    if n_taps not in (2, 3) or np.moveaxis(samples_arr, axis, 0).shape[0] < n_taps:
+        msg = f"n_taps ({n_taps}) must be 2 or 3, and no more than the pulses along axis."
         raise ValueError(msg)
-    result: NDArray[np.complex128] = np.diff(samples_arr, n=n_pulses - 1, axis=axis)
+    result: NDArray[np.complex128] = np.diff(samples_arr, n=n_taps - 1, axis=axis)
     return result
 
 
@@ -522,7 +522,7 @@ def fold_range_rate_mps(range_rate_mps: ArrayLike, period_mps: ArrayLike) -> NDA
 
     Closed at the top, unlike :func:`fold_into_period`: rate is :math:`-\lambda f_d` and the
     shifted Doppler axis is :math:`[-\mathrm{PRF}/2, +\mathrm{PRF}/2)`. For
-    :func:`doppler_bin_centers_mps` the period is :math:`\lambda / T_{\mathrm{PRI}}`,
+    :func:`doppler_bin_centres_mps` the period is :math:`\lambda / T_{\mathrm{PRI}}`,
     and its map has a bin on the closed edge only for an even number of bins.
 
     References

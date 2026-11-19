@@ -321,7 +321,7 @@ def line_of_sight_paths(
     )
 
 
-def leakage_paths(radar: Radar, lags: ArrayLike, inr_db: ArrayLike) -> PropagationPaths:
+def leakage_paths(radar: Radar, lags_samples: ArrayLike, inr_db: ArrayLike) -> PropagationPaths:
     r"""Build the transmitter's leakage into the receiver, one path per whole-sample lag.
 
     Leakage is specified at the ADC, not derived (Sabharwal [5] §IV-B to IV-D): what antenna
@@ -329,7 +329,7 @@ def leakage_paths(radar: Radar, lags: ArrayLike, inr_db: ArrayLike) -> Propagati
     zero Doppler; ``inr_db`` is each path's power over the noise in one sample,
     :attr:`~radar_forge.radar.Receiver.noise_power_per_sample_w`, not over the matched band.
     """
-    lags_arr = np.atleast_1d(np.asarray(lags, dtype=np.float64))
+    lags_arr = np.atleast_1d(np.asarray(lags_samples, dtype=np.float64))
     # (c m)/f_s, not bistatic_range_from_delay_m(m / f_s): the orders differ in the last bit.
     range_m = SPEED_OF_LIGHT_MPS * lags_arr / radar.receiver.sample_rate_hz
     return _specified_paths(radar, range_m, inr_db, 0.0)
@@ -350,9 +350,11 @@ def disturbance_paths(
     radar: Radar, leakage: LeakageSettings | None, clutter: Sequence[ClutterSettings]
 ) -> PropagationPaths:
     """Join a scenario's ``[leakage]`` and ``[[clutter]]`` into one path set, leakage first."""
-    lags, inr_db = (leakage.lags, leakage.inr_db) if leakage is not None else ((), ())
+    lags_samples, inr_db = (
+        (leakage.lags_samples, leakage.inr_db) if leakage is not None else ((), ())
+    )
     return PropagationPaths.concatenate(
-        leakage_paths(radar, lags, inr_db),
+        leakage_paths(radar, lags_samples, inr_db),
         static_clutter_paths(
             radar,
             [c.range_m for c in clutter],

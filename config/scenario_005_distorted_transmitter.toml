@@ -53,7 +53,7 @@ noise_figure_db = 3.0
 # What antenna isolation and an analog canceller leave at the ADC, per sample over the
 # noise k T0 F f_s = -131.94 dBW: the front end's short impulse response at lags 0-2.
 [leakage]
-lags = [0, 1, 2]
+lags_samples = [0, 1, 2]
 inr_db = [40.0, 30.0, 20.0]
 
 # Four buildings and stretches of terrain, on whole lags of c / f_s: routes of 16, 40, 80

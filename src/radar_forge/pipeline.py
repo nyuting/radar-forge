@@ -44,11 +44,11 @@ from radar_forge.coordinates import directions_unit
 from radar_forge.detection import Detection, cfar_detect, cluster_detections
 from radar_forge.dsp import (
     batched_correlation,
-    delay_bin_centers_m,
-    doppler_bin_centers_mps,
+    delay_bin_centres_m,
+    doppler_bin_centres_mps,
     doppler_fft,
     fold_range_rate_mps,
-    range_bin_centers_m,
+    range_bin_centres_m,
     range_doppler_map,
     unfold_doppler_dual_prf,
     unfold_range_dual_prf,
@@ -181,7 +181,7 @@ def scan_iq(scenario: Scenario, *, n_scans: int | None = None) -> Iterator[ScanI
     # A loop over scans is the point: each scan is built and handed out before the next.
     for index, truth in enumerate(truths):
         if radar.transmitter.waveform == "noise":
-            n_pulses = scenario.n_pulses[0]
+            n_pulses = scenario.n_pulses_per_burst[0]
             code = noise_waveform(n_pulses * radar.n_samples_per_chirp, rng=rng)
             stream = synthesise(
                 radar,
@@ -208,7 +208,7 @@ def scan_iq(scenario: Scenario, *, n_scans: int | None = None) -> Iterator[ScanI
                 scattering_phase_rad=phase_rad[index],
             )
             for radar, n_pulses, gate in zip(
-                scenario.radars, scenario.n_pulses, scenario.gates, strict=True
+                scenario.radars, scenario.n_pulses_per_burst, scenario.gates, strict=True
             )
         )
         yield ScanIq(index, float(scenario.scan_times_s[index]), truth, cubes)
@@ -220,7 +220,7 @@ def map_axes(
     """Return a burst's map axes: bistatic range of each range bin, and rate of each Doppler bin.
 
     FMCW range is the beat axis; a pulsed bin is one sample of delay from the range gate's
-    first, :func:`~radar_forge.dsp.delay_bin_centers_m` (no gate: the whole PRI from zero); a
+    first, :func:`~radar_forge.dsp.delay_bin_centres_m` (no gate: the whole PRI from zero); a
     noise burst's is one lag of its correlation, the same axis from zero for ``m < n_range_lags``,
     a window that does not wrap (:attr:`~radar_forge.radar.Radar.unambiguous_delay_s`).
     """
@@ -231,20 +231,20 @@ def map_axes(
             msg = "a noise burst's map needs n_range_lags, its count of correlation lags."
             raise ValueError(msg)
         # Lag m is m samples of delay from zero: the ungated pulsed axis, c m / f_s.
-        range_axis_m = delay_bin_centers_m(n_range_lags, sample_rate_hz)
+        range_axis_m = delay_bin_centres_m(n_range_lags, sample_rate_hz)
     elif transmitter.waveform == "pulsed":
-        range_axis_m = delay_bin_centers_m(
+        range_axis_m = delay_bin_centres_m(
             gate.n_samples(radar), sample_rate_hz, range_gate_start_m=gate.range_gate_start_m
         )
     else:
-        range_axis_m = range_bin_centers_m(
+        range_axis_m = range_bin_centres_m(
             radar.n_samples_per_pri,
             transmitter.bandwidth_hz,
             transmitter.chirp_duration_s,
             sample_rate_hz,
         )
     pri_s = transmitter.pulse_repetition_interval_s
-    return range_axis_m, doppler_bin_centers_mps(n_pulses, pri_s, radar.wavelength_m)
+    return range_axis_m, doppler_bin_centres_mps(n_pulses, pri_s, radar.wavelength_m)
 
 
 @dataclass(frozen=True)
@@ -255,7 +255,7 @@ class RangeDopplerProduct:
     index past the last bin lies across the wrap, and a rate folds into
     ``(-period/2, +period/2]``, period = :attr:`rate_period_mps`. A noise burst's range axis is
     a window of lags instead, which does not wrap: ``range_wraps`` is ``False``.
-    The rate axis falls with index, its sign from :func:`~radar_forge.dsp.doppler_bin_centers_mps`.
+    The rate axis falls with index, its sign from :func:`~radar_forge.dsp.doppler_bin_centres_mps`.
     A range-gated map is a window on its range circle, ``unambiguous_range_m`` round. A cube
     with a channel axis keeps each channel's map, ``channels`` ``(n_doppler_bins, n_range_bins,
     n_rx)``, and ``rd_map`` is their conventional beam at boresight.
@@ -571,7 +571,7 @@ class ScanTracker:
         if settings is None:
             msg = f"scenario {scenario.name!r} has no [tracking] table."
             raise ValueError(msg)
-        range_axis_m, rate_axis_mps = map_axes(scenario.radar, scenario.n_pulses[0])
+        range_axis_m, rate_axis_mps = map_axes(scenario.radar, scenario.n_pulses_per_burst[0])
         range_bin_m = float(range_axis_m[1] - range_axis_m[0])
         rate_bin_mps = float(rate_axis_mps[0] - rate_axis_mps[1])
         self.range_period_m = range_axis_m.size * range_bin_m

@@ -21,15 +21,15 @@ from radar_forge.dsp import (
     apply_window,
     batched_correlation,
     coherent_gain_linear,
-    delay_bin_centers_m,
-    doppler_bin_centers_mps,
+    delay_bin_centres_m,
+    doppler_bin_centres_mps,
     doppler_fft,
     fold_into_period,
     fold_range_rate_mps,
     matched_filter,
     mti_filter,
     processing_loss_db,
-    range_bin_centers_m,
+    range_bin_centres_m,
     range_doppler_map,
     range_fft,
     unfold_doppler_dual_prf,
@@ -315,7 +315,7 @@ class TestBinCenters:
 
         The span is one circle of c f_s T / B.
         """
-        bins_m = range_bin_centers_m(N_SAMPLES, **NOMINAL)
+        bins_m = range_bin_centres_m(N_SAMPLES, **NOMINAL)
         f_s, t_s, b_hz = (
             NOMINAL["sample_rate_hz"],
             NOMINAL["chirp_duration_s"],
@@ -332,7 +332,7 @@ class TestBinCenters:
         Bin 0 holds f_d = -PRF/2, so its rate is +lambda/(2T): the interval is
         (-v_ua, +v_ua], and the array decreases.
         """
-        rate_mps = doppler_bin_centers_mps(N_PULSES, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)
+        rate_mps = doppler_bin_centres_mps(N_PULSES, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)
         step_mps = WAVELENGTH_M / (N_PULSES * PULSE_REPETITION_INTERVAL_S)
         expected_mps = -(np.arange(N_PULSES) - N_PULSES // 2) * step_mps
         np.testing.assert_allclose(rate_mps, expected_mps, rtol=1e-12, atol=1e-12)
@@ -345,7 +345,7 @@ class TestBinCenters:
         """
         peak = int(np.argmax(np.abs(doppler_fft(tone(3, N_PULSES)))))
         assert peak == N_PULSES // 2 + 3
-        rate_mps = doppler_bin_centers_mps(N_PULSES, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)
+        rate_mps = doppler_bin_centres_mps(N_PULSES, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)
         assert rate_mps[peak] < 0.0
 
     @pytest.mark.parametrize("n_bins", [0, 8])
@@ -353,20 +353,20 @@ class TestBinCenters:
         """n_bins = 0 is the boundary; at n_bins = 8 a zero sample rate or PRI is the fault."""
         bad = {**NOMINAL, "sample_rate_hz": 0.0} if n_bins else NOMINAL
         with pytest.raises(ValueError, match="positive"):
-            range_bin_centers_m(n_bins, **bad)
+            range_bin_centres_m(n_bins, **bad)
         with pytest.raises(ValueError, match="positive"):
-            doppler_bin_centers_mps(n_bins, 0.0 if n_bins else 1e-3, WAVELENGTH_M)
+            doppler_bin_centres_mps(n_bins, 0.0 if n_bins else 1e-3, WAVELENGTH_M)
 
     def test_the_stationary_bin_is_positive_zero(self) -> None:
         """Negating 0 Hz gives -0.0, which prints as "-0.0" on an axis label."""
-        rate_mps = doppler_bin_centers_mps(N_PULSES, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)
+        rate_mps = doppler_bin_centres_mps(N_PULSES, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)
         assert rate_mps[N_PULSES // 2] == 0.0
         assert not np.signbit(rate_mps[N_PULSES // 2])
 
     def test_an_odd_bin_count_is_symmetric_inside_the_interval(self) -> None:
         """N = 5: rates +-2 and +-1 steps of lambda/(N T), so no bin sits on +v_ua = 15 m/s."""
         np.testing.assert_allclose(
-            doppler_bin_centers_mps(5, 1e-3, 0.03), [12.0, 6.0, 0.0, -6.0, -12.0], atol=1e-12
+            doppler_bin_centres_mps(5, 1e-3, 0.03), [12.0, 6.0, 0.0, -6.0, -12.0], atol=1e-12
         )
 
 
@@ -376,8 +376,8 @@ class TestRangeDopplerMap:
 
         Beat is alpha tau = (B/T) R / c for bistatic range R; Doppler is -rate/lambda.
         """
-        range_m = range_bin_centers_m(N_SAMPLES, **NOMINAL)[range_bin]
-        rate_mps = doppler_bin_centers_mps(N_PULSES, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)
+        range_m = range_bin_centres_m(N_SAMPLES, **NOMINAL)[range_bin]
+        rate_mps = doppler_bin_centres_mps(N_PULSES, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)
         beat_hz = (
             NOMINAL["bandwidth_hz"] / NOMINAL["chirp_duration_s"] * range_m / SPEED_OF_LIGHT_MPS
         )
@@ -423,43 +423,37 @@ class TestMtiFilter:
         """Return a 32-pulse unit tone whose phase turns by the given fraction per pulse."""
         return np.exp(2j * np.pi * doppler_fraction_of_prf * np.arange(N_PULSES))
 
-    @pytest.mark.parametrize("n_pulses", [2, 3])
+    @pytest.mark.parametrize("n_taps", [2, 3])
     @pytest.mark.parametrize("doppler_fraction_of_prf", [0.0, 1.0], ids=["stationary", "blind"])
-    def test_nulls_zero_doppler_and_the_blind_speed(
-        self, n_pulses, doppler_fraction_of_prf
-    ) -> None:
+    def test_nulls_zero_doppler_and_the_blind_speed(self, n_taps, doppler_fraction_of_prf) -> None:
         """|H| = 0 at every multiple of the PRF, the blind speeds, not only at zero."""
-        filtered = mti_filter(
-            self.slow_time_tone(doppler_fraction_of_prf), n_pulses=n_pulses, axis=0
-        )
+        filtered = mti_filter(self.slow_time_tone(doppler_fraction_of_prf), n_taps=n_taps, axis=0)
         np.testing.assert_allclose(filtered, 0.0, atol=1e-12)
 
-    @pytest.mark.parametrize(("n_pulses", "gain_linear"), [(2, 2.0), (3, 4.0)])
-    def test_peak_gain_midway_between_blind_speeds(self, n_pulses: int, gain_linear: float) -> None:
+    @pytest.mark.parametrize(("n_taps", "gain_linear"), [(2, 2.0), (3, 4.0)])
+    def test_peak_gain_midway_between_blind_speeds(self, n_taps: int, gain_linear: float) -> None:
         """At f_d = PRF/2 alternate pulses flip sign: |H| = 2^(n-1) exactly."""
-        filtered = mti_filter(self.slow_time_tone(0.5), n_pulses=n_pulses, axis=0)
+        filtered = mti_filter(self.slow_time_tone(0.5), n_taps=n_taps, axis=0)
         np.testing.assert_allclose(np.abs(filtered), gain_linear, rtol=1e-12)
 
-    @pytest.mark.parametrize("n_pulses", [2, 3])
+    @pytest.mark.parametrize("n_taps", [2, 3])
     @pytest.mark.parametrize("doppler_fraction_of_prf", [0.01, 0.1, 0.25, 0.4])
-    def test_matches_the_binomial_frequency_response(self, n_pulses, doppler_fraction_of_prf):
+    def test_matches_the_binomial_frequency_response(self, n_taps, doppler_fraction_of_prf):
         r"""|H| = (2 |sin(pi f_d T)|)^(n-1): catches wrong taps such as [1, -2, -1]."""
-        filtered = mti_filter(
-            self.slow_time_tone(doppler_fraction_of_prf), n_pulses=n_pulses, axis=0
-        )
-        expected = (2.0 * abs(np.sin(np.pi * doppler_fraction_of_prf))) ** (n_pulses - 1)
+        filtered = mti_filter(self.slow_time_tone(doppler_fraction_of_prf), n_taps=n_taps, axis=0)
+        expected = (2.0 * abs(np.sin(np.pi * doppler_fraction_of_prf))) ** (n_taps - 1)
         np.testing.assert_allclose(np.abs(filtered), expected, rtol=1e-10)
 
     def test_two_pulse_output_is_the_later_minus_the_earlier_pulse(self) -> None:
         """The documented y[m] = x[m+1] - x[m], and the dwell shortens by n - 1."""
         samples = np.arange(5.0)[:, None] ** 2 * np.ones((1, 3))
         np.testing.assert_allclose(mti_filter(samples, axis=0)[:, 0], [1.0, 3.0, 5.0, 7.0])
-        assert mti_filter(np.ones((128, 4)), n_pulses=3, axis=0).shape == (126, 4)
+        assert mti_filter(np.ones((128, 4)), n_taps=3, axis=0).shape == (126, 4)
 
-    @pytest.mark.parametrize(("n_pulses", "n_available"), [(1, 8), (4, 8), (3, 2)])
-    def test_rejects_an_unsupported_order_or_too_short_a_dwell(self, n_pulses, n_available):
+    @pytest.mark.parametrize(("n_taps", "n_available"), [(1, 8), (4, 8), (3, 2)])
+    def test_rejects_an_unsupported_order_or_too_short_a_dwell(self, n_taps, n_available):
         with pytest.raises(ValueError, match="must be 2 or 3"):
-            mti_filter(np.ones((n_available, 4)), n_pulses=n_pulses, axis=0)
+            mti_filter(np.ones((n_available, 4)), n_taps=n_taps, axis=0)
 
 
 class TestFold:
@@ -484,7 +478,7 @@ class TestFold:
     @pytest.mark.parametrize("n_folds", [-3, 2])
     def test_a_folded_target_lands_where_fold_velocity_says(self, n_folds: int) -> None:
         """Synthesise a target n_folds intervals off bin 7; the FFT and the fold must agree."""
-        rate_mps = doppler_bin_centers_mps(N_PULSES, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)
+        rate_mps = doppler_bin_centres_mps(N_PULSES, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)
         period_mps = WAVELENGTH_M / PULSE_REPETITION_INTERVAL_S
         true_mps = rate_mps[7] + n_folds * period_mps
         slow_time_s = np.arange(N_PULSES) * PULSE_REPETITION_INTERVAL_S
@@ -606,8 +600,8 @@ class TestUnfold:
             lambda: unfold_doppler_dual_prf(
                 0.0, 0.0, PERIOD_A_MPS, PERIOD_B_MPS, max_range_rate_mps=np.nan, tolerance_mps=1.0
             ),
-            lambda: range_bin_centers_m(8, np.nan, 40e-6, 1e6),
-            lambda: doppler_bin_centers_mps(8, np.nan, WAVELENGTH_M),
+            lambda: range_bin_centres_m(8, np.nan, 40e-6, 1e6),
+            lambda: doppler_bin_centres_mps(8, np.nan, WAVELENGTH_M),
         ],
         ids=["unfold_dual_period", "unfold_doppler_dual_prf", "range_bins", "rate_bins"],
     )
@@ -715,13 +709,13 @@ class TestDelayBins:
     def test_without_a_gate_a_bin_is_one_sample_of_delay_from_zero(self) -> None:
         """Bit for bit the pipeline's former inline axis, c n / f_s."""
         np.testing.assert_array_equal(
-            delay_bin_centers_m(100, 2.5e6),
+            delay_bin_centres_m(100, 2.5e6),
             SPEED_OF_LIGHT_MPS * np.arange(100, dtype=np.float64) / 2.5e6,
         )
 
     def test_a_gated_axis_starts_on_the_sample_the_gate_opens_on(self) -> None:
         """4800 m opens on sample 9607 at 600 MHz: 4800.18 m, not 4800, so the axis is on grid."""
-        axis_m = delay_bin_centers_m(3, 600.0e6, range_gate_start_m=4800.0)
+        axis_m = delay_bin_centres_m(3, 600.0e6, range_gate_start_m=4800.0)
         np.testing.assert_allclose(
             axis_m, SPEED_OF_LIGHT_MPS * (9607 + np.arange(3)) / 600.0e6, rtol=1e-15
         )

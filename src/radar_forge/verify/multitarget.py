@@ -660,7 +660,7 @@ def _iq_statistics(ctx: stepper.Context) -> stepper.Context:
     for scan, found in enumerate(ctx.plots):
         windows = pair_windows(ctx, scan, _PAIR_BINS)
         for burst, (radar, n_pulses) in enumerate(
-            zip(scenario.radars, scenario.n_pulses, strict=True)
+            zip(scenario.radars, scenario.n_pulses_per_burst, strict=True)
         ):
             _, _, bin_m = stepper.periods(scenario, burst)
             ranges = found.bistatic_range_m[found.burst_index == burst]

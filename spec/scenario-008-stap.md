@@ -495,7 +495,7 @@ src/radar_forge/raspnet.py                         (new)
 tests/array/test_stap.py, tests/test_clutter_ward.py, tests/test_raspnet.py
 ```
 
-Consumed, never edited: `dsp.py` (`doppler_fft`, `doppler_bin_centers_mps`, `range_fft`,
+Consumed, never edited: `dsp.py` (`doppler_fft`, `doppler_bin_centres_mps`, `range_fft`,
 `window`, `coherent_gain_linear`), `detection.py` (`cfar_detect_2d`, `cluster_detections`),
 `signal.py` (`thermal_noise`), `constants.py`. Consumed from
 006: `array/geometry.py`, `array/beamforming.py` steering vectors; from 007: the D16 weight

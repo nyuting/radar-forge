@@ -68,7 +68,11 @@ _KEYS = (
 def leakage(ctx: stepper.Context) -> stepper.Context:
     """Cancel each scan; CA, floor rise, SINR loss and target detections; leakage.csv."""
     scenario, verify = ctx.scenario, stepper.thresholds(ctx, "leakage")
-    radar, n_pulses, n_range_lags = scenario.radar, scenario.n_pulses[0], scenario.n_range_lags[0]
+    radar, n_pulses, n_range_lags = (
+        scenario.radar,
+        scenario.n_pulses_per_burst[0],
+        scenario.n_range_lags[0],
+    )
     if radar.transmitter.waveform != "noise":
         msg = "the leakage stage needs a noise burst: a stream beside the code it sent."
         raise ValueError(msg)
