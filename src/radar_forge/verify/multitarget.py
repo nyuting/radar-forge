@@ -611,7 +611,7 @@ def pair_windows(
     """
     truth = stepper.truth(ctx)
     first, now = truth[0].bistatic_range_m, truth[scan].bistatic_range_m
-    _, _, bin_m = stepper.spans(ctx.scenario, 0)
+    _, _, bin_m = stepper.periods(ctx.scenario, 0)
     order = np.argsort(first)
     groups: list[list[int]] = []
     # Targets in range order: a handful, each joining the group before it or starting one.
@@ -662,7 +662,7 @@ def _iq_statistics(ctx: stepper.Context) -> stepper.Context:
         for burst, (radar, n_pulses) in enumerate(
             zip(scenario.radars, scenario.n_pulses, strict=True)
         ):
-            _, _, bin_m = stepper.spans(scenario, burst)
+            _, _, bin_m = stepper.periods(scenario, burst)
             ranges = found.bistatic_range_m[found.burst_index == burst]
             near = np.zeros(ranges.size, dtype=bool)
             excluded_bins = 0

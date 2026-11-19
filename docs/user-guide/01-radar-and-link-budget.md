@@ -193,7 +193,7 @@ power_w = received_power_w(
     range_tx_m=truth.range_tx_m[0],
     range_rx_m=truth.range_rx_m[0],
 )
-rate_span_mps = radar.unambiguous_bistatic_range_rate_mps
+rate_period_mps = radar.unambiguous_bistatic_range_rate_mps
 print(f"monostatic      {radar.is_monostatic}, baseline {radar.baseline_m:.1f} m")
 print(f"R_T, R_R        {truth.range_tx_m[0]:.1f} m, {truth.range_rx_m[0]:.1f} m")
 print(f"wavelength      {radar.wavelength_m * 1e3:.4f} mm")
@@ -208,7 +208,7 @@ print(f"range res.      {radar.range_resolution_m:.4f} m")
 print(f"PRI, duty       {tx.pulse_repetition_interval_s * 1e3:.3f} ms, {tx.duty_cycle_linear:.2f}")
 print(f"sweep rate      {tx.sweep_rate_hzps:.4e} Hz/s")
 print(f"R_b,ua          {radar.unambiguous_bistatic_range_m / 1e3:.3f} km")
-print(f"rate span       {rate_span_mps:.4f} m/s, +-{rate_span_mps / 4:.4f} m/s radial")
+print(f"rate span       {rate_period_mps:.4f} m/s, +-{rate_period_mps / 4:.4f} m/s radial")
 ```
 
 ```text

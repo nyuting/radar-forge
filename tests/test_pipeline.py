@@ -280,11 +280,13 @@ def test_the_fold_monitor_fits_the_slope_on_the_scans_own_times():
     wrong prediction and the wrong fold stood.
     """
     tracker = ScanTracker(load_scenario(REPO / "config" / "scenario_003_tracking.toml"))
-    span_mps, rate_mps = tracker.fold_span_mps, 50.0
-    ids = tracker.tracker.seed([[20_600.0, rate_mps + span_mps]], np.diag([100.0, 1.0])[None], 12.0)
+    period_mps, rate_mps = tracker.rate_period_mps, 50.0
+    ids = tracker.tracker.seed(
+        [[20_600.0, rate_mps + period_mps]], np.diag([100.0, 1.0])[None], 12.0
+    )
     times_s = [*range(9), 12.0]
     tracker.history[int(ids[0])] = [(float(t), 20_000.0 + rate_mps * t) for t in times_s]
-    folded_mps = rate_mps - span_mps * round(rate_mps / span_mps)
+    folded_mps = rate_mps - period_mps * round(rate_mps / period_mps)
     # abs 1e-9: whole spans added to a folded reading, a few float64 operations.
     np.testing.assert_allclose(tracker.unfold(np.array([folded_mps])), [rate_mps], atol=1e-9)
 

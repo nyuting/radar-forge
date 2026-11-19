@@ -81,12 +81,12 @@ def geometry(ctx: stepper.Context) -> stepper.Context:
         ("unambiguous_bistatic_range_rate_mps", radar.unambiguous_bistatic_range_rate_mps),
     ):
         ctx.record(name, value)
-    # Inside the map unfolded: one burst's spans, or the larger span and the dual-PRF bound.
-    spans = [stepper.spans(scenario, k) for k in range(len(scenario.radars))]
+    # Inside the map unfolded: one burst's periods, or the larger and the dual-PRF bound.
+    periods = [stepper.periods(scenario, k) for k in range(len(scenario.radars))]
     half_rate_mps = (
-        scenario.detection.max_bistatic_range_rate_mps if len(spans) == 2 else spans[0][1] / 2
+        scenario.detection.max_bistatic_range_rate_mps if len(periods) == 2 else periods[0][1] / 2
     )
-    max_range_m = max(span[0] for span in spans)
+    max_range_m = max(period[0] for period in periods)
     inside = [
         np.all(
             (t.bistatic_range_m < max_range_m) & (np.abs(t.bistatic_range_rate_mps) < half_rate_mps)
@@ -276,7 +276,7 @@ def detect(ctx: stepper.Context) -> stepper.Context:
     if len(ctx.plots) != ctx.n_scans:
         msg = "the detect stage needs the rd stage's plots; run rd first."
         raise ValueError(msg)
-    range_span_m, rate_span_mps, range_bin_m = stepper.spans(scenario, 0)
+    range_period_m, rate_period_mps, range_bin_m = stepper.periods(scenario, 0)
     within_m = float(verify.get("truth_within_bins", 1.0)) * range_bin_m
     errors_mps, show, rows = [], figures.display_axes(scenario.radar), []
     # A noise burst's lags are a window: a gap in range is not taken the short way round.
@@ -287,7 +287,7 @@ def detect(ctx: stepper.Context) -> stepper.Context:
         for k, rate_mps in enumerate(truth.bistatic_range_rate_mps):
             gap_m = found.bistatic_range_m[accepted] - truth.bistatic_range_m[k]
             if wraps:
-                gap_m = fold_into_period(gap_m, range_span_m, lower=-range_span_m / 2.0)
+                gap_m = fold_into_period(gap_m, range_period_m, lower=-range_period_m / 2.0)
             gap_m = np.abs(gap_m)
             if np.any(gap_m <= within_m):
                 plot = accepted[np.argmin(gap_m)]
@@ -295,8 +295,8 @@ def detect(ctx: stepper.Context) -> stepper.Context:
                 # Unfolded, against the truth; read off the map, against the truth folded too.
                 folded_gap_mps = fold_into_period(
                     found.folded_rate_mps[plot] - rate_mps,
-                    rate_span_mps,
-                    lower=-rate_span_mps / 2.0,
+                    rate_period_mps,
+                    lower=-rate_period_mps / 2.0,
                 )
                 errors_mps.append(
                     abs(unfolded_mps - rate_mps if unfolded_mps == unfolded_mps else folded_gap_mps)

@@ -66,7 +66,7 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 | windows, coherent gain, processing loss | `window`, `apply_window`, `coherent_gain_linear`, `processing_loss_db` (dsp.py) |
 | matched filter, batched correlation, range/Doppler FFT, map | `matched_filter`, `batched_correlation`, `range_fft`, `doppler_fft`, `range_doppler_map` (dsp.py); `range_doppler_product` (pipeline.py) |
 | bin axes, Doppler resolution; MTI | `range_bin_centers_m`, `doppler_bin_centers_mps` (its spacing λ/(N T)); `mti_filter` (dsp.py) |
-| fold, dual-PRF unfold | `fold_velocity_mps`, `unfold_doppler_dual_prf`, `unfold_range_dual_prf` (dsp.py; all take the span) |
+| fold, dual-PRF unfold | `fold_range_rate_mps`, `unfold_doppler_dual_prf`, `unfold_range_dual_prf` (dsp.py; all take the period) |
 | wrap any periodic value into `[lower, lower + period)` | `fold_into_period` (dsp.py); `tracking/`, `clustering`, `coordinates` and `doa` call `fold` (_periodic.py) |
 | CFAR Pfa, threshold, detect; clustering of cells (connected, or mean-shift modes) | `cfar_probability_of_false_alarm`, `cfar_threshold_factor`, `cfar_detect`, `cfar_detect_2d`; `label_connected_cells`, `cluster_detections(bandwidth_bins=)` (detection.py) |
 | clustering of points: DBSCAN, mean shift; per-column scale and period | `cluster_points`, `mean_shift` (clustering.py) |

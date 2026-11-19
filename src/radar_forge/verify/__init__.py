@@ -10,8 +10,8 @@ import, and the import order below is the run order, since the registry is an ap
 ``__all__`` entry here.
 
 A stage module imports ``from radar_forge.verify import stepper`` and calls the shared helpers
-qualified, ``stepper.stage``, ``stepper.truth(ctx)``, ``stepper.spans(...)``: stages bind
-locals named ``truth`` and ``spans``, which would shadow a bare import and raise
+qualified, ``stepper.stage``, ``stepper.truth(ctx)``, ``stepper.periods(...)``: stages bind
+locals named ``truth`` and ``periods``, which would shadow a bare import and raise
 ``UnboundLocalError``.
 """
 

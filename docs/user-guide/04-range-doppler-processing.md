@@ -50,7 +50,7 @@ undo that.
 | Doppler bins | $N$ | one per chirp | `Scenario.n_pulses` | 256 |
 | Rate resolution | $\Delta v$ | $\Delta v = \frac{\lambda}{N T_{\mathrm{PRI}}}$ | `dsp.doppler_bin_centers_mps`, `RangeDopplerProduct.rate_bin_mps` | 0.119496 m/s (0.059748 m/s radial) |
 | Unambiguous rate | $v_{ua}$ | $v_{ua} = \lambda\,\mathrm{PRF}/2$; the map spans $(-v_{ua}, +v_{ua}]$ | `RangeDopplerProduct.rate_period_mps` $/2$ | 15.2955 m/s (7.6478 m/s radial) |
-| Folded rate | — | $\dot R_b$ wrapped into $(-v_{ua}, +v_{ua}]$ | `dsp.fold_velocity_mps` | +160 m/s (receding at 80 m/s) reads as +7.0447 m/s |
+| Folded rate | — | $\dot R_b$ wrapped into $(-v_{ua}, +v_{ua}]$ | `dsp.fold_range_rate_mps` | +160 m/s (receding at 80 m/s) reads as +7.0447 m/s |
 | Integration gain of the two FFTs | — | $N_s N$ | `dsp.range_doppler_map` | 256 000, 54.08 dB |
 | MTI blind rate | — | $\lambda\,\mathrm{PRF} = 2 v_{ua}$ | `dsp.mti_filter`, `Radar.unambiguous_bistatic_range_rate_mps` | 30.5911 m/s |
 | Dual-PRF $v_{ua}$ (S3) | $v_{ua,a}$, $v_{ua,b}$ | $\lambda\,\mathrm{PRF}/2$ per burst | as above | S3: 76.4777 / 91.7732 m/s |
@@ -130,7 +130,7 @@ $$L = -10\log_{10}\frac{\left(\sum_n w[n]\right)^2}{N\sum_n w[n]^2}.$$
    chirps: $x[m+1] - x[m]$, or $x[m+2] - 2x[m+1] + x[m]$ for three. `axis` has no default.
    Stationary echoes cancel. The slow-time axis gets `n_pulses - 1` shorter, and targets at
    multiples of the blind rate $\lambda\,\mathrm{PRF}$ cancel too.
-7. **Fold and unfold.** `dsp.fold_velocity_mps(rate_mps, span_mps)` predicts where a target of
+7. **Fold and unfold.** `dsp.fold_range_rate_mps(rate_mps, period_mps)` predicts where a target of
    true rate `rate_mps` appears: in $(-\mathrm{span}/2, +\mathrm{span}/2]$, closed at the top as
    the map is. Range folds
    with `dsp.fold_into_period(range_m, span_m, lower=0.0)`. `unfold_doppler_dual_prf` and
@@ -166,7 +166,7 @@ print(f"shown as {show.range_name} and {show.rate_name}, times {show.scale}")
 
 truth_m = scan.truth.bistatic_range_m[0]
 truth_mps = scan.truth.bistatic_range_rate_mps[0]
-folded_mps = dsp.fold_velocity_mps(truth_mps, product.rate_period_mps)
+folded_mps = dsp.fold_range_rate_mps(truth_mps, product.rate_period_mps)
 print(f"truth {truth_m:.1f} m, {truth_mps:+.4f} m/s, folded {folded_mps:+.4f} m/s")
 rate_bin, range_bin = np.unravel_index(np.abs(product.rd_map).argmax(), product.rd_map.shape)
 print(f"peak ({rate_bin}, {range_bin}): {range_m[range_bin]:.1f} m, {rate_mps[rate_bin]:+.4f} m/s")
@@ -176,13 +176,13 @@ for name, level in (("rectangular", None), ("hann", None), ("taylor", -60.0)):
     print(f"{name:<11} gain {gain:.3f}  loss {loss:.2f} dB")
 
 a, b = load_scenario("config/scenario_001_fmcw_dual_prf.toml").radars
-span_a = a.unambiguous_bistatic_range_rate_mps
-span_b = b.unambiguous_bistatic_range_rate_mps
-read_a, read_b = dsp.fold_velocity_mps(160.0, span_a), dsp.fold_velocity_mps(160.0, span_b)
+period_a = a.unambiguous_bistatic_range_rate_mps
+period_b = b.unambiguous_bistatic_range_rate_mps
+read_a, read_b = dsp.fold_range_rate_mps(160.0, period_a), dsp.fold_range_rate_mps(160.0, period_b)
 true_mps, _ = dsp.unfold_doppler_dual_prf(
-    read_a, read_b, span_a, span_b, max_velocity_mps=458.0, tolerance_mps=0.7
+    read_a, read_b, period_a, period_b, max_range_rate_mps=458.0, tolerance_mps=0.7
 )
-print(f"S3 spans {span_a:.4f} / {span_b:.4f} m/s; +160 m/s reads {read_a:+.4f} / {read_b:+.4f}")
+print(f"S3 spans {period_a:.4f} / {period_b:.4f} m/s; +160 m/s reads {read_a:+.4f} / {read_b:+.4f}")
 print(f"unfolds to {true_mps:+.4f} m/s")
 ```
 
@@ -246,7 +246,7 @@ Intern task: [Can an unrolled solver beat a taper?](../../interns/unrolled-spars
 **The rate axis runs backwards.** `doppler_bin_centers_mps` falls with index, from exactly
 $+v_{ua}$ at bin 0 to $-v_{ua} + \Delta v$ at the last bin. The FFT index rises with Doppler, and
 Doppler is minus the rate over $\lambda$. So the interval is $(-v_{ua}, +v_{ua}]$, closed at the
-top, and `fold_velocity_mps` folds into the same one.
+top, and `fold_range_rate_mps` folds into the same one.
 
 **The target's rate on the S1 map is nowhere near the truth.** S1's $v_{ua}$ is only 15.30 m/s
 (7.65 m/s radial on the figure), so an aircraft at tens of m/s folds several times. The dashed
@@ -254,7 +254,7 @@ crosshair marks where folding puts it; the red cross marks the true rate, off th
 folds.
 
 **`Radar.unambiguous_bistatic_range_rate_mps` is twice $v_{ua}$.** It is the span the rate axis
-covers before it repeats, $\lambda\,\mathrm{PRF}$. `fold_velocity_mps` and the unfolding
+covers before it repeats, $\lambda\,\mathrm{PRF}$. `fold_range_rate_mps` and the unfolding
 functions take the same span, as the example does.
 
 **The rectangular window costs "−0.00 dB", and raw windows have a coherent gain below 1.** The

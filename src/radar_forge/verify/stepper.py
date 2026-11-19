@@ -64,8 +64,8 @@ __all__ = [
     "Report",
     "VerificationError",
     "n_cached_scans",
+    "periods",
     "run",
-    "spans",
     "stage",
     "target_power_w",
     "thresholds",
@@ -199,14 +199,14 @@ def target_power_w(radar: Radar, truth: TargetGeometry, rcs_m2: ArrayLike) -> ND
     )
 
 
-def spans(scenario: Scenario, burst: int) -> tuple[float, float, float]:
-    """Return a burst's range span, rate span and range bin, m and m/s."""
+def periods(scenario: Scenario, burst: int) -> tuple[float, float, float]:
+    """Return a burst's range period, rate period and range bin, m and m/s."""
     range_axis_m, rate_axis_mps = map_axes(
         scenario.radars[burst], scenario.n_pulses[burst], n_range_lags=scenario.n_range_lags[burst]
     )
     range_bin_m = float(range_axis_m[1] - range_axis_m[0])
-    rate_span_mps = float(rate_axis_mps.size * (rate_axis_mps[0] - rate_axis_mps[1]))
-    return range_axis_m.size * range_bin_m, rate_span_mps, range_bin_m
+    rate_period_mps = float(rate_axis_mps.size * (rate_axis_mps[0] - rate_axis_mps[1]))
+    return range_axis_m.size * range_bin_m, rate_period_mps, range_bin_m
 
 
 def n_cached_scans(ctx: Context) -> int:

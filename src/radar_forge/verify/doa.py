@@ -65,7 +65,7 @@ from radar_forge.doa import (
     steering_derivative_u,
     steering_u,
 )
-from radar_forge.dsp import fold_velocity_mps
+from radar_forge.dsp import fold_range_rate_mps
 from radar_forge.pipeline import (
     RangeDopplerProduct,
     range_doppler_product,
@@ -402,7 +402,7 @@ def _truth_rows(
     snr_db = power_to_db(power_w / radar.receiver.noise_power_per_sample_w * gain)
     in_array = enu_to_array_frame(array, directions_unit(truth.aoa_rad[:, 0], truth.aoa_rad[:, 1]))
     # Folded as the map reads it, beside the estimates' folded rates.
-    folded_mps = fold_velocity_mps(
+    folded_mps = fold_range_rate_mps(
         truth.bistatic_range_rate_mps, radar.unambiguous_bistatic_range_rate_mps
     )
     # The cone angle asin(u), as the estimates' rows: a linear array sees no elevation.
@@ -447,7 +447,7 @@ def _estimate_rows(
     rate_bin, range_bin = (int(i) for i in chip.parent_index(*cell))
     noise_w = _cell_noise_w(radar, scenario.n_pulses[0])
     rate_mps = float(
-        fold_velocity_mps(fine.bistatic_range_rate_mps, radar.unambiguous_bistatic_range_rate_mps)
+        fold_range_rate_mps(fine.bistatic_range_rate_mps, radar.unambiguous_bistatic_range_rate_mps)
     )
     rows = []
     # A row per method and source: a few dozen a detection.

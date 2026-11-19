@@ -56,7 +56,7 @@ __all__ = [
     "doppler_bin_centers_mps",
     "doppler_fft",
     "fold_into_period",
-    "fold_velocity_mps",
+    "fold_range_rate_mps",
     "matched_filter",
     "mti_filter",
     "processing_loss_db",
@@ -517,55 +517,55 @@ def unfold_dual_period(
     return np.where(residual <= tolerance, value, np.nan), residual
 
 
-def fold_velocity_mps(velocity_mps: ArrayLike, span_mps: ArrayLike) -> NDArray[np.float64]:
-    r"""Wrap a range rate, positive receding, into ``(-span/2, +span/2]``, as the map shows it.
+def fold_range_rate_mps(range_rate_mps: ArrayLike, period_mps: ArrayLike) -> NDArray[np.float64]:
+    r"""Wrap a range rate, positive receding, into ``(-period/2, +period/2]``, as a map shows it.
 
     Closed at the top, unlike :func:`fold_into_period`: rate is :math:`-\lambda f_d` and the
     shifted Doppler axis is :math:`[-\mathrm{PRF}/2, +\mathrm{PRF}/2)`. For
-    :func:`doppler_bin_centers_mps` the span is :math:`\lambda / T_{\mathrm{PRI}}`,
+    :func:`doppler_bin_centers_mps` the period is :math:`\lambda / T_{\mathrm{PRI}}`,
     and its map has a bin on the closed edge only for an even number of bins.
 
     References
     ----------
     Richards [1]_, §5.5.4.
     """
-    span = np.asarray(span_mps, dtype=np.float64)
-    flipped = -np.asarray(velocity_mps, dtype=np.float64)
-    return -fold_into_period(flipped, span, lower=-span / 2.0)
+    period = np.asarray(period_mps, dtype=np.float64)
+    flipped = -np.asarray(range_rate_mps, dtype=np.float64)
+    return -fold_into_period(flipped, period, lower=-period / 2.0)
 
 
 def unfold_doppler_dual_prf(
-    folded_velocity_a_mps: ArrayLike,
-    folded_velocity_b_mps: ArrayLike,
-    span_a_mps: float,
-    span_b_mps: float,
+    folded_range_rate_a_mps: ArrayLike,
+    folded_range_rate_b_mps: ArrayLike,
+    period_a_mps: float,
+    period_b_mps: float,
     *,
-    max_velocity_mps: float,
+    max_range_rate_mps: float,
     tolerance_mps: float,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     r"""Recover a range rate from two bursts by :func:`unfold_dual_period`.
 
-    Periods are the two rate spans, bounds :math:`\pm` ``max_velocity_mps``; returns
-    ``(velocity_mps, residual_mps)``.
+    The periods are the two maps' rate periods, the bounds :math:`\pm`
+    ``max_range_rate_mps``; returns ``(range_rate_mps, residual_mps)``.
 
     References
     ----------
     Richards [1]_, §5.5.4.
     """
-    if not (span_a_mps > 0.0 and span_b_mps > 0.0) or span_a_mps == span_b_mps:
-        msg = "the two rate spans must be positive and different."
+    if not (period_a_mps > 0.0 and period_b_mps > 0.0) or period_a_mps == period_b_mps:
+        msg = "the two rate periods must be positive and different."
         raise ValueError(msg)
     # `not >` so a NaN bound is rejected here rather than inside np.arange.
-    if not max_velocity_mps > min(span_a_mps, span_b_mps) / 2.0:
-        msg = "max_velocity_mps must exceed half the smaller span, or nothing is folded."
+    if not max_range_rate_mps > min(period_a_mps, period_b_mps) / 2.0:
+        msg = "max_range_rate_mps must exceed half the smaller period, or nothing is folded."
         raise ValueError(msg)
     return unfold_dual_period(
-        folded_velocity_a_mps,
-        folded_velocity_b_mps,
-        span_a_mps,
-        span_b_mps,
-        lower_bound=-max_velocity_mps,
-        upper_bound=max_velocity_mps,
+        folded_range_rate_a_mps,
+        folded_range_rate_b_mps,
+        period_a_mps,
+        period_b_mps,
+        lower_bound=-max_range_rate_mps,
+        upper_bound=max_range_rate_mps,
         tolerance=tolerance_mps,
     )
 
@@ -573,15 +573,15 @@ def unfold_doppler_dual_prf(
 def unfold_range_dual_prf(
     folded_range_a_m: ArrayLike,
     folded_range_b_m: ArrayLike,
-    span_a_m: float,
-    span_b_m: float,
+    period_a_m: float,
+    period_b_m: float,
     *,
     max_range_m: float,
     tolerance_m: float,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Recover a range from two maps by :func:`unfold_dual_period` over ``[0, max_range_m]``.
 
-    ``span_a_m`` and ``span_b_m`` are each map's range circumference; returns
+    ``period_a_m`` and ``period_b_m`` are each map's range circumference; returns
     ``(range_m, residual_m)``.
 
     References
@@ -594,8 +594,8 @@ def unfold_range_dual_prf(
     return unfold_dual_period(
         folded_range_a_m,
         folded_range_b_m,
-        span_a_m,
-        span_b_m,
+        period_a_m,
+        period_b_m,
         lower_bound=0.0,
         upper_bound=max_range_m,
         tolerance=tolerance_m,

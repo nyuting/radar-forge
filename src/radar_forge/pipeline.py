@@ -47,7 +47,7 @@ from radar_forge.dsp import (
     delay_bin_centers_m,
     doppler_bin_centers_mps,
     doppler_fft,
-    fold_velocity_mps,
+    fold_range_rate_mps,
     range_bin_centers_m,
     range_doppler_map,
     unfold_doppler_dual_prf,
@@ -252,9 +252,9 @@ class RangeDopplerProduct:
     """One burst's map ``(n_doppler_bins, n_range_bins)`` and its axes (:func:`map_axes`).
 
     Both axes are circles: a fractional index converts by the axis's own uniform formula, so an
-    index past the last bin lies across the wrap, and a rate folds into ``(-span/2, +span/2]``,
-    span = :attr:`rate_period_mps`. A noise burst's range axis is a window of lags instead, which
-    does not wrap: ``range_wraps`` is ``False``.
+    index past the last bin lies across the wrap, and a rate folds into
+    ``(-period/2, +period/2]``, period = :attr:`rate_period_mps`. A noise burst's range axis is
+    a window of lags instead, which does not wrap: ``range_wraps`` is ``False``.
     The rate axis falls with index, its sign from :func:`~radar_forge.dsp.doppler_bin_centers_mps`.
     A range-gated map is a window on its range circle, ``unambiguous_range_m`` round. A cube
     with a channel axis keeps each channel's map, ``channels`` ``(n_doppler_bins, n_range_bins,
@@ -298,7 +298,7 @@ class RangeDopplerProduct:
     def rate_at_index_mps(self, index: ArrayLike) -> NDArray[np.float64]:
         """Return the folded rate at fractional Doppler indices, in ``(-span/2, +span/2]``."""
         rate_mps = self.rate_axis_mps[0] + np.asarray(index) * self.rate_bin_mps
-        return fold_velocity_mps(rate_mps, self.rate_period_mps)
+        return fold_range_rate_mps(rate_mps, self.rate_period_mps)
 
     def index_of(
         self, bistatic_range_m: ArrayLike, rate_mps: ArrayLike
@@ -524,7 +524,7 @@ def _pair(
         second.folded_rate_mps[j],
         a.rate_period_mps,
         b.rate_period_mps,
-        max_velocity_mps=max_rate_mps,
+        max_range_rate_mps=max_rate_mps,
         tolerance_mps=2.0 * max(abs(a.rate_bin_mps), abs(b.rate_bin_mps)),
     )
     members = np.concatenate([i, first.burst_index.size + j])
@@ -555,14 +555,15 @@ class ScanTracker:
 
     The rate is measured where it cannot fold: after dual-PRF pairing, from one burst whose
     rate interval exceeds the largest rate, or once a track can unfold it; otherwise range
-    alone. Range is measured modulo the first map's span (the state stays continuous), with a
+    alone. Range is measured modulo the first map's period (the state stays continuous), with a
     bin over √12 of noise. ``rate_unfolding = "track_aided"`` is scenario 003's policy: a
     track may unfold after N associated ranges, the least N whose least-squares slope is
-    certain to a ``unfold_sigma_gate``-th of a fold span, :math:`(\sigma_R/T)\sqrt{12/(N(N^2-1))}
-    < v_{span}/g` (Bar-Shalom [2] §5.5). The track with the longest such history gives each
-    plot the fold nearest its rate, unless that lies over half a span from the slope of its last
-    ``n_slope_scans`` ranges, the fold monitor: a wrong fold agrees with the prediction that
-    chose it, never with the range. One reference track serves a scan: single-target policy.
+    certain to a ``unfold_sigma_gate``-th of the rate period,
+    :math:`(\sigma_R/T)\sqrt{12/(N(N^2-1))} < v_{period}/g` (Bar-Shalom [2] §5.5). The track
+    with the longest such history gives each plot the fold nearest its rate, unless that lies
+    over half a period from the slope of its last ``n_slope_scans`` ranges, the fold monitor: a
+    wrong fold agrees with the prediction that chose it, never with the range. One reference
+    track serves a scan: single-target policy.
     """
 
     def __init__(self, scenario: Scenario) -> None:
@@ -574,7 +575,7 @@ class ScanTracker:
         range_bin_m = float(range_axis_m[1] - range_axis_m[0])
         rate_bin_mps = float(rate_axis_mps[0] - rate_axis_mps[1])
         self.range_period_m = range_axis_m.size * range_bin_m
-        self.fold_span_mps = rate_axis_mps.size * rate_bin_mps
+        self.rate_period_mps = rate_axis_mps.size * rate_bin_mps
         self.scan_period_s, self.n_slope_scans = scenario.scan_period_s, settings.n_slope_scans
         sigma_range_m, sigma_rate_mps = (
             range_bin_m / math.sqrt(12.0),
@@ -585,7 +586,7 @@ class ScanTracker:
             len(scenario.radars) == 2,
         )
         track_aided = {"track_aided": True, "none": False}[settings.rate_unfolding]
-        self.measures_rate = dual or track_aided or self.fold_span_mps / 2.0 > max_rate_mps
+        self.measures_rate = dual or track_aided or self.rate_period_mps / 2.0 > max_rate_mps
         names = ("bistatic_range_m", "bistatic_range_rate_mps")[: 1 + self.measures_rate]
         motion = RadialConstantVelocity(
             settings.sigma_acceleration_mps2,
@@ -600,14 +601,14 @@ class ScanTracker:
             models[_RANGE] = marginal(model, names[:1])
         # One false alarm per scan over the range span and over the rate span a plot can take;
         # only their ratio decides an assignment, since GNN maximises the pairs first.
-        rate_span_mps = 2.0 * max_rate_mps if dual else self.fold_span_mps
+        rate_span_mps = 2.0 * max_rate_mps if dual else self.rate_period_mps
         density = {
             _MEASURED: 1.0 / self.range_period_m / (rate_span_mps if self.measures_rate else 1)
         }
         density[_RANGE] = 1.0 / self.range_period_m
         n_scans = np.arange(2, 1000)
         slope_sigma_mps = sigma_range_m / self.scan_period_s * np.sqrt(12 / (n_scans**3 - n_scans))
-        enough = n_scans[slope_sigma_mps < self.fold_span_mps / settings.unfold_sigma_gate]
+        enough = n_scans[slope_sigma_mps < self.rate_period_mps / settings.unfold_sigma_gate]
         if track_aided and not enough.size:
             msg = "the range slope never resolves the fold within 1000 scans; widen the gate."
             raise ValueError(msg)
@@ -658,10 +659,10 @@ class ScanTracker:
         return [(_MEASURED, self.unfoldable(bank.track_id)), (_RANGE, np.ones(bank.n_tracks, bool))]
 
     def _fold(self, folded_mps: NDArray[np.float64], reference_mps: float) -> NDArray[np.float64]:
-        """Return each folded rate moved by whole spans to the fold nearest ``reference_mps``."""
-        span_mps = self.fold_span_mps
-        result: NDArray[np.float64] = folded_mps + span_mps * np.round(
-            (reference_mps - folded_mps) / span_mps
+        """Return each folded rate moved by whole periods to the fold nearest ``reference_mps``."""
+        period_mps = self.rate_period_mps
+        result: NDArray[np.float64] = folded_mps + period_mps * np.round(
+            (reference_mps - folded_mps) / period_mps
         )
         return result
 
@@ -677,7 +678,7 @@ class ScanTracker:
         # Fit on the scans' own times: a coasted scan leaves a gap, not a shorter step.
         time_s, recent_m = np.array(histories[longest][-self.n_slope_scans :]).T
         slope_mps = float(np.polyfit(time_s, recent_m, 1)[0])
-        disagree = np.abs(unfolded_mps - slope_mps) > self.fold_span_mps / 2.0
+        disagree = np.abs(unfolded_mps - slope_mps) > self.rate_period_mps / 2.0
         result: NDArray[np.float64] = np.where(
             disagree, self._fold(folded_mps, slope_mps), unfolded_mps
         )

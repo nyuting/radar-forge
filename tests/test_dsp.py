@@ -25,7 +25,7 @@ from radar_forge.dsp import (
     doppler_bin_centers_mps,
     doppler_fft,
     fold_into_period,
-    fold_velocity_mps,
+    fold_range_rate_mps,
     matched_filter,
     mti_filter,
     processing_loss_db,
@@ -48,7 +48,7 @@ N_PULSES = 32
 N_LONG = 4096
 FIXED_WINDOWS = [name for name in WINDOW_NAMES if name not in ("taylor", "chebyshev")]
 # Scenario 001 S3's two bursts: rate spans in about 5:6, maps of 60 and 50 km.
-SPAN_A_MPS, SPAN_B_MPS = 76.48, 91.78
+PERIOD_A_MPS, PERIOD_B_MPS = 76.48, 91.78
 SPAN_A_M, SPAN_B_M, REPEAT_M = 60_000.0, 50_000.0, 300_000.0
 
 
@@ -473,26 +473,28 @@ class TestFold:
 
     def test_fold_velocity_is_closed_at_the_top_as_the_map_is(self) -> None:
         """Both edges read +v_ua, since rate bin 0 is +v_ua: catches the closing-positive edge."""
-        np.testing.assert_allclose(fold_velocity_mps([7.65, -7.65], 15.3), [7.65, 7.65])
-        folded_mps = fold_velocity_mps(np.linspace(-500.0, 500.0, 2001), 15.3)
+        np.testing.assert_allclose(fold_range_rate_mps([7.65, -7.65], 15.3), [7.65, 7.65])
+        folded_mps = fold_range_rate_mps(np.linspace(-500.0, 500.0, 2001), 15.3)
         assert np.all((folded_mps > -7.65) & (folded_mps <= 7.65))
 
     def test_fold_velocity_takes_the_span_the_map_wraps_at(self) -> None:
         """One whole span past a rate is the same rate: the argument is the span, not half."""
-        np.testing.assert_allclose(fold_velocity_mps(15.3 + 1.0, 15.3), 1.0, rtol=1e-12)
+        np.testing.assert_allclose(fold_range_rate_mps(15.3 + 1.0, 15.3), 1.0, rtol=1e-12)
 
     @pytest.mark.parametrize("n_folds", [-3, 2])
     def test_a_folded_target_lands_where_fold_velocity_says(self, n_folds: int) -> None:
         """Synthesise a target n_folds intervals off bin 7; the FFT and the fold must agree."""
         rate_mps = doppler_bin_centers_mps(N_PULSES, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)
-        span_mps = WAVELENGTH_M / PULSE_REPETITION_INTERVAL_S
-        true_mps = rate_mps[7] + n_folds * span_mps
+        period_mps = WAVELENGTH_M / PULSE_REPETITION_INTERVAL_S
+        true_mps = rate_mps[7] + n_folds * period_mps
         slow_time_s = np.arange(N_PULSES) * PULSE_REPETITION_INTERVAL_S
         echo = np.exp(-2j * np.pi * true_mps / WAVELENGTH_M * slow_time_s)
         peak = int(np.argmax(np.abs(doppler_fft(echo))))
-        np.testing.assert_allclose(rate_mps[peak], fold_velocity_mps(true_mps, span_mps), rtol=1e-9)
+        np.testing.assert_allclose(
+            rate_mps[peak], fold_range_rate_mps(true_mps, period_mps), rtol=1e-9
+        )
 
-    @pytest.mark.parametrize("fold", [fold_into_period, fold_velocity_mps])
+    @pytest.mark.parametrize("fold", [fold_into_period, fold_range_rate_mps])
     def test_rejects_a_zero_period(self, fold) -> None:
         with pytest.raises(ValueError, match="strictly positive"):
             fold(10.0, 0.0, **({"lower": 0.0} if fold is fold_into_period else {}))
@@ -512,19 +514,19 @@ class TestUnfold:
         tolerance separates them for every coprime pair.
         """
         p, q = pq
-        max_velocity_mps = 0.999 * p * q * base_mps / 2.0
-        true_mps = fraction * max_velocity_mps
+        max_range_rate_mps = 0.999 * p * q * base_mps / 2.0
+        true_mps = fraction * max_range_rate_mps
         velocity_mps, residual_mps = unfold_doppler_dual_prf(
-            fold_velocity_mps(true_mps, p * base_mps),
-            fold_velocity_mps(true_mps, q * base_mps),
+            fold_range_rate_mps(true_mps, p * base_mps),
+            fold_range_rate_mps(true_mps, q * base_mps),
             p * base_mps,
             q * base_mps,
-            max_velocity_mps=max_velocity_mps,
+            max_range_rate_mps=max_range_rate_mps,
             tolerance_mps=base_mps / 4.0,
         )
         # A mod and a few adds: float error scales with the span.
-        np.testing.assert_allclose(velocity_mps, true_mps, atol=1e-9 * max_velocity_mps)
-        assert residual_mps < 1e-9 * max_velocity_mps
+        np.testing.assert_allclose(velocity_mps, true_mps, atol=1e-9 * max_range_rate_mps)
+        assert residual_mps < 1e-9 * max_range_rate_mps
 
     @given(pq=coprime_pair, base_m=st.floats(100.0, 50_000.0), fraction=st.floats(0.0, 0.999))
     def test_range_round_trips_anywhere_in_the_pairs_span(self, pq, base_m, fraction) -> None:
@@ -544,25 +546,25 @@ class TestUnfold:
     def test_a_target_outside_the_bound_aliases_to_a_confident_wrong_answer(self) -> None:
         """300 m/s on S3's bursts reads as 300 - 6 x 76.48 m/s, with no warning."""
         velocity_mps, residual_mps = unfold_doppler_dual_prf(
-            fold_velocity_mps(300.0, SPAN_A_MPS),
-            fold_velocity_mps(300.0, SPAN_B_MPS),
-            SPAN_A_MPS,
-            SPAN_B_MPS,
-            max_velocity_mps=191.0,
+            fold_range_rate_mps(300.0, PERIOD_A_MPS),
+            fold_range_rate_mps(300.0, PERIOD_B_MPS),
+            PERIOD_A_MPS,
+            PERIOD_B_MPS,
+            max_range_rate_mps=191.0,
             tolerance_mps=1.0,
         )
-        np.testing.assert_allclose(velocity_mps, 300.0 - 6.0 * SPAN_A_MPS, atol=1e-9)
+        np.testing.assert_allclose(velocity_mps, 300.0 - 6.0 * PERIOD_A_MPS, atol=1e-9)
         assert residual_mps < 1.0
 
     def test_pairs_every_a_reading_with_every_b_reading(self) -> None:
         """A column against a row: only the diagonal pairs a target with itself."""
         true_mps = np.array([10.0, 80.0, -120.0])
         velocity_mps, _ = unfold_doppler_dual_prf(
-            fold_velocity_mps(true_mps, SPAN_A_MPS)[:, None],
-            fold_velocity_mps(true_mps, SPAN_B_MPS)[None, :],
-            SPAN_A_MPS,
-            SPAN_B_MPS,
-            max_velocity_mps=191.0,
+            fold_range_rate_mps(true_mps, PERIOD_A_MPS)[:, None],
+            fold_range_rate_mps(true_mps, PERIOD_B_MPS)[None, :],
+            PERIOD_A_MPS,
+            PERIOD_B_MPS,
+            max_range_rate_mps=191.0,
             tolerance_mps=1.0,
         )
         np.testing.assert_allclose(np.diag(velocity_mps), true_mps, atol=1e-9)
@@ -577,7 +579,12 @@ class TestUnfold:
 
     def test_an_inconsistent_pair_is_reported_unresolved(self) -> None:
         velocity_mps, residual_mps = unfold_doppler_dual_prf(
-            3.52, -11.78 + 5.0, SPAN_A_MPS, SPAN_B_MPS, max_velocity_mps=191.0, tolerance_mps=1.0
+            3.52,
+            -11.78 + 5.0,
+            PERIOD_A_MPS,
+            PERIOD_B_MPS,
+            max_range_rate_mps=191.0,
+            tolerance_mps=1.0,
         )
         assert np.isnan(velocity_mps)
         assert residual_mps > 1.0
@@ -597,7 +604,7 @@ class TestUnfold:
                 0.0, 0.0, 6.0, 5.0, lower_bound=0.0, upper_bound=np.nan, tolerance=0.1
             ),
             lambda: unfold_doppler_dual_prf(
-                0.0, 0.0, SPAN_A_MPS, SPAN_B_MPS, max_velocity_mps=np.nan, tolerance_mps=1.0
+                0.0, 0.0, PERIOD_A_MPS, PERIOD_B_MPS, max_range_rate_mps=np.nan, tolerance_mps=1.0
             ),
             lambda: range_bin_centers_m(8, np.nan, 40e-6, 1e6),
             lambda: doppler_bin_centers_mps(8, np.nan, WAVELENGTH_M),
@@ -641,17 +648,19 @@ class TestUnfold:
             )
 
     @pytest.mark.parametrize(
-        ("span_a_mps", "span_b_mps", "max_mps", "match"),
+        ("period_a_mps", "period_b_mps", "max_mps", "match"),
         [
-            (0.0, SPAN_B_MPS, 191.0, "positive and different"),
-            (SPAN_A_MPS, SPAN_A_MPS, 191.0, "positive and different"),
-            (SPAN_A_MPS, SPAN_B_MPS, 10.0, "nothing is folded"),
+            (0.0, PERIOD_B_MPS, 191.0, "positive and different"),
+            (PERIOD_A_MPS, PERIOD_A_MPS, 191.0, "positive and different"),
+            (PERIOD_A_MPS, PERIOD_B_MPS, 10.0, "nothing is folded"),
         ],
     )
-    def test_unfold_doppler_rejects_invalid_arguments(self, span_a_mps, span_b_mps, max_mps, match):
+    def test_unfold_doppler_rejects_invalid_arguments(
+        self, period_a_mps, period_b_mps, max_mps, match
+    ):
         with pytest.raises(ValueError, match=match):
             unfold_doppler_dual_prf(
-                0.0, 0.0, span_a_mps, span_b_mps, max_velocity_mps=max_mps, tolerance_mps=1.0
+                0.0, 0.0, period_a_mps, period_b_mps, max_range_rate_mps=max_mps, tolerance_mps=1.0
             )
 
     def test_unfold_range_rejects_a_negative_bound(self) -> None:
