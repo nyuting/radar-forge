@@ -79,7 +79,8 @@ gospa_mean_max_m = 600.0
 # Single run: the IMM's position NEES, chi-square(2) 95 % interval, 0.94 measured.
 nees_fraction_min = 0.9
 # Single run: the median scans to the turn mode after a tracked turn's onset,
-# 4 measured over A3, A4 and H1's turns (Monte Carlo in test_imm.py: 90 % within 5).
+# 4 measured over A3, A4 and H1's turns (Monte Carlo in tests/tracking/test_imm.py: at least 90 %
+# of 200 trials within 5).
 mode_latency_max_scans = 5
 # The plot model's Pd 0.9 outside the notch: the 99 % binomial lower bound over this run's
 # 542 aircraft echoes outside the notch, 0.8653; 0.902 measured.

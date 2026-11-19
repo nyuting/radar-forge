@@ -294,9 +294,10 @@ def test_a_pair_closing_across_the_beam_swaps_under_gnn_and_as_often_under_mht(
     closest approach to five after. The pair spends 16 scans inside one resolution cell, where
     it gives one plot; 3 scans of deferral (n_scan) cannot bridge that, and both trackers'
     tracks take the merged plot and the clutter, so most swaps are tracks lost, not
-    exchanged. The prototype, 200 trials: GNN 0.780, MHT 0.845, JPDA 0.850 (lost 136, 143,
-    145; exchanged 20, 26, 24). The expected GNN >= 0.2 holds; the expected MHT <= 0.05 does not, so
-    the bounds are the prototype's 99 % Clopper-Pearson limits: GNN >= 0.69, MHT <= 0.91.
+    exchanged. The prototype, a 200-trial run of this scenario: GNN 0.780, MHT 0.845, JPDA 0.850
+    (lost 136, 143, 145; exchanged 20, 26, 24). The scenario was designed expecting GNN >= 0.2 and
+    MHT <= 0.05: GNN's holds and MHT's does not, so the bounds are the prototype's 99 %
+    Clopper-Pearson limits, GNN >= 0.69 and MHT <= 0.91.
     """
     swaps: dict[str, list[float]] = {
         "swap_fraction": [],

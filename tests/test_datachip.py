@@ -39,7 +39,7 @@ CARRIER_HZ, BANDWIDTH_HZ, CHIRP_S = 9.8e9, 500.0e6, 0.5e-6
 SAMPLE_RATE_HZ, PRF_HZ, N_PULSES = 600.0e6, 50.0e3, 1024
 WAVELENGTH_M = SPEED_OF_LIGHT_MPS / CARRIER_HZ
 BIN_M = SPEED_OF_LIGHT_MPS / SAMPLE_RATE_HZ
-# The nominal integrated SNR, 28.886 dB, and the lowest one asserted.
+# The nominal integrated SNR, 28.886 dB: the 004 configs' expected_snr_db.
 NOMINAL_SNR = 10 ** (28.886 / 10)
 TONE_METHODS = FINE_METHODS[:5]
 
@@ -297,7 +297,7 @@ class TestEstimate:
         assert found.method == method
 
     def test_fold_factor_unfolds_the_reported_rate(self) -> None:
-        """In small: a chip keystoned with F = 1 reports the folded rate less lambda PRF."""
+        """A small chip keystoned with F = 1 reports the folded rate less lambda PRF."""
         folded_mps = -670.45
         chip = crop_slow_time(
             _model_chip(16.2, folded_mps),

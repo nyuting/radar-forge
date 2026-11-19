@@ -258,40 +258,113 @@ def test_no_markdown_equation_uses_a_macro_github_refuses() -> None:
     assert found == []
 
 
-# What a deleted spec left in comments: a decision number, an acceptance-criterion number, a
-# numbered criterion, or a pointer into a spec that no longer exists. The 011 configs name their
-# aircraft A1 to A5, so those five count as criteria only after an opening bracket, "spec",
-# "criterion" or "acceptance", or before a colon. Ruff's codes have three digits and never match.
-_DEAD_SPEC_PATTERNS = {
-    "decision tag": re.compile(r"\bD\d{1,2}\b"),
-    "criterion tag": re.compile(
-        r"\bA(?:[6-9]|[12]\d)\b"
-        r"|(?:\(|\bspec\s+|\bcriteri(?:on|a)\s+|\bacceptance\s+)A[1-5]\b"
-        r"|\bA[1-5](?:\([a-z]\))?(?:,? (?:and )?A\d+)*:"
-        r"|\bcriteri(?:on|a) \d"
+# What a deleted spec left in comments: a decision number, an acceptance-criterion number, or a
+# pointer into a spec that no longer exists. The 011 configs name their aircraft with the same
+# letter and the first digits, so a bare number below the sixth is not a tag unless the words
+# around it say so (a spec, a criterion, a sub-item letter); ruff's codes have three digits.
+_QUOTE_OR_REFERENCE = (
+    r"""(?<!["'])(?<![Ee]q\. \()(?<!Fig\. )(?<!Figure )(?<!Table )(?<!Appendix )"""
+)
+_TAG_RES = {
+    "decision tag": (
+        re.compile(r"\bdecisions?\s+D\d{1,2}\b", re.IGNORECASE),
+        re.compile(r"\b(?:scenario|spec)\s+0\d\d[a-z]?\s+D\d{1,2}\b", re.IGNORECASE),
+        re.compile(r"\bD\d{1,2}\s+item\b"),
+        re.compile(r"[A-Za-z] \(D\d{1,2}\)"),
+        re.compile(r'(?:#|""")\s*D\d{1,2}:'),
     ),
-    "pointer into a deleted spec": re.compile(
-        r"\bspec(?:ification)?[ -]0(?:0[1-6]|1[1-9])[a-z]?\b", re.IGNORECASE
+    "criterion tag": (
+        re.compile(_QUOTE_OR_REFERENCE + r"""\bA(?:[6-9]|[12]\d)\b(?!["'])"""),
+        re.compile(r"\b(?:spec|criteri(?:on|a)|acceptance)\s+A\d{1,2}\b", re.IGNORECASE),
+        re.compile(r"\b(?:scenario|spec)\s+0\d\d[a-z]?\s+(?:A\d{1,2}|criteri(?:on|a)\s+\d)", re.I),
+        re.compile(r"\bA\d{1,2}\([a-z]\)"),
+        re.compile(r'(?:^|#|""")\s*Criteri(?:on|a)\s+\d+(?:\s+and\s+\d+)?[:,]'),
     ),
 }
+_SPEC_POINTER_RE = re.compile(r"\bspec(?:ification)?[ -](\d{3})[a-z]?\b", re.IGNORECASE)
+_ADVICE = (
+    "Say the reason in a clause, or point at what exists: a [verify] key, a test, tracker-001."
+)
+
+
+def _tags_in(line: str, live_specs: set[str]) -> list[str]:
+    """Return the kinds of dead reference a line holds, given the numbers of the live specs."""
+    kinds = [kind for kind, patterns in _TAG_RES.items() if any(p.search(line) for p in patterns)]
+    if any(m.group(1) not in live_specs for m in _SPEC_POINTER_RE.finditer(line)):
+        kinds.append("pointer into a deleted spec")
+    return kinds
+
+
+# This file holds the examples the patterns must catch, so the scan leaves it out.
+THIS_FILE = "tests/test_conventions.py"
 
 
 def test_no_file_outside_spec_holds_a_decision_or_criterion_tag() -> None:
-    """A tag names a line of a spec that is deleted when its scenario lands: state the reason."""
+    """A tag names a line of a spec that is deleted when its scenario lands."""
     tracked = subprocess.run(
-        ["git", "ls-files", "--", ".", ":!spec", ":!uv.lock", ":!*.csv"],
+        [
+            "git",
+            "ls-files",
+            "-z",
+            "--",
+            ".",
+            ":!spec",
+            ":!uv.lock",
+            ":!*.csv",
+            ":!*.ipynb",
+            f":!{THIS_FILE}",
+        ],
         capture_output=True,
         text=True,
         check=True,
         cwd=REPO,
-    ).stdout.split()
+    ).stdout.split("\0")
+    tracked = [name for name in tracked if name]
     assert tracked, "git listed no file: the test would pass without reading anything"
+    # A spec NNN is live while spec/scenario-NNN-*.md exists; the rest were deleted with their PR.
+    live_specs = {path.name.split("-")[1] for path in (REPO / "spec").glob("scenario-*.md")}
     found = []
     for name in tracked:
-        for number, line in enumerate((REPO / name).read_text(encoding="utf-8").splitlines(), 1):
+        data = (REPO / name).read_bytes()
+        if b"\0" in data:  # git's own test for a binary file: there is no comment to read
+            continue
+        for number, line in enumerate(data.decode("utf-8", errors="replace").splitlines(), 1):
             found += [
                 f"{name}:{number}: {kind}: {line.strip()[:90]}"
-                for kind, pattern in _DEAD_SPEC_PATTERNS.items()
-                if pattern.search(line)
+                for kind in _tags_in(line, live_specs)
             ]
-    assert found == []
+    assert not found, "\n".join(found) + "\n" + _ADVICE
+
+
+@pytest.mark.parametrize(
+    ("line", "kinds"),
+    [
+        ("# Scenario 001 A5: every frame detected within one bin.", ["criterion tag"]),
+        ('    """A3(a): P_D = P_G = 1, one measurement per gate."""', ["criterion tag"]),
+        ("# Not a spec criterion; derived as A6. The 2 Hz copy", ["criterion tag"]),
+        ("# the cue spread (spec A14)", ["criterion tag"]),
+        (
+            "# (spec 011 D28; criteria A3, A18)",
+            ["decision tag", "criterion tag", "pointer into a deleted spec"],
+        ),
+        ("Scenario 003 criterion 8 is that the pictures exist", ["criterion tag"]),
+        ("# Criterion 1: 4-of-5 confirms on the fourth hit.", ["criterion tag"]),
+        ("covariance methods train on the chip's cells (D14)", ["decision tag"]),
+        ("# D29: track-oriented MHT runs inside the tracker loop", ["decision tag"]),
+        ("# the pair of aircraft (spec 011 §3.6)", ["pointer into a deleted spec"]),
+        ("# Spec 011b: the same plots also scored by GNN", ["pointer into a deleted spec"]),
+        # Legitimate text a looser pattern would flag.
+        ("# A4: the circuit", []),
+        ("the go-around aircraft (A1)", []),
+        ('name = "A6"', []),
+        ("see eq. (A12) of the appendix, and Fig. A7", []),
+        ("D1 = np.diff(range_m)", []),
+        ("np.sum(D1) + D2[0]", []),
+        ("criterion 2 of the Wald test", []),
+        ("ruff D100 and D213 check docstrings", []),
+        ("spec 007 is built later; see spec/tracker-001.md §5.4", []),
+        ("Tracker-001 §3: the UKF is the KF", []),
+    ],
+)
+def test_the_tag_patterns_fire_on_dead_references_and_only_on_those(line, kinds) -> None:
+    assert sorted(_tags_in(line, {"007", "008", "009", "010"})) == sorted(kinds)

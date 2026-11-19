@@ -118,8 +118,8 @@ rate_tolerance_mps = 0.298741
 # statistic: its estimate from N samples scatters about 0.02 dB, so 0.1 dB is five sigma.
 cancellation_depth_db = 40.947
 cancellation_tolerance_db = 0.1
-# Not a bound the suite carries (the linear fit's floor, 22.14 dB, is a slow test): with the
-# distortion in the span the floor is the clean one, (1 - 384/N), -0.002 dB.
+# With the distortion in the span the floor is the clean one, (1 - 384/N), -0.002 dB. A linear fit
+# leaves it 22.14 dB up: the slow test of the linear basis in tests/test_clutter.py.
 floor_rise_db = 0.0
 floor_rise_tolerance_db = 1.0
 # Within 1.0 dB of the clean run, which carries the same amplifier: the
@@ -129,8 +129,8 @@ sinr_loss_tolerance_db = 1.0
 # The parallel-Hammerstein fit detects the target every frame.
 detections_per_frame = 1
 uncancelled_detections_per_frame = 0
-# The leakage checks hold on the five acceptance frames, 0-4, where the
-# target sits on a Doppler bin at 26.5-27.2 dB clean SINR, the level the tolerances above were
-# derived at (the rd and detect stages check the target within one bin over the whole window). Past them the clean SINR
-# falls to 18.9 dB with straddle, and the residual's swing in the peak cell outgrows 1.0 dB.
+# The leakage checks hold on the five acceptance frames, 0-4, where the target sits on a Doppler
+# bin at 26.5-27.2 dB clean SINR, the level the tolerances above were derived at (the rd and detect
+# stages check the target within one bin over the whole window). Past them the clean SINR falls to
+# 18.9 dB with straddle, and the residual's swing in the peak cell outgrows 1.0 dB.
 acceptance_frames = 5

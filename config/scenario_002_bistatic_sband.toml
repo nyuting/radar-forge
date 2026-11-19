@@ -55,8 +55,8 @@ n_pulses = 256
 gain_rx_dbi = 30.0
 noise_figure_db = 3.0
 
-# Cell-averaging CFAR along range, which wraps, as scenario 003 runs it. At
-# pfa = 1e-5, S1's map of 256 x 1000 cells holds about 2.6 false alarms a frame.
+# Cell-averaging CFAR along range, which wraps, as scenario 003 runs it. At pfa = 1e-5, the map
+# of S1 (scenario_001_fmcw_low_prf), 256 x 1000 cells, holds about 2.6 false alarms a frame.
 [detection]
 pfa = 1e-5
 n_train = 16

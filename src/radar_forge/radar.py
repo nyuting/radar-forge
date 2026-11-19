@@ -297,8 +297,9 @@ class Radar:
 
         Pulsed, the map holds ``round(PRI f_s)`` samples, equal whenever the PRI is a whole number
         of samples (every config is). FMCW, it mirrors :func:`~radar_forge.dsp.range_bin_centers_m`
-        and can exceed the chirp (S3: :math:`2T_c` at :math:`f_s = 2B`), though a sawtooth deramp
-        caps the physical reach at :math:`T_c` (Charvat [6]_, ch. 3). A noise code folds nothing,
+        and can exceed the chirp (S3, ``scenario_001_fmcw_dual_prf``: :math:`2T_c` at
+        :math:`f_s = 2B`), though a sawtooth deramp caps the physical reach at :math:`T_c` (Charvat
+        [6]_, ch. 3). A noise code folds nothing,
         so it is infinite: batched correlation reads each lag whole, past its own batch, and the
         map is a window of lags, :math:`c\,m/f_s` for ``m < n_range_lags``
         (:func:`~radar_forge.pipeline.map_axes`), which an echo beyond it misses.

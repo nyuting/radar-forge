@@ -1,7 +1,8 @@
 """The stepper's command line: three frames of a shipped scenario, its files, its exit status.
 
-This run checks that the pictures exist: it draws them. S2's maps are the
-smallest shipped, 256 x 100 cells, so it is the cheapest scenario to draw three frames of.
+This run checks that the pictures exist: it draws them. The maps of S2
+(scenario_001_pulsed_medium_prf) are the smallest shipped, 256 x 100 cells, so it is the
+cheapest scenario to draw three frames of.
 """
 
 from __future__ import annotations

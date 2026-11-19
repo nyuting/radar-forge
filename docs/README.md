@@ -47,19 +47,20 @@ The rules, and the check that enforces each, are summarised in [CLAUDE.md](../CL
 A scenario is specified in `spec/` until it is built; then its TOML in `config/` carries its
 acceptance numbers in a `[verify]` table and its spec is deleted. Run one with
 `uv run python scripts/run_scenario.py config/<file>.toml --frames 3`, which writes
-`runs/<file>/` and exits 1 if a check fails.
+`runs/<file>/` and exits 1 if a check fails. The Labels column gives the variant names that
+comments, tests and each TOML's `description` use (S1-S3 for 001, B1-B2 for 002, and so on).
 
-| Scenario | TOML | Status |
-| :--- | :--- | :--- |
-| 001, X-band: trajectory to IQ to range-Doppler map, three ambiguity variants | `scenario_001_fmcw_low_prf.toml`, `scenario_001_fmcw_dual_prf.toml`, `scenario_001_pulsed_medium_prf.toml` | Runs; checked by `[verify]` |
-| 002, bistatic: the Raleigh-Durham transmitter received at the Duke receiver | `scenario_002_bistatic_xband.toml`, `scenario_002_bistatic_sband.toml` | Runs; checked by `[verify]` |
-| 003, tracking: CFAR, association and tracking on 001 | `scenario_003_tracking.toml`, `scenario_003_tracking_dual_prf.toml`, `scenario_003_ukf_*.toml` | Runs; checked by `[verify]` |
-| 004, keystone: a fast sounding rocket; range walk, Doppler spread and fold, corrected and estimated on a data chip | `scenario_004_keystone_k1.toml`, `scenario_004_keystone_k2.toml`, `scenario_004_keystone_k3.toml` | Runs; checked by `[verify]` |
-| 005, leakage cancellation: a noise radar cancels its own leakage and near clutter | `scenario_005_static_leakage.toml`, `scenario_005_varying_clutter.toml`, `scenario_005_distorted_transmitter.toml` | Runs; checked by `[verify]` |
-| 006, parallel-approach DoA: two aircraft in one range-Doppler cell, a 16-channel receive array, coherent-pair DOA | `scenario_006_parallel_resolved.toml`, `scenario_006_parallel_subrayleigh.toml`, `scenario_006_parallel_sweep.toml` | Runs; checked by `[verify]` |
-| [007, interference](../spec/scenario-007-interference.md): strong interferers against a weak target | none | Specified, not built |
-| [008, STAP](../spec/scenario-008-stap.md): airborne clutter ridge | none | Specified, not built |
-| [009, receiver chain](../spec/scenario-009-receiver-chain.md): front end, DDC, impairments | none | Specified, not built |
-| [010, self-calibration](../spec/scenario-010-self-calibration.md): array perturbations | none | Specified, not built |
-| 011a, terminal-area tracking: turns, crossings, clutter; IMM, JPDA, JIPDA, the plot model | `scenario_011_manoeuvre.toml`, `scenario_011_crossing.toml`, `scenario_011_terminal_dense.toml`, `scenario_011_iq_check.toml`, `scenario_011_iq_check_mean_shift.toml` (the same chain clustered by mean-shift mode) | Runs; checked by `[verify]` |
-| 011b, track-oriented MHT and PMBM: the separation sweep | `scenario_011_cst_sweep.toml`; MHT and PMBM also score `scenario_011_crossing.toml` and `scenario_011_terminal_dense.toml` | Runs; checked by `[verify]` |
+| Scenario | TOML | Labels | Status |
+| :--- | :--- | :--- | :--- |
+| 001, X-band: trajectory to IQ to range-Doppler map, three ambiguity variants | `scenario_001_fmcw_low_prf.toml`, `scenario_001_fmcw_dual_prf.toml`, `scenario_001_pulsed_medium_prf.toml` | S1 `fmcw_low_prf`, S2 `pulsed_medium_prf`, S3 `fmcw_dual_prf` | Runs; checked by `[verify]` |
+| 002, bistatic: the Raleigh-Durham transmitter received at the Duke receiver | `scenario_002_bistatic_xband.toml`, `scenario_002_bistatic_sband.toml` | B1 `xband`, B2 `sband` | Runs; checked by `[verify]` |
+| 003, tracking: CFAR, association and tracking on 001 | `scenario_003_tracking.toml`, `scenario_003_tracking_dual_prf.toml`, `scenario_003_ukf_*.toml` | S1 and S3 of 001 (`ukf_*` also S2): the label of the waveform tracked | Runs; checked by `[verify]` |
+| 004, keystone: a fast sounding rocket; range walk, Doppler spread and fold, corrected and estimated on a data chip | `scenario_004_keystone_k1.toml`, `scenario_004_keystone_k2.toml`, `scenario_004_keystone_k3.toml` | K1 `keystone_k1`, K2 `keystone_k2`, K3 `keystone_k3` | Runs; checked by `[verify]` |
+| 005, leakage cancellation: a noise radar cancels its own leakage and near clutter | `scenario_005_static_leakage.toml`, `scenario_005_varying_clutter.toml`, `scenario_005_distorted_transmitter.toml` | P1 `static_leakage`, P2 `varying_clutter`, P3 `distorted_transmitter` | Runs; checked by `[verify]` |
+| 006, parallel-approach DoA: two aircraft in one range-Doppler cell, a 16-channel receive array, coherent-pair DOA | `scenario_006_parallel_resolved.toml`, `scenario_006_parallel_subrayleigh.toml`, `scenario_006_parallel_sweep.toml` | F1 `parallel_resolved`, F2 `parallel_subrayleigh`, F3 `parallel_sweep` | Runs; checked by `[verify]` |
+| [007, interference](../spec/scenario-007-interference.md): strong interferers against a weak target | none | none | Specified, not built |
+| [008, STAP](../spec/scenario-008-stap.md): airborne clutter ridge | none | none | Specified, not built |
+| [009, receiver chain](../spec/scenario-009-receiver-chain.md): front end, DDC, impairments | none | none | Specified, not built |
+| [010, self-calibration](../spec/scenario-010-self-calibration.md): array perturbations | none | none | Specified, not built |
+| 011a, terminal-area tracking: turns, crossings, clutter; IMM, JPDA, JIPDA, the plot model | `scenario_011_manoeuvre.toml`, `scenario_011_crossing.toml`, `scenario_011_terminal_dense.toml`, `scenario_011_iq_check.toml`, `scenario_011_iq_check_mean_shift.toml` (the same chain clustered by mean-shift mode) | V1 `manoeuvre`, V2 `crossing`, V4 `terminal_dense`, V5 `iq_check` and `iq_check_mean_shift` | Runs; checked by `[verify]` |
+| 011b, track-oriented MHT and PMBM: the separation sweep | `scenario_011_cst_sweep.toml`; MHT and PMBM also score `scenario_011_crossing.toml` and `scenario_011_terminal_dense.toml` | V3 `cst_sweep` | Runs; checked by `[verify]` |

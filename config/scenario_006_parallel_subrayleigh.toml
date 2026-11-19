@@ -92,14 +92,16 @@ noise_tolerance_db = 0.05
 truth_within_bins = 1.0
 detection_fraction = 1.0
 rate_tolerance_mps = 0.119496
-# FBSS-MUSIC, FBSS-ESPRIT, IAA and ML resolve the pair, P >= 0.95. The resolved fractions and RMSE bounds are
-# statistics of 200 trials: the stage judges them from 50 frames on, so on the whole window.
+# FBSS-MUSIC, FBSS-ESPRIT, IAA and ML resolve the pair, P >= 0.95. The resolved fractions and RMSE
+# bounds are statistics of 200 trials: the stage judges them from 50 frames on, so on the whole
+# window.
 resolved_methods = ["fbss_music", "fbss_esprit", "iaa", "deterministic_ml"]
 resolved_fraction_min = 0.95
 # MUSIC and ESPRIT on the raw chip covariance fail, P <= 0.25.
 baseline_methods = ["music", "esprit"]
 baseline_resolved_fraction_max = 0.25
-# RMSE over the bound's deviation at the truth, set from the prototype at 38.23 dB.
+# RMSE over the bound's deviation at the truth, set from a 200-trial run of the snapshot model
+# (tests/test_doa.py) at 38.23 dB.
 deterministic_ml_rmse_crb_max = 1.3
 fbss_music_rmse_crb_max = 1.5
 fbss_esprit_rmse_crb_max = 1.5

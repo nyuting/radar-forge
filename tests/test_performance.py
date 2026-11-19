@@ -86,7 +86,8 @@ def test_one_frame_holds_at_most_two_cubes_a_keystones_working_set_and_64_mib(pa
     assert peak_bytes <= 2 * _cube_bytes(path) + _migration_bytes(path) + 64 * 2**20
 
 
-# Budgets, s, for three frames of S1 without figures: about four times this machine's time.
+# Budgets, s, for three frames of S1 (scenario_001_fmcw_low_prf) without figures: about four
+# times this machine's time.
 STAGE_BUDGET_S = {"geometry": 2.0, "iq": 2.0, "rd": 8.0, "detect": 1.0, "track": 2.0}
 
 

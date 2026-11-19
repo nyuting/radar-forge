@@ -8,8 +8,9 @@ hold, the IMM's latency to its turn mode after each turn onset, the position NEE
 Pd and false-plot rate against the plot model's, and the JPDA cluster sizes, then trajectory
 GOSPA [2]. ``[tracking] trackers`` adds trackers scored in step on the same plots, each
 score prefixed by its name; MHT's leaf and hypothesis counts and PMBM's Bernoulli and cluster
-sizes are recorded, and a scene of two aircraft (V3) is scored as a pair: resolved or not, and
-its coalescence ratio. An IQ scenario (scenario 011's V5) gives the plot model's rates and
+sizes are recorded, and a scene of two aircraft (V3, ``scenario_011_cst_sweep``) is scored as a
+pair: resolved or not, and its coalescence ratio. An IQ scenario (scenario 011's V5,
+``scenario_011_iq_check``) gives the plot model's rates and
 merging from ``ctx.plots`` instead. Writes ``plots.csv``, ``tracks.csv``, ``gospa.csv`` (one
 row per tracker per rotation) and ``scene.png``.
 

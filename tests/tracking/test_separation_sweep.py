@@ -127,11 +127,11 @@ def test_pmbm_resolves_a_pair_as_often_as_any_tracker_less_0_05(
 # Slow: the 100 trials of the point d = 1 across range at n_gate = 1, shared with the PMBM test.
 @pytest.mark.slow
 def test_mht_resolves_the_pair_one_cell_apart_as_often_as_jpda() -> None:
-    """MHT clause: at d = 1 across range, n_gate = 1, P(resolved) for MHT >= JPDA's.
+    """At d = 1 across range, n_gate = 1, MHT's P(resolved) is at least JPDA's.
 
     Measured while building it: every tracker 0.00 of 60 trials; 61 % of scans merge the
-    pair into one plot 244 m from each aircraft, outside both 99 % gates, so the clause
-    holds without saying much. Rejected only at 99 % confidence, as PMBM's clause is.
+    pair into one plot 244 m from each aircraft, outside both 99 % gates, so the comparison
+    holds without saying much. Rejected only at 99 % confidence, as in the PMBM test above.
     """
     resolved = _resolved(1.0, 1.0, True, 100)
     print({name: float(values.mean()) for name, values in resolved.items()})

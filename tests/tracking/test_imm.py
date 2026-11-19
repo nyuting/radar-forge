@@ -44,7 +44,7 @@ from radar_forge.tracking.scene import Arc, polar
 
 SEED = 20261106
 # The latency, as measured: 90 % of trials reach the turn mode within five scans of the onset
-# (97 % did; 87.5 % within four, 37 % within three).
+# (97 % did; 87.5 % within four; 37 % within three, the figure the scenario was designed to).
 LATENCY_SCANS = 5
 TURN_SIGMA_RADPS = np.radians(3.0)
 
@@ -62,10 +62,10 @@ def _three_modes() -> InteractingMultipleModel:
     )
 
 
-def test_the_switching_matrix_at_four_point_eight_seconds_is_the_tabulated_one() -> None:
-    """expm(Lambda T) at T = 4.8 s, tabulated to four places."""
+def test_the_switching_matrix_at_four_point_eight_seconds_is_expm_of_the_generator() -> None:
+    """Pi(4.8 s) for sojourns of 120, 30 and 20 s, against values pinned to four places."""
     expected = [[0.9627, 0.0192, 0.0181], [0.0767, 0.8569, 0.0664], [0.1089, 0.0995, 0.7916]]
-    # atol 5e-5: the table is rounded to four places.
+    # atol 5e-5: the pinned values are rounded to four places.
     np.testing.assert_allclose(_three_modes().switching_matrix(4.8), expected, atol=5e-5)
 
 
@@ -212,7 +212,7 @@ def _run_v1(
     Each trial is seeded at the truth 66.7 s before the first turn, with a 50 m and 5 m/s
     spread; the beam crosses A4 once a rotation, and the plot model draws Pd (0.9, 0.3 in the
     notch) and the measurement noise. No clutter: the scene's n_gate 0.01 seldom reaches a
-    gate, and these criteria are about the motion models.
+    gate, and these tests are about the motion models.
     """
     arc, start_s = _a4()
     rng = np.random.default_rng(seed)
@@ -302,8 +302,8 @@ def _turn_rmse_m(record: dict[str, NDArray[np.float64]]) -> float:
 def test_the_imm_beats_both_constant_velocity_models_through_the_turns() -> None:
     """As measured: at 1.2, 2.4 and 4.8 s the IMM's RMSE through A4's turns beats both CVs.
 
-    The design also expected IMM / best CV to fall as the revisit grows; it rises instead, 0.83,
-    0.86, 0.92, because the agile CV keeps up better at a long revisit (PR report).
+    The scenario was designed expecting IMM / best CV to fall as the revisit grows; it rises
+    instead, 0.83, 0.86, 0.92, because the agile CV keeps up better at a long revisit.
     """
     ratio = {}
     for period_s in (1.2, 2.4, 4.8):

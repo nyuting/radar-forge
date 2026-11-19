@@ -174,7 +174,7 @@ class TestKeystone:
 
     @pytest.mark.parametrize("method", ["czt", "sinc"])
     def test_walk_is_removed_for_two_velocities_at_once(self, method: str) -> None:
-        """In small: each target's peak track stays within half a bin after the keystone.
+        """On a small cube: each target's peak track stays within half a bin after the keystone.
 
         Two speeds in one cube, so a velocity-dependent correction cannot pass. The end pulses
         ring and are excluded; the sinc baseline's truncation shows in its loss, not here.
@@ -220,7 +220,7 @@ class TestKeystone:
 
 class TestFoldFactor:
     def test_search_finds_the_fold_of_an_ambiguous_target(self) -> None:
-        """In small: a target at 1.4 PRFs of Doppler keystones at F = 1, not at the alias.
+        """On a small cube: a target at 1.4 PRFs of Doppler keystones at F = 1, not at the alias.
 
         At 10 GHz the band is 3 % of the carrier, so 1.4 PRFs stays in fold 1 across it; rate
         -1.4 lambda PRF is closing (positive Doppler) and walks 6.5 bins.
@@ -263,7 +263,7 @@ class TestFoldFactor:
 
 class TestDopplerRate:
     def test_search_finds_the_acceleration_and_recovers_the_peak(self) -> None:
-        """In small: the curve peaks within one step of the truth; the peak is restored.
+        """On a small cube: the curve peaks within one step of the truth; the peak is restored.
 
         At 10 GHz, -100 m/s^2 spreads 13.6 Doppler bins and bends the range a quarter of a bin;
         the reference is the same target at constant rate. 0.3 dB is the allowed loss.

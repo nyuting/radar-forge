@@ -428,7 +428,7 @@ def test_murty_stops_where_the_next_assignment_costs_more_than_the_gap() -> None
     np.testing.assert_array_equal(totals, [1.0, 1.5])
 
 
-# --- coalescence shown, and fixed (the V3 pair at d = 1 across range) ---
+# --- coalescence shown, and fixed (V3's pair, scenario_011_cst_sweep, at d = 1 across range) ---
 
 ALPHA_RANGE_M, ALPHA_AZIMUTH_RAD = 115.75, np.radians(1.4)
 WINDOW_INTENSITY = 0.21683  # n_gate = 1, plots per (m rad) a scan
@@ -541,8 +541,9 @@ def test_jpda_pulls_a_close_pair_together_more_than_jpda_star_set_mht_and_pmbm()
     20 of 40 scans. Its spread is wide: in n_gate = 1 clutter a quiet CV track loses the pair
     in some trials and wanders off (ratios over 2), so the median over the 200 trials is the
     statistic, and JPDA's must lie below both fixes' and MHT's and PMBM's, which
-    commit to one plot a track rather than pull both to the merged one. The bounds first expected,
-    JPDA at most 0.8 and the fixes at least 0.9, do not hold here: the medians measured 1.14
+    commit to one plot a track rather than pull both to the merged one. The scenario was designed
+    expecting a ratio of at most 0.8 for JPDA and at least 0.9 for the fixes; neither holds here:
+    the medians measured 1.14
     (JPDA), 1.40 (JPDA*), 1.24 (set), 1.89 (MHT) and 1.56 (PMBM), the means 1.35, 1.53,
     1.42, 2.10 and 1.73.
     """

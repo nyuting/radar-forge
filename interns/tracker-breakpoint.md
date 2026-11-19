@@ -23,8 +23,8 @@ and research. Scenario 003 simulates an X-band FMCW radar watching a light aircr
 
 At the default 100 W transmit power the target is detected in every frame. So the parts of the
 tracker that handle a *missed* detection have never been tested against a real one. The
-scenario 003 specification said so itself (§13.1 and §14.9; deleted once the scenario was built,
-its numbers now live in `config/scenario_003_tracking.toml`). Your job is
+scenario 003 specification said so itself (deleted once the scenario was built; its numbers now
+live in `config/scenario_003_tracking.toml`). Your job is
 to find out what happens when the radar starts missing.
 
 ## Setup

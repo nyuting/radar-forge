@@ -2,12 +2,13 @@
 
 Fast tests are analytic: noiseless one- and two-source snapshots, the Cramér-Rao bound's closed
 form, the rank a coherent pair leaves and forward-backward averaging restores, the conventional
-beam's and monopulse's response to an unresolved pair. The
-slow tests are a Monte Carlo on the snapshot model,
-``x_k = g_k A(u) s + n_k`` over a 5 x 5 chip, which the noiseless chip test proves equal to the
-chain: bias and RMSE at 400 trials, the resolved fractions and RMSE bounds at 200 at F2's
-geometry, the separation-sweep point at 200 at F3's. Each draws its own seeded trials once; the
-bounds are set from the prototype.
+beam's and monopulse's response to an unresolved pair. The slow tests are a Monte Carlo on the
+snapshot model, ``x_k = g_k A(u) s + n_k`` over a 5 x 5 chip, which the doa stage's noiseless
+check on F2 (``snapshot_model_tolerance`` in ``config/scenario_006_parallel_subrayleigh.toml``)
+proves equal to the chain at the peak cell: bias and RMSE at 400 trials, the resolved fractions
+and RMSE bounds at 200 at F2's geometry, the separation-sweep point at 200 at F3's
+(``config/scenario_006_parallel_sweep.toml``). Each draws its own seeded trials once. F2's bounds
+were set from a 200-trial run of this model at 38.23 dB, "the prototype" below.
 """
 
 from __future__ import annotations
@@ -204,8 +205,10 @@ def test_iaa_spans_the_visible_region_and_resolves_a_wide_noiseless_pair():
     ("separation_rayleigh", "phase_rad", "snr_db"),
     [(1.0, 0.0, -18.3), (1.0, np.pi, -6.5), (0.5, np.pi / 2, -3.5), (0.1, np.pi, 53.4)],
 )
-def test_smiths_resolution_limit_reproduces_the_spec_table(separation_rayleigh, phase_rad, snr_db):
-    """Section 3.4 re-derived: the SNR where sqrt(CRB(delta)) = delta, to its 0.1 dB rounding."""
+def test_smiths_resolution_limit_at_four_separations_and_phases(
+    separation_rayleigh, phase_rad, snr_db
+):
+    """Smith's limit, the SNR where sqrt(CRB(delta)) = delta, against values pinned to 0.1 dB."""
     found = resolution_snr_db(ULA, separation_rayleigh, phase_rad, wavelength_m=WAVELENGTH_M)
     assert found == pytest.approx(snr_db, abs=0.05)
 

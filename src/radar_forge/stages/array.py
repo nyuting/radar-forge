@@ -516,7 +516,7 @@ def _row(truth: TargetGeometry, k: int) -> TargetGeometry:
 def _noiseless(
     ctx: evaluate.Context, verify: dict[str, Any], array: ArrayGeometry, settings: DoaSettings
 ) -> None:
-    """On noiseless frame 0: the peak cell against the snapshot model, the rank (one without noise).
+    """On noiseless frame 0: the peak cell against the snapshot model, the chip's rank against one.
 
     The model's :math:`g s_k` is aircraft k's own one-channel map at the peak cell, its
     steering vector the truth's: nothing of the multi-channel chain enters the prediction.

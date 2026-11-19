@@ -48,7 +48,8 @@ n_gate_samples = 1024
 gain_rx_dbi = 25.0
 noise_figure_db = 3.0
 
-# CA-CFAR along range at Pfa 1e-6 on both maps: about one false alarm in the 1024 x 1024 map.
+# CA-CFAR along range at Pfa 1e-6: about one false alarm in the 1024 x 1024 map. The slow test in
+# tests/test_migration.py runs it on the uncorrected map too, where it misses the target.
 [detection]
 pfa = 1.0e-6
 n_train = 16
@@ -88,5 +89,5 @@ uncompensated_loss_db = -25.78
 loss_tolerance_db = 1.0
 # The keystone recovers all but 0.3 dB of ideal integration.
 compensated_loss_min_db = -0.3
-# K1: the fine rate (A&M on the chip) within three of its Cramer-Rao bounds.
+# The fine rate (A&M on the chip) within three of its Cramer-Rao bounds.
 rate_error_max_crb = 3.0

@@ -62,8 +62,9 @@ leaf_count_max = 10
 # Mean GOSPA over the 62 rotations; pins the run (323 m measured): until 41 every aircraft is
 # alone, then the crossings and the clutter discs.
 gospa_mean_max_m = 400.0
-# V2: crossings after which either aircraft's GOSPA track changed, JPDA, 2 of 7
-# measured; only GNN and MHT carry a swap bound, JPDA is pinned at its measured value: this pins it.
+# V2: the fraction of crossings after which either aircraft's GOSPA track changed, under JPDA:
+# 2 of 7 measured, and this pins it with margin (4 of 7 pass). GNN's and MHT's swap rates are
+# bounded over 200 trials in tests/tracking/test_hypotheses.py.
 swap_fraction_max = 0.6
 nees_fraction_min = 0.9           # 0.95 measured
 pd_min = 0.8704                 # Pd 0.9: 99 % binomial lower bound over 710 echoes
