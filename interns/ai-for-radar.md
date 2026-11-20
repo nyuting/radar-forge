@@ -35,8 +35,9 @@ Know this before you choose. Each item is something you may have to build in you
   any number of targets and their RCS, so one call can place several targets in one IQ cube.
 - **One tracker.** A KF, EKF or UKF with radial constant-velocity motion
   (`radar_forge.tracking.motion.ConstantVelocity.bistatic_range`) or Cartesian constant-velocity
-  or constant-acceleration motion (`ConstantVelocity`, `ConstantAcceleration`), a chi-square gate, and global or greedy
-  nearest-neighbour assignment. There is no IMM, no PDA or JPDA, no MHT and no smoother.
+  or constant-acceleration motion (`ConstantVelocity`, `ConstantAcceleration`), a chi-square
+  gate, and global or greedy nearest-neighbour assignment. IMM, the JPDA family, MHT and PMBM
+  exist, configured through `radar_forge.scan_tracker`; there is no smoother.
 - **No resource manager.** Nothing schedules beams, revisits or dwells.
 
 ## Rules for every task and direction

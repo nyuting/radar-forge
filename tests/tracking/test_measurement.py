@@ -148,8 +148,7 @@ def test_the_spherical_jacobian_matches_a_central_difference(
     layout = ConstantVelocity(axes).state_layout
     model = RangeAzimuthElevationRangeRate(layout, [10.0, -20.0, 5.0], names, fixed)
     states = _random_states(rng, layout)
-    # rtol 1e-6, atol 1e-10: the best a central difference reaches on a norm, as in
-    # tests/core/tracking/test_measurement_models.py.
+    # rtol 1e-6, atol 1e-10: the best a central difference reaches on a norm.
     np.testing.assert_allclose(
         model.jacobian(states), _central_difference(model, states), rtol=1e-6, atol=1e-10
     )

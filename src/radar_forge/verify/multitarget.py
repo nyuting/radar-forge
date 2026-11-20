@@ -592,8 +592,8 @@ def _trajectory_score(scenario: Scenario, run: _Run) -> Any:
             np.isnan(times[step]), np.nanmean(time_s) if time_s.size else 0.0, times[step]
         )
         truths[step, present] = _truth(scenario, at)[present]
-        rotation_s = np.nanmean(time_s) if time_s.size else scenario.start_time_s
-        present_at[step, present] = _truth(scenario, np.array(rotation_s))[present]
+        scan_time_s = np.nanmean(time_s) if time_s.size else scenario.start_time_s
+        present_at[step, present] = _truth(scenario, np.array(scan_time_s))[present]
     aircraft = [k for k, t in enumerate(scenario.arcs) if t.target_class == "aircraft"]
     return trajectory_gospa(
         estimates,

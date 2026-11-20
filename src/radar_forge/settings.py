@@ -105,7 +105,7 @@ class TrackingSettings:
     mixes measurement dimensions, so it needs ``cost = "negative_log_likelihood_ratio"``.
     ``initiator`` is ``"direct"`` or ``"range_only"`` for an IQ scenario and
     ``"debiased_spherical"`` for a plot-level one. ``detection_probability`` given, GNN
-    assigns no pair cheaper than ln(P_D / (1 - P_D P_G)); JPDA, MHT and PMBM need it.
+    leaves unassigned any pair costlier than ln(P_D / (1 - P_D P_G)); JPDA, MHT and PMBM need it.
     """
 
     linearisation: Literal["taylor", "unscented"] = "unscented"

@@ -1,9 +1,9 @@
 # Tracker 001 — Tracking architecture
 
-> Status: built, in `src/radar_forge/tracking/` (`motion`, `measurement`, `filters`, `imm`, `association`,
-> `initiation`, `lifecycle`, `tracker`, `hypotheses`, `pmbm`, `metrics`, `clutter_map`), and
-> `scan_tracker.py` beside it. Where
-> this page and the code differ in a name, the code's name stands.
+> Status: built, in `src/radar_forge/tracking/` (`motion`, `measurement`, `filters`, `imm`,
+> `association`, `initiation`, `lifecycle`, `tracker`, `hypotheses`, `pmbm`, `metrics`,
+> `clutter_map`), and `scan_tracker.py` beside it. Where this page and the code differ in a
+> name, the code's name stands.
 >
 > The tracker after the tracking refactor: one Gaussian filter, a batched track bank, one
 > correction core, one scan loop. Running it is in [the user guide](../docs/user-guide/06-tracking.md).
@@ -53,8 +53,8 @@ tracker in the filter, the tracker or `pipeline.py` breaks this. There is one `T
 
 **Dependencies.** `tracking/` imports NumPy, SciPy and the private `_periodic.fold` (the
 guarded half-open fold that `CoordinateLayout` shares with `dsp.fold_into_period`;
-`RangeAzimuthElevationRangeRate.predicted_measurement` still wraps inline), and nothing
-else of the package: never `settings`, `scenario`, `trajectory`, `plot_simulator`,
+`RangeAzimuthElevationRangeRate.predicted_measurement` and `ClutterMap` still wrap inline),
+and nothing else of the package: never `settings`, `scenario`, `trajectory`, `plot_simulator`,
 `scan_tracker`, `pipeline`, `verify`, `dsp` or `figures`. `settings.py` and `scenario.py`
 import nothing from `tracking/` but `hypotheses`' two default MHT thresholds, the defaults
 of `[tracking] confirm_score` and `delete_drop`. `scan_tracker.py` is the one bridge: it
@@ -124,13 +124,14 @@ interval at 99.9 %; covariances stay symmetric to `rtol=1e-12` with Cholesky suc
 
 - **Cartesian state**: per-axis interleaved `[x_m, xdot_mps, y_m, ydot_mps, z_m, zdot_mps]` in
   local ENU (x east, y north, z up); constant acceleration is `ConstantAcceleration`.
-- **Radial state**: `ConstantVelocity.bistatic_range`, `[bistatic_range_m, bistatic_range_rate_mps]`:
-  the route length R_T + R_R and its time derivative, positive receding, with transition
-  `[[1, T], [0, 1]]`. Monostatic, both are twice the slant values; nothing in the pipeline
-  halves the state, and only a display does (`figures.display_axes`). Scenario 003 tracks with it.
-- **Constant turn** (the coordinated turn): `ConstantTurn`, `[x_m, xdot_mps, y_m, ydot_mps, turn_rate_radps]`,
-  the rate the heading's, positive to the right; exact discretisation with series forms near zero
-  rate (scenario 011 D26).
+- **Radial state**: `ConstantVelocity.bistatic_range`,
+  `[bistatic_range_m, bistatic_range_rate_mps]`: the route length R_T + R_R and its time
+  derivative, positive receding, with transition `[[1, T], [0, 1]]`. Monostatic, both are twice
+  the slant values; nothing in the pipeline halves the state, and only a display does
+  (`figures.display_axes`). Scenario 003 tracks with it.
+- **Constant turn** (the coordinated turn): `ConstantTurn`,
+  `[x_m, xdot_mps, y_m, ydot_mps, turn_rate_radps]`, the rate the heading's, positive to the
+  right; exact discretisation with series forms near zero rate (scenario 011 D26).
 - **Process noise**: `white_noise = "continuous"`, continuous white-noise acceleration (q in
   m²/s³; Bar-Shalom, Li and Kirubarajan 2001, §6.2.2), is the default because its Q is exact for
   any step length under that model; its intensity q = 2σ²τ is Singer's, an approximation to a

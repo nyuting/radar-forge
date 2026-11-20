@@ -1,7 +1,8 @@
 """Tests for radar_forge.scan_tracker: one tracker for a staring and a rotating scenario.
 
 Staring (scenario 003): the fold monitor's slope, a birth's range history, and JPDA, which only
-the one tracker can give an IQ scenario, against the target's truth. Rotating (scenario 011):
+the one tracker can give an IQ scenario, against the target's truth, and refused where a scan
+offers range alone beside range and rate. Rotating (scenario 011):
 the sector batching by a Monte Carlo over 20 seeds through the multitarget stage, and the
 likelihood ratio's density against the drifting rain cell.
 """
@@ -96,6 +97,15 @@ def test_an_iq_scenario_tracks_under_jpda_and_confirms_its_target() -> None:
     gap_m = (truths[-1].bistatic_range_m[0] - tracker.bank.mean[row, 0]) % tracker.range_period_m
     bin_m = np.sqrt(12.0 * tracker.noise_covariance[0, 0])
     assert min(gap_m, tracker.range_period_m - gap_m) < bin_m
+
+
+def test_jpda_is_refused_when_built_where_range_alone_is_offered_beside_range_and_rate() -> None:
+    """Regression: scenario 003's range-only retry built JPDA, which raised on the first scan."""
+    scenario = load_scenario(REPO / "config" / "scenario_003_tracking.toml")
+    assert scenario.tracking is not None
+    tracking = dataclasses.replace(scenario.tracking, association="jpda", detection_probability=0.9)
+    with pytest.raises(ValueError, match="needs one measurement model a scan"):
+        ScanTracker(dataclasses.replace(scenario, tracking=tracking))
 
 
 # Slow: 20 seeds of V4 at 16 and at 32 sectors, 25 scans each, about six minutes.

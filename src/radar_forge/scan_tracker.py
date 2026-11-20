@@ -100,25 +100,29 @@ class ScanTracker:
     r"""A scenario's ``[tracking]`` table as a tracker, and the policy that feeds it each scan.
 
     Both kinds read alike the filter (``linearisation``, the motion model's
-    ``sigma_acceleration_mps2``, ``white_noise`` and correlation time), ``initiator``, ``cost``,
-    ``assignment``, ``gate_probability``, the association (``association``, ``coalescence``,
-    ``existence`` and MHT's tree) and the lifecycle counts; ``name`` (a key of
-    :data:`VARIANTS`, or ``"pmbm"`` when rotating) replaces the configured association. GNN
-    takes any pair the gate allows, or, given ``detection_probability``, none cheaper than
-    ln(P_D / (1 - P_D P_G)), the track score's break-even.
+    ``sigma_acceleration_mps2``, ``white_noise`` and correlation time; the constant-turn mode
+    stays continuous), ``initiator``, ``cost``, ``assignment``, ``gate_probability``, the
+    association (``association``, ``coalescence``, ``existence`` and MHT's tree) and the
+    lifecycle counts; ``name`` (a key of :data:`VARIANTS`, or ``"pmbm"`` when rotating) replaces
+    the configured association. GNN takes any pair the gate allows, or, given
+    ``detection_probability``, leaves unassigned any pair costlier than ln(P_D / (1 - P_D P_G)),
+    the track score's break-even.
 
     Staring: the state is ``[bistatic_range_m, bistatic_range_rate_mps]``. The rate is measured
     where it cannot fold: after dual-PRF pairing, from one burst whose rate period exceeds twice
     the largest rate, or once a track can unfold it; otherwise range alone. Range is measured
     modulo the first map's period (the state stays continuous), with a bin over √12 of noise,
-    and the clutter density is one false plot a scan over the map. ``rate_unfolding =
-    "track_aided"`` is scenario 003's policy: a track may unfold after N associated ranges, the
-    least N whose least-squares slope is certain to a ``unfold_sigma_gate``-th of the rate
-    period, :math:`(\sigma_R/T)\sqrt{12/(N(N^2-1))} < v_{period}/g` (Bar-Shalom [1] §5.5). The
-    track with the longest such history gives each plot the fold nearest its rate, unless that
-    lies over half a period from the slope of its last ``n_slope_scans`` ranges, the fold
-    monitor: a wrong fold agrees with the prediction that chose it, never with the range. One
-    reference track serves a scan: single-target policy.
+    and the clutter density is one false plot a scan over the range period and the rate span a
+    plot can take. JPDA and MHT take one measurement model a scan, so neither is built where
+    range alone is offered beside range and rate (``range_only_retry``, track-aided unfolding).
+    ``rate_unfolding = "track_aided"`` is scenario 003's policy: a track may unfold after N
+    associated ranges, the least N whose least-squares slope is certain to a
+    ``unfold_sigma_gate``-th of the rate period,
+    :math:`(\sigma_R/T)\sqrt{12/(N(N^2-1))} < v_{period}/g` (Bar-Shalom [1] §5.5). The track
+    with the longest such history gives each plot the fold nearest its rate, unless that lies
+    over half a period from the slope of its last ``n_slope_scans`` ranges, the fold monitor: a
+    wrong fold agrees with the prediction that chose it, never with the range. One reference
+    track serves a scan: single-target policy.
 
     Rotating: the state is ENU (x, y) and velocity, plus the turn rate under ``motion =
     "imm"``, whose modes are CV quiet, constant turn and CV agile; z is (horizontal range,
@@ -245,6 +249,14 @@ class ScanTracker:
         models: dict[str, Any] = {_MEASURED: model}
         if self.measures_rate and (settings.range_only_retry or track_aided):
             models[_RANGE] = marginal(model, names[:1])
+        # The Tracker's weighting (JPDA, JIPDA) and branching (MHT) take one model a scan.
+        if settings.association != "gnn" and len(models) > 1:
+            msg = (
+                f'[tracking] association = "{settings.association}" needs one measurement model '
+                "a scan, but range alone is offered beside range and rate. Set "
+                'range_only_retry = false and rate_unfolding = "none", or association = "gnn".'
+            )
+            raise ValueError(msg)
         # One false alarm per scan over the range period and over the rate span a plot can take;
         # only their ratio decides an assignment, since GNN maximises the pairs first.
         rate_span_mps = 2.0 * max_rate_mps if dual else self.rate_period_mps

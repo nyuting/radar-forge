@@ -262,7 +262,8 @@ from radar_forge.scenario import load_scenario
 from radar_forge.tracking.association import chi_square_gate_threshold
 from radar_forge.tracking.motion import ConstantVelocity
 
-# The UKF on S1: [tracking] gives sigma_a = 8 m/s^2 of bistatic range, tau = 1 s, continuous white noise.
+# The UKF on S1: [tracking] gives sigma_a = 8 m/s^2 of bistatic range, tau = 1 s and
+# continuous white noise.
 scenario = load_scenario("config/scenario_003_ukf_fmcw_low_prf.toml")
 settings = scenario.tracking
 motion = ConstantVelocity.bistatic_range(
@@ -421,7 +422,10 @@ could have seen (`tracker.Coverage`). Their docstrings and `spec/tracker-001.md`
 `scan_tracker.ScanTracker` configures any of the associators for either kind of scenario
 (`association`, `coalescence`, `existence` in `[tracking]`, with `detection_probability`);
 this page's scenarios configure GNN, with a range-and-rate state, and PMBM and the IMM need
-a plot-level scenario's ground-plane state.
+a plot-level scenario's ground-plane state. An IQ scenario takes JPDA or MHT only with one
+measurement model a scan: where the rate is measured, `range_only_retry = false` and
+`rate_unfolding = "none"`, as in the three `scenario_003_ukf_*` files; `ScanTracker` refuses
+the rest when built.
 
 **Not yet supported:**
 
