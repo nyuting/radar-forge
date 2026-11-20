@@ -14,8 +14,8 @@ there too, but may move. Modules, in signal-path order:
     Range-Doppler processing; leakage and clutter cancellation; CFAR and clustering of cells;
     clustering of points; batched multi-target tracking.
 ``scenario``, ``pipeline``, ``verify``, ``figures``
-    A scenario file, the chain from it to tracks, the stepper that checks each stage, the
-    stages it runs, and figures (the ``visualisation`` extra, imported only when drawing).
+    A scenario file, the chain from it to tracks, the stepper and the stages it runs, and
+    figures (the ``visualisation`` extra, imported only when drawing).
 """
 
 from __future__ import annotations

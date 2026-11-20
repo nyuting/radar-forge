@@ -40,3 +40,20 @@ its base merges, or its commits never reach `main`.
 - The branch is deleted on merge. Then `git switch main && git pull --ff-only` and remove the
   worktree.
 - The changelog is generated from `main`'s history, grouped by type.
+
+## Integration branches
+
+A change too large for one review (a refactor in several steps) goes through an integration
+branch, `refactor/<name>` from `main`, and reaches `main` in one PR. Each step's PR targets the
+integration branch and is squash-merged into it once its fast CI jobs and commit-message check
+pass, an independent review's findings are fixed and, for a refactor, a run before and after
+shows that nothing computes differently. It does not wait for the full `check` jobs, which take
+hours. After each merge, run them on the integration branch with
+`gh workflow run ci.yml --ref refactor/<name>` (a newer run cancels an older one, and the newest
+covers every merge before it) and fix what they find before the PR into `main`, which waits for
+the full suite like any other.
+
+A PR stacked on a step that squash-merges still holds that step's own commits. Merge the
+integration branch into it before review goes on; when the integration branch's tree is the one
+the stack was built on (`git diff <that commit> origin/refactor/<name>` prints nothing),
+`git merge -s ours origin/refactor/<name>` records the squash without touching a file.

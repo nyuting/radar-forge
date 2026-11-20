@@ -424,6 +424,17 @@ def test_a_noise_target_lands_on_its_lag_and_doppler_bin():
         range_doppler_product(cube, radar, n_range_lags=1024)
 
 
+@pytest.mark.parametrize("config", ["scenario_001_fmcw_low_prf.toml", "scenario_011_crossing.toml"])
+def test_a_scans_table_without_a_period_is_refused_by_name(config, tmp_path):
+    """IQ and plot-level loaders alike name the missing key, not a bare KeyError."""
+    text = (REPO / "config" / config).read_text(encoding="utf-8")
+    kept = [line for line in text.splitlines() if not line.startswith("scan_period_s")]
+    path = tmp_path / config
+    path.write_text("\n".join(kept), encoding="utf-8")
+    with pytest.raises(ValueError, match=r"\[scans\] needs scan_period_s"):
+        load_scenario(path)
+
+
 def test_noise_tables_need_a_noise_burst(tmp_path):
     """[leakage] and the rest describe a noise burst; a scenario without one refuses them."""
     text = (REPO / "config" / "scenario_001_fmcw_low_prf.toml").read_text(encoding="utf-8")

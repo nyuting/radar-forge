@@ -275,6 +275,14 @@ def _keys(table: Mapping[str, Any], allowed: set[str], name: str) -> dict[str, A
     return dict(table)
 
 
+def _scan_period_s(window: Mapping[str, Any]) -> float:
+    """Return ``[scans] scan_period_s``, or raise naming it: every scenario needs one."""
+    if "scan_period_s" not in window:
+        msg = "[scans] needs scan_period_s, the time from one scan to the next, s."
+        raise ValueError(msg)
+    return float(window["scan_period_s"])
+
+
 def _settings(kind: Any, table: Mapping[str, Any], name: str) -> Any:
     """Build a settings dataclass, refusing an unknown key, a wrong TOML type or choice."""
     defaults = {f.name: f.default for f in fields(kind)}
@@ -393,7 +401,7 @@ def _plot_level(document: Mapping[str, Any], path: Path) -> Scenario:
         targets=(),
         start_time_s=float(window["start_time_s"]),
         duration_s=float(window["duration_s"]),
-        scan_period_s=float(window["scan_period_s"]),
+        scan_period_s=_scan_period_s(window),
         tracking=None if tracking is None else _settings(TrackingSettings, tracking, "tracking"),
         verify=dict(document.get("verify", {})),
         sensor=sensor,
@@ -432,7 +440,7 @@ def load_scenario(path: Path | str) -> Scenario:
         targets=tuple(_target(t, toml_path.parent) for t in document["target"]),
         start_time_s=float(window["start_time_s"]),
         duration_s=float(window["duration_s"]),
-        scan_period_s=float(window["scan_period_s"]),
+        scan_period_s=_scan_period_s(window),
         detection=_settings(DetectionSettings, document.get("detection", {}), "detection"),
         tracking=None if tracking is None else _settings(TrackingSettings, tracking, "tracking"),
         verify=dict(document.get("verify", {})),

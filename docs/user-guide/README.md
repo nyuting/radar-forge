@@ -92,8 +92,8 @@ Each symbol means the same thing on every page.
 
 A page may add a symbol of its own. When it does, it defines it in its own table.
 
-Each word below means one thing on every page and in the code. The last column is what a
-MATLAB, Stone Soup, TI or radarsimpy reader would look for.
+Each word below means one thing on every page; the code follows as Phase 5 lands. The last
+column is what a MATLAB, Stone Soup, TI or radarsimpy reader would look for.
 
 | Word | Meaning | Elsewhere |
 | :-- | :-- | :-- |
@@ -105,7 +105,7 @@ MATLAB, Stone Soup, TI or radarsimpy reader would look for.
 | measurement | A plot's vector and covariance inside the filter | |
 | figure | A picture; "plot" is kept for the tracker's input | |
 | range rate | The time derivative of a route's length, positive receding | TI and radarsimpy: radial velocity, used here only for the halved monostatic display; MATLAB's "speed" is positive approaching |
-| period | The whole width of a circular axis before a value folds: a map's unambiguous range or range rate, in route units | Most sources give the one-sided monostatic limits, c / 2 PRF and ±λ PRF / 4 |
+| period (span in prose) | The whole width of a circular axis before a value folds: a map's unambiguous range or range rate, in route units. The code names it `*_period_*`; the pages also say span | Most sources give the one-sided monostatic limits, c / 2 PRF and ±λ PRF / 4 |
 | trajectory, track | The true path of a target; a track is the tracker's estimate of it | MATLAB `waypointTrajectory`; Stone Soup: ground truth path |
 | clutter density | False plots per unit of measurement space. "Intensity" is kept for the PMBM birth process | MATLAB `ClutterDensity`; Stone Soup `clutter_spatial_density` |
 | monostatic or bistatic | Spelled out; "geometry" where a noun is needed | MATLAB: `Mode` |

@@ -81,7 +81,8 @@ def geometry(ctx: stepper.Context) -> stepper.Context:
         ("unambiguous_bistatic_range_rate_mps", radar.unambiguous_bistatic_range_rate_mps),
     ):
         ctx.record(name, value)
-    # Inside the map unfolded: one burst's periods, or the larger and the dual-PRF bound.
+    # Inside the map unfolded: one burst's periods, or the larger range period and the
+    # dual-PRF rate bound.
     periods = [stepper.periods(scenario, k) for k in range(len(scenario.radars))]
     half_rate_mps = (
         scenario.detection.max_bistatic_range_rate_mps if len(periods) == 2 else periods[0][1] / 2
