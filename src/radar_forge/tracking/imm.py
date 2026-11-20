@@ -38,7 +38,8 @@ from radar_forge.tracking.filters import (
     innovate,
     update_weighted,
 )
-from radar_forge.tracking.models import MeasurementModel, MotionModel, StateLayout
+from radar_forge.tracking.measurement import MeasurementModel
+from radar_forge.tracking.motion import CoordinateLayout, MotionModel
 
 __all__ = [
     "InteractingMultipleModel",
@@ -57,19 +58,19 @@ _TINY_PROBABILITY = 1e-300
 class _Held:
     """A mode's motion model lifted into the IMM's layout; the coordinates it lacks are held."""
 
-    def __init__(self, motion: MotionModel, layout: StateLayout) -> None:
+    def __init__(self, motion: MotionModel, layout: CoordinateLayout) -> None:
         self.state_layout = layout
         self._motion = motion
         self._own = np.asarray(layout.indices(motion.state_layout.names), dtype=np.intp)
 
     def transition(self, state: NDArray[np.float64], dt_s: ArrayLike) -> NDArray[np.float64]:
-        """Return the states with the mode's coordinates moved on and the others held."""
+        """Return f(x): the mode's coordinates moved on and the others held."""
         result = np.array(state, dtype=np.float64)
         result[..., self._own] = self._motion.transition(result[..., self._own], dt_s)
         return result
 
     def jacobian(self, state: NDArray[np.float64], dt_s: ArrayLike) -> NDArray[np.float64]:
-        """Return the mode's Jacobian on its coordinates and the identity on the others."""
+        """Return F: the mode's Jacobian on its coordinates and the identity on the others."""
         own, n_state = self._own, self.state_layout.dimension
         inner = self._motion.jacobian(np.asarray(state)[..., own], dt_s)
         result = np.zeros((*inner.shape[:-2], n_state, n_state)) + np.eye(n_state)
@@ -106,7 +107,7 @@ class InteractingMultipleModel:
     motions: tuple[MotionModel, ...]
     sojourn_time_s: tuple[float, ...]
     absent_sigma: Mapping[str, float] = field(default_factory=dict)
-    state_layout: StateLayout = field(init=False)
+    state_layout: CoordinateLayout = field(init=False)
     generator_per_s: NDArray[np.float64] = field(init=False, repr=False)
     initial_probability: NDArray[np.float64] = field(init=False, repr=False)
     held: tuple[_Held, ...] = field(init=False, repr=False)
@@ -159,7 +160,7 @@ def _mode_bank(bank: TrackBank, mode: int) -> TrackBank:
 
 
 def _combine(
-    layout: StateLayout,
+    layout: CoordinateLayout,
     weight: NDArray[np.float64],
     mean: NDArray[np.float64],
     covariance: NDArray[np.float64],
@@ -195,7 +196,7 @@ def imm_mix(
     mixing = (joint + floor) / (predicted + _TINY_PROBABILITY)[:, None, :]
     rows = np.repeat(np.arange(n_tracks), n_modes)  # broadcast-exempt: one row per target mode
     mean, covariance = _combine(
-        bank.layout,
+        bank.state_layout,
         np.swapaxes(mixing, 1, 2).reshape(-1, n_modes),
         bank.mode_mean[rows],
         bank.mode_covariance[rows],
@@ -229,7 +230,7 @@ def imm_predict(
         mixed = replace(bank, mean=mean[:, mode], covariance=covariance[:, mode])
         mean[:, mode], covariance[:, mode] = linearisation.predict(motion, mixed, dt_s)
     combined_mean, combined_covariance = _combine(
-        bank.layout, predicted, mean, covariance, bank.mean
+        bank.state_layout, predicted, mean, covariance, bank.mean
     )
     return replace(
         bank,
@@ -308,7 +309,7 @@ def imm_update(
         corrected = update_weighted(_mode_bank(bank, k), innovation, conditional[:, k])
         mean[:, k], covariance[:, k] = corrected.mean, corrected.covariance
     combined_mean, combined_covariance = _combine(
-        bank.layout, posterior, mean, covariance, bank.mean
+        bank.state_layout, posterior, mean, covariance, bank.mean
     )
     return replace(
         bank,

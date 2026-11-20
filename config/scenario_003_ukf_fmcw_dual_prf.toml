@@ -77,7 +77,7 @@ max_bistatic_range_rate_mps = 200.0
 # 4.0 m/s^2 radial, correlation falling to about a half after 1 s, so
 # sigma = 8 m/s^2 of bistatic range and tau = 1 s.
 linearisation = "unscented"
-process_noise = "cwna"
+white_noise = "continuous"
 sigma_acceleration_mps2 = 8.0
 acceleration_correlation_time_s = 1.0
 initiator = "direct"

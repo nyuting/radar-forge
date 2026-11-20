@@ -41,6 +41,7 @@ from radar_forge.array import (
     uniform_linear_array,
 )
 from radar_forge.coordinates import geodetic_to_enu_m
+from radar_forge.plot_simulator import ClutterComponent, FixedDiscretes
 from radar_forge.propagation import dbsm_to_m2
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter
 from radar_forge.settings import (
@@ -60,7 +61,7 @@ from radar_forge.settings import (
     TrackingSettings,
 )
 from radar_forge.signal import RangeGate
-from radar_forge.tracking.scene import Arc, ClutterComponent, FixedDiscretes, Leg
+from radar_forge.trajectory import Arc, Leg
 
 __all__ = [
     "RangeGate",
@@ -293,7 +294,10 @@ def _settings(kind: Any, table: Mapping[str, Any], name: str) -> Any:
         if choices and value not in choices:
             msg = f"[{name}] {key} must be one of {list(choices)}; got {value!r}."
             raise ValueError(msg)
-        default: Any = defaults[key]
+        # An optional number (float | None, default None) takes a float, as a float does.
+        default: Any = (
+            0.0 if defaults[key] is None and float in get_args(hints[key]) else defaults[key]
+        )
         given: Any = tuple(value) if isinstance(default, tuple) else value
         # A bool is an int in Python, so the exact type is compared; a float takes an int.
         if not (type(given) is type(default) or (type(default) is float and type(given) is int)):

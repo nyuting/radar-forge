@@ -10,12 +10,15 @@ there too, but may move. Modules, in signal-path order:
 ``coordinates``, ``radar``, ``propagation``, ``signal``
     Geodetic and ENU conversions; the radar and its sites; propagation paths and the radar
     equation; waveforms and IQ.
+``trajectory``, ``plot_simulator``
+    Closed-form target paths; a rotating radar's plots of them, scan by scan, without IQ.
 ``dsp``, ``clutter``, ``detection``, ``clustering``, ``tracking``
     Range-Doppler processing; leakage and clutter cancellation; CFAR and clustering of cells;
     clustering of points; batched multi-target tracking.
-``scenario``, ``pipeline``, ``verify``, ``figures``
-    A scenario file, the chain from it to tracks, the stepper and the stages it runs, and
-    figures (the ``visualisation`` extra, imported only when drawing).
+``scenario``, ``pipeline``, ``scan_tracker``, ``verify``, ``figures``
+    A scenario file, the chain from it to plots, its ``[tracking]`` table as one tracker fed a
+    scan at a time, the stepper and the stages it runs, and figures (the ``visualisation``
+    extra, imported only when drawing).
 """
 
 from __future__ import annotations

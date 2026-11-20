@@ -1,8 +1,9 @@
 r"""The ``multitarget`` stage: many targets through the plot model and a configured tracker.
 
-A plot-level scenario (``[sensor]``) is played rotation by rotation
-(:func:`~radar_forge.tracking.scans.scans`) into :class:`~radar_forge.tracking.scans.PlotTracker`.
-Each rotation's confirmed tracks are scored against the aircraft in coverage by GOSPA [1], each
+A plot-level scenario (``[sensor]``) is played scan by scan
+(:func:`~radar_forge.plot_simulator.plot_scans`) into
+:class:`~radar_forge.scan_tracker.ScanTracker`.
+Each scan's confirmed tracks are scored against the aircraft in coverage by GOSPA [1], each
 truth at its track's own time; over the run the stage measures swaps at every crossing the arcs
 hold, the IMM's latency to its turn mode after each turn onset, the position NEES, the measured
 Pd and false-plot rate against the plot model's, and the JPDA cluster sizes, then trajectory
@@ -12,7 +13,7 @@ sizes are recorded, and a scene of two aircraft (V3, ``scenario_011_cst_sweep``)
 pair: resolved or not, and its coalescence ratio. An IQ scenario (scenario 011's V5,
 ``scenario_011_iq_check``) gives the plot model's rates and
 merging from ``ctx.plots`` instead. Writes ``plots.csv``, ``tracks.csv``, ``gospa.csv`` (one
-row per tracker per rotation) and ``scene.png``.
+row per tracker per scan) and ``scene.png``.
 
 References
 ----------
@@ -37,11 +38,12 @@ from scipy.stats import chi2
 
 from radar_forge import figures
 from radar_forge.coordinates import range_azimuth_to_east_north_m
+from radar_forge.plot_simulator import PlotScan, plot_scans
+from radar_forge.scan_tracker import ScanTracker, tracker_name
 from radar_forge.scenario import Scenario
 from radar_forge.tracking.filters import TrackBank, TrackStatus, is_confirmed
 from radar_forge.tracking.metrics import gospa, nees, trajectory_gospa
-from radar_forge.tracking.rfs import PmbmTracker
-from radar_forge.tracking.scans import PlotScan, PlotTracker, scans, tracker_name
+from radar_forge.tracking.pmbm import PmbmTracker
 from radar_forge.verify import stepper
 
 __all__ = ["merged_counts", "multitarget", "pair_scores", "pair_windows", "play"]
@@ -68,7 +70,7 @@ _PAIR_SCANS, _HELD_FRACTION = 20, 0.9
 
 @dataclass
 class _Run:
-    """What the rotations accumulate for the scores."""
+    """What the scans accumulate for the scores."""
 
     gospa_rows: list[dict[str, Any]] = field(default_factory=list)
     assigned: list[NDArray[np.int64]] = field(default_factory=list)
@@ -99,12 +101,12 @@ def _truth(scenario: Scenario, time_s: NDArray[np.float64]) -> NDArray[np.float6
     return np.stack([target.arc.state(time_s)[0] for target in scenario.arcs])
 
 
-def _score_rotation(scenario: Scenario, plots_scan: PlotScan, bank: TrackBank, run: _Run) -> None:
-    """Score one rotation's confirmed tracks: GOSPA, its assignment, NEES and mode probability."""
+def _score_scan(scenario: Scenario, plots_scan: PlotScan, bank: TrackBank, run: _Run) -> None:
+    """Score one scan's confirmed tracks: GOSPA, its assignment, NEES and mode probability."""
     aircraft = np.array([t.target_class == "aircraft" for t in scenario.arcs])
     present = np.flatnonzero(aircraft & plots_scan.echo_in_coverage)
     confirmed = np.flatnonzero(is_confirmed(bank.status))
-    names = bank.layout.names
+    names = bank.state_layout.names
     columns = [names.index("x_m"), names.index("y_m")]
     estimate = bank.mean[confirmed][:, columns]
     truth = _truth(scenario, bank.time_s[confirmed])[present]
@@ -127,7 +129,7 @@ def _score_rotation(scenario: Scenario, plots_scan: PlotScan, bank: TrackBank, r
     error_m = np.full(len(scenario.arcs), np.nan)
     estimate_m = np.full((len(scenario.arcs), 2), np.nan)
     for k, row in zip(present, score.assignment, strict=True):
-        # A few aircraft a rotation; each scored against the one track GOSPA gave it.
+        # A few aircraft a scan; each scored against the one track GOSPA gave it.
         if row < 0:
             continue
         track = confirmed[row]
@@ -210,7 +212,7 @@ def _mode_latency(scenario: Scenario, run: _Run, period_s: float) -> float:
 
 
 def _plot_rows(plots_scan: PlotScan) -> list[dict[str, Any]]:
-    """Return one plots.csv row per plot of a rotation."""
+    """Return one plots.csv row per plot of a scan."""
     return [
         {
             "scan": plots_scan.index,
@@ -228,10 +230,10 @@ def _plot_rows(plots_scan: PlotScan) -> list[dict[str, Any]]:
 def _track_rows(
     plots_scan: PlotScan, bank: TrackBank, tracker: str, score: NDArray[np.float64]
 ) -> list[dict[str, Any]]:
-    """Return one tracks.csv row per live track at the end of a rotation; MHT's has a score."""
+    """Return one tracks.csv row per live track at the end of a scan; MHT's has a score."""
     rows = []
-    names = bank.layout.names
-    # One row per track: tens to a few thousand a rotation.
+    names = bank.state_layout.names
+    # One row per track: tens to a few thousand a scan.
     for r in range(bank.n_tracks):
         row: dict[str, Any] = {"tracker": tracker, "scan": plots_scan.index}
         row["time_s"] = bank.time_s[r]
@@ -245,9 +247,9 @@ def _track_rows(
 
 
 def _expected_false_plots(scenario: Scenario, time_s: float) -> float:
-    """Return the false plots a rotation should hold: Poisson regions and discretes."""
+    """Return the false plots a scan should hold: Poisson regions and discretes."""
     clutter = scenario.clutter_plots
-    regions = sum(c.intensity_per_m_rad * c.volume_m_rad(time_s) for c in clutter.components)
+    regions = sum(c.density_per_m_rad * c.volume_m_rad(time_s) for c in clutter.components)
     discretes = clutter.discretes
     return regions + (
         0.0 if discretes is None else discretes.report_probability * discretes.range_m.size
@@ -271,7 +273,7 @@ def _expected_false_plots(scenario: Scenario, time_s: float) -> float:
 def multitarget(ctx: stepper.Context) -> stepper.Context:
     """Track a plot-level scene and score it, or measure an IQ chain's plot statistics.
 
-    ``gospa_mean_max_m`` bounds the mean GOSPA over the rotations; ``swap_fraction_max`` the
+    ``gospa_mean_max_m`` bounds the mean GOSPA over the scans; ``swap_fraction_max`` the
     fraction of crossings followed by a swap; ``mode_latency_max_scans`` the median scans an
     IMM takes to its turn mode after the onset of a turn it tracks; ``nees_fraction_min`` the
     fraction of position NEES inside chi-square(2)'s 95 % interval; ``pd_min`` the measured
@@ -279,7 +281,7 @@ def multitarget(ctx: stepper.Context) -> stepper.Context:
     all of the configured tracker. ``merged_fraction_max`` bounds, pair by pair in range
     order, the fraction of an IQ chain's scans in which a pair gives one detection.
     ``leaf_count_max`` bounds MHT's most leaves in one tree;
-    ``pmbm_cardinality_error_max`` PMBM's mean |tracks - aircraft| a rotation;
+    ``pmbm_cardinality_error_max`` PMBM's mean |tracks - aircraft| a scan;
     ``mht_resolved_lead_min`` MHT's resolved fraction less JPDA's and
     ``pmbm_resolved_lead_min`` PMBM's less the best other tracker's, on a pair (V3).
     """
@@ -328,24 +330,24 @@ def play(scenario: Scenario, n_scans: int | None = None, *, rows: bool = False) 
     settings = scenario.tracking
     primary = tracker_name(settings) if settings else "gnn"
     names = [primary, *(n for n in (settings.trackers if settings else ()) if n != primary)]
-    trackers = {name: PlotTracker(scenario, None if name == primary else name) for name in names}
+    trackers = {name: ScanTracker(scenario, None if name == primary else name) for name in names}
     runs = {name: _Run() for name in names}
     plot_rows: list[dict[str, Any]] = []
     track_rows: list[dict[str, Any]] = []
     false_enu: list[NDArray[np.float64]] = []
     true_enu: list[NDArray[np.float64]] = []
     aircraft = np.array([t.target_class == "aircraft" for t in scenario.arcs])
-    # Rotations are sequential: each one's tracks are the next one's prior.
-    for plots_scan in scans(scenario, n_scans=n_scans):
-        # A few trackers, each run over the same rotation.
+    # Scans are sequential: each one's tracks are the next one's prior.
+    for plots_scan in plot_scans(scenario, n_scans=n_scans):
+        # A few trackers, each run over the same scan.
         for name, tracker in trackers.items():
             run = runs[name]
-            for _, association in tracker.rotation(plots_scan):
+            for _, association in tracker.process(plots_scan):
                 if association is not None:
                     run.cluster_tracks += association.cluster_tracks.tolist()
                     run.cluster_events += association.cluster_events.tolist()
             bank = tracker.bank
-            _score_rotation(scenario, plots_scan, bank, run)
+            _score_scan(scenario, plots_scan, bank, run)
             score = _count_hypotheses(tracker, run, bank.n_tracks)
             if rows:
                 track_rows += _track_rows(plots_scan, bank, name, score)
@@ -366,7 +368,7 @@ def play(scenario: Scenario, n_scans: int | None = None, *, rows: bool = False) 
     return runs, plot_rows, track_rows, false_enu, true_enu
 
 
-def _count_hypotheses(tracker: PlotTracker, run: _Run, n_tracks: int) -> NDArray[np.float64]:
+def _count_hypotheses(tracker: ScanTracker, run: _Run, n_tracks: int) -> NDArray[np.float64]:
     """Keep MHT's largest tree and cluster, PMBM's Bernoullis; return MHT's reported scores."""
     inner = tracker.tracker
     if isinstance(inner, PmbmTracker):
@@ -384,9 +386,9 @@ def pair_scores(scenario: Scenario, run: Any) -> tuple[float, float]:
     """Return whether a scene's two aircraft were resolved (1 or 0), and its coalescence ratio.
 
     Resolved: each aircraft held by one confirmed track, its own, within c/2 in at least 90 %
-    of the last 20 rotations. The ratio is the mean distance between the two aircraft's
-    tracks over their true separation, over the rotations both have one; 0 when never.
-    NaN for a run under 20 rotations or a scene not of two aircraft.
+    of the last 20 scans. The ratio is the mean distance between the two aircraft's
+    tracks over their true separation, over the scans both have one; 0 when never.
+    NaN for a run under 20 scans or a scene not of two aircraft.
     """
     aircraft = [k for k, t in enumerate(scenario.arcs) if t.target_class == "aircraft"]
     if len(aircraft) != 2 or len(run.assigned) < _PAIR_SCANS:
@@ -452,7 +454,7 @@ def _record_trackers(
         if key not in verify:
             continue
         if name not in resolved or not against or any(n not in resolved for n in against):
-            print(f"  {key.removesuffix('_min')}: no pair, or too few rotations, to judge")
+            print(f"  {key.removesuffix('_min')}: no pair, or too few scans, to judge")
             continue
         lead = ctx.record(
             key.removesuffix("_min"), resolved[name] - max(resolved[n] for n in against)
@@ -568,7 +570,7 @@ def _record(
 def _trajectory_score(scenario: Scenario, run: _Run) -> Any:
     """Return trajectory GOSPA over the run's confirmed tracks, or None without any.
 
-    Each confirmed track is one trajectory, present in the rotations it was confirmed; each
+    Each confirmed track is one trajectory, present in the scans it was confirmed; each
     aircraft present while in coverage, taken at each track's time.
     """
     ids = sorted({int(i) for track_id, _, _ in run.confirmed for i in track_id})
@@ -580,7 +582,7 @@ def _trajectory_score(scenario: Scenario, run: _Run) -> Any:
     times = np.full((n_steps, len(ids)), np.nan)
     truths = np.full((n_steps, n_targets, len(ids), 2), np.nan)
     present_at = np.full((n_steps, n_targets, 2), np.nan)
-    # One rotation at a time: its tracks and the aircraft in coverage.
+    # One scan at a time: its tracks and the aircraft in coverage.
     for step, ((track_id, position, time_s), present) in enumerate(
         zip(run.confirmed, run.present, strict=True)
     ):
@@ -590,8 +592,8 @@ def _trajectory_score(scenario: Scenario, run: _Run) -> Any:
             np.isnan(times[step]), np.nanmean(time_s) if time_s.size else 0.0, times[step]
         )
         truths[step, present] = _truth(scenario, at)[present]
-        rotation_s = np.nanmean(time_s) if time_s.size else scenario.start_time_s
-        present_at[step, present] = _truth(scenario, np.array(rotation_s))[present]
+        scan_time_s = np.nanmean(time_s) if time_s.size else scenario.start_time_s
+        present_at[step, present] = _truth(scenario, np.array(scan_time_s))[present]
     aircraft = [k for k, t in enumerate(scenario.arcs) if t.target_class == "aircraft"]
     return trajectory_gospa(
         estimates,

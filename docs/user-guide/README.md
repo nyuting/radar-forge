@@ -32,7 +32,7 @@ target's route; `coordinates` turns latitude and longitude into the local frame 
 | [3. Waveforms and signals](03-waveforms-and-signals.md) | `signal` | The chirp, how range turns into a beat frequency, and how the library builds the complex samples a receiver records |
 | [4. Range-Doppler processing](04-range-doppler-processing.md) | `dsp`, and `pipeline.range_doppler_product` | How two FFTs turn those samples into a map of range against velocity, what a taper costs, and how two PRFs undo folding |
 | [5. Detection](05-detection.md) | `detection`, and `pipeline.scan_plots` | How CFAR decides which cells of the map hold a target, at a false-alarm rate you choose |
-| [6. Tracking](06-tracking.md) | `tracking/`, and `pipeline.ScanTracker` | How detections from scan after scan become tracks |
+| [6. Tracking](06-tracking.md) | `tracking/`, and `scan_tracker.ScanTracker` | How detections from scan after scan become tracks |
 
 Every page has the same sections in the same order: what the stage does, a table of quantities
 and equations with a worked value, how it works step by step, a short example to run, a

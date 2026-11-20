@@ -32,7 +32,7 @@ from scipy import sparse
 from scipy.optimize import linear_sum_assignment, linprog
 from scipy.stats import chi2
 
-from radar_forge.tracking.models import StateLayout
+from radar_forge.tracking.motion import CoordinateLayout
 
 __all__ = [
     "Gospa",
@@ -46,7 +46,7 @@ __all__ = [
 
 
 def _error(
-    estimate: ArrayLike, truth: ArrayLike, state_layout: StateLayout | None
+    estimate: ArrayLike, truth: ArrayLike, state_layout: CoordinateLayout | None
 ) -> NDArray[np.float64]:
     """Return truth minus estimate, the short way round when a layout gives periods."""
     if state_layout is None:
@@ -59,7 +59,7 @@ def nees(
     covariance: ArrayLike,
     truth: ArrayLike,
     *,
-    state_layout: StateLayout | None = None,
+    state_layout: CoordinateLayout | None = None,
 ) -> NDArray[np.float64]:
     """Return the NEES of estimates ``(..., n_state)``, solving rather than inverting P.
 
@@ -101,7 +101,7 @@ def rmse(
     truth: ArrayLike,
     *,
     axis: int | tuple[int, ...] = 0,
-    state_layout: StateLayout | None = None,
+    state_layout: CoordinateLayout | None = None,
 ) -> NDArray[np.float64]:
     """Return the root-mean-square error of each coordinate, averaged over ``axis``.
 

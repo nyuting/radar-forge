@@ -71,13 +71,13 @@ a different false-alarm rate. Your job is to find out on a problem we control.
     `range_doppler_product`. Each scan carries its IQ (`scan.cubes`) and the truth
     (`scan.truth.bistatic_range_m`, `scan.truth.bistatic_range_rate_mps`: unfolded, twice the
     slant values here, positive receding). The map has shape `(n_doppler, n_range)`.
-  - `radar_forge.pipeline`: `scan_plots`, `ScanTracker`, and the `track` stage of
-    `radar_forge.verify` that scores it. This is the classical baseline.
+  - `radar_forge.pipeline`: `scan_plots`; `radar_forge.scan_tracker`: `ScanTracker`; and the
+    `track` stage of `radar_forge.verify` that scores it. This is the classical baseline.
   - `radar_forge.scenario.truth_geometry`: reads each target's trajectory, resamples it onto the
     scan times and returns its geometry seen from the radar. Its steps, once `load_flight_csv`,
     `resample` and `to_radar_frame`, are private now; `radar_forge.coordinates.geodetic_to_enu_m`
     converts fixes of your own.
-  - `radar_forge.tracking.models.MotionModel`: the interface a motion model follows.
+  - `radar_forge.tracking.motion.MotionModel`: the interface a motion model follows.
     `radar_forge.tracking.Tracker` and `radar_forge.tracking.filters.predict` accept **any**
     object that follows it, so you can put your own transition into the library's tracker
     from your script.

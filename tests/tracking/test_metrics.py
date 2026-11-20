@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from radar_forge.tracking.metrics import consistency_interval, gospa, nees, rmse, trajectory_gospa
-from radar_forge.tracking.models import Coordinate, StateLayout
+from radar_forge.tracking.motion import Coordinate, CoordinateLayout
 
 
 def test_nees_is_the_error_weighted_by_the_inverse_covariance() -> None:
@@ -28,7 +28,7 @@ def test_nees_is_batched_over_runs_and_steps() -> None:
 
 
 def test_nees_takes_the_short_way_round_a_periodic_coordinate() -> None:
-    layout = StateLayout((Coordinate("azimuth_rad", "rad", period=2 * np.pi),))
+    layout = CoordinateLayout((Coordinate("azimuth_rad", "rad", period=2 * np.pi),))
     value = nees([2 * np.pi - 0.1], np.eye(1), [0.1], state_layout=layout)
     assert value == pytest.approx(0.04, rel=1e-12)
 

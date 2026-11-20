@@ -20,9 +20,10 @@ from numpy.typing import NDArray
 
 from radar_forge.detection import CfarVariant
 from radar_forge.doa import label_parts
+from radar_forge.plot_simulator import ClutterComponent, FixedDiscretes
 from radar_forge.propagation import dbsm_to_m2
 from radar_forge.tracking.hypotheses import CONFIRM_SCORE, DELETE_DROP
-from radar_forge.tracking.scene import Arc, ClutterComponent, FixedDiscretes
+from radar_forge.trajectory import Arc
 
 __all__ = [
     "ArcTarget",
@@ -102,13 +103,16 @@ class TrackingSettings:
     Every rate and acceleration is of bistatic range, twice the radial value when monostatic.
     ``range_only_retry`` offers each track range alone when range and rate fail the gate; it
     mixes measurement dimensions, so it needs ``cost = "negative_log_likelihood_ratio"``.
+    ``initiator`` is ``"direct"`` or ``"range_only"`` for an IQ scenario and
+    ``"debiased_spherical"`` for a plot-level one. ``detection_probability`` given, GNN
+    leaves unassigned any pair costlier than ln(P_D / (1 - P_D P_G)); JPDA, MHT and PMBM need it.
     """
 
     linearisation: Literal["taylor", "unscented"] = "unscented"
-    process_noise: Literal["cwna", "dwna"] = "cwna"
+    white_noise: Literal["continuous", "discrete"] = "continuous"
     sigma_acceleration_mps2: float = 8.0
     acceleration_correlation_time_s: float = 1.0
-    initiator: Literal["direct", "range_only"] = "direct"
+    initiator: Literal["direct", "range_only", "debiased_spherical"] = "direct"
     cost: Literal["nis", "negative_log_likelihood_ratio"] = "nis"
     assignment: Literal["confirmed_first", "joint"] = "confirmed_first"
     range_only_retry: bool = False
@@ -130,15 +134,15 @@ class TrackingSettings:
     turn_rate_noise_density_rad2ps3: float = 1.6e-5
     sojourn_time_s: tuple[float, ...] = (120.0, 30.0, 20.0)
     turn_rate_sigma_degps: float = 3.0
-    clutter_intensity: Literal["oracle", "map"] = "oracle"
-    detection_probability: float = 0.9
-    max_birth_clutter_intensity_per_m_rad: float = 0.01
+    clutter_density_source: Literal["oracle", "map"] = "oracle"
+    detection_probability: float | None = None
+    max_birth_clutter_density_per_m_rad: float = 0.01
     initial_speed_sigma_mps: float = 150.0
     max_position_sigma_m: float = np.inf
     # Scenario 011b: MHT's tree, PMBM's births and pruning, cues at the truth, and further
-    # trackers to score beside the configured one (tracking.scans.VARIANTS, or "pmbm").
+    # trackers to score beside the configured one (scan_tracker.VARIANTS, or "pmbm").
     k_best: int = 10
-    n_scan: int = 3
+    n_scan_depth: int = 3
     confirm_score: float = CONFIRM_SCORE
     delete_drop: float = DELETE_DROP
     birth_intensity_per_scan: float = 0.05
@@ -184,10 +188,10 @@ class SensorSettings:
     range_max_m: float = 40000.0
     sigma_range_m: float = 33.414
     sigma_azimuth_deg: float = 0.15
-    pd_aircraft: float = 0.9
-    pd_bird: float = 0.3
+    detection_probability_aircraft: float = 0.9
+    detection_probability_bird: float = 0.3
     mti_notch_mps: float = 4.0
-    pd_notch: float = 0.3
+    detection_probability_notch: float = 0.3
     n_sectors: int = 16
 
 

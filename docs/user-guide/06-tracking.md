@@ -5,7 +5,7 @@ running estimate of one target: its state (for example its range and range rate)
 uncertain that estimate is, and whether the tracker trusts it yet. Every track is one row of a
 `TrackBank`, and each step of the filter runs over every row at once. It is the last stage of
 [the chain](README.md#the-chain): it takes the plots from [page 5](05-detection.md), and
-`pipeline.ScanTracker` builds it from a scenario's `[tracking]` table. This page says what is
+`scan_tracker.ScanTracker` builds it from a scenario's `[tracking]` table. This page says what is
 in the package, the equations it runs, the order a scan runs in, how to try it, and what it
 can't do yet.
 
@@ -27,18 +27,22 @@ twice the radial value when monostatic.
 
 | Module | What it holds |
 | :-- | :-- |
-| `models.py` | `StateLayout` and `Coordinate`, the named coordinates of a state or measurement, which wrap a periodic value (`StateLayout.wrap`, through the shared `_periodic.fold`); `check_covariances`, the one boundary check (symmetric, positive definite). Motion models, which predict a state forward: `RadialConstantVelocity` (state `[bistatic_range_m, bistatic_range_rate_mps]`) and `CartesianMotion` (constant velocity or acceleration on each ENU axis). Measurement models, which predict a measurement from a state: `LinearMeasurement` (some state coordinates, reported directly, optionally folded at a period), `RangeAzimuthElevationRangeRate` (a monostatic radar's spherical measurement of an ENU state), `BistaticRangeRateModel` ($R_T + R_R$ and its rate; $(2r, 2\dot r)$ when the sites coincide) and `marginal` (some of a model's components, such as range alone). |
+| `motion.py` | `CoordinateLayout` and `Coordinate`, the named coordinates of a state or measurement, which wrap a periodic value (`CoordinateLayout.wrap`, through the shared `_periodic.fold`); `check_covariances`, the one boundary check (symmetric, positive definite). Motion models, which predict a state forward: `ConstantVelocity` (on each ENU axis, or, built by `ConstantVelocity.bistatic_range`, on the state `[bistatic_range_m, bistatic_range_rate_mps]`), `ConstantAcceleration`, and `ConstantTurn` (also called the coordinated turn). |
+| `measurement.py` | Measurement models, which predict a measurement from a state: `LinearMeasurement` (some state coordinates, reported directly, optionally folded at a period), `RangeAzimuthElevationRangeRate` (a monostatic radar's spherical measurement of an ENU state), `BistaticRangeAndRangeRate` ($R_T + R_R$ and its rate; $(2r, 2\dot r)$ when the sites coincide) and `marginal` (some of a model's components, such as range alone). |
 | `filters.py` | `TrackBank`, every track a row of one immutable struct of arrays; `TrackStatus` and the read-only `TrackSnapshot`; the one Gaussian filter, `predict`, `innovate` and `update`, through `TaylorLinearisation` (the KF on a linear model, the EKF otherwise) or `UnscentedTransform` (the UKF). |
 | `association.py` | `chi_square_gate_threshold` and `gate`; `association_cost`, `"nis"` or `"negative_log_likelihood_ratio"`; `GlobalNearestNeighbour` (GNN) and `GreedyNearestNeighbour`. |
 | `tracker.py` | `Tracker`, which runs one `Scan` at a time; `Scan`, every measurement one sensor made at one time with its R, checked and frozen. `initiation.py` holds the initiators `DirectStateInitiator` and `DebiasedSphericalInitiator`. |
 | `metrics.py` | `nees`, `consistency_interval` and `rmse`, which score a tracker against the truth; `gospa` and `trajectory_gospa` for a many-target scene. |
 | `lifecycle.py` | `LifecyclePolicy`, the M-of-N rule this page uses, with deletion and re-acquisition, and `ExistencePolicy`, confirmation by existence probability (scenario 011). |
-| `imm.py`, `hypotheses.py`, `rfs.py` | The many-target methods of scenario 011, not walked through here: the interacting multiple model, track-oriented MHT and the PMBM tracker. |
-| `scene.py` | Not tracker code: a simulator of the plots a rotating surveillance radar makes (true trajectories, merged echoes, missed detections, false plots). Four of scenario 011's six variants use it in place of IQ. |
-| `scans.py` | Plays that scene a rotation at a time, and holds `PlotTracker`, the tracker scenario 011 builds from its `[tracking]` table. |
+| `imm.py`, `hypotheses.py`, `pmbm.py` | The many-target methods of scenario 011, not walked through here: the interacting multiple model, track-oriented MHT and the PMBM tracker. |
+| `clutter_map.py` | `ClutterMap`, the clutter density per (m rad) learnt from the plots no confirmed track took (scenario 011). |
 
 `radar_forge.tracking` exports `Scan` and `Tracker`; everything else is imported from its
-module.
+module. Outside the package, `scan_tracker.py` builds a scenario's tracker from its
+`[tracking]` table and feeds it each scan. Not tracker code: `trajectory.py` holds the true
+trajectories of scenario 011's targets, and `plot_simulator.py` the plots a rotating
+surveillance radar makes of them (merged echoes, missed detections, false plots), scan by
+scan. Four of scenario 011's six variants use them in place of IQ.
 
 ## Quantities and equations
 
@@ -51,8 +55,8 @@ alone and infers the rate.
 | Quantity | Symbol | Equation | In the code | Scenario 003, UKF on S1 |
 | :-- | :-- | :-- | :-- | --: |
 | State and its covariance | $\mathbf{x}$, $P$ | mean and covariance of the estimate | a row of `TrackBank.mean`, `.covariance` | $[R_b, \dot R_b]$ |
-| Transition over a step $T$ | $F$ | $R_b \to R_b + T\dot R_b$, $\dot R_b \to \dot R_b$ | `RadialConstantVelocity.jacobian` | $T$ = 1 s |
-| Process-noise intensity | $q$ | $q = 2\sigma_a^2\tau$ (`"cwna"`) | `RadialConstantVelocity(sigma_acceleration_mps2, ...)` | 128 m²/s³ |
+| Transition over a step $T$ | $F$ | $R_b \to R_b + T\dot R_b$, $\dot R_b \to \dot R_b$ | `ConstantVelocity.bistatic_range(...).jacobian` | $T$ = 1 s |
+| Process-noise intensity | $q$ | $q = 2\sigma_a^2\tau$ (`white_noise = "continuous"`) | `ConstantVelocity.bistatic_range(sigma_acceleration_mps2, ...)` | 128 m²/s³ |
 | Process noise over a step | $Q(T)$ | $q$ times the matrix below | `.process_noise` | [[42.667, 64], [64, 128]] m², m²/s, m²/s² |
 | Predict | $\mathbf{x}^-$, $P^-$ | $\mathbf{x}^- = F\mathbf{x}$, $P^- = FPF^\mathsf{T} + Q$ | `predict` | — |
 | Measurement noise | $R_z$ | one bin over $\sqrt{12}$, on the diagonal | `ScanTracker.noise_covariance` | 43.27 m (0.0345 m/s when the rate is measured) |
@@ -76,9 +80,9 @@ The motion model gives $F$ and $Q$:
 $$F = \begin{bmatrix} 1 & T \\ 0 & 1 \end{bmatrix}, \qquad
 Q(T) = q\begin{bmatrix} T^3/3 & T^2/2 \\ T^2/2 & T \end{bmatrix}$$
 
-This is continuous white-noise acceleration (CWNA). The off-diagonal terms are positive
+This is continuous white-noise acceleration (`"continuous"`). The off-diagonal terms are positive
 because the rate is the range's derivative: a receding target's range grows. Discrete
-white-noise acceleration (`"dwna"`), which scenario 003's Kalman path uses, holds one
+white-noise acceleration (`"discrete"`), which scenario 003's Kalman path uses, holds one
 acceleration of standard deviation $\sigma_a$ through each step instead:
 $Q(T) = \sigma_a^2 \begin{bmatrix} T^4/4 & T^3/2 \\ T^3/2 & T^2 \end{bmatrix}$, so
 [[25, 50], [50, 100]] at its $\sigma_a$ = 10 m/s².
@@ -153,22 +157,23 @@ hit, miss, hit, miss, hit confirms on scan 5, and hit, miss, miss, miss deletes 
 
 ### The scenario's tracker
 
-`pipeline.ScanTracker(scenario)` builds a `Tracker` from `[tracking]` (`linearisation`,
-`process_noise`, `initiator`, `cost`, `assignment`, the lifecycle counts) on
-`RadialConstantVelocity`, and `ScanTracker.scan(plots, time_s)` feeds it a scan's accepted
-plots. Range is measured modulo the map's span, 149,896 m for S1, while the state stays
-continuous. The rate is measured only where it cannot fold: after dual-PRF pairing, from
+`scan_tracker.ScanTracker(scenario)` builds a `Tracker` from `[tracking]` (`linearisation`,
+`white_noise`, `initiator`, `cost`, `assignment`, `association`, the lifecycle counts) on
+`ConstantVelocity.bistatic_range`, and `ScanTracker.process(plots, time_s)` feeds it a scan's
+accepted plots as one batch; a rotating radar's scan (scenario 011) reaches the same class as
+one batch a sector. Range is measured modulo the map's period, 149,896 m for S1, while the
+state stays continuous. The rate is measured only where it cannot fold: after dual-PRF pairing, from
 one burst whose rate interval covers `max_bistatic_range_rate_mps`, or once a track can unfold
 it (`rate_unfolding = "track_aided"`); otherwise range alone. Track-aided unfolding lets a track
 unfold once it holds N associated ranges, the least N whose least-squares slope is certain to a
-`unfold_sigma_gate`-th of a fold span:
+`unfold_sigma_gate`-th of the rate period:
 
-$$\frac{\sigma_R}{T}\sqrt{\frac{12}{N(N^2-1)}} < \frac{v_{\mathrm{span}}}{g}$$
+$$\frac{\sigma_R}{T}\sqrt{\frac{12}{N(N^2-1)}} < \frac{v_{\mathrm{period}}}{g}$$
 
-with $v_{\mathrm{span}}$ the rate span and $g$ the gate. On S1, $\sigma_R$ = 43.27 m,
-$v_{\mathrm{span}}$ = 30.591 m/s and $g$ = 6 give N = 10. Of the tracks that may unfold, the
+with $v_{\mathrm{period}}$ the rate period and $g$ the gate. On S1, $\sigma_R$ = 43.27 m,
+$v_{\mathrm{period}}$ = 30.591 m/s and $g$ = 6 give N = 10. Of the tracks that may unfold, the
 one with the longest range history then gives each plot the fold nearest its rate, unless that
-lies over half a span from the slope of its last `n_slope_scans` ranges (the **fold monitor**):
+lies over half a period from the slope of its last `n_slope_scans` ranges (the **fold monitor**):
 a wrong fold agrees with the prediction that chose it, never with the range.
 
 ### Choosing the process noise
@@ -181,9 +186,11 @@ may stray from it, given as two physical numbers:
   a 3σ bound gives $\sigma_a$ = `a_max` / 3.
 - `acceleration_correlation_time_s`, $\tau$: roughly how long one acceleration lasts.
 
-`"cwna"` turns them into $q = 2\sigma_a^2\tau$ and builds $Q(T)$ from the actual step at every
-prediction ([the equations above](#quantities-and-equations)); it is right for any step.
-`"dwna"` reads $\sigma_a$ alone. The two add equal velocity variance per step only when
+`"continuous"` turns them into $q = 2\sigma_a^2\tau$ and builds $Q(T)$ from the actual step
+at every prediction ([the equations above](#quantities-and-equations)). That $Q$ is exact for
+any step under continuous white-noise acceleration; $q = 2\sigma_a^2\tau$ itself is Singer's
+intensity, an approximation to a correlated acceleration that holds for steps long against
+$\tau$. `"discrete"` reads $\sigma_a$ alone. The two add equal velocity variance per step only when
 $\tau = T/2$. The UKF scenario's 8 m/s² and 1 s are measured from scenario 001's truth: 4.0 m/s²
 radial, with a correlation that falls to about a half after 1 s.
 
@@ -201,12 +208,13 @@ import numpy as np
 from radar_forge.tracking import Scan, Tracker
 from radar_forge.tracking.association import GlobalNearestNeighbour
 from radar_forge.tracking.filters import UnscentedTransform
-from radar_forge.tracking.models import LinearMeasurement, RadialConstantVelocity
 from radar_forge.tracking.initiation import DirectStateInitiator
 from radar_forge.tracking.lifecycle import LifecyclePolicy
+from radar_forge.tracking.measurement import LinearMeasurement
+from radar_forge.tracking.motion import ConstantVelocity
 
 # State and measurement: bistatic range and its rate, positive receding.
-motion = RadialConstantVelocity(8.0)  # sigma_a of bistatic range, m/s^2
+motion = ConstantVelocity.bistatic_range(8.0)  # sigma_a of bistatic range, m/s^2
 names = ("bistatic_range_m", "bistatic_range_rate_mps")
 models = {"range_rate": LinearMeasurement(motion.state_layout, names)}
 sigma = np.array([43.27, 0.0345])  # one bin over sqrt(12): m, m/s
@@ -252,15 +260,16 @@ import numpy as np
 from radar_forge.pipeline import map_axes
 from radar_forge.scenario import load_scenario
 from radar_forge.tracking.association import chi_square_gate_threshold
-from radar_forge.tracking.models import RadialConstantVelocity
+from radar_forge.tracking.motion import ConstantVelocity
 
-# The UKF on S1: [tracking] gives sigma_a = 8 m/s^2 of bistatic range, tau = 1 s, CWNA.
+# The UKF on S1: [tracking] gives sigma_a = 8 m/s^2 of bistatic range, tau = 1 s and
+# continuous white noise.
 scenario = load_scenario("config/scenario_003_ukf_fmcw_low_prf.toml")
 settings = scenario.tracking
-motion = RadialConstantVelocity(
+motion = ConstantVelocity.bistatic_range(
     settings.sigma_acceleration_mps2,
     acceleration_correlation_time_s=settings.acceleration_correlation_time_s,
-    process_noise=settings.process_noise,
+    white_noise=settings.white_noise,
 )
 step_s = scenario.scan_period_s
 print("F(1 s) =", motion.jacobian(np.zeros(2), step_s).tolist())
@@ -298,10 +307,11 @@ import numpy as np
 
 from radar_forge.tracking.filters import TrackBank, UnscentedTransform, innovate, predict, update
 from radar_forge.tracking.metrics import consistency_interval, nees
-from radar_forge.tracking.models import LinearMeasurement, RadialConstantVelocity
+from radar_forge.tracking.measurement import LinearMeasurement
+from radar_forge.tracking.motion import ConstantVelocity
 
 # 200 runs of one UKF as the 200 rows of one bank, measuring range alone.
-motion = RadialConstantVelocity(8.0)
+motion = ConstantVelocity.bistatic_range(8.0)
 model = LinearMeasurement(motion.state_layout, ["bistatic_range_m"])
 ukf, noise_m2 = UnscentedTransform(), np.array([[43.27**2]])
 n_runs, prior = 200, np.diag([43.27, 20.0]) ** 2
@@ -396,26 +406,30 @@ from here.
   `max_bistatic_range_rate_mps`, 400 m/s, because the plot's rate is folded and would start the
   track confidently wrong.
 - **A scenario-003 track measures range only until it holds ten ranges.** Track-aided unfolding
-  needs a range slope certain to a sixth of a fold span first, which takes N = 10 ranges
+  needs a range slope certain to a sixth of the rate period first, which takes N = 10 ranges
   ([the scenario's tracker](#the-scenarios-tracker)).
 
 ## Limits
 
 **Built, but not covered on this page.** The page walks through the single-target tracker of
 scenario 003. The package also holds, for the many-target scenario 011: the interacting multiple
-model filter (`imm.py`) and the `CoordinatedTurn` motion model; probabilistic association (PDA,
+model filter (`imm.py`) and the `ConstantTurn` motion model; probabilistic association (PDA,
 JPDA and its variants) and Murty's k-best assignments (`association.py`); track-oriented
 multiple hypothesis tracking (`hypotheses.py`) and the Poisson multi-Bernoulli mixture tracker
-(`rfs.py`); confirmation by existence probability (`lifecycle.py`); GOSPA and trajectory GOSPA
+(`pmbm.py`); confirmation by existence probability (`lifecycle.py`); GOSPA and trajectory GOSPA
 (`metrics.py`); and sensor coverage, so that a scan counts a miss only against the tracks it
 could have seen (`tracker.Coverage`). Their docstrings and `spec/tracker-001.md` describe them.
-Only scenario 011's tracker (`tracking.scans.PlotTracker`) can be configured to use them today;
-the tracker this page's scenarios build (`pipeline.ScanTracker`) is always GNN, with a
-range-and-rate state.
+`scan_tracker.ScanTracker` configures any of the associators for either kind of scenario
+(`association`, `coalescence`, `existence` in `[tracking]`, with `detection_probability`);
+this page's scenarios configure GNN, with a range-and-rate state, and PMBM and the IMM need
+a plot-level scenario's ground-plane state. An IQ scenario takes JPDA or MHT only with one
+measurement model a scan: where the rate is measured, `range_only_retry = false` and
+`rate_unfolding = "none"`, as in the three `scenario_003_ukf_*` files; `ScanTracker` refuses
+the rest when built.
 
 **Not yet supported:**
 
-- an initiator for `BistaticRangeRateModel`: one bistatic measurement cannot fix a position, so
+- an initiator for `BistaticRangeAndRangeRate`: one bistatic measurement cannot fix a position, so
   `DirectStateInitiator` returns None for it. Add its tracks with `Tracker.seed`.
 
 **Built-in assumptions.**

@@ -33,12 +33,8 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from radar_forge.tracking._linalg import symmetrise
-from radar_forge.tracking.models import (
-    MeasurementModel,
-    MotionModel,
-    StateLayout,
-    check_covariances,
-)
+from radar_forge.tracking.measurement import MeasurementModel
+from radar_forge.tracking.motion import CoordinateLayout, MotionModel, check_covariances
 
 __all__ = [
     "Innovation",
@@ -118,7 +114,7 @@ class TrackBank:
     Bar-Shalom [1], §5.2.1 (the state estimate and its covariance).
     """
 
-    layout: StateLayout
+    state_layout: CoordinateLayout
     mean: NDArray[np.float64]
     covariance: NDArray[np.float64]
     time_s: NDArray[np.float64]
@@ -136,12 +132,12 @@ class TrackBank:
     mode_covariance: NDArray[np.float64]
 
     @classmethod
-    def empty(cls, layout: StateLayout, n_modes: int = 0) -> TrackBank:
+    def empty(cls, state_layout: CoordinateLayout, n_modes: int = 0) -> TrackBank:
         """Return a bank with no rows, holding ``n_modes`` IMM modes (0: one model)."""
-        n = layout.dimension
+        n = state_layout.dimension
         columns = {name: np.zeros(0, dtype=dtype) for name, dtype in _DTYPES.items()}
         return cls(
-            layout,
+            state_layout,
             np.zeros((0, n)),
             np.zeros((0, n, n)),
             **columns,
@@ -178,7 +174,7 @@ class TrackBank:
         ``mode_probability`` ``(n_modes,)`` or ``(n_new, n_modes)``; ``existence`` defaults
         to 1.
         """
-        n_state = self.layout.dimension
+        n_state = self.state_layout.dimension
         new_mean = np.array(mean, dtype=np.float64)
         if new_mean.ndim != 2 or new_mean.shape[1] != n_state or not np.all(np.isfinite(new_mean)):
             msg = f"mean must be finite with shape (n_new, {n_state}); got {new_mean.shape}."
@@ -223,7 +219,7 @@ class TrackBank:
             np.zeros((n_new, n_modes, n_state, n_state)) + new["covariance"][:, None]
         )
         columns = {name: np.concatenate([getattr(self, name), new[name]]) for name in new}
-        return TrackBank(self.layout, **columns)
+        return TrackBank(self.state_layout, **columns)
 
     def compact(self, keep: ArrayLike) -> TrackBank:
         """Return the rows where ``keep``, ``(n_tracks,)`` bool, is True, in order."""
@@ -235,7 +231,7 @@ class TrackBank:
         columns: dict[str, NDArray[Any]] = {
             f.name: getattr(self, f.name)[index] for f in fields(self)[1:]
         }
-        return TrackBank(self.layout, **columns)
+        return TrackBank(self.state_layout, **columns)
 
     def join(self, *others: TrackBank) -> TrackBank:
         """Return this bank's rows followed by each other bank's, all of one layout."""
@@ -243,7 +239,7 @@ class TrackBank:
             f.name: np.concatenate([getattr(b, f.name) for b in (self, *others)])
             for f in fields(self)[1:]
         }
-        return TrackBank(self.layout, **columns)
+        return TrackBank(self.state_layout, **columns)
 
     def snapshots(self) -> tuple[TrackSnapshot, ...]:
         """Return a frozen, read-only :class:`TrackSnapshot` of each row, in row order."""
@@ -332,14 +328,16 @@ class TaylorLinearisation:
         r"""Return :math:`f(\hat{x})` and :math:`F P F^T + Q` for every row."""
         transition = motion.jacobian(bank.mean, dt_s)
         noise = motion.process_noise(bank.mean, dt_s)
-        mean = bank.layout.wrap(motion.transition(bank.mean, dt_s))
+        mean = bank.state_layout.wrap(motion.transition(bank.mean, dt_s))
         return mean, symmetrise(transition @ bank.covariance @ _transpose(transition) + noise)
 
     def measure(self, model: MeasurementModel, bank: TrackBank) -> MeasurementMoments:
         r"""Return :math:`h(\hat{x})`, :math:`P H^T`, :math:`H P H^T` and H for every row."""
         matrix = model.jacobian(bank.mean)
         cross = bank.covariance @ _transpose(matrix)
-        return MeasurementMoments(model.predict(bank.mean), cross, matrix @ cross, matrix)
+        return MeasurementMoments(
+            model.predicted_measurement(bank.mean), cross, matrix @ cross, matrix
+        )
 
 
 @cache
@@ -405,17 +403,17 @@ class UnscentedTransform:
 
     def sigma_points(self, bank: TrackBank) -> NDArray[np.float64]:
         """Return every row's sigma points, ``(n_tracks, 2 n_state + 1, n_state)``."""
-        n_state = bank.layout.dimension
+        n_state = bank.state_layout.dimension
         # The weights refuse n + kappa <= 0, which would put every sigma point on the mean.
         self.weights(n_state)
         # Row i of Lᵀ is column i of L, so each row of the offsets is one spread direction.
         root = _transpose(np.linalg.cholesky(bank.covariance))
         offsets = np.sqrt(self.alpha**2 * (n_state + self.kappa)) * root
         deviations = np.concatenate([np.zeros_like(offsets[:, :1]), offsets, -offsets], axis=1)
-        return bank.layout.wrap(bank.mean[:, None, :] + deviations)
+        return bank.state_layout.wrap(bank.mean[:, None, :] + deviations)
 
     def _moments(
-        self, points: NDArray[np.float64], layout: StateLayout
+        self, points: NDArray[np.float64], layout: CoordinateLayout
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """Return the weighted mean about the centre point, and each point's deviation."""
         mean_weights, _ = self.weights((points.shape[1] - 1) // 2)
@@ -427,18 +425,18 @@ class UnscentedTransform:
         self, motion: MotionModel, bank: TrackBank, dt_s: NDArray[np.float64]
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """Return the weighted mean and covariance of the moved points, plus Q."""
-        _, covariance_weights = self.weights(bank.layout.dimension)
+        _, covariance_weights = self.weights(bank.state_layout.dimension)
         moved = motion.transition(self.sigma_points(bank), dt_s[:, None])
-        mean, deviation = self._moments(moved, bank.layout)
+        mean, deviation = self._moments(moved, bank.state_layout)
         spread = np.einsum("k,tki,tkj->tij", covariance_weights, deviation, deviation)
         return mean, symmetrise(spread + motion.process_noise(bank.mean, dt_s))
 
     def measure(self, model: MeasurementModel, bank: TrackBank) -> MeasurementMoments:
         r"""Return :math:`\hat{z}`, :math:`P_{xz}` and S without R from the pushed points."""
-        _, covariance_weights = self.weights(bank.layout.dimension)
+        _, covariance_weights = self.weights(bank.state_layout.dimension)
         points = self.sigma_points(bank)
-        predicted, dz = self._moments(model.predict(points), model.measurement_layout)
-        dx = bank.layout.residual(points, bank.mean[:, None, :])
+        predicted, dz = self._moments(model.predicted_measurement(points), model.measurement_layout)
+        dx = bank.state_layout.residual(points, bank.mean[:, None, :])
         cross = np.einsum("k,tki,tkj->tij", covariance_weights, dx, dz)
         spread = np.einsum("k,tki,tkj->tij", covariance_weights, dz, dz)
         return MeasurementMoments(predicted, cross, symmetrise(spread))
@@ -549,7 +547,7 @@ def update(
     rows = np.flatnonzero(choice >= 0)
     step, posterior = _correct(bank, innovation, rows, choice[rows])
     mean, full_covariance = bank.mean.copy(), bank.covariance.copy()
-    mean[rows] = bank.layout.wrap(bank.mean[rows] + step)
+    mean[rows] = bank.state_layout.wrap(bank.mean[rows] + step)
     full_covariance[rows] = symmetrise(posterior)
     return replace(bank, mean=mean, covariance=full_covariance)
 
@@ -566,7 +564,7 @@ def _correct(
     if matrix is None:
         posterior = prior - gain @ covariance @ _transpose(gain)
     else:
-        spread = np.eye(bank.layout.dimension) - gain @ matrix[rows]
+        spread = np.eye(bank.state_layout.dimension) - gain @ matrix[rows]
         noise = innovation.measurement_noise[cols]
         posterior = spread @ prior @ _transpose(spread) + gain @ noise @ _transpose(gain)
     step = (gain @ innovation.innovation[rows, cols][..., None])[..., 0]
@@ -598,5 +596,5 @@ def update_weighted(bank: TrackBank, innovation: Innovation, weights: ArrayLike)
     covariance = beta[:, -1, None, None] * bank.covariance
     np.add.at(covariance, rows, weight[:, None, None] * outer)
     covariance -= shift[:, :, None] * shift[:, None, :]
-    mean = bank.layout.wrap(bank.mean + shift)
+    mean = bank.state_layout.wrap(bank.mean + shift)
     return replace(bank, mean=mean, covariance=symmetrise(covariance))

@@ -74,7 +74,7 @@ max_bistatic_range_rate_mps = 400.0
 # is seeded from both components and nothing unfolds by track.
 [tracking]
 linearisation = "taylor"
-process_noise = "dwna"
+white_noise = "discrete"
 sigma_acceleration_mps2 = 10.0
 initiator = "direct"
 range_only_retry = true

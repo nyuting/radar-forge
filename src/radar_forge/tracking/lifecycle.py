@@ -76,7 +76,7 @@ class LifecyclePolicy:
 class ExistencePolicy:
     """Confirm and delete by the probability that a track's target exists (JIPDA).
 
-    Each scan that sees a track multiplies its existence by ``p_survival`` before the
+    Each scan that sees a track multiplies its existence by ``survival_probability`` before the
     association updates it; a track is confirmed at ``confirm`` or more and deleted below
     ``delete``. A new track starts at ``initial``. It replaces M-of-N, and needs an associator
     that weights.
@@ -86,7 +86,7 @@ class ExistencePolicy:
     Mušicki and Evans [2] (the existence prediction and the confirm and delete thresholds).
     """
 
-    p_survival: float = 0.995
+    survival_probability: float = 0.995
     confirm: float = 0.95
     delete: float = 0.05
     initial: float = 0.2
@@ -94,11 +94,14 @@ class ExistencePolicy:
     def __post_init__(self) -> None:
         """Need 0 < delete < initial and delete < confirm <= 1, survival in (0, 1]."""
         if not (
-            0 < self.p_survival <= 1
+            0 < self.survival_probability <= 1
             and 0 < self.delete < self.initial <= 1
             and self.delete < self.confirm <= 1
         ):
-            msg = f"need 0 < delete < initial, confirm <= 1 and 0 < p_survival <= 1; got {self}."
+            msg = (
+                "need 0 < delete < initial, confirm <= 1 and 0 < survival_probability <= 1; "
+                f"got {self}."
+            )
             raise ValueError(msg)
 
 

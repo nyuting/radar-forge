@@ -34,9 +34,10 @@ Know this before you choose. Each item is something you may have to build in you
   yours to synthesise. `radar_forge.propagation.line_of_sight_paths` takes a `TargetGeometry` of
   any number of targets and their RCS, so one call can place several targets in one IQ cube.
 - **One tracker.** A KF, EKF or UKF with radial constant-velocity motion
-  (`radar_forge.tracking.models.RadialConstantVelocity`) or Cartesian constant-velocity or
-  constant-acceleration motion (`CartesianMotion`), a chi-square gate, and global or greedy
-  nearest-neighbour assignment. There is no IMM, no PDA or JPDA, no MHT and no smoother.
+  (`radar_forge.tracking.motion.ConstantVelocity.bistatic_range`) or Cartesian constant-velocity
+  or constant-acceleration motion (`ConstantVelocity`, `ConstantAcceleration`), a chi-square
+  gate, and global or greedy nearest-neighbour assignment. IMM, the JPDA family, MHT and PMBM
+  exist, configured through `radar_forge.scan_tracker`; there is no smoother.
 - **No resource manager.** Nothing schedules beams, revisits or dwells.
 
 ## Rules for every task and direction
@@ -89,7 +90,7 @@ The "Build first" column is what the library lacks for that direction. Count it 
 | Differentiable simulation ("inverse rendering") | Fit scene parameters by gradient descent through a differentiable copy of the forward model | FFT peak with interpolation; the Cramér-Rao lower bound (CRLB) | Fit range, velocity and RCS through a PyTorch copy of the FMCW IQ model. Does the fit reach the CRLB, and where does it stick in local minima? | The PyTorch IQ model, checked against `fmcw_deramp_baseband` |
 | Normalizing flows | An invertible network with an exact likelihood | CA-CFAR and OS-CFAR; the likelihood-ratio test that knows the true clutter law (a ceiling, not a rival) | Is a flow-learned clutter density, used as a likelihood-ratio detector, better than CFAR at equal Pfa? Does it keep its Pfa when the clutter level changes, as CFAR does? | Clutter; see [task 8](evt-thresholds.md) |
 | Uncertainty quantification | Separating aleatoric from epistemic uncertainty, and checking calibration | NEES and NIS of the library's UKF | Does a deep ensemble of a learned motion model flag a flight regime it was not trained on, before its errors grow? | The learned motion model |
-| Neural SDE | A learned drift and diffusion in continuous time | `CartesianMotion` (constant velocity, constant acceleration) | The ADS-B fixes are 2–8 s apart. Does a neural SDE handle the irregular spacing better than a constant-velocity model with a time-scaled process noise, with an honest covariance? | Overlaps [task 5, direction A](world-models.md#the-questions) |
+| Neural SDE | A learned drift and diffusion in continuous time | `ConstantVelocity`, `ConstantAcceleration` | The ADS-B fixes are 2–8 s apart. Does a neural SDE handle the irregular spacing better than a constant-velocity model with a time-scaled process noise, with an honest covariance? | Overlaps [task 5, direction A](world-models.md#the-questions) |
 | Mixture of experts | A gating network that weights specialist models | An IMM filter: Markov switching between motion models | Does a learned gate switch between motion models faster or more accurately than IMM's Markov chain? | An IMM, about one day |
 | Transformer | Attention over a sequence | Constant-velocity Kalman prediction | What does attention over 30 s of track history buy over a constant-velocity filter, at each prediction horizon? The data is one aircraft: say what that limits. | — |
 | Foundation model | A large pretrained model used without training, or fine-tuned | Constant-velocity and constant-acceleration Kalman prediction | Does a pretrained time-series model forecast the ADS-B track better than a Kalman filter, per operation? | **Ask us first.** Pretrained weights come from outside, and their use needs our agreement |

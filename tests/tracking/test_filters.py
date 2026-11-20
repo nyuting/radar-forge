@@ -29,20 +29,18 @@ from radar_forge.tracking.filters import (
     update,
     update_weighted,
 )
-from radar_forge.tracking.metrics import consistency_interval, nees
-from radar_forge.tracking.models import (
-    BistaticRangeRateModel,
-    CartesianMotion,
+from radar_forge.tracking.measurement import (
+    BistaticRangeAndRangeRate,
     LinearMeasurement,
-    RadialConstantVelocity,
     RangeAzimuthElevationRangeRate,
-    StateLayout,
 )
+from radar_forge.tracking.metrics import consistency_interval, nees
+from radar_forge.tracking.motion import ConstantVelocity, CoordinateLayout
 
 SEED = 20261104
 
 
-def _bank(layout: StateLayout, mean: Any, covariance: Any, time_s: float = 0.0) -> TrackBank:
+def _bank(layout: CoordinateLayout, mean: Any, covariance: Any, time_s: float = 0.0) -> TrackBank:
     """A bank whose rows are ``mean`` ``(n, n_state)`` with ``covariance`` each."""
     mean = np.atleast_2d(np.asarray(mean, dtype=np.float64))
     covariance = np.zeros((len(mean), *np.shape(covariance)[-2:])) + covariance
@@ -59,7 +57,7 @@ def _step(
 
 
 def test_append_validates_the_new_rows_and_keeps_the_old_ones_first() -> None:
-    layout = RadialConstantVelocity().state_layout
+    layout = ConstantVelocity.bistatic_range().state_layout
     bank = _bank(layout, [[1.0, 2.0]], np.eye(2)).append([[3.0, 4.0]], [np.eye(2)], 5.0, [9], [1])
     np.testing.assert_array_equal(bank.track_id, [0, 9])
     np.testing.assert_array_equal(bank.time_s, [0.0, 5.0])
@@ -80,14 +78,14 @@ def test_append_validates_the_new_rows_and_keeps_the_old_ones_first() -> None:
 def test_append_rejects_rows_that_are_not_a_valid_state(
     mean: Any, covariance: Any, ids: Any
 ) -> None:
-    empty = TrackBank.empty(RadialConstantVelocity().state_layout)
+    empty = TrackBank.empty(ConstantVelocity.bistatic_range().state_layout)
     with pytest.raises(ValueError, match=r"symmetric|definite|finite|shape"):
         empty.append(mean, covariance, 0.0, ids, [0] * len(ids))
 
 
 def test_append_rejects_a_zero_variance_and_names_its_row() -> None:
     """Semidefinite is not enough: the UKF factorises every row, so the boundary refuses it."""
-    empty = TrackBank.empty(RadialConstantVelocity().state_layout)
+    empty = TrackBank.empty(ConstantVelocity.bistatic_range().state_layout)
     covariance = np.stack([np.eye(2), np.diag([1.0, 0.0]), np.eye(2)])
     with pytest.raises(ValueError, match=r"positive definite; the matrices at rows \[1\]"):
         empty.append(np.zeros((3, 2)), covariance, 0.0, [1, 2, 3], [0, 0, 0])
@@ -96,20 +94,22 @@ def test_append_rejects_a_zero_variance_and_names_its_row() -> None:
 @pytest.mark.parametrize("status", [[4], [-1], [7]])
 def test_append_rejects_a_status_that_is_not_a_track_status(status: list[int]) -> None:
     """A stray int8 would never confirm or delete, so it is refused at the boundary."""
-    empty = TrackBank.empty(RadialConstantVelocity().state_layout)
+    empty = TrackBank.empty(ConstantVelocity.bistatic_range().state_layout)
     with pytest.raises(ValueError, match="TrackStatus"):
         empty.append([[1.0, 2.0]], [np.eye(2)], 0.0, [1], status)
 
 
 def test_compact_keeps_the_chosen_rows_in_order() -> None:
     bank = _bank(
-        RadialConstantVelocity().state_layout, [[1.0, 0.0], [2.0, 0.0], [3.0, 0.0]], np.eye(2)
+        ConstantVelocity.bistatic_range().state_layout,
+        [[1.0, 0.0], [2.0, 0.0], [3.0, 0.0]],
+        np.eye(2),
     )
     np.testing.assert_array_equal(bank.compact([True, False, True]).mean[:, 0], [1.0, 3.0])
 
 
 def test_a_snapshot_is_a_read_only_copy() -> None:
-    bank = _bank(RadialConstantVelocity().state_layout, [[1.0, 2.0]], np.eye(2))
+    bank = _bank(ConstantVelocity.bistatic_range().state_layout, [[1.0, 2.0]], np.eye(2))
     snapshot = bank.snapshots()[0]
     bank.mean[0, 0] = 99.0
     assert snapshot.mean[0] == 1.0 and not snapshot.mean.flags.writeable
@@ -118,9 +118,9 @@ def test_a_snapshot_is_a_read_only_copy() -> None:
 
 
 def test_predict_moves_each_row_by_its_own_step() -> None:
-    layout = RadialConstantVelocity().state_layout
+    layout = ConstantVelocity.bistatic_range().state_layout
     bank = _bank(layout, [[0.0, 10.0]], np.eye(2)).append([[0.0, 10.0]], [np.eye(2)], 1.0, [1], [0])
-    moved = predict(bank, RadialConstantVelocity(), TaylorLinearisation(), 3.0)
+    moved = predict(bank, ConstantVelocity.bistatic_range(), TaylorLinearisation(), 3.0)
     np.testing.assert_array_equal(moved.mean[:, 0], [30.0, 20.0])
     np.testing.assert_array_equal(moved.time_s, [3.0, 3.0])
 
@@ -161,7 +161,7 @@ def test_impossible_sigma_point_settings_are_refused_at_construction(
 @pytest.mark.parametrize("n_state", [2, 6])
 def test_sigma_points_refuse_a_spread_that_puts_every_point_on_the_mean(n_state: int) -> None:
     """kappa = -n makes c = alpha² (n + kappa) zero: every sigma point would be the mean."""
-    layout = CartesianMotion("xyz"[: n_state // 2]).state_layout
+    layout = ConstantVelocity("xyz"[: n_state // 2]).state_layout
     bank = _bank(layout, np.zeros((1, n_state)), np.eye(n_state))
     with pytest.raises(ValueError, match="kappa must be positive"):
         UnscentedTransform(kappa=-float(n_state)).sigma_points(bank)
@@ -174,7 +174,7 @@ def test_the_weights_are_computed_once_per_size() -> None:
 def test_the_weighted_sigma_points_reproduce_each_rows_mean_and_covariance(
     rng: np.random.Generator,
 ) -> None:
-    layout = CartesianMotion().state_layout
+    layout = ConstantVelocity().state_layout
     roots = rng.normal(0.0, 1.0, (4, 6, 6))
     bank = _bank(
         layout, rng.normal(0.0, 100.0, (4, 6)), roots @ np.swapaxes(roots, 1, 2) + np.eye(6)
@@ -208,7 +208,7 @@ def _guard_bank() -> TrackBank:
     correlation = root @ root.T + np.eye(6)
     correlation /= np.sqrt(np.outer(np.diag(correlation), np.diag(correlation)))
     means = [[5000.0, -20.0, 3000.0, 15.0, 1000.0, 2.0], [0.0, 5.0, -800.0, 0.0, 9.0, 1.0]]
-    return _bank(CartesianMotion().state_layout, means, correlation * np.outer(scale, scale))
+    return _bank(ConstantVelocity().state_layout, means, correlation * np.outer(scale, scale))
 
 
 def _assert_scaled_close(actual: Any, expected: Any, scale: Any) -> None:
@@ -230,7 +230,7 @@ def test_the_unscented_moments_are_the_kalman_moments_on_linear_models(
     alpha: float, beta: float, kappa: float
 ) -> None:
     """Tracker-001 §3: x⁻, P⁻, z, P_xz and S agree, whatever the accepted weights."""
-    motion, bank = CartesianMotion(), _guard_bank()
+    motion, bank = ConstantVelocity(), _guard_bank()
     model = LinearMeasurement(motion.state_layout, ("x_m", "y_m", "z_m"))
     unscented, taylor, steps_s = (
         UnscentedTransform(alpha, beta, kappa),
@@ -263,7 +263,7 @@ def test_the_unscented_moments_are_the_kalman_moments_on_linear_models(
 
 def test_the_ukf_and_the_kf_agree_over_200_steps(rng: np.random.Generator) -> None:
     """Tracker-001 §3: the same measurements through both filters, judged on the current spread."""
-    motion = CartesianMotion()
+    motion = ConstantVelocity()
     model = LinearMeasurement(motion.state_layout, ("x_m", "y_m", "z_m"))
     noise = np.diag([50.0**2] * 3)
     ukf = kf = _guard_bank()
@@ -271,7 +271,7 @@ def test_the_ukf_and_the_kf_agree_over_200_steps(rng: np.random.Generator) -> No
     for step in range(1, 201):
         # A loop over time: each step starts from the one before.
         truth = motion.transition(truth, 1.0)
-        z = model.predict(truth) + rng.normal(0.0, 50.0, (2, 3))
+        z = model.predicted_measurement(truth) + rng.normal(0.0, 50.0, (2, 3))
         ukf = _step(
             predict(ukf, motion, UnscentedTransform(), step), model, UnscentedTransform(), z, noise
         )
@@ -296,12 +296,12 @@ def test_the_ekf_and_the_ukf_differ_at_second_order_on_the_spherical_model() -> 
     ch. 5); the EKF's is h(x). A wrong Jacobian leaves a first-order gap, slope about 1. The
     seven scales are seven rows of one bank.
     """
-    layout = CartesianMotion().state_layout
+    layout = ConstantVelocity().state_layout
     model = RangeAzimuthElevationRangeRate(layout, np.zeros(3))
     mean = np.array([12_000.0, -150.0, 16_000.0, 20.0, 3_000.0, 5.0])
     sigma = np.array([2_000.0, 100.0] * 3)
     noise = np.diag([20.0**2, 2e-3**2, 2e-3**2, 1.0**2])
-    z = model.predict(mean)[None] + np.array([[30.0, 2e-3, -2e-3, 1.0]])
+    z = model.predicted_measurement(mean)[None] + np.array([[30.0, 2e-3, -2e-3, 1.0]])
     scaled = SECOND_ORDER_SCALES[:, None, None] ** 2 * np.diag(sigma**2)
     prior = _bank(layout, np.full((7, 6), mean), scaled)
     updated = [
@@ -315,7 +315,7 @@ def test_the_ekf_and_the_ukf_differ_at_second_order_on_the_spherical_model() -> 
 
 def test_a_kalman_update_is_the_textbook_one(linearisation: Linearisation) -> None:
     """Predict and update written out with F, Q, H and an explicit inverse, independently."""
-    motion = CartesianMotion("x")
+    motion = ConstantVelocity("x")
     model = LinearMeasurement(motion.state_layout, ("x_m",))
     bank = _bank(motion.state_layout, [[1.0, 2.0]], [[4.0, 1.0], [1.0, 2.0]])
     f, q = motion.jacobian(np.zeros(2), 1.0), motion.process_noise(np.zeros(2), 1.0)
@@ -334,7 +334,7 @@ def test_a_range_only_update_leaves_an_uncorrelated_rate_alone(
     linearisation: Linearisation,
 ) -> None:
     """With a diagonal prior, a range cannot inform the rate: P_xz has an exact zero there."""
-    motion = RadialConstantVelocity()
+    motion = ConstantVelocity.bistatic_range()
     model = LinearMeasurement(motion.state_layout, ("bistatic_range_m",))
     prior = _bank(motion.state_layout, [[10_000.0, 0.0]], np.diag([400.0, 200.0**2]))
     posterior = _step(prior, model, linearisation, [[10_100.0]], [[400.0]])
@@ -343,7 +343,7 @@ def test_a_range_only_update_leaves_an_uncorrelated_rate_alone(
 
 
 def test_an_innovation_across_due_north_takes_the_short_way(linearisation: Linearisation) -> None:
-    layout = CartesianMotion().state_layout
+    layout = ConstantVelocity().state_layout
     model = RangeAzimuthElevationRangeRate(layout, np.zeros(3), ("range_m", "azimuth_rad"))
     bank = _bank(layout, [[-10.0, 0.0, 10_000.0, 0.0, 0.0, 0.0]], np.diag([1.0, 1.0] * 3))
     innovation = innovate(bank, model, linearisation, [[10_000.0, 0.001]], np.diag([1.0, 1e-6]))
@@ -355,13 +355,13 @@ def test_the_batched_innovation_equals_a_per_pair_loop(
     linearisation: Linearisation, rng: np.random.Generator
 ) -> None:
     """Tracker-001 §7: every (track, measurement) pair scored at once equals each pair alone."""
-    layout = CartesianMotion().state_layout
+    layout = ConstantVelocity().state_layout
     model = RangeAzimuthElevationRangeRate(layout, [100.0, 50.0, 10.0])
     means = rng.uniform(-100.0, 100.0, (5, 6))
     means[:, [0, 2, 4]] = rng.uniform(2_000.0, 20_000.0, (5, 3))
     roots = rng.normal(0.0, 1.0, (5, 6, 6))
     bank = _bank(layout, means, 100.0 * roots @ np.swapaxes(roots, 1, 2) + 25.0 * np.eye(6))
-    z = model.predict(means[rng.integers(0, 5, 7)]) + rng.normal(0.0, 1e-3, (7, 4))
+    z = model.predicted_measurement(means[rng.integers(0, 5, 7)]) + rng.normal(0.0, 1e-3, (7, 4))
     noise = np.diag([25.0, 1e-6, 1e-6, 0.25]) * rng.uniform(0.5, 2.0, (7, 1, 1))
     batched = innovate(bank, model, linearisation, z, noise)
     for i in range(5):
@@ -379,11 +379,11 @@ def test_the_batched_innovation_equals_a_per_pair_loop(
 
 def test_the_batched_nis_and_likelihood_are_the_textbook_formulas(rng: np.random.Generator) -> None:
     """The EKF innovation, S = H P Hᵀ + R, d² and log-likelihood per pair, by solve and slogdet."""
-    layout = CartesianMotion().state_layout
-    model = BistaticRangeRateModel(layout, np.zeros(3), [20_000.0, 0.0, 0.0])
+    layout = ConstantVelocity().state_layout
+    model = BistaticRangeAndRangeRate(layout, np.zeros(3), [20_000.0, 0.0, 0.0])
     means = rng.uniform(2_000.0, 15_000.0, (4, 6)) * np.array([1.0, 0.01] * 3)
     bank = _bank(layout, means, np.diag([400.0, 25.0] * 3))
-    z = model.predict(means)[[0, 1, 2]] + [[30.0, 1.0]]
+    z = model.predicted_measurement(means)[[0, 1, 2]] + [[30.0, 1.0]]
     noise = np.diag([100.0, 1.0])
     batched = innovate(bank, model, TaylorLinearisation(), z, noise)
     for i in range(4):
@@ -391,7 +391,7 @@ def test_the_batched_nis_and_likelihood_are_the_textbook_formulas(rng: np.random
         h = model.jacobian(means[i])
         s = h @ bank.covariance[i] @ h.T + noise
         for j in range(3):
-            nu = z[j] - model.predict(means[i])
+            nu = z[j] - model.predicted_measurement(means[i])
             nis = nu @ np.linalg.solve(s, nu)
             log_likelihood = -0.5 * (2 * np.log(2 * np.pi) + np.linalg.slogdet(s)[1] + nis)
             # rtol 1e-10: Cholesky against LU on a well-conditioned 2 x 2.
@@ -401,13 +401,13 @@ def test_the_batched_nis_and_likelihood_are_the_textbook_formulas(rng: np.random
 
 def _long_run(kind: str, linearisation: Linearisation, rng: np.random.Generator) -> list[Any]:
     """200 noisy updates of a crossing target; return every posterior covariance."""
-    motion = CartesianMotion()
+    motion = ConstantVelocity()
     layout = motion.state_layout
     if kind == "spherical":
         model: Any = RangeAzimuthElevationRangeRate(layout, np.zeros(3))
         noise = np.diag([20.0**2, 2e-3**2, 2e-3**2, 1.0])
     else:
-        model = BistaticRangeRateModel(layout, np.zeros(3), [20_000.0, 0.0, 0.0])
+        model = BistaticRangeAndRangeRate(layout, np.zeros(3), [20_000.0, 0.0, 0.0])
         noise = np.diag([20.0**2, 1.0])
     truth = np.array([12_000.0, -150.0, 16_000.0, 0.0, 3_000.0, 0.0])
     prior_covariance = np.diag([200.0**2, 30.0**2] * 3)
@@ -418,7 +418,9 @@ def _long_run(kind: str, linearisation: Linearisation, rng: np.random.Generator)
     for step in range(1, 201):
         # A loop over time: each step starts from the one before.
         truth = motion.transition(truth, 1.0)
-        z = model.predict(truth)[None] + rng.multivariate_normal(np.zeros(len(noise)), noise)
+        z = model.predicted_measurement(truth)[None] + rng.multivariate_normal(
+            np.zeros(len(noise)), noise
+        )
         bank = _step(predict(bank, motion, linearisation, step), model, linearisation, z, noise)
         covariances.append(bank.covariance[0])
     return covariances
@@ -446,7 +448,7 @@ def consistency_runs(linearisation: Linearisation) -> tuple[float, float]:
     Truth uses the same F, Q and R as the filter, so any failure is the filter's.
     """
     rng = np.random.default_rng(SEED)
-    motion = CartesianMotion("x", sigma_acceleration_mps2=1.0, acceleration_correlation_time_s=0.5)
+    motion = ConstantVelocity("x", sigma_acceleration_mps2=1.0, acceleration_correlation_time_s=0.5)
     model = LinearMeasurement(motion.state_layout, ("x_m",))
     f, q = motion.jacobian(np.zeros(2), 1.0), motion.process_noise(np.zeros(2), 1.0)
     p0, noise = np.diag([100.0, 25.0]), np.array([[4.0]])
@@ -485,17 +487,17 @@ SIGMA_RANGE_M = 21.635652855125496
 BOOTSTRAP_THRESHOLD_MPS = 15.2955 / 6.0
 
 
-def test_the_dwna_rate_variance_floors_above_the_bootstrap_threshold() -> None:
+def test_the_discrete_noise_rate_variance_floors_above_the_bootstrap_threshold() -> None:
     """Why scenario 003's unfold test cannot be the filter's own rate covariance.
 
     Re-homed from ``tests/core/test_tracking.py``, which ``pipelines/tracking.py`` cites:
-    with ``sigma_accel_mps2 = 2`` (one-way), DWNA adds sigma² T² to the rate variance every
-    scan, so on range alone the rate standard deviation floors near 4.1 m/s, above the
-    v_span / 6 = 2.55 m/s promotion threshold, and never unfolds. The state here is bistatic
+    with ``sigma_accel_mps2 = 2`` (one-way), discrete noise adds sigma² T² to the rate variance
+    every scan, so on range alone the rate standard deviation floors near 4.1 m/s, above the
+    v_period / 6 = 2.55 m/s promotion threshold, and never unfolds. The state here is bistatic
     range, twice the one-way range, so sigma, R and the floor all double at the boundary. The
     floor is the steady state of the Riccati recursion, which 60 scans reach.
     """
-    motion = RadialConstantVelocity(2 * 2.0, process_noise="dwna")
+    motion = ConstantVelocity.bistatic_range(2 * 2.0, white_noise="discrete")
     model = LinearMeasurement(motion.state_layout, ("bistatic_range_m",))
     noise = np.array([[(2 * SIGMA_RANGE_M) ** 2]])
     bank = _bank(motion.state_layout, [[40_000.0, 0.0]], np.diag([noise[0, 0], (2 * 200.0) ** 2]))
@@ -517,7 +519,7 @@ def test_the_dwna_rate_variance_floors_above_the_bootstrap_threshold() -> None:
 
 def test_the_taylor_mean_on_a_linear_model_is_still_f_times_x_to_the_bit() -> None:
     """Moving the mean through transition() left every linear model's prediction unchanged."""
-    motion = CartesianMotion("xyz", sigma_acceleration_mps2=3.0)
+    motion = ConstantVelocity("xyz", sigma_acceleration_mps2=3.0)
     rng = np.random.default_rng(SEED)
     bank = _bank(motion.state_layout, rng.normal(0, 1e3, (5, 6)), np.eye(6))
     mean, _ = TaylorLinearisation().predict(motion, bank, np.full(5, 2.5))
@@ -527,7 +529,7 @@ def test_the_taylor_mean_on_a_linear_model_is_still_f_times_x_to_the_bit() -> No
 
 def test_a_weighted_update_with_one_hot_weights_is_the_kalman_update() -> None:
     """All weight on one measurement: the mixture is that measurement's Kalman update."""
-    layout = RadialConstantVelocity().state_layout
+    layout = ConstantVelocity.bistatic_range().state_layout
     model = LinearMeasurement(layout, ["bistatic_range_m", "bistatic_range_rate_mps"])
     bank = _bank(layout, [[1e4, 50.0], [2e4, -30.0]], np.diag([400.0, 25.0]))
     innovation = innovate(
@@ -551,7 +553,7 @@ def test_a_weighted_update_with_one_noise_is_the_textbook_pda_update() -> None:
     The PDA form, written out here from Bar-Shalom, Daum and Huang (2009), shares no code
     with the mixture of Kalman updates the library computes.
     """
-    layout = RadialConstantVelocity().state_layout
+    layout = ConstantVelocity.bistatic_range().state_layout
     model = LinearMeasurement(layout, ["bistatic_range_m", "bistatic_range_rate_mps"])
     prior = np.diag([400.0, 25.0])
     bank = _bank(layout, [[1e4, 50.0]], prior)
@@ -574,7 +576,7 @@ def test_a_weighted_update_with_one_noise_is_the_textbook_pda_update() -> None:
 
 
 def test_the_bank_refuses_an_existence_outside_zero_to_one_and_bad_mode_weights() -> None:
-    layout = RadialConstantVelocity().state_layout
+    layout = ConstantVelocity.bistatic_range().state_layout
     with pytest.raises(ValueError, match="existence"):
         TrackBank.empty(layout).append([[0.0, 0.0]], [np.eye(2)], 0.0, [1], [0], existence=[1.5])
     with pytest.raises(ValueError, match="mode_probability"):
