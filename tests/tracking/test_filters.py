@@ -24,6 +24,7 @@ from radar_forge.tracking.filters import (
     TrackStatus,
     UnscentedTransform,
     innovate,
+    is_confirmed,
     predict,
     update,
     update_weighted,
@@ -580,3 +581,9 @@ def test_the_bank_refuses_an_existence_outside_zero_to_one_and_bad_mode_weights(
         TrackBank.empty(layout, 2).append(
             [[0.0, 0.0]], [np.eye(2)], 0.0, [1], [0], mode_probability=[0.5, 0.6]
         )
+
+
+def test_a_confirmed_track_is_confirmed_or_coasting():
+    statuses = [TrackStatus.TENTATIVE, TrackStatus.CONFIRMED, TrackStatus.COASTING]
+    statuses.append(TrackStatus.DELETED)
+    assert is_confirmed(np.array(statuses, dtype=np.int8)).tolist() == [False, True, True, False]

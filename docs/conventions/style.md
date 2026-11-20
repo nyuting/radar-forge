@@ -30,6 +30,8 @@ Enforced (table above). Use `X | None`, builtin generics and `from __future__ im
 R5 checks parameter names. The rest is judgement:
 
 1. **Linear internally, decibels only at the API boundary**, and the converted name says `_db*`.
+   Convert with `radar_forge.units`: `power_to_db` for a power, `amplitude_to_db` for an
+   amplitude, and their inverses; never an inline `10 ** (x / 10)`.
 2. **Radians internally.** A constructor may take `_deg` for convenience and converts on its
    first line.
 3. **Locals follow the same rule.** R5 checks only parameters; review checks the rest.

@@ -24,13 +24,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.linalg import expm
 from scipy.special import logsumexp
 
+from radar_forge.tracking._linalg import symmetrise
 from radar_forge.tracking.filters import (
     Innovation,
     Linearisation,
@@ -47,12 +47,6 @@ __all__ = [
     "imm_predict",
     "imm_update",
 ]
-
-
-def _symmetrise(matrix: NDArray[Any]) -> NDArray[np.float64]:
-    """Return the symmetric part of a stack of matrices, removing asymmetric roundoff."""
-    result: NDArray[np.float64] = (matrix + np.swapaxes(matrix, -1, -2)) / 2
-    return result
 
 
 # A mode probability is floored here before a logarithm or a division: the IMM's weights are
@@ -176,7 +170,7 @@ def _combine(
     centre = np.einsum("nk,nks->ns", weight, offset)
     deviation = offset - centre[:, None, :]
     spread = covariance + deviation[..., :, None] * deviation[..., None, :]
-    return layout.wrap(reference + centre), _symmetrise(np.einsum("nk,nkst->nst", weight, spread))
+    return layout.wrap(reference + centre), symmetrise(np.einsum("nk,nkst->nst", weight, spread))
 
 
 def imm_mix(

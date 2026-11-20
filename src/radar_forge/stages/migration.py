@@ -36,6 +36,7 @@ from radar_forge.migration import (
 from radar_forge.pipeline import frames, map_axes, synthesise
 from radar_forge.radar import Radar
 from radar_forge.settings import MigrationSettings
+from radar_forge.units import power_to_db
 
 __all__ = ["keystone_stage"]
 
@@ -84,7 +85,7 @@ def keystone_stage(ctx: evaluate.Context) -> evaluate.Context:
 
     def loss(name: str, data: NDArray[np.complex128]) -> float:
         row[name] = ctx.record(
-            name, evaluate.to_db(integrated_peak(data).power_linear / reference_w)
+            name, float(power_to_db(integrated_peak(data).power_linear / reference_w))
         )
         return float(row[name])
 
@@ -143,12 +144,12 @@ def _searches(
     """Record the fold-factor and acceleration searches' curves and choices."""
     found: dict[str, float] = {}
     if compensated.fold is not None:
-        curve_db = 10.0 * np.log10(compensated.fold.integrated_peak_linear)
+        curve_db = power_to_db(compensated.fold.integrated_peak_linear)
         for factor, value_db in zip(compensated.fold.fold_factors, curve_db, strict=True):
             print(f"    fold factor {factor:+d}: integrated peak {value_db:.2f} dB")
         found["fold_factor"] = ctx.record("fold_factor", compensated.fold_factor)
     if compensated.rate is not None:
-        curve_db = 10.0 * np.log10(compensated.rate.integrated_peak_linear[:, 0])
+        curve_db = power_to_db(compensated.rate.integrated_peak_linear[:, 0])
         for value_mps2, value_db in zip(compensated.rate.accelerations_mps2, curve_db, strict=True):
             print(f"    acceleration {value_mps2:+.1f} m/s^2: integrated peak {value_db:.3f} dB")
         found["acceleration_mps2"] = ctx.record("acceleration_mps2", compensated.acceleration_mps2)
@@ -191,7 +192,7 @@ def _estimates(ctx: evaluate.Context) -> dict[str, Any]:
     found: dict[str, Any] = {
         "estimator": method,
         "fine_fold_factor": compensated.fold_factor,
-        "fine_snr_db": ctx.record("fine_snr_db", evaluate.to_db(estimate.snr_linear)),
+        "fine_snr_db": ctx.record("fine_snr_db", float(power_to_db(estimate.snr_linear))),
         "fine_bistatic_range_m": ctx.record("fine_bistatic_range_m", estimate.bistatic_range_m),
         "fine_bistatic_range_rate_mps": ctx.record(
             "fine_bistatic_range_rate_mps", estimate.bistatic_range_rate_mps

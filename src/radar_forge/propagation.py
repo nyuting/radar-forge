@@ -31,6 +31,7 @@ from numpy.typing import ArrayLike, NDArray
 
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.radar import Radar, TargetGeometry
+from radar_forge.units import db_to_power, power_to_db
 
 if TYPE_CHECKING:
     from radar_forge.settings import ClutterSettings, LeakageSettings
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
 __all__ = [
     "PointTarget",
     "PropagationPaths",
+    "bistatic_range_from_delay_m",
     "bistatic_range_rate_from_doppler_mps",
     "dbsm_to_m2",
     "disturbance_paths",
@@ -52,6 +54,7 @@ __all__ = [
     "received_power_w",
     "static_clutter_paths",
     "swerling_rcs_m2",
+    "wavenumber_radpm",
 ]
 
 _FOUR_PI_CUBED = (4.0 * np.pi) ** 3
@@ -122,8 +125,7 @@ class PropagationPaths:
     @property
     def bistatic_range_m(self) -> NDArray[np.float64]:
         r"""Length of each route, :math:`R_b = c\tau`, m. Monostatic, :math:`2R`."""
-        result: NDArray[np.float64] = self.delay_s * SPEED_OF_LIGHT_MPS
-        return result
+        return bistatic_range_from_delay_m(self.delay_s)
 
     def bistatic_range_at_m(
         self, slow_time_s: ArrayLike, wavelength_m: float
@@ -161,6 +163,20 @@ def propagation_delay_s(bistatic_range_m: ArrayLike) -> NDArray[np.float64]:
     r"""Return the time to travel a route, :math:`\tau = R_b/c`, s (Richards [1], §2.6.1)."""
     result: NDArray[np.float64] = (
         np.asarray(bistatic_range_m, dtype=np.float64) / SPEED_OF_LIGHT_MPS
+    )
+    return result
+
+
+def bistatic_range_from_delay_m(delay_s: ArrayLike) -> NDArray[np.float64]:
+    r"""Return the route a delay spans, :math:`R_b = c\tau`, m: the inverse of the delay."""
+    result: NDArray[np.float64] = SPEED_OF_LIGHT_MPS * np.asarray(delay_s, dtype=np.float64)
+    return result
+
+
+def wavenumber_radpm(frequency_hz: ArrayLike) -> NDArray[np.float64]:
+    r"""Return the wavenumber :math:`k = 2\pi f/c`, rad/m: phase per metre of route."""
+    result: NDArray[np.float64] = (
+        2.0 * np.pi * np.asarray(frequency_hz, dtype=np.float64) / SPEED_OF_LIGHT_MPS
     )
     return result
 
@@ -272,9 +288,9 @@ def line_of_sight_paths(
         msg = "rcs_m2 must be non-negative; 0.0 is a target that returns nothing."
         raise ValueError(msg)
     if gain_tx_linear is None:
-        gain_tx_linear = 10.0 ** (radar.transmitter.gain_tx_dbi / 10.0)
+        gain_tx_linear = radar.transmitter.gain_tx_linear
     if gain_rx_linear is None:
-        gain_rx_linear = 10.0 ** (radar.receiver.gain_rx_dbi / 10.0)
+        gain_rx_linear = radar.receiver.gain_rx_linear
     power_w = received_power_w(
         transmit_power_w=radar.transmitter.transmit_power_w,
         gain_tx_linear=gain_tx_linear,
@@ -314,6 +330,7 @@ def leakage_paths(radar: Radar, lags: ArrayLike, inr_db: ArrayLike) -> Propagati
     :attr:`~radar_forge.radar.Receiver.noise_power_per_sample_w`, not over the matched band.
     """
     lags_arr = np.atleast_1d(np.asarray(lags, dtype=np.float64))
+    # (c m)/f_s, not bistatic_range_from_delay_m(m / f_s): the orders differ in the last bit.
     range_m = SPEED_OF_LIGHT_MPS * lags_arr / radar.receiver.sample_rate_hz
     return _specified_paths(radar, range_m, inr_db, 0.0)
 
@@ -357,7 +374,7 @@ def _specified_paths(
     if not np.all(range_m >= 0.0):
         msg = "a leakage or clutter route must be non-negative."
         raise ValueError(msg)
-    power_w = radar.receiver.noise_power_per_sample_w * 10.0 ** (ratio / 10.0)
+    power_w = radar.receiver.noise_power_per_sample_w * db_to_power(ratio)
     phase_rad = propagation_phase_rad(range_m, radar.wavelength_m)
     return PropagationPaths(
         delay_s=propagation_delay_s(range_m),
@@ -371,7 +388,7 @@ def _specified_paths(
 
 def dbsm_to_m2(rcs_dbsm: ArrayLike) -> NDArray[np.float64]:
     """Convert a cross-section from dBsm to m²."""
-    return np.asarray(10.0 ** (np.asarray(rcs_dbsm, dtype=np.float64) / 10.0), dtype=np.float64)
+    return np.asarray(db_to_power(rcs_dbsm), dtype=np.float64)
 
 
 def m2_to_dbsm(rcs_m2: ArrayLike) -> NDArray[np.float64]:
@@ -380,7 +397,7 @@ def m2_to_dbsm(rcs_m2: ArrayLike) -> NDArray[np.float64]:
     if np.any(rcs_arr <= 0.0):
         msg = "rcs_m2 must be strictly positive; a non-positive area has no decibel value."
         raise ValueError(msg)
-    return np.asarray(10.0 * np.log10(rcs_arr), dtype=np.float64)
+    return np.asarray(power_to_db(rcs_arr), dtype=np.float64)
 
 
 @dataclass(frozen=True)

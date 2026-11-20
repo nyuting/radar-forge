@@ -18,6 +18,7 @@ from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.propagation import (
     PointTarget,
     PropagationPaths,
+    bistatic_range_from_delay_m,
     bistatic_range_rate_from_doppler_mps,
     dbsm_to_m2,
     doppler_rate_hzps,
@@ -31,6 +32,7 @@ from radar_forge.propagation import (
     received_power_w,
     static_clutter_paths,
     swerling_rcs_m2,
+    wavenumber_radpm,
 )
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter
 
@@ -69,6 +71,21 @@ def _bistatic_geometry(range_tx_m: float, range_rx_m: float, rate_mps: float) ->
 class TestPathRelations:
     def test_delay_is_the_route_at_the_speed_of_light(self) -> None:
         np.testing.assert_allclose(propagation_delay_s(27.0e3), 27.0e3 / 299_792_458.0, rtol=1e-15)
+
+    def test_one_microsecond_of_delay_is_c_times_a_microsecond_of_route(self) -> None:
+        np.testing.assert_allclose(bistatic_range_from_delay_m([0.0, 1.0e-6]), [0.0, 299.792458])
+        np.testing.assert_allclose(
+            bistatic_range_from_delay_m(propagation_delay_s(27.0e3)), 27.0e3, rtol=1e-15
+        )
+
+    def test_the_wavenumber_turns_one_wavelength_into_two_pi(self) -> None:
+        wavenumber = wavenumber_radpm(S1_RADAR.transmitter.carrier_frequency_hz)
+        np.testing.assert_allclose(wavenumber * WAVELENGTH_M, 2.0 * np.pi, rtol=1e-15)
+        np.testing.assert_allclose(
+            -wavenumber * 5.0 * WAVELENGTH_M,
+            propagation_phase_rad(5.0 * WAVELENGTH_M, WAVELENGTH_M),
+            rtol=1e-15,
+        )
 
     def test_one_wavelength_of_route_is_one_cycle_of_lag(self) -> None:
         np.testing.assert_allclose(
@@ -368,6 +385,9 @@ class TestCrossSection:
     def test_rejects_a_zero_area_in_decibels(self) -> None:
         with pytest.raises(ValueError, match="strictly positive"):
             m2_to_dbsm(0.0)
+
+    def test_an_absent_area_stays_nan(self) -> None:
+        assert np.isnan(m2_to_dbsm(np.nan))
 
     def test_point_target_round_trips_through_dbsm(self) -> None:
         target = PointTarget.from_dbsm(13.0, name="light-aircraft")

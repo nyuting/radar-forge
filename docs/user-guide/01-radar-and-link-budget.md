@@ -166,7 +166,8 @@ the second's.
    `radar.range_resolution_m / np.cos(geometry.bistatic_angle_rad / 2)`.
 7. **The power.** `received_power_w` takes keywords only, among them `range_tx_m` and
    `range_rx_m`; for one site, pass the slant range to both. Gains enter linear:
-   `10.0 ** (gain_tx_dbi / 10.0)`. Every argument broadcasts, so range arrays of shape
+   `tx.gain_tx_linear` and `rx.gain_rx_linear`, which are `db_to_power` of the dBi values
+   (`radar_forge.units` holds the four decibel conversions). Every argument broadcasts, so range arrays of shape
    `(n_targets,)` give a power array of the same shape.
 
 ## Try it
@@ -174,10 +175,9 @@ the second's.
 This loads S1, computes its link budget at the target's frame-0 range and prints its limits:
 
 ```python
-import numpy as np
-
 from radar_forge.propagation import received_power_w
 from radar_forge.scenario import load_scenario, truth_geometry
+from radar_forge.units import power_to_db
 
 scenario = load_scenario("config/scenario_001_fmcw_low_prf.toml")
 radar = scenario.radar  # one Transmitter and one Receiver; no [site.rx], so monostatic
@@ -186,8 +186,8 @@ target = scenario.targets[0]
 truth = truth_geometry(scenario)[0]  # frame 0
 power_w = received_power_w(
     transmit_power_w=tx.transmit_power_w,
-    gain_tx_linear=10.0 ** (tx.gain_tx_dbi / 10.0),
-    gain_rx_linear=10.0 ** (rx.gain_rx_dbi / 10.0),
+    gain_tx_linear=tx.gain_tx_linear,
+    gain_rx_linear=rx.gain_rx_linear,
     wavelength_m=radar.wavelength_m,
     rcs_m2=target.rcs_m2,
     range_tx_m=truth.range_tx_m[0],
@@ -202,8 +202,8 @@ print(f"received power  {power_w:.4e} W")
 print(f"N0              {rx.noise_density_w_per_hz:.4e} W/Hz")
 print(f"noise / sample  {rx.noise_power_per_sample_w:.4e} W")
 print(f"noise, matched  {radar.noise_power_matched_w:.4e} W")
-print(f"SNR, matched    {10 * np.log10(power_w / radar.noise_power_matched_w):.2f} dB")
-print(f"SNR / sample    {10 * np.log10(power_w / rx.noise_power_per_sample_w):.2f} dB")
+print(f"SNR, matched    {power_to_db(power_w / radar.noise_power_matched_w):.2f} dB")
+print(f"SNR / sample    {power_to_db(power_w / rx.noise_power_per_sample_w):.2f} dB")
 print(f"range res.      {radar.range_resolution_m:.4f} m")
 print(f"PRI, duty       {tx.pulse_repetition_interval_s * 1e3:.3f} ms, {tx.duty_cycle_linear:.2f}")
 print(f"sweep rate      {tx.sweep_rate_hzps:.4e} Hz/s")

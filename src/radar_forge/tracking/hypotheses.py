@@ -37,8 +37,13 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.sparse import coo_array
 from scipy.sparse.csgraph import connected_components
 
-from radar_forge.tracking.association import Assignment, global_nearest_neighbour, murty_k_best
-from radar_forge.tracking.filters import TrackBank, TrackStatus
+from radar_forge.tracking.association import (
+    Assignment,
+    global_nearest_neighbour,
+    murty_k_best,
+    non_assignment_cost,
+)
+from radar_forge.tracking.filters import TrackBank, is_confirmed
 from radar_forge.tracking.models import StateLayout
 
 __all__ = [
@@ -62,7 +67,6 @@ DELETE_DROP = -math.log(0.1 / (1 - 1e-4))
 
 # A new leaf's measurement code: -1 a miss, -2 an old leaf the scan did not cover.
 _MISS, _CARRIED = -1, -2
-_CONFIRMED = (TrackStatus.CONFIRMED, TrackStatus.COASTING)
 
 
 @dataclass(frozen=True, eq=False)
@@ -570,8 +574,7 @@ class TrackOrientedMHT:
     @property
     def non_assignment_cost(self) -> float:
         r"""Return :math:`\ln(P_D / (1 - P_D P_G))`, where a hit and a miss score alike."""
-        p_d = self.detection_probability
-        return math.log(p_d / (1 - p_d * self.gate_probability))
+        return non_assignment_cost(self.detection_probability, self.gate_probability)
 
     def assign(self, cost: ArrayLike, in_gate: ArrayLike) -> Assignment:
         """Return the one best assignment, GNN's, for a caller that needs one."""
@@ -606,7 +609,7 @@ class TrackOrientedMHT:
         ancestry[:n_old, self.n_scan - kept_width :] = tree.ancestry[:, width - kept_width :]
         old_score, old_peak = np.append(tree.score, 0.0), np.append(tree.peak, 0.0)
         old_node = np.append(tree.node, -1)
-        was_confirmed = np.append(np.isin(tree.bank.status, _CONFIRMED), False)
+        was_confirmed = np.append(is_confirmed(tree.bank.status), False)
         ratio = np.where(in_gate, log_likelihood - np.log(clutter_intensity)[None, :], -np.inf)
         miss = math.log(1 - p_d * p_g)
         step = extend(

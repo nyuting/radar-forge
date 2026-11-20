@@ -32,11 +32,10 @@ import pytest
 
 import radar_forge
 from radar_forge.dsp import window
-from radar_forge.signal import (
-    bistatic_range_from_beat_frequency_m,
-    range_resolution_m,
-    sweep_rate_hzps,
-)
+from radar_forge.propagation import bistatic_range_from_delay_m, wavenumber_radpm
+from radar_forge.radar import range_resolution_m, sweep_rate_hzps
+from radar_forge.signal import bistatic_range_from_beat_frequency_m
+from radar_forge.units import amplitude_to_db, db_to_amplitude, db_to_power, power_to_db
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 MODULE_NAMES = sorted(
@@ -112,6 +111,12 @@ def test_no_name_is_exported_twice_or_private(module_name: str) -> None:
         pytest.param(range_resolution_m, ([1e9, 2e9],), id="range_resolution_m"),
         pytest.param(sweep_rate_hzps, ([1e9, 2e9], [1e-5, 2e-5]), id="sweep_rate_hzps"),
         pytest.param(bistatic_range_from_beat_frequency_m, ([1e6], 1e9, 4e-5), id="from_beat"),
+        pytest.param(power_to_db, ([1.0, 2.0],), id="power_to_db"),
+        pytest.param(db_to_power, ([1.0, 2.0],), id="db_to_power"),
+        pytest.param(amplitude_to_db, ([1.0, 2.0],), id="amplitude_to_db"),
+        pytest.param(db_to_amplitude, ([1.0, 2.0],), id="db_to_amplitude"),
+        pytest.param(bistatic_range_from_delay_m, ([1e-6, 2e-6],), id="from_delay"),
+        pytest.param(wavenumber_radpm, ([1e9, 2e9],), id="wavenumber_radpm"),
     ],
 )
 def test_a_python_list_is_accepted_and_a_float64_array_returned(function, arguments):

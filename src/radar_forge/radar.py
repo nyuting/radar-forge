@@ -40,6 +40,7 @@ from radar_forge.coordinates import (
     enu_to_range_azimuth_elevation_rad,
     geodetic_to_enu_m,
 )
+from radar_forge.units import db_to_power
 
 __all__ = [
     "Radar",
@@ -48,10 +49,28 @@ __all__ = [
     "TargetGeometry",
     "Transmitter",
     "WaveformKind",
+    "range_resolution_m",
+    "sweep_rate_hzps",
 ]
 
 WaveformKind = Literal["fmcw", "pulsed", "noise"]
 """Which waveform family a transmitter emits: deramped FMCW, a pulse train or a noise code."""
+
+
+def range_resolution_m(bandwidth_hz: ArrayLike) -> NDArray[np.float64]:
+    r"""Return the monostatic range resolution :math:`c/2B`, m (Richards [1], §4.6.1)."""
+    result: NDArray[np.float64] = SPEED_OF_LIGHT_MPS / (
+        2.0 * np.asarray(bandwidth_hz, dtype=np.float64)
+    )
+    return result
+
+
+def sweep_rate_hzps(bandwidth_hz: ArrayLike, chirp_duration_s: ArrayLike) -> NDArray[np.float64]:
+    r"""Return the chirp slope :math:`\alpha = B/T`, Hz/s."""
+    result: NDArray[np.float64] = np.asarray(bandwidth_hz, dtype=np.float64) / np.asarray(
+        chirp_duration_s, dtype=np.float64
+    )
+    return result
 
 
 @dataclass(frozen=True)
@@ -85,6 +104,11 @@ class Transmitter:
             raise ValueError(msg)
 
     @property
+    def gain_tx_linear(self) -> float:
+        """Transmit antenna gain as a linear factor."""
+        return float(db_to_power(self.gain_tx_dbi))
+
+    @property
     def wavelength_m(self) -> float:
         r"""Carrier wavelength :math:`\lambda = c/f_c`, m."""
         return SPEED_OF_LIGHT_MPS / self.carrier_frequency_hz
@@ -102,7 +126,7 @@ class Transmitter:
     @property
     def sweep_rate_hzps(self) -> float:
         r"""Chirp slope :math:`\alpha = B/T`, Hz/s."""
-        return self.bandwidth_hz / self.chirp_duration_s
+        return float(sweep_rate_hzps(self.bandwidth_hz, self.chirp_duration_s))
 
 
 @dataclass(frozen=True)
@@ -123,9 +147,14 @@ class Receiver:
             raise ValueError(msg)
 
     @property
+    def gain_rx_linear(self) -> float:
+        """Receive antenna gain as a linear factor."""
+        return float(db_to_power(self.gain_rx_dbi))
+
+    @property
     def noise_figure_linear(self) -> float:
         r"""Noise figure as a linear factor :math:`F \ge 1`."""
-        return float(10.0 ** (self.noise_figure_db / 10.0))
+        return float(db_to_power(self.noise_figure_db))
 
     @property
     def noise_density_w_per_hz(self) -> float:
@@ -288,7 +317,7 @@ class Radar:
     @property
     def range_resolution_m(self) -> float:
         r"""Range resolution :math:`c/2B`, m: monostatic, and the bistatic best case."""
-        return SPEED_OF_LIGHT_MPS / (2.0 * self.transmitter.bandwidth_hz)
+        return float(range_resolution_m(self.transmitter.bandwidth_hz))
 
     @property
     def unambiguous_delay_s(self) -> float:

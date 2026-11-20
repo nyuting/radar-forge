@@ -25,6 +25,7 @@ from numpy.typing import ArrayLike, NDArray
 
 from radar_forge.dsp import fold_velocity_mps
 from radar_forge.radar import Radar
+from radar_forge.units import amplitude_to_db, db_to_amplitude, power_to_db
 
 __all__ = [
     "DisplayAxes",
@@ -119,9 +120,8 @@ def magnitude_db(
     if reference <= 0.0:
         msg = f"reference_linear must be strictly positive; got {reference_linear!r}."
         raise ValueError(msg)
-    floor_linear = reference * 10.0 ** (floor_db / 20.0)
-    result: NDArray[np.float64] = 20.0 * np.log10(np.maximum(magnitude, floor_linear) / reference)
-    return result
+    floor_linear = reference * db_to_amplitude(floor_db)
+    return amplitude_to_db(np.maximum(magnitude, floor_linear) / reference)
 
 
 def save_figure(figure: Any, path: Path | str, *, dpi: int = 100) -> None:
@@ -353,7 +353,7 @@ def render_cancellation(
     image = None
     # Two panels, the same drawing: before cancellation, then after.
     for axes, values, label in zip(panels, (before, after), ("before", "after"), strict=True):
-        power_db = 10.0 * np.log10(np.maximum(np.abs(np.asarray(values)) ** 2 / floor_w, 1e-30))
+        power_db = power_to_db(np.maximum(np.abs(np.asarray(values)) ** 2 / floor_w, 1e-30))
         image = axes.imshow(
             power_db,
             aspect="auto",
@@ -446,7 +446,7 @@ def render_doa_spectra(
     # One curve per method: a handful.
     for label, values in spectra:
         power = np.maximum(np.asarray(values, dtype=np.float64), 1e-300)
-        axes.plot(u, 10.0 * np.log10(power / power.max()), label=label, linewidth=1.0)
+        axes.plot(u, power_to_db(power / power.max()), label=label, linewidth=1.0)
     markers = "ov^sD"
     for k, (label, found) in enumerate(estimates):
         found_u = np.atleast_1d(np.asarray(found, dtype=np.float64))

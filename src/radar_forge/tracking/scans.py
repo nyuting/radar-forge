@@ -30,16 +30,18 @@ from radar_forge.coordinates import east_north_to_range_azimuth_rad
 from radar_forge.tracking.association import (
     GlobalNearestNeighbour,
     JointProbabilisticDataAssociation,
+    non_assignment_cost,
 )
 from radar_forge.tracking.filters import (
     TaylorLinearisation,
     TrackBank,
-    TrackStatus,
     UnscentedTransform,
+    is_confirmed,
 )
 from radar_forge.tracking.hypotheses import TrackOrientedMHT
 from radar_forge.tracking.imm import InteractingMultipleModel
 from radar_forge.tracking.initiation import DebiasedSphericalInitiator
+from radar_forge.tracking.lifecycle import ExistencePolicy, LifecyclePolicy
 from radar_forge.tracking.models import (
     CartesianMotion,
     CoordinatedTurn,
@@ -57,7 +59,7 @@ from radar_forge.tracking.scene import (
     poisson_clutter_plots,
     resolve,
 )
-from radar_forge.tracking.tracker import ExistencePolicy, LifecyclePolicy, Scan, Tracker
+from radar_forge.tracking.tracker import Scan, Tracker
 
 if TYPE_CHECKING:
     # Types only: scenario.py imports tracking.scene, so a run-time import would be a cycle.
@@ -277,7 +279,7 @@ class PlotTracker:
         p_d, p_g = settings.detection_probability, settings.gate_probability
         self.components = scenario.clutter_plots.components
         initiator = DebiasedSphericalInitiator(np.zeros(layout.dimension), prior)
-        associator: Any = GlobalNearestNeighbour(math.log(p_d / (1 - p_d * p_g)))
+        associator: Any = GlobalNearestNeighbour(non_assignment_cost(p_d, p_g))
         if settings.association == "jpda":
             associator = JointProbabilisticDataAssociation(p_d, p_g, settings.coalescence)
         elif settings.association == "mht":
@@ -419,7 +421,7 @@ class PlotTracker:
                 association = self.tracker.last_association
             else:
                 bank = self.tracker.process(scan)
-            confirmed = np.isin(bank.status, (TrackStatus.CONFIRMED, TrackStatus.COASTING))
+            confirmed = is_confirmed(bank.status)
             used = bank.measurement_index[confirmed & (bank.measurement_index >= 0)]
             taken[mine[used]] = True
             results.append((bank, association))

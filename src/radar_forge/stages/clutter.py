@@ -38,6 +38,7 @@ from radar_forge.propagation import disturbance_paths
 from radar_forge.radar import TargetGeometry
 from radar_forge.scenario import Scenario
 from radar_forge.signal import cubic_amplifier, stream_baseband
+from radar_forge.units import db_to_power, power_to_db
 
 __all__ = ["leakage"]
 
@@ -95,7 +96,7 @@ def leakage(ctx: evaluate.Context) -> evaluate.Context:
         sinr_db = {
             name: math.nan
             if cell is None
-            else evaluate.to_db(np.abs(product.rd_map[cell]) ** 2 / floor_w[name])
+            else float(power_to_db(np.abs(product.rd_map[cell]) ** 2 / floor_w[name]))
             for name, product in maps.items()
         }
         # rd has detected on the cancelled map already: its plots are reused when it ran.
@@ -108,17 +109,21 @@ def leakage(ctx: evaluate.Context) -> evaluate.Context:
         }
         row: dict[str, Any] = {"frame": frame.index, "time_s": frame.time_s}
         # The ceiling on the frame's own disturbance: paths on one route add in phase.
-        row["disturbance_inr_db"] = evaluate.to_db(np.mean(np.abs(echo) ** 2) / noise_w)
+        row["disturbance_inr_db"] = float(power_to_db(np.mean(np.abs(echo) ** 2) / noise_w))
         row["cancellation_depth_db"] = clutter.cancellation_depth_db(stream, result.residual)
+        # Through dB and back, not the ratio itself: the golden bound was made from the
+        # rounded value.
         row["cancellation_depth_bound_db"] = (
             clutter.expected_cancellation_depth_db(
-                10.0 ** (row["disturbance_inr_db"] / 10.0), n_basis, n_fit
+                float(db_to_power(row["disturbance_inr_db"])), n_basis, n_fit
             )
             if n_basis
             else 0.0
         )
-        row["floor_rise_db"] = evaluate.to_db(floor_w["cancelled"] / floor_w["clean"])
-        row["uncancelled_floor_rise_db"] = evaluate.to_db(floor_w["uncancelled"] / floor_w["clean"])
+        row["floor_rise_db"] = float(power_to_db(floor_w["cancelled"] / floor_w["clean"]))
+        row["uncancelled_floor_rise_db"] = float(
+            power_to_db(floor_w["uncancelled"] / floor_w["clean"])
+        )
         row["sinr_db"], row["clean_sinr_db"] = sinr_db["cancelled"], sinr_db["clean"]
         row["sinr_loss_db"] = sinr_db["clean"] - sinr_db["cancelled"]
         row["uncancelled_sinr_db"] = sinr_db["uncancelled"]

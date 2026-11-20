@@ -43,8 +43,8 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from radar_forge._fourier import aboutanios_mulgrew, signed_cycles
-from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.dsp import matched_filter
+from radar_forge.propagation import wavenumber_radpm
 from radar_forge.radar import Radar
 from radar_forge.signal import RangeGate, lfm_chirp
 
@@ -537,9 +537,9 @@ def _rate_phase_rad(
     r"""Return :math:`H`'s phase per unit acceleration and per unit jerk, ``(n_pulses, n_f)``."""
     tau_s = (np.arange(n_pulses, dtype=np.float64) / prf_hz)[:, None]
     scale = _keystone_scale(range_frequency_hz, carrier_frequency_hz)
-    wavenumber_rad_per_m = 2.0 * np.pi * carrier_frequency_hz / SPEED_OF_LIGHT_MPS
-    quadratic = wavenumber_rad_per_m * scale * tau_s**2 / 2.0
-    cubic = wavenumber_rad_per_m * scale**2 * tau_s**3 / 6.0
+    carrier_wavenumber_radpm = float(wavenumber_radpm(carrier_frequency_hz))
+    quadratic = carrier_wavenumber_radpm * scale * tau_s**2 / 2.0
+    cubic = carrier_wavenumber_radpm * scale**2 * tau_s**3 / 6.0
     return quadratic, cubic
 
 

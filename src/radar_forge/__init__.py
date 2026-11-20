@@ -5,6 +5,8 @@ there too, but may move. Modules, in signal-path order:
 
 ``constants``
     Every physical constant, defined once.
+``units``
+    A power or an amplitude to and from decibels, each conversion written once.
 ``coordinates``, ``radar``, ``propagation``, ``signal``
     Geodetic and ENU conversions; the radar and its sites; propagation paths and the radar
     equation; waveforms and IQ.
@@ -46,6 +48,7 @@ from radar_forge.signal import (
     thermal_noise,
 )
 from radar_forge.tracking import Scan, Tracker
+from radar_forge.units import amplitude_to_db, db_to_amplitude, db_to_power, power_to_db
 
 __version__ = "0.0.0"
 
@@ -61,10 +64,13 @@ __all__ = [
     "Transmitter",
     "__version__",
     "ambiguity_function",
+    "amplitude_to_db",
     "cfar_detect",
     "cfar_detect_2d",
     "cluster_detections",
     "cluster_points",
+    "db_to_amplitude",
+    "db_to_power",
     "doppler_bin_centers_mps",
     "doppler_fft",
     "doppler_shift_hz",
@@ -75,6 +81,7 @@ __all__ = [
     "load_scenario",
     "matched_filter",
     "mean_shift",
+    "power_to_db",
     "pulsed_baseband",
     "range_bin_centers_m",
     "range_doppler_map",

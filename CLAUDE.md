@@ -45,19 +45,20 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 - Range rate is the time derivative of range, positive receding; Doppler = -rate/wavelength, written once in `propagation.doppler_shift_hz`. Map axes and tracker states are bistatic, R_T + R_R and its rate (2R monostatic); only `plots.display_axes` halves them, for figures and CSVs.
 - The FMCW generator relies on a down-sweep.
 - British spelling (`normalise`, `visualisation`) except where mirroring an outside API.
-  SI units internally; dB only at API boundaries, named `_db*`.
+  SI units internally; dB only at API boundaries, named `_db*`, converted by `radar_forge.units`.
 
 ## Where things are: maths
 
 | Relation | Function (file under `src/radar_forge/`) |
 | :--- | :--- |
-| wavelength; PRI, duty cycle, sweep rate; range resolution c/2B | `Transmitter.wavelength_m`; `.pulse_repetition_interval_s`, `.duty_cycle_linear`, `.sweep_rate_hzps`; `Radar.range_resolution_m` (radar.py); `range_resolution_m` (signal.py) |
+| wavelength; PRI, duty cycle, sweep rate; range resolution c/2B | `Transmitter.wavelength_m`; `.pulse_repetition_interval_s`, `.duty_cycle_linear`, `.sweep_rate_hzps` and `sweep_rate_hzps`; `Radar.range_resolution_m` and `range_resolution_m` (radar.py) |
 | unambiguous delay, range, rate | `Radar.unambiguous_delay_s`, `.unambiguous_bistatic_range_m` (c τ, the map's range span), `.unambiguous_bistatic_range_rate_mps` (λ PRF, the whole span) (radar.py) |
 | route geometry, baseline, bistatic angle | `Radar.geometry` -> `TargetGeometry`, `Radar.baseline_m`, `TargetGeometry.bistatic_angle_rad` (radar.py) |
 | geodesy: geodetic, ECEF, ENU, range-azimuth-elevation; on the ground plane; unit direction | `geodetic_to_ecef_m`, `ecef_to_enu_m`, `geodetic_to_enu_m`, `enu_to_range_azimuth_elevation_rad`, `range_azimuth_elevation_to_enu_m`; `east_north_to_range_azimuth_rad`, `range_azimuth_to_east_north_m`; `directions_unit` (coordinates.py) |
 | beat frequency ↔ bistatic range | `beat_frequency_hz`, `bistatic_range_from_beat_frequency_m` (signal.py) |
-| delay, phase, Doppler; stop-and-hop | `propagation_delay_s`, `propagation_phase_rad`, `doppler_shift_hz`; `PropagationPaths.bistatic_range_at_m` (propagation.py) |
+| delay and its inverse, phase, wavenumber 2πf/c, Doppler and its inverse; stop-and-hop | `propagation_delay_s`, `bistatic_range_from_delay_m`, `propagation_phase_rad`, `wavenumber_radpm`, `doppler_shift_hz`, `bistatic_range_rate_from_doppler_mps`; `PropagationPaths.bistatic_range_at_m` (propagation.py) |
 | radar equation; RCS, Swerling 0-4 | `received_power_w` (R_T² R_R²); `dbsm_to_m2`, `swerling_rcs_m2` (propagation.py) |
+| dB: a power 10 log10, an amplitude 20 log10; antenna gains linear | `power_to_db`, `db_to_power`, `amplitude_to_db`, `db_to_amplitude` (units.py); `Transmitter.gain_tx_linear`, `Receiver.gain_rx_linear` (radar.py) |
 | noise N0 = kT0F, per sample, in band | `Receiver.noise_density_w_per_hz`, `.noise_power_per_sample_w`, `Radar.noise_power_matched_w` (radar.py) |
 | SNR, single pulse and integrated | `received_power_w / Radar.noise_power_matched_w`; times B T N on the map (stages/core.py geometry stage) |
 | thermal noise; synthesis; LFM chirp, noise code, amplifier; ambiguity | `thermal_noise`; `fmcw_deramp_baseband`, `pulsed_baseband`, `stream_baseband`; `lfm_chirp`, `noise_waveform`, `cubic_amplifier`; `ambiguity_function` (signal.py) |
@@ -71,7 +72,7 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 | clustering of points: DBSCAN, mean shift; per-column scale and period | `cluster_points`, `mean_shift` (clustering.py) |
 | predict, innovate, update, weighted update; NEES, GOSPA, trajectory GOSPA | `predict`, `innovate`, `update`, `update_weighted`, `TaylorLinearisation`, `UnscentedTransform` (tracking/filters.py); `nees`, `gospa`, `trajectory_gospa` (tracking/metrics.py) |
 | CWNA/DWNA process noise, coordinated turn; IMM, Π = expm(ΛT) | `CartesianMotion`, `RadialConstantVelocity`, `CoordinatedTurn` (tracking/models.py); `InteractingMultipleModel`, `imm_mix`, `imm_predict`, `imm_update` (tracking/imm.py) |
-| χ² gate, GNN, PDA/JPDA/JPDA*/set weights, Murty k-best; M-of-N, JIPDA existence; MHT track score, N-scan; PMBM | `chi_square_gate_threshold`, `GlobalNearestNeighbour`, `probabilistic_data_association`, `joint_probabilistic_data_association`, `murty_k_best` (tracking/association.py); `LifecyclePolicy`, `ExistencePolicy` (tracking/lifecycle.py); `TrackOrientedMHT`, `TrackTree` (tracking/hypotheses.py); `PmbmTracker` (tracking/rfs.py) |
+| χ² gate, GNN, PDA/JPDA/JPDA*/set weights, Murty k-best; M-of-N, JIPDA existence; MHT track score, N-scan; PMBM | `chi_square_gate_threshold`, `non_assignment_cost` ln(P_D/(1 − P_D P_G)), `GlobalNearestNeighbour`, `probabilistic_data_association`, `joint_probabilistic_data_association`, `murty_k_best` (tracking/association.py); `LifecyclePolicy`, `ExistencePolicy` (tracking/lifecycle.py); `TrackOrientedMHT`, `TrackTree` (tracking/hypotheses.py); `PmbmTracker` (tracking/rfs.py) |
 | route acceleration R̈_b; Doppler rate | `Radar.geometry(acceleration_enu_mps2=)` (radar.py); `doppler_rate_hzps` (propagation.py) |
 | range gate, its delay axis; compression through it; keystone, fold factor, Doppler-rate filter | `pulsed_baseband(range_gate_start_m=, n_gate_samples=)`, `range_gate_first_sample` (signal.py); `delay_bin_centers_m` (dsp.py); `pulse_compress`; `keystone`, `second_order_keystone`, `fold_factor_search`, `doppler_rate_compensation`, `compensate_migration` (migration.py) |
 | data chip; sub-bin and polynomial-phase estimates; CRB | `crop_slow_time`, `crop_range_doppler`, `estimate_tone`, `estimate_fine`, `cramer_rao_bounds` (datachip.py) |

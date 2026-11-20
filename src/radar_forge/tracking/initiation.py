@@ -22,6 +22,7 @@ from typing import Protocol
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from radar_forge.tracking._linalg import symmetrise
 from radar_forge.tracking.models import (
     LinearMeasurement,
     MeasurementModel,
@@ -186,7 +187,7 @@ def debiased_spherical_to_enu(
     position_m = radius_m[..., None] * direction
     outer = position_m[..., :, None] * position_m[..., None, :]
     covariance_m2 = (radius_m**2 + sigma_r**2)[..., None, None] * second_moment - outer
-    return position_m, (covariance_m2 + np.swapaxes(covariance_m2, -1, -2)) / 2
+    return position_m, symmetrise(covariance_m2)
 
 
 class DebiasedSphericalInitiator(_PriorInitiator):

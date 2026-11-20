@@ -32,7 +32,8 @@ from typing import Literal
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from radar_forge.tracking.association import chi_square_gate_threshold
+from radar_forge.tracking._linalg import symmetrise
+from radar_forge.tracking.association import chi_square_gate_threshold, gate
 from radar_forge.tracking.filters import (
     Linearisation,
     TaylorLinearisation,
@@ -180,7 +181,7 @@ class PmbmTracker:
         existence = bank.existence * self.survival_probability
         z, noise = scan.measurements, scan.noise_covariance
         innovation = innovate(bank, self.measurement, self.linearisation, z, noise)
-        in_gate = innovation.nis <= chi_square_gate_threshold(p_g, z.shape[1])
+        in_gate = gate(innovation.nis, chi_square_gate_threshold(p_g, z.shape[1]))
         clutter = scan.clutter_intensity
         limit = (
             np.inf if self.max_birth_clutter_intensity is None else self.max_birth_clutter_intensity
@@ -314,7 +315,7 @@ class PmbmTracker:
         return replace(
             report,
             mean=mean[keep],
-            covariance=(covariance[keep] + np.swapaxes(covariance[keep], -1, -2)) / 2,
+            covariance=symmetrise(covariance[keep]),
             existence=np.minimum(existence[keep], 1.0),
             status=np.where(took, TrackStatus.CONFIRMED, TrackStatus.COASTING).astype(np.int8),
         )

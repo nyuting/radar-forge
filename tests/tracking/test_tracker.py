@@ -31,6 +31,7 @@ from radar_forge.tracking.initiation import (
     DirectStateInitiator,
     debiased_spherical_to_enu,
 )
+from radar_forge.tracking.lifecycle import ExistencePolicy, LifecyclePolicy
 from radar_forge.tracking.models import (
     BistaticRangeRateModel,
     CartesianMotion,
@@ -39,7 +40,7 @@ from radar_forge.tracking.models import (
     RangeAzimuthElevationRangeRate,
     marginal,
 )
-from radar_forge.tracking.tracker import ExistencePolicy, LifecyclePolicy, Scan, Tracker
+from radar_forge.tracking.tracker import Scan, Tracker
 
 TENTATIVE, CONFIRMED = TrackStatus.TENTATIVE, TrackStatus.CONFIRMED
 COASTING, DELETED = TrackStatus.COASTING, TrackStatus.DELETED

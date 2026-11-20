@@ -160,7 +160,8 @@ def cfar_threshold_factor(
 
     Examples
     --------
-    >>> round(10 * math.log10(cfar_threshold_factor(pfa=1e-5, n_train=16)), 3)
+    >>> from radar_forge.units import power_to_db
+    >>> round(float(power_to_db(cfar_threshold_factor(pfa=1e-5, n_train=16))), 3)
     11.417
     """
     n_reference = cfar_reference_cell_count(n_train, 0)

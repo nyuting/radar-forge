@@ -32,6 +32,7 @@ from typing import Any, Protocol
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from radar_forge.tracking._linalg import symmetrise
 from radar_forge.tracking.models import (
     MeasurementModel,
     MotionModel,
@@ -49,6 +50,7 @@ __all__ = [
     "TrackStatus",
     "UnscentedTransform",
     "innovate",
+    "is_confirmed",
     "predict",
     "update",
     "update_weighted",
@@ -62,6 +64,11 @@ class TrackStatus(IntEnum):
     CONFIRMED = 1
     COASTING = 2
     DELETED = 3
+
+
+def is_confirmed(status: ArrayLike) -> NDArray[np.bool_]:
+    """Return which statuses are a confirmed track's: with a hit this scan, or coasting."""
+    return np.isin(status, (TrackStatus.CONFIRMED, TrackStatus.COASTING))
 
 
 @dataclass(frozen=True, eq=False)
@@ -82,12 +89,6 @@ class TrackSnapshot:
 def _transpose(matrix: NDArray[Any]) -> NDArray[Any]:
     """Swap the last two axes of a stack of matrices."""
     return np.swapaxes(matrix, -1, -2)
-
-
-def _symmetrise(matrix: NDArray[Any]) -> NDArray[np.float64]:
-    """Return the symmetric part of a stack of matrices, removing asymmetric roundoff."""
-    result: NDArray[np.float64] = (matrix + _transpose(matrix)) / 2
-    return result
 
 
 def _column(value: ArrayLike, n_rows: int, dtype: type[np.generic], name: str) -> NDArray[Any]:
@@ -332,7 +333,7 @@ class TaylorLinearisation:
         transition = motion.jacobian(bank.mean, dt_s)
         noise = motion.process_noise(bank.mean, dt_s)
         mean = bank.layout.wrap(motion.transition(bank.mean, dt_s))
-        return mean, _symmetrise(transition @ bank.covariance @ _transpose(transition) + noise)
+        return mean, symmetrise(transition @ bank.covariance @ _transpose(transition) + noise)
 
     def measure(self, model: MeasurementModel, bank: TrackBank) -> MeasurementMoments:
         r"""Return :math:`h(\hat{x})`, :math:`P H^T`, :math:`H P H^T` and H for every row."""
@@ -430,7 +431,7 @@ class UnscentedTransform:
         moved = motion.transition(self.sigma_points(bank), dt_s[:, None])
         mean, deviation = self._moments(moved, bank.layout)
         spread = np.einsum("k,tki,tkj->tij", covariance_weights, deviation, deviation)
-        return mean, _symmetrise(spread + motion.process_noise(bank.mean, dt_s))
+        return mean, symmetrise(spread + motion.process_noise(bank.mean, dt_s))
 
     def measure(self, model: MeasurementModel, bank: TrackBank) -> MeasurementMoments:
         r"""Return :math:`\hat{z}`, :math:`P_{xz}` and S without R from the pushed points."""
@@ -440,7 +441,7 @@ class UnscentedTransform:
         dx = bank.layout.residual(points, bank.mean[:, None, :])
         cross = np.einsum("k,tki,tkj->tij", covariance_weights, dx, dz)
         spread = np.einsum("k,tki,tkj->tij", covariance_weights, dz, dz)
-        return MeasurementMoments(predicted, cross, _symmetrise(spread))
+        return MeasurementMoments(predicted, cross, symmetrise(spread))
 
 
 def predict(
@@ -519,7 +520,7 @@ def innovate(
     innovation = model.measurement_layout.residual(
         measurements[None, :, :], moments.predicted_measurement[:, None, :]
     )
-    covariance = _symmetrise(moments.predicted_measurement_covariance[:, None] + noise[None])
+    covariance = symmetrise(moments.predicted_measurement_covariance[:, None] + noise[None])
     root = np.linalg.cholesky(covariance)
     whitened = np.linalg.solve(root, innovation[..., None])[..., 0]
     nis = np.sum(whitened**2, axis=-1)
@@ -549,7 +550,7 @@ def update(
     step, posterior = _correct(bank, innovation, rows, choice[rows])
     mean, full_covariance = bank.mean.copy(), bank.covariance.copy()
     mean[rows] = bank.layout.wrap(bank.mean[rows] + step)
-    full_covariance[rows] = _symmetrise(posterior)
+    full_covariance[rows] = symmetrise(posterior)
     return replace(bank, mean=mean, covariance=full_covariance)
 
 
@@ -598,4 +599,4 @@ def update_weighted(bank: TrackBank, innovation: Innovation, weights: ArrayLike)
     np.add.at(covariance, rows, weight[:, None, None] * outer)
     covariance -= shift[:, :, None] * shift[:, None, :]
     mean = bank.layout.wrap(bank.mean + shift)
-    return replace(bank, mean=mean, covariance=_symmetrise(covariance))
+    return replace(bank, mean=mean, covariance=symmetrise(covariance))

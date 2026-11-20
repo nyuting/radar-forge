@@ -75,6 +75,7 @@ __all__ = [
     "greedy_nearest_neighbour",
     "joint_probabilistic_data_association",
     "murty_k_best",
+    "non_assignment_cost",
     "probabilistic_data_association",
 ]
 
@@ -96,6 +97,21 @@ def chi_square_gate_threshold(probability: float, dim: int) -> float:
         msg = f"need 0 < probability < 1 and dim >= 1; got {probability}, {dim}."
         raise ValueError(msg)
     return float(chi2.ppf(probability, dim))
+
+
+def non_assignment_cost(detection_probability: float, gate_probability: float) -> float:
+    r"""Return :math:`\ln[P_D/(1 - P_D P_G)]`, the cost at which a hit and a miss score alike.
+
+    A hit adds :math:`\ln(P_D g/\lambda)` to a track's score and a miss :math:`\ln(1 - P_D P_G)`,
+    and a pair costs :math:`-\ln g + \ln\lambda` (:func:`association_cost`): a pair costing more
+    is better left unassigned.
+
+    References
+    ----------
+    Blackman [4], the track score as a log-likelihood ratio.
+    """
+    p_d = detection_probability
+    return math.log(p_d / (1 - p_d * gate_probability))
 
 
 def gate(nis: ArrayLike, threshold: float) -> NDArray[np.bool_]:

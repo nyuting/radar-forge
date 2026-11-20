@@ -69,7 +69,6 @@ __all__ = [
     "stage",
     "target_power_w",
     "thresholds",
-    "to_db",
     "truth",
     "write_csv",
 ]
@@ -187,17 +186,12 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         )
 
 
-def to_db(value: ArrayLike) -> float:
-    """Return a power ratio or a power in W as decibels."""
-    return float(10.0 * np.log10(value))
-
-
 def target_power_w(radar: Radar, truth: TargetGeometry, rcs_m2: ArrayLike) -> NDArray[np.float64]:
     """Return each target's received power by the radar equation, W."""
     return received_power_w(
         transmit_power_w=radar.transmitter.transmit_power_w,
-        gain_tx_linear=10.0 ** (radar.transmitter.gain_tx_dbi / 10.0),
-        gain_rx_linear=10.0 ** (radar.receiver.gain_rx_dbi / 10.0),
+        gain_tx_linear=radar.transmitter.gain_tx_linear,
+        gain_rx_linear=radar.receiver.gain_rx_linear,
         wavelength_m=radar.wavelength_m,
         rcs_m2=rcs_m2,
         range_tx_m=truth.range_tx_m,

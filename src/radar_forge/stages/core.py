@@ -41,8 +41,9 @@ from radar_forge.pipeline import (
 from radar_forge.radar import TargetGeometry
 from radar_forge.scenario import Scenario
 from radar_forge.signal import thermal_noise
-from radar_forge.tracking.filters import TrackStatus
+from radar_forge.tracking.filters import TrackStatus, is_confirmed
 from radar_forge.tracking.metrics import nees
+from radar_forge.units import power_to_db
 
 __all__ = ["detect", "geometry", "iq", "rd", "track"]
 
@@ -66,11 +67,11 @@ def geometry(ctx: evaluate.Context) -> evaluate.Context:
     power_w = float(evaluate.target_power_w(radar, truth[0], rcs_m2)[0])
     # Integrated over one chirp's samples and every pulse: P T N / N0, on an exact bin.
     gain = radar.n_samples_per_chirp * scenario.n_pulses[0]
-    snr_db = evaluate.to_db(power_w / radar.receiver.noise_power_per_sample_w * gain)
+    snr_db = float(power_to_db(power_w / radar.receiver.noise_power_per_sample_w * gain))
     beta_deg = np.degrees([frame.bistatic_angle_rad for frame in truth])
     for name, value in (
-        ("received_power_dbw", evaluate.to_db(power_w)),
-        ("noise_power_per_sample_dbw", evaluate.to_db(radar.receiver.noise_power_per_sample_w)),
+        ("received_power_dbw", float(power_to_db(power_w))),
+        ("noise_power_per_sample_dbw", float(power_to_db(radar.receiver.noise_power_per_sample_w))),
         ("predicted_snr_db", snr_db),
         ("baseline_m", radar.baseline_m),
         ("bistatic_angle_min_deg", beta_deg.min()),
@@ -129,20 +130,19 @@ def iq(ctx: evaluate.Context) -> evaluate.Context:
     for k, (radar, n_pulses) in enumerate(zip(scenario.radars, scenario.n_pulses, strict=True)):
         # A generator of its own, so the frames' noise does not depend on whether this ran.
         rng, gate = np.random.default_rng([scenario.seed, 1, k]), scenario.gates[k]
-        noise_db = evaluate.to_db(
-            np.mean(
-                np.abs(synthesise(radar, first, 0.0 * rcs_m2, n_pulses, rng=rng, gate=gate)) ** 2
-            )
+        noise_w = np.mean(
+            np.abs(synthesise(radar, first, 0.0 * rcs_m2, n_pulses, rng=rng, gate=gate)) ** 2
         )
-        peak_db = evaluate.to_db(
-            np.max(np.abs(synthesise(radar, first, rcs_m2, n_pulses, rng=None, gate=gate)) ** 2)
+        peak_w = np.max(
+            np.abs(synthesise(radar, first, rcs_m2, n_pulses, rng=None, gate=gate)) ** 2
         )
+        noise_db, peak_db = float(power_to_db(noise_w)), float(power_to_db(peak_w))
         noise_errors_db.append(
-            abs(noise_db - evaluate.to_db(radar.receiver.noise_power_per_sample_w))
+            abs(noise_db - float(power_to_db(radar.receiver.noise_power_per_sample_w)))
         )
         # The strongest target's power: exact for one target, a lower bound for several.
         peak_errors_db.append(
-            abs(peak_db - evaluate.to_db(evaluate.target_power_w(radar, first, rcs_m2).max()))
+            abs(peak_db - float(power_to_db(evaluate.target_power_w(radar, first, rcs_m2).max())))
         )
         if k == 0:
             ctx.record("iq_noise_power_dbw", noise_db)
@@ -227,8 +227,8 @@ def rd(ctx: evaluate.Context) -> evaluate.Context:
             rate_bin, range_bin = np.unravel_index(int(np.argmax(power_w)), power_w.shape)
             ctx.record("rd_peak_range_index", float(range_bin))
             ctx.record("rd_peak_rate_index", float(rate_bin))
-            ctx.record("rd_peak_power_dbw", evaluate.to_db(power_w.max()))
-            ctx.record("rd_noise_floor_dbw", evaluate.to_db(np.median(power_w)))
+            ctx.record("rd_peak_power_dbw", float(power_to_db(power_w.max())))
+            ctx.record("rd_noise_floor_dbw", float(power_to_db(np.median(power_w))))
     ctx.record("n_detections", sum(len(p.status) for p in ctx.plots))
     fraction = ctx.record("detection_fraction", float(np.mean(hits)))
     if "detection_fraction" in verify:
@@ -435,9 +435,7 @@ def _score(
     worst of each is reported. Returns the scores, the metrics.csv rows and the tracks drawn.
     """
     truth = evaluate.truth(ctx)
-    confirmed = [
-        np.isin(b.status, (TrackStatus.CONFIRMED, TrackStatus.COASTING)) for b, _ in ctx.banks
-    ]
+    confirmed = [is_confirmed(b.status) for b, _ in ctx.banks]
     votes: dict[tuple[int, int], int] = {}
     # Each frame's confirmed tracks vote for the target nearest in range: a few rows a frame.
     for (bank, _), mask, frame in zip(ctx.banks, confirmed, truth, strict=True):
@@ -449,6 +447,7 @@ def _score(
             )
             key = (int(np.argmin(gap_m)), int(bank.track_id[row]))
             votes[key] = votes.get(key, 0) + 1
+    # Not metrics.consistency_interval(2, 1, 0.95): its (1 - 0.95)/2 rounds above 0.025.
     low, high = chi2.ppf([0.025, 0.975], 2)
     worst = dict.fromkeys(
         ("range_rmse_m", "range_rate_rmse_mps", "nees_fraction", "confirmation_latency_scans"),

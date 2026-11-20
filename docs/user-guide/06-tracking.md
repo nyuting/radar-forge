@@ -30,9 +30,9 @@ twice the radial value when monostatic.
 | `models.py` | `StateLayout` and `Coordinate`, the named coordinates of a state or measurement, which wrap a periodic value (`StateLayout.wrap`, through the shared `_periodic.fold`); `check_covariances`, the one boundary check (symmetric, positive definite). Motion models, which predict a state forward: `RadialConstantVelocity` (state `[bistatic_range_m, bistatic_range_rate_mps]`) and `CartesianMotion` (constant velocity or acceleration on each ENU axis). Measurement models, which predict a measurement from a state: `LinearMeasurement` (some state coordinates, reported directly, optionally folded at a period), `RangeAzimuthElevationRangeRate` (a monostatic radar's spherical measurement of an ENU state), `BistaticRangeRateModel` ($R_T + R_R$ and its rate; $(2r, 2\dot r)$ when the sites coincide) and `marginal` (some of a model's components, such as range alone). |
 | `filters.py` | `TrackBank`, every track a row of one immutable struct of arrays; `TrackStatus` and the read-only `TrackSnapshot`; the one Gaussian filter, `predict`, `innovate` and `update`, through `TaylorLinearisation` (the KF on a linear model, the EKF otherwise) or `UnscentedTransform` (the UKF). |
 | `association.py` | `chi_square_gate_threshold` and `gate`; `association_cost`, `"nis"` or `"negative_log_likelihood_ratio"`; `GlobalNearestNeighbour` (GNN) and `GreedyNearestNeighbour`. |
-| `tracker.py` | `Tracker`, which runs one `Scan` at a time; `Scan`, every measurement one sensor made at one time with its R, checked and frozen; `LifecyclePolicy`, the M-of-N rule, deletion and re-acquisition. `initiation.py` holds the initiators `DirectStateInitiator` and `DebiasedSphericalInitiator`. |
+| `tracker.py` | `Tracker`, which runs one `Scan` at a time; `Scan`, every measurement one sensor made at one time with its R, checked and frozen. `initiation.py` holds the initiators `DirectStateInitiator` and `DebiasedSphericalInitiator`. |
 | `metrics.py` | `nees`, `consistency_interval` and `rmse`, which score a tracker against the truth; `gospa` and `trajectory_gospa` for a many-target scene. |
-| `lifecycle.py` | `LifecyclePolicy`, the M-of-N rule this page uses (`tracker` re-exports it), and `ExistencePolicy`, confirmation by existence probability (scenario 011). |
+| `lifecycle.py` | `LifecyclePolicy`, the M-of-N rule this page uses, with deletion and re-acquisition, and `ExistencePolicy`, confirmation by existence probability (scenario 011). |
 | `imm.py`, `hypotheses.py`, `rfs.py` | The many-target methods of scenario 011, not walked through here: the interacting multiple model, track-oriented MHT and the PMBM tracker. |
 | `scene.py` | Not tracker code: a simulator of the plots a rotating surveillance radar makes (true trajectories, merged echoes, missed detections, false plots). Four of scenario 011's six variants use it in place of IQ. |
 | `scans.py` | Plays that scene a rotation at a time, and holds `PlotTracker`, the tracker scenario 011 builds from its `[tracking]` table. |
@@ -203,7 +203,7 @@ from radar_forge.tracking.association import GlobalNearestNeighbour
 from radar_forge.tracking.filters import UnscentedTransform
 from radar_forge.tracking.models import LinearMeasurement, RadialConstantVelocity
 from radar_forge.tracking.initiation import DirectStateInitiator
-from radar_forge.tracking.tracker import LifecyclePolicy
+from radar_forge.tracking.lifecycle import LifecyclePolicy
 
 # State and measurement: bistatic range and its rate, positive receding.
 motion = RadialConstantVelocity(8.0)  # sigma_a of bistatic range, m/s^2
