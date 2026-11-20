@@ -247,7 +247,7 @@ def _track_rows(
 def _expected_false_plots(scenario: Scenario, time_s: float) -> float:
     """Return the false plots a rotation should hold: Poisson regions and discretes."""
     clutter = scenario.clutter_plots
-    regions = sum(c.intensity_per_m_rad * c.volume_m_rad(time_s) for c in clutter.components)
+    regions = sum(c.density_per_m_rad * c.volume_m_rad(time_s) for c in clutter.components)
     discretes = clutter.discretes
     return regions + (
         0.0 if discretes is None else discretes.report_probability * discretes.range_m.size

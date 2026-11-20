@@ -70,7 +70,7 @@ class PmbmTracker:
     volume the birth intensity spreads over (m rad for range and azimuth); the undetected
     intensity is held at the fixed point of :math:`\lambda_u \leftarrow p_S (1 - P_D)
     \lambda_u + \lambda_b`, uniform, so every sector of a rotation sees it alike, and zero
-    where ``Scan.clutter_intensity`` exceeds ``max_birth_clutter_intensity``, the birth limit
+    where ``Scan.clutter_density`` exceeds ``max_birth_clutter_density``, the birth limit
     every tracker shares. ``initiator`` places a first detection's density. Under
     ``"confirmed_first"`` only Bernoullis of existence 0.5 or more join clusters, as the
     tracker's confirmed tracks do (:func:`~radar_forge.tracking.hypotheses.extend`).
@@ -100,7 +100,7 @@ class PmbmTracker:
         k_best: int = 100,
         prune_existence: float = 1e-5,
         prune_weight: float = 1e-4,
-        max_birth_clutter_intensity: float | None = None,
+        max_birth_clutter_density: float | None = None,
         linearisation: Linearisation | None = None,
         coverage: Coverage | None = None,
         assignment: Literal["confirmed_first", "joint"] = "joint",
@@ -130,7 +130,7 @@ class PmbmTracker:
         self.detection_probability, self.gate_probability = p_d, gate_probability
         self.survival_probability, self.k_best = p_s, k_best
         self.prune_existence, self.prune_weight = prune_existence, prune_weight
-        self.max_birth_clutter_intensity = max_birth_clutter_intensity
+        self.max_birth_clutter_density = max_birth_clutter_density
         birth = birth_intensity_per_scan / coverage_volume
         self.undetected_intensity = birth / (1 - p_s * (1 - p_d))
         self.local = TrackBank.empty(motion.state_layout)
@@ -165,8 +165,8 @@ class PmbmTracker:
 
     def process(self, scan: Scan) -> TrackBank:
         """Run one scan: predict, update every global hypothesis, prune; return the report."""
-        if scan.clutter_intensity is None:
-            msg = "PMBM weighs by clutter intensity, so the Scan needs clutter_intensity."
+        if scan.clutter_density is None:
+            msg = "PMBM weighs by clutter density, so the Scan needs clutter_density."
             raise ValueError(msg)
         if scan.measurements.shape[1] != self.measurement.measurement_layout.dimension:
             msg = f"the scan's dimension does not match the measurement model's: {scan.model_id!r}."
@@ -183,10 +183,8 @@ class PmbmTracker:
         z, noise = scan.measurements, scan.noise_covariance
         innovation = innovate(bank, self.measurement, self.linearisation, z, noise)
         in_gate = gate(innovation.nis, chi_square_gate_threshold(p_g, z.shape[1]))
-        clutter = scan.clutter_intensity
-        limit = (
-            np.inf if self.max_birth_clutter_intensity is None else self.max_birth_clutter_intensity
-        )
+        clutter = scan.clutter_density
+        limit = np.inf if self.max_birth_clutter_density is None else self.max_birth_clutter_density
         detected = np.where(clutter <= limit, self.undetected_intensity * p_d, 0.0)
         opened = detected / (clutter + detected)
         unassigned = np.log(clutter + detected)

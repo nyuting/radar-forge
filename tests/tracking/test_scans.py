@@ -65,14 +65,14 @@ def test_halving_the_sector_moves_the_terminal_scenes_gospa_less_than_its_seed_s
 
 
 def test_gnn_clutter_density_follows_the_drifting_rain_cell() -> None:
-    """The regions' mean intensity is set each rotation, at that rotation's time."""
+    """The regions' mean density is set each rotation, at that rotation's time."""
     from radar_forge.tracking.scans import PlotTracker
 
     scenario = load_scenario(TERMINAL)
     tracker = PlotTracker(scenario)
-    assert tracker.mean_intensity(0.0) != tracker.mean_intensity(600.0)
+    assert tracker.mean_density(0.0) != tracker.mean_density(600.0)
     rotations = scans(scenario, n_scans=2)
     next(rotations)
     second = next(rotations)
     tracker.rotation(second)
-    assert tracker.tracker.clutter_density["plots"] == tracker.mean_intensity(second.start_time_s)
+    assert tracker.tracker.clutter_density["plots"] == tracker.mean_density(second.start_time_s)

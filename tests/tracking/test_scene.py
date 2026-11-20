@@ -23,7 +23,7 @@ from radar_forge.tracking.scene import (
     ClutterMap,
     FixedDiscretes,
     Leg,
-    clutter_intensity,
+    clutter_density,
     detect,
     detection_probability,
     measure,
@@ -166,10 +166,10 @@ def test_a_disc_of_clutter_has_the_volume_of_its_integral_of_one_over_range(
     assert disc.volume_m_rad(0.0) == pytest.approx(volume_m_rad, rel=5e-4)
 
 
-def test_every_clutter_component_draws_its_intensity_times_volume() -> None:
+def test_every_clutter_component_draws_its_density_times_volume() -> None:
     """Each layer's plots over 125 scans in the 99 % Poisson interval of lambda V.
 
-    Catches an intensity per square metre where one per (m rad) was meant: the counts would be
+    Catches a density per square metre where one per (m rad) was meant: the counts would be
     off by the range, thousands of times.
     """
     rng = np.random.default_rng(SEED)
@@ -180,16 +180,16 @@ def test_every_clutter_component_draws_its_intensity_times_volume() -> None:
         time_s = 4.8 * scan
         _, _, index = poisson_clutter_plots(components, time_s, rng)
         counts += np.bincount(index, minlength=len(components))
-        expected += [c.intensity_per_m_rad * c.volume_m_rad(time_s) for c in components]
+        expected += [c.density_per_m_rad * c.volume_m_rad(time_s) for c in components]
     low, high = poisson.ppf(0.005, expected), poisson.ppf(0.995, expected)
     assert np.all((low <= counts) & (counts <= high)), (counts, expected)
 
 
-def test_the_oracle_intensity_sums_the_layers_a_point_lies_in() -> None:
+def test_the_oracle_density_sums_the_layers_a_point_lies_in() -> None:
     components = _components()
     # The rain centre at 0 s is inside the background and the rain; 3 km is ground residue too.
     rain_r, rain_az = east_north_to_range_azimuth_rad(np.array([20e3, 4e3]))
-    got = clutter_intensity(components, [float(rain_r), 3e3], [float(rain_az), 0.0], 0.0)
+    got = clutter_density(components, [float(rain_r), 3e3], [float(rain_az), 0.0], 0.0)
     np.testing.assert_allclose(got, [0.0021683 + 0.65048, 0.0021683 + 0.065048], rtol=1e-12)
 
 
@@ -203,7 +203,7 @@ def test_fixed_discretes_are_the_same_points_every_run_and_report_half_the_time(
     assert low <= reports <= high
 
 
-def test_the_clutter_map_learns_a_uniform_intensity() -> None:
+def test_the_clutter_map_learns_a_uniform_density() -> None:
     """Uniform clutter at 0.02 per m rad for 60 scans: the map's mean estimate within 3 %.
 
     The estimate over 1440 cells averages ~ 1.7 plots a cell a scan; 3 % is over five standard
@@ -219,17 +219,17 @@ def test_the_clutter_map_learns_a_uniform_intensity() -> None:
     centres_r, centres_az = np.meshgrid(
         np.arange(500.0, 20e3, 1e3), np.arange(72) * math.radians(5.0) + 0.01
     )
-    estimate = clutter_map.intensity(centres_r.ravel(), centres_az.ravel())
+    estimate = clutter_map.density(centres_r.ravel(), centres_az.ravel())
     assert estimate.mean() == pytest.approx(0.02, rel=0.03)
 
 
 def test_an_empty_clutter_map_holds_its_prior_then_its_floor() -> None:
     """Before any scan: the prior; a cell that never saw a plot later: the forgetting floor."""
     clutter_map = ClutterMap(prior_per_m_rad=0.02)
-    assert clutter_map.intensity([5e3], [1.0])[0] == pytest.approx(0.02, rel=1e-12)
+    assert clutter_map.density([5e3], [1.0])[0] == pytest.approx(0.02, rel=1e-12)
     for _ in range(200):
         clutter_map.update(np.zeros(0), np.zeros(0))
-    assert clutter_map.intensity([5e3], [1.0])[0] == pytest.approx(
+    assert clutter_map.density([5e3], [1.0])[0] == pytest.approx(
         clutter_map.floor_per_m_rad, rel=1e-12
     )
 

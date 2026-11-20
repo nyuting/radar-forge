@@ -50,7 +50,7 @@ def _scene(d: float, n_gate: float, across: bool, seed: int, n_scans: int = 40) 
         for k, (r, a) in enumerate(zip(range_m, azimuth, strict=True))
     )
     disc = dataclasses.replace(
-        V3.clutter_plots.components[0], intensity_per_m_rad=n_gate / REFERENCE_GATE_M_RAD
+        V3.clutter_plots.components[0], density_per_m_rad=n_gate / REFERENCE_GATE_M_RAD
     )
     return dataclasses.replace(
         V3,

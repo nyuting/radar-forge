@@ -37,11 +37,11 @@ The filter is functions over a bank of tracks, and the hypothesiser is the gate.
 | :--- | :--- | :--- |
 | State layout | `CoordinateLayout`, `Coordinate` | names, units, periods |
 | Motion model | `MotionModel`: `ConstantVelocity` (and `ConstantVelocity.bistatic_range`), `ConstantAcceleration`, `ConstantTurn` | layout, `transition(x, dt)`, `jacobian(x, dt)`, `process_noise(x, dt)` |
-| Scan | `Scan` | z `(n_meas, m)`, R per measurement, time, model ID, clutter intensity per measurement; one revisit at one time |
+| Scan | `Scan` | z `(n_meas, m)`, R per measurement, time, model ID, clutter density per measurement; one revisit at one time |
 | Measurement model | `MeasurementModel` | layouts, `predicted_measurement(x)` = h(x), `jacobian(x)` = H |
 | Filter, transform | `predict`, `innovate`, `update`, `update_weighted` over a `TrackBank`; protocol `Linearisation`, `TaylorLinearisation`, `UnscentedTransform` | a motion model; a function, a mean, a covariance |
 | IMM | `InteractingMultipleModel`; `imm_predict`, `imm_innovate`, `imm_update` | modes, their union layout, `expm(Λ T)` |
-| Gate, associator | `gate`, `chi_square_gate_threshold`; `GreedyNearestNeighbour`, `GlobalNearestNeighbour`, `JointProbabilisticDataAssociation` | NIS; a cost matrix, or log-likelihoods and clutter intensity for weights |
+| Gate, associator | `gate`, `chi_square_gate_threshold`; `GreedyNearestNeighbour`, `GlobalNearestNeighbour`, `JointProbabilisticDataAssociation` | NIS; a cost matrix, or log-likelihoods and clutter density for weights |
 | Initiator, lifecycle | `Initiator` (`initiation.py`); `LifecyclePolicy`, `ExistencePolicy` | a prior; hits, misses, times, covariance, existence |
 | Track bank | `TrackBank`, `TrackSnapshot` | batched means and covariances, status, counts, existence, IMM modes |
 | Tracker | `Tracker` | all of the above, through their protocols |
@@ -210,7 +210,7 @@ which none was.
 | Deletion after misses in a row; after a coast time | `n_delete_misses`; `max_coast_time_s` |
 | Re-acquisition window for confirmed tracks: extra misses in a row | `n_reacquire_misses` |
 | Covariance-based deletion | `max_position_sigma_m` |
-| Existence-based confirm and delete (JIPDA) | `ExistencePolicy(p_survival, confirm, delete, initial)` |
+| Existence-based confirm and delete (JIPDA) | `ExistencePolicy(survival_probability, confirm, delete, initial)` |
 
 **Covariance-based deletion.** Delete a confirmed track when the square root of the largest
 eigenvalue of its position covariance exceeds `max_position_sigma_m` after its update, whatever the
@@ -289,7 +289,7 @@ the metrics of `spec/data-001-formats.md` §6.9; for many targets GOSPA and traj
 - **D27: the IMM is functions over a bank with per-mode columns**, `tracking/imm.py`: mixing by
   name in the union layout; switching matrix `expm(Λ T)` for the actual interval.
 - **D28: JPDA, JPDA\*, Set-JPDA and JIPDA return weights from `Associator.weights`.** Exact events
-  per cluster with a bound that raises; clutter intensity per measurement from an oracle or a
+  per cluster with a bound that raises; clutter density per measurement from an oracle or a
   clutter map; JIPDA's existence drives an `ExistencePolicy`.
 - **D29: track-oriented MHT inside the one loop**, its leaves a bank, its global hypotheses
   pairs per cluster; confirmation and deletion by score on its path only.

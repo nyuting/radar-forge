@@ -3,7 +3,7 @@ r"""A plot-level scenario played scan by scan, and the ground-plane tracker it f
 :func:`scans` plays a scenario with a ``[sensor]`` table (scenario 011) one scan at a time:
 the beam crosses each target at its own time, the plot model of
 :mod:`~radar_forge.tracking.scene` merges, detects and measures the echoes, and clutter and
-fixed discretes are added, each plot with the clutter intensity at it. :class:`PlotTracker`
+fixed discretes are added, each plot with the clutter density at it. :class:`PlotTracker`
 builds a :class:`~radar_forge.tracking.Tracker` (GNN, the JPDA family or MHT) or a
 :class:`~radar_forge.tracking.pmbm.PmbmTracker` from ``[tracking]`` and feeds it each scan
 as sector batches, keeping the clutter map as policy. Nothing here halves a range or does I/O.
@@ -46,10 +46,10 @@ from radar_forge.tracking.measurement import RangeAzimuthElevationRangeRate
 from radar_forge.tracking.motion import ConstantTurn, ConstantVelocity
 from radar_forge.tracking.pmbm import PmbmTracker
 from radar_forge.tracking.scene import (
-    LEAST_INTENSITY_PER_M_RAD,
+    LEAST_DENSITY_PER_M_RAD,
     ClutterMap,
     FixedDiscretes,
-    clutter_intensity,
+    clutter_density,
     detect,
     detection_probability,
     measure,
@@ -96,7 +96,7 @@ class PlotScan:
     Plots ``(n_plots,)``: the time the beam crossed each, horizontal range, azimuth, the
     sector it is batched in, its ``source`` (``target``, ``merged``, ``clutter``,
     ``discrete``) and ``source_ids`` (truth names joined by ``;``), and the clutter
-    intensity there per (m rad), the oracle. Echoes ``(n_targets,)``: when the beam crossed
+    density there per (m rad), the oracle. Echoes ``(n_targets,)``: when the beam crossed
     each target, whether it was in coverage, in the MTI notch, and detected (alone or merged).
     The tracker never reads ``source`` or the echoes.
     """
@@ -109,7 +109,7 @@ class PlotScan:
     sector: NDArray[np.int64]
     source: tuple[str, ...]
     source_ids: tuple[str, ...]
-    clutter_intensity_per_m_rad: NDArray[np.float64]
+    clutter_density_per_m_rad: NDArray[np.float64]
     echo_time_s: NDArray[np.float64]
     echo_in_coverage: NDArray[np.bool_]
     echo_in_notch: NDArray[np.bool_]
@@ -147,7 +147,12 @@ def scans(
         raise ValueError(msg)
     rng = np.random.default_rng(scenario.seed) if rng is None else rng
     names = np.array([target.name for target in scenario.arcs])
-    pd = np.array([getattr(sensor, f"pd_{target.target_class}") for target in scenario.arcs])
+    pd = np.array(
+        [
+            getattr(sensor, f"detection_probability_{target.target_class}")
+            for target in scenario.arcs
+        ]
+    )
     sector_rad = 2 * np.pi / sensor.n_sectors
     sigma_az = math.radians(sensor.sigma_azimuth_deg)
     count = scenario.n_scans if n_scans is None else min(n_scans, scenario.n_scans)
@@ -171,7 +176,7 @@ def scans(
             rate_mps[rows],
             pd[rows],
             mti_notch_mps=sensor.mti_notch_mps,
-            notch_detection_probability=sensor.pd_notch,
+            notch_detection_probability=sensor.detection_probability_notch,
         )
         found = detect(group, echo_pd, rng)
         plot_r, plot_az = measure(
@@ -206,7 +211,7 @@ def scans(
             sector=np.minimum(azimuth_rad // sector_rad, sensor.n_sectors - 1).astype(np.int64),
             source=tuple(s for s, _ in source),
             source_ids=tuple(i for _, i in source),
-            clutter_intensity_per_m_rad=clutter_intensity(
+            clutter_density_per_m_rad=clutter_density(
                 scenario.clutter_plots.components, range_m, azimuth_rad, start_s
             ),
             echo_time_s=echo_s,
@@ -230,11 +235,11 @@ class PlotTracker:
     radar at the origin and z fixed at its height. A scan reaches the tracker as
     ``n_sectors`` batches, each at its centre time, and a batch sees only the tracks whose
     extrapolated azimuth lies in its sector. GNN costs by the likelihood ratio against the
-    clutter regions' mean intensity that scan, with no assignment cheaper than
+    clutter regions' mean density that scan, with no assignment cheaper than
     ln(P_D / (1 - P_D P_G)), the track score's break-even; JPDA weighs
-    confirmed tracks jointly and tentative ones alone, with the clutter intensity at each plot
+    confirmed tracks jointly and tentative ones alone, with the clutter density at each plot
     from the scene (``"oracle"``) or a :class:`~radar_forge.tracking.scene.ClutterMap`
-    (``"map"``) fed every plot no confirmed track took. MHT scores by the same intensity.
+    (``"map"``) fed every plot no confirmed track took. MHT scores by the same density.
     ``name`` (a key of :data:`VARIANTS`, or ``"pmbm"``) replaces the configured association;
     PMBM runs one CV model, the agile mode's under ``motion = "imm"``. ``seed_truth`` starts
     each aircraft's track at its truth, confirmed.
@@ -284,7 +289,7 @@ class PlotTracker:
                 p_d,
                 p_g,
                 settings.k_best,
-                settings.n_scan,
+                settings.n_scan_depth,
                 settings.confirm_score,
                 settings.delete_drop,
             )
@@ -305,13 +310,13 @@ class PlotTracker:
                 max_position_sigma_m=min(settings.max_position_sigma_m, 1e12),
             ),
             "negative_log_likelihood_ratio",
-            {_PLOTS: self.mean_intensity(scenario.start_time_s)},
+            {_PLOTS: self.mean_density(scenario.start_time_s)},
             assignment=settings.assignment,
             coverage=self._covers,
             existence=ExistencePolicy(settings.survival_probability)
             if settings.existence
             else None,
-            max_birth_clutter_intensity=settings.max_birth_clutter_intensity_per_m_rad,
+            max_birth_clutter_density=settings.max_birth_clutter_density_per_m_rad,
         )
         if name == "pmbm":
             sigma = settings.sigma_acceleration_mps2 if settings.motion == "cv" else agile
@@ -329,14 +334,14 @@ class PlotTracker:
                 survival_probability=settings.survival_probability,
                 prune_existence=settings.prune_existence,
                 prune_weight=settings.prune_weight,
-                max_birth_clutter_intensity=settings.max_birth_clutter_intensity_per_m_rad,
+                max_birth_clutter_density=settings.max_birth_clutter_density_per_m_rad,
                 coverage=self._covers,
                 assignment=settings.assignment,
             )
         if settings.seed_truth:
             self._seed(scenario)
         # The map starts at twice the birth threshold: no track starts where it has not looked.
-        limit = settings.max_birth_clutter_intensity_per_m_rad
+        limit = settings.max_birth_clutter_density_per_m_rad
         self.clutter_map = ClutterMap(range_max_m=sensor.range_max_m, prior_per_m_rad=2 * limit)
         self._sector = 0
 
@@ -380,14 +385,12 @@ class PlotTracker:
         )
         return np.asarray(sector == self._sector, dtype=bool)
 
-    def mean_intensity(self, time_s: float) -> float:
-        """Return the clutter regions' mean intensity at ``time_s``, plots per (m rad): GNN's λ."""
+    def mean_density(self, time_s: float) -> float:
+        """Return the clutter regions' mean density at ``time_s``, plots per (m rad): GNN's λ."""
         volumes = [c.volume_m_rad(time_s) for c in self.components]
-        plots = sum(
-            c.intensity_per_m_rad * v for c, v in zip(self.components, volumes, strict=True)
-        )
+        plots = sum(c.density_per_m_rad * v for c, v in zip(self.components, volumes, strict=True))
         mean = plots / sum(volumes) if self.components else 0.0
-        return max(mean, LEAST_INTENSITY_PER_M_RAD)
+        return max(mean, LEAST_DENSITY_PER_M_RAD)
 
     def rotation(self, plots: PlotScan) -> list[tuple[TrackBank, Any]]:
         """Track one scan, sector by sector; return each batch's bank and JPDA clusters."""
@@ -395,13 +398,13 @@ class PlotTracker:
         # A drifting disc changes the regions' mean, so GNN's density is this scan's.
         if isinstance(self.tracker, Tracker):
             self.tracker.clutter_density = MappingProxyType(
-                {_PLOTS: self.mean_intensity(plots.start_time_s)}
+                {_PLOTS: self.mean_density(plots.start_time_s)}
             )
-        oracle = self.settings.clutter_intensity == "oracle"
-        intensity = (
-            plots.clutter_intensity_per_m_rad
+        oracle = self.settings.clutter_density_source == "oracle"
+        density = (
+            plots.clutter_density_per_m_rad
             if oracle
-            else self.clutter_map.intensity(plots.range_m, plots.azimuth_rad)
+            else self.clutter_map.density(plots.range_m, plots.azimuth_rad)
         )
         results, taken = [], np.zeros(plots.range_m.size, dtype=bool)
         # Sector by sector: each batch's tracks are the next one's prior.
@@ -410,7 +413,7 @@ class PlotTracker:
             mine = np.flatnonzero(plots.sector == sector)
             time_s = plots.start_time_s + (sector + 0.5) / n_sectors * self.period_s
             z = np.column_stack([plots.range_m[mine], plots.azimuth_rad[mine]])
-            scan = Scan(time_s, z, self.noise_covariance, _PLOTS, intensity[mine])
+            scan = Scan(time_s, z, self.noise_covariance, _PLOTS, density[mine])
             association = None
             if isinstance(self.tracker, Tracker):
                 self.tracker.last_association = None

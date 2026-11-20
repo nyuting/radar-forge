@@ -94,7 +94,7 @@ class Scan:
 
     ``noise_covariance`` may be one ``(m, m)`` for every measurement; it is stored as the
     ``(n_meas, m, m)`` stack, each positive definite. ``(0, m)`` measurements is a scan that
-    saw nothing. ``clutter_intensity`` ``(n_meas,)`` is the false-measurement density at each
+    saw nothing. ``clutter_density`` ``(n_meas,)`` is the false-measurement density at each
     measurement, per scan per unit of z: an associator that weights needs it.
 
     References
@@ -106,7 +106,7 @@ class Scan:
     measurements: NDArray[np.float64]
     noise_covariance: NDArray[np.float64]
     model_id: str
-    clutter_intensity: NDArray[np.float64] | None = None
+    clutter_density: NDArray[np.float64] | None = None
 
     def __post_init__(self) -> None:
         """Check, copy and freeze the measurements and their covariances."""
@@ -123,13 +123,13 @@ class Scan:
             shared = check_covariances(noise, (size, size), "noise_covariance")
             noise = np.zeros((n_meas, size, size)) + shared
         noise = check_covariances(noise, (n_meas, size, size), "noise_covariance")
-        if self.clutter_intensity is not None:
-            clutter = np.array(self.clutter_intensity, dtype=np.float64)
+        if self.clutter_density is not None:
+            clutter = np.array(self.clutter_density, dtype=np.float64)
             if clutter.shape != (n_meas,) or not np.all(np.isfinite(clutter) & (clutter > 0)):
-                msg = f"clutter_intensity must be ({n_meas},), positive and finite."
+                msg = f"clutter_density must be ({n_meas},), positive and finite."
                 raise ValueError(msg)
             clutter.setflags(write=False)
-            object.__setattr__(self, "clutter_intensity", clutter)
+            object.__setattr__(self, "clutter_density", clutter)
         measurements.setflags(write=False)
         noise.setflags(write=False)
         object.__setattr__(self, "time_s", float(self.time_s))
@@ -180,8 +180,8 @@ class Tracker:
         None offers the scan's own model to every track.
     existence : ExistencePolicy or None, optional
         Confirm and delete by existence instead of M-of-N; needs an associator that weights.
-    max_birth_clutter_intensity : float or None, optional
-        No track starts from a measurement whose ``Scan.clutter_intensity`` exceeds this.
+    max_birth_clutter_density : float or None, optional
+        No track starts from a measurement whose ``Scan.clutter_density`` exceeds this.
 
     References
     ----------
@@ -204,7 +204,7 @@ class Tracker:
         model_selector: ModelSelector | None = None,
         coverage: Coverage | None = None,
         existence: ExistencePolicy | None = None,
-        max_birth_clutter_intensity: float | None = None,
+        max_birth_clutter_density: float | None = None,
     ) -> None:
         layout = motion.state_layout
         densities = dict(clutter_density or {})
@@ -243,7 +243,7 @@ class Tracker:
         self.model_selector = model_selector
         self.coverage = coverage
         self.existence = existence
-        self.max_birth_clutter_intensity = max_birth_clutter_intensity
+        self.max_birth_clutter_density = max_birth_clutter_density
         self.imm = motion if isinstance(motion, InteractingMultipleModel) else None
         n_modes = 0 if self.imm is None else len(self.imm.motions)
         self.bank = TrackBank.empty(layout, n_modes)
@@ -253,7 +253,7 @@ class Tracker:
         # Whether the associator weights: asked once, of an empty scan.
         empty = np.zeros((0, 0))
         self._weighs = (
-            associator.weights(empty, empty.astype(bool), clutter_intensity=np.zeros(0)) is not None
+            associator.weights(empty, empty.astype(bool), clutter_density=np.zeros(0)) is not None
         )
         # An associator that branches (MHT) keeps its leaves in a tree; the bank then reports.
         branches = callable(getattr(associator, "hypotheses", None))
@@ -333,10 +333,10 @@ class Tracker:
         if model is None or scan.measurements.shape[1] != model.measurement_layout.dimension:
             msg = f"scan model {scan.model_id!r} is unknown, or its dimension does not match."
             raise ValueError(msg)
-        if self._weighs and scan.clutter_intensity is None:
+        if self._weighs and scan.clutter_density is None:
             msg = (
-                "the associator weights by clutter intensity, so the Scan needs "
-                f"clutter_intensity, one per measurement: shape ({len(scan.measurements)},)."
+                "the associator weights by clutter density, so the Scan needs "
+                f"clutter_density, one per measurement: shape ({len(scan.measurements)},)."
             )
             raise ValueError(msg)
         last_scan_s = -math.inf if self.time_s is None else self.time_s
@@ -382,7 +382,7 @@ class Tracker:
         else:
             bank = predict(bank, self.motion, self.linearisation, time_s)
         if self.existence is not None:
-            bank = replace(bank, existence=bank.existence * self.existence.p_survival)
+            bank = replace(bank, existence=bank.existence * self.existence.survival_probability)
         return bank
 
     def _merge(self, seen: NDArray[np.bool_], part: TrackBank) -> TrackBank:
@@ -506,12 +506,12 @@ class Tracker:
         if self.assignment == "confirmed_first":
             first = is_confirmed(bank.status)
         prior = bank.existence if self.existence is not None else None
-        clutter = scan.clutter_intensity
+        clutter = scan.clutter_density
         log_likelihood = innovations[0][0].log_likelihood
         joint = self.associator.weights(
             log_likelihood[first],
             in_gate[first],
-            clutter_intensity=clutter,
+            clutter_density=clutter,
             existence=None if prior is None else prior[first],
         )
         if joint is None:
@@ -534,7 +534,7 @@ class Tracker:
             alone = self.associator.weights(
                 log_likelihood[second][:, free],
                 in_gate[second][:, free],
-                clutter_intensity=None if clutter is None else clutter[free],
+                clutter_density=None if clutter is None else clutter[free],
                 existence=None if prior is None else prior[second],
                 joint=False,
             )
@@ -631,8 +631,8 @@ class Tracker:
         none = np.full(bank.n_tracks, -1, dtype=np.int64)
         bank = replace(bank, nis=np.full(bank.n_tracks, np.nan), measurement_index=none)
         _, chosen, innovations = self._score(bank, scan, np.ones(bank.n_tracks, dtype=bool))
-        if len(innovations) != 1 or scan.clutter_intensity is None:
-            msg = "MHT needs one measurement model a scan and the Scan's clutter_intensity."
+        if len(innovations) != 1 or scan.clutter_density is None:
+            msg = "MHT needs one measurement model a scan and the Scan's clutter_density."
             raise ValueError(msg)
         size = scan.measurements.shape[1]
         seeds = self.initiator.initiate(np.zeros((0, size)), np.zeros((0, size, size)), model)
@@ -642,7 +642,7 @@ class Tracker:
             seen,
             innovations[0][0].log_likelihood,
             chosen >= 0,
-            clutter_intensity=scan.clutter_intensity,
+            clutter_density=scan.clutter_density,
             born=born,
             linking=None if self.assignment == "joint" else is_confirmed(bank.status),
         )
@@ -684,9 +684,9 @@ class Tracker:
     def _may_start(self, scan: Scan) -> NDArray[np.bool_]:
         """Return where a track may start: wherever the clutter is under the birth limit."""
         allowed = np.ones(len(scan.measurements), dtype=bool)
-        limit = self.max_birth_clutter_intensity
-        if limit is not None and scan.clutter_intensity is not None:
-            allowed &= scan.clutter_intensity <= limit
+        limit = self.max_birth_clutter_density
+        if limit is not None and scan.clutter_density is not None:
+            allowed &= scan.clutter_density <= limit
         return allowed
 
     def _start(

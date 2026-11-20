@@ -2,7 +2,7 @@
 # once, fourteen aircraft and a flock of twelve birds, in layered clutter:
 # a light background, ground-clutter residue inside 6 km, a rain cell drifting
 # over the holding stack, and 25 fixed discretes. Tracked by an IMM under JIPDA,
-# with the clutter intensity at each plot estimated by a clutter map.
+# with the clutter density at each plot estimated by a clutter map.
 
 [scenario]
 name = "scenario-011-terminal-dense"
@@ -22,28 +22,28 @@ range_min_m = 1000.0
 range_max_m = 40000.0
 sigma_range_m = 33.414
 sigma_azimuth_deg = 0.15
-pd_aircraft = 0.90
-pd_bird = 0.30
+detection_probability_aircraft = 0.90
+detection_probability_bird = 0.30
 mti_notch_mps = 4.0
-pd_notch = 0.30
+detection_probability_notch = 0.30
 n_sectors = 16
 
 # n_gate per 4.6123 m rad reference gate.
 [[clutter_plots.component]]
 name = "background"             # n_gate 0.01: 531 plots a rotation
-intensity_per_m_rad = 0.0021683
+density_per_m_rad = 0.0021683
 range_min_m = 1000.0
 range_max_m = 40000.0
 
 [[clutter_plots.component]]
 name = "ground residue"         # n_gate 0.3 inside 6 km: 2044 plots a rotation
-intensity_per_m_rad = 0.065048
+density_per_m_rad = 0.065048
 range_min_m = 1000.0
 range_max_m = 6000.0
 
 [[clutter_plots.component]]
 name = "rain cell"              # n_gate 3; 1611 plots at the start, 1337 at 600 s
-intensity_per_m_rad = 0.65048
+density_per_m_rad = 0.65048
 range_min_m = 1000.0
 range_max_m = 40000.0
 centre_enu_m = [20000.0, 4000.0]
@@ -73,8 +73,8 @@ n_confirm_hits = 4
 n_confirm_scans = 5
 n_delete_misses = 3
 assignment = "confirmed_first"
-clutter_intensity = "map"
-max_birth_clutter_intensity_per_m_rad = 0.01
+clutter_density_source = "map"
+max_birth_clutter_density_per_m_rad = 0.01
 initial_speed_sigma_mps = 150.0
 # A track whose position sigma passes 300 m after its update is deleted
 # (tracker-001 §5.4): a gate that wide holds 85 rain plots at 20 km.

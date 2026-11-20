@@ -134,7 +134,7 @@ def test_two_tracks_sharing_one_measurement_weigh_each_hypothesis_as_the_product
 
 def test_no_track_opens_where_the_clutter_is_denser_than_the_birth_limit() -> None:
     """The birth intensity is zero where the clutter passes the limit every tracker shares."""
-    tracker = _pmbm(max_birth_clutter_intensity=1e-3)
+    tracker = _pmbm(max_birth_clutter_density=1e-3)
     tracker.process(_scan(0.0, [100.0], clutter=1e-2))
     assert tracker.bernoulli_count == 0
     tracker.process(_scan(1.0, [300.0], clutter=1e-4))

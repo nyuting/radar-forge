@@ -80,7 +80,7 @@ def test_a_hit_adds_the_log_likelihood_ratio_and_a_miss_the_missed_detection_ter
     1 s on: S = 1 + 100² + q/3 + R; the hit at 5 m scores the 1-D Gaussian there. Deletion
     is off: the branch's peak is its birth's zero, which the miss would fall 2.3025 below.
     """
-    tracker = _one_axis_mht(k_best=1, n_scan=1, delete_drop=math.inf)
+    tracker = _one_axis_mht(k_best=1, n_scan_depth=1, delete_drop=math.inf)
     tracker.process(_scan(0.0, [0.0]))
     tracker.process(_scan(1.0, [5.0]))
     assert tracker.tree is not None
@@ -95,7 +95,7 @@ def test_a_hit_adds_the_log_likelihood_ratio_and_a_miss_the_missed_detection_ter
 
 def test_a_branch_confirms_at_the_threshold_and_dies_falling_the_drop_below_its_peak() -> None:
     """Hits confirm once the score reaches 9.105; one miss (-2.216) survives, two do not."""
-    tracker = _one_axis_mht(k_best=1, n_scan=1)
+    tracker = _one_axis_mht(k_best=1, n_scan_depth=1)
     statuses, scores = [], []
     for time_s, hit in enumerate("hhhhhhmhmm"):
         bank = tracker.process(_scan(float(time_s), [10.0 * time_s] if hit == "h" else []))
@@ -109,11 +109,11 @@ def test_a_branch_confirms_at_the_threshold_and_dies_falling_the_drop_below_its_
     assert statuses[-1] == [TrackStatus.DELETED]  # two misses in a row: 4.43 below it
 
 
-def test_k_best_one_n_scan_one_is_gnn_with_the_finite_non_assignment_cost() -> None:
-    """MHT with n_scan 1, k_best 1 makes GNN's assignments and states on V2's 30° crossings.
+def test_k_best_one_n_scan_depth_one_is_gnn_with_the_finite_non_assignment_cost() -> None:
+    """MHT with n_scan_depth 1, k_best 1 makes GNN's assignments and states on V2's 30° crossings.
 
     Both pairs (X3 across range, X4 along it) are seeded at the truth 40 s before they cross
-    and run through their crossing in n_gate = 1 clutter, one clutter intensity per scan so
+    and run through their crossing in n_gate = 1 clutter, one clutter density per scan so
     both costs are -ln(g / lambda), with deletion and births off. rtol 1e-10: the same
     updates in batches of another size.
     """
@@ -140,7 +140,7 @@ def test_k_best_one_n_scan_one_is_gnn_with_the_finite_non_assignment_cost() -> N
             "negative_log_likelihood_ratio",
             {"plots": CLUTTER},
             assignment="joint",
-            max_birth_clutter_intensity=0.01,
+            max_birth_clutter_density=0.01,
         )
         for associator in (
             GlobalNearestNeighbour(math.log(P_D / (1 - P_D * P_G))),
@@ -192,9 +192,9 @@ def test_k_best_one_n_scan_one_is_gnn_with_the_finite_non_assignment_cost() -> N
 
 def test_no_tree_holds_more_leaves_than_k_best_and_every_tree_agrees_n_scan_back() -> None:
     """A tree's leaves are at most k_best, and after N-scan pruning they share their
-    ancestor n_scan scans back; a cluttered crossing in 1-D makes many branches to prune."""
+    ancestor n_scan_depth scans back; a cluttered crossing in 1-D makes many branches to prune."""
     rng = np.random.default_rng(7)
-    tracker = _one_axis_mht(k_best=4, n_scan=2)
+    tracker = _one_axis_mht(k_best=4, n_scan_depth=2)
     for time_s in range(30):
         targets = [100.0 + 3.0 * time_s, 190.0 - 3.0 * time_s]
         clutter = rng.uniform(0.0, 300.0, rng.poisson(3.0)).tolist()
@@ -289,7 +289,7 @@ def test_a_pair_closing_across_the_beam_swaps_under_gnn_and_as_often_under_mht(
 
     A swap is the stage's: either aircraft's GOSPA track changed from the scan before the
     closest approach to five after. The pair spends 16 scans inside one resolution cell, where
-    it gives one plot; 3 scans of deferral (n_scan) cannot bridge that, and both trackers'
+    it gives one plot; 3 scans of deferral (n_scan_depth) cannot bridge that, and both trackers'
     tracks take the merged plot and the clutter, so most swaps are tracks lost, not
     exchanged. The prototype, a 200-trial run of this scenario: GNN 0.780, MHT 0.845, JPDA 0.850
     (lost 136, 143, 145; exchanged 20, 26, 24). The scenario was designed expecting GNN >= 0.2 and

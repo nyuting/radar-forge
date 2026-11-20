@@ -25,10 +25,10 @@ range_min_m = 1000.0
 range_max_m = 40000.0
 sigma_range_m = 33.414
 sigma_azimuth_deg = 0.15
-pd_aircraft = 0.90
-pd_bird = 0.30
+detection_probability_aircraft = 0.90
+detection_probability_bird = 0.30
 mti_notch_mps = 4.0
-pd_notch = 0.30
+detection_probability_notch = 0.30
 n_sectors = 16
 
 [tracking]
@@ -43,10 +43,10 @@ n_confirm_hits = 4
 n_confirm_scans = 5
 n_delete_misses = 3
 assignment = "confirmed_first"
-clutter_intensity = "oracle"
+clutter_density_source = "oracle"
 # No track starts where the clutter is denser than n_gate = 0.05: inside the
 # discs only an established track continues.
-max_birth_clutter_intensity_per_m_rad = 0.01
+max_birth_clutter_density_per_m_rad = 0.01
 initial_speed_sigma_mps = 150.0
 # A track whose position sigma passes 300 m after its update is deleted
 # (tracker-001 §5.4): a gate that wide holds 85 rain plots at 20 km.
@@ -174,7 +174,7 @@ speed_mps = 72.0
 
 [[clutter_plots.component]]
 name = "window X1"
-intensity_per_m_rad = 0.21683
+density_per_m_rad = 0.21683
 range_min_m = 1000.0
 range_max_m = 40000.0
 centre_enu_m = [10000.0, 17320.5]
@@ -182,7 +182,7 @@ radius_m = 2500.0
 
 [[clutter_plots.component]]
 name = "window X2"
-intensity_per_m_rad = 0.21683
+density_per_m_rad = 0.21683
 range_min_m = 1000.0
 range_max_m = 40000.0
 centre_enu_m = [20000.0, 0.0]
@@ -190,7 +190,7 @@ radius_m = 2500.0
 
 [[clutter_plots.component]]
 name = "window X3"
-intensity_per_m_rad = 0.21683
+density_per_m_rad = 0.21683
 range_min_m = 1000.0
 range_max_m = 40000.0
 centre_enu_m = [10000.0, -17320.5]
@@ -198,7 +198,7 @@ radius_m = 2500.0
 
 [[clutter_plots.component]]
 name = "window X4"
-intensity_per_m_rad = 0.21683
+density_per_m_rad = 0.21683
 range_min_m = 1000.0
 range_max_m = 40000.0
 centre_enu_m = [-10000.0, -17320.5]
@@ -206,7 +206,7 @@ radius_m = 2500.0
 
 [[clutter_plots.component]]
 name = "window X5"
-intensity_per_m_rad = 0.21683
+density_per_m_rad = 0.21683
 range_min_m = 1000.0
 range_max_m = 40000.0
 centre_enu_m = [-20000.0, -0.0]
@@ -214,7 +214,7 @@ radius_m = 2500.0
 
 [[clutter_plots.component]]
 name = "window X6"
-intensity_per_m_rad = 0.21683
+density_per_m_rad = 0.21683
 range_min_m = 1000.0
 range_max_m = 40000.0
 centre_enu_m = [-10000.0, 17320.5]

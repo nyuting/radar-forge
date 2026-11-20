@@ -745,7 +745,7 @@ def test_the_existence_policy_needs_an_associator_that_weights() -> None:
 
 @pytest.mark.parametrize(
     "settings",
-    [{"delete": 0.5, "initial": 0.2}, {"confirm": 0.01}, {"p_survival": 0.0}],
+    [{"delete": 0.5, "initial": 0.2}, {"confirm": 0.01}, {"survival_probability": 0.0}],
 )
 def test_an_existence_policy_that_could_not_work_is_rejected(settings: dict[str, Any]) -> None:
     with pytest.raises(ValueError, match="delete"):
@@ -768,8 +768,8 @@ def test_a_confirmed_track_whose_position_sigma_passes_the_limit_is_deleted() ->
 
 
 def test_no_track_starts_where_the_clutter_is_denser_than_the_birth_limit() -> None:
-    """Births only from the measurement whose clutter intensity is at most the limit."""
-    tracker = _one_axis(LifecyclePolicy(1, 1), max_birth_clutter_intensity=0.01)
+    """Births only from the measurement whose clutter density is at most the limit."""
+    tracker = _one_axis(LifecyclePolicy(1, 1), max_birth_clutter_density=0.01)
     bank = tracker.process(Scan(0.0, [[0.0], [100.0], [200.0]], [[1.0]], "x", [0.001, 0.02, 0.01]))
     np.testing.assert_array_equal(bank.measurement_index, [0, 2])
 
@@ -834,16 +834,16 @@ def test_a_jpda_track_whose_gate_holds_only_an_unlikely_plot_misses() -> None:
         assert (bank.measurement_index[0] == 0) == hit
 
 
-def test_a_weighting_tracker_refuses_a_scan_without_clutter_intensity() -> None:
+def test_a_weighting_tracker_refuses_a_scan_without_clutter_density() -> None:
     """JPDA needs lambda at each measurement; the message names the Scan's field."""
     tracker = _one_axis_jpda(LifecyclePolicy(1, 1))
-    with pytest.raises(ValueError, match="clutter_intensity"):
+    with pytest.raises(ValueError, match="clutter_density"):
         tracker.process(Scan(0.0, [[0.0]], [[1.0]], "x"))
 
 
 def test_existence_stays_at_most_one_when_survival_is_certain() -> None:
-    """With p_survival = 1 a steady target's existence rounds towards 1 + eps; it is clipped."""
-    tracker = _one_axis_jpda(LifecyclePolicy(1, 1), ExistencePolicy(p_survival=1.0))
+    """With certain survival a steady target's existence rounds to 1 + eps; it is clipped."""
+    tracker = _one_axis_jpda(LifecyclePolicy(1, 1), ExistencePolicy(survival_probability=1.0))
     # Thirty scans of one target in light clutter: existence climbs to one and stays.
     for t in range(30):
         bank = tracker.process(Scan(float(t), [[20.0 * t]], [[1.0]], "x", [1e-4]))

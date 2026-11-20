@@ -30,10 +30,10 @@ range_min_m = 1000.0
 range_max_m = 40000.0
 sigma_range_m = 33.414
 sigma_azimuth_deg = 0.15
-pd_aircraft = 0.90
-pd_bird = 0.30
+detection_probability_aircraft = 0.90
+detection_probability_bird = 0.30
 mti_notch_mps = 4.0
-pd_notch = 0.30
+detection_probability_notch = 0.30
 n_sectors = 1          # one batch a rotation, at 180 deg: the pair's crossing
 
 [tracking]
@@ -48,8 +48,8 @@ n_confirm_hits = 1              # a cue is confirmed at once
 n_confirm_scans = 1
 n_delete_misses = 40            # and never deleted in 40 scans
 assignment = "joint"
-clutter_intensity = "oracle"
-max_birth_clutter_intensity_per_m_rad = 0.01   # no track starts in the clutter
+clutter_density_source = "oracle"
+max_birth_clutter_density_per_m_rad = 0.01   # no track starts in the clutter
 initial_speed_sigma_mps = 150.0
 delete_drop = inf               # MHT deletes nothing either,
 survival_probability = 1.0      # nor JIPDA nor PMBM: a sure target stays sure
@@ -89,7 +89,7 @@ speed_mps = 72.0
 
 [[clutter_plots.component]]
 name = "disc about the pair"
-intensity_per_m_rad = 0.21683   # n_gate = 1
+density_per_m_rad = 0.21683   # n_gate = 1
 range_min_m = 1000.0
 range_max_m = 40000.0
 centre_enu_m = [0.0, -20000.0]

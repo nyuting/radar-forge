@@ -244,7 +244,7 @@ def test_jpda_weights_are_the_marginals_of_every_feasible_joint_event() -> None:
     log_g, in_gate = rng.normal(-3.0, 1.0, (3, 4)), rng.random((3, 4)) < 0.7
     clutter = rng.uniform(0.01, 0.1, 4)
     result = joint_probabilistic_data_association(
-        log_g, in_gate, clutter_intensity=clutter, detection_probability=P_D, gate_probability=P_G
+        log_g, in_gate, clutter_density=clutter, detection_probability=P_D, gate_probability=P_G
     )
     expected = _brute_force(log_g, in_gate, clutter, np.ones(3))
     # rtol 1e-12: sums of at most a few dozen products.
@@ -264,7 +264,7 @@ def test_jpda_with_certain_detection_and_disjoint_gates_is_the_kalman_filter() -
     weights = joint_probabilistic_data_association(
         innovation.log_likelihood,
         in_gate,
-        clutter_intensity=[1e-3, 1e-3],
+        clutter_density=[1e-3, 1e-3],
         detection_probability=1.0,
         gate_probability=1.0,
     ).weights
@@ -282,14 +282,14 @@ def test_jpda_on_one_track_is_pda() -> None:
     log_g, clutter = np.array([[-4.0, -2.5, -6.0]]), np.array([0.02, 0.05, 0.01])
     in_gate = np.ones((1, 3), bool)
     joint = joint_probabilistic_data_association(
-        log_g, in_gate, clutter_intensity=clutter, detection_probability=P_D, gate_probability=P_G
+        log_g, in_gate, clutter_density=clutter, detection_probability=P_D, gate_probability=P_G
     )
     ratio = P_D * np.exp(log_g[0]) / clutter
     miss = 1 - P_D * P_G
     expected = np.append(ratio, miss) / (miss + ratio.sum())
     np.testing.assert_allclose(joint.weights[0], expected, rtol=1e-10)
     alone = probabilistic_data_association(
-        log_g, in_gate, clutter_intensity=clutter, detection_probability=P_D, gate_probability=P_G
+        log_g, in_gate, clutter_density=clutter, detection_probability=P_D, gate_probability=P_G
     )
     np.testing.assert_allclose(alone.weights, joint.weights, rtol=1e-10)
 
@@ -300,7 +300,7 @@ def test_a_cluster_past_the_event_bound_raises_naming_its_size() -> None:
         joint_probabilistic_data_association(
             np.zeros((6, 12)),
             np.ones((6, 12), bool),
-            clutter_intensity=np.ones(12),
+            clutter_density=np.ones(12),
             detection_probability=P_D,
             gate_probability=P_G,
             max_events_per_cluster=1000,
@@ -335,7 +335,7 @@ def test_jpda_star_drops_the_swapped_labelling_and_set_moves_its_mass_onto_the_k
         got = joint_probabilistic_data_association(
             np.log(ratio),
             np.ones((2, 2), bool),
-            clutter_intensity=clutter,
+            clutter_density=clutter,
             detection_probability=P_D,
             gate_probability=P_G,
             coalescence=coalescence,
@@ -350,7 +350,7 @@ def test_jipda_existence_after_a_miss_is_the_ipda_recursion() -> None:
     result = joint_probabilistic_data_association(
         np.zeros((1, 0)),
         np.zeros((1, 0), bool),
-        clutter_intensity=np.ones(0),
+        clutter_density=np.ones(0),
         detection_probability=P_D,
         gate_probability=P_G,
         existence=[r],
@@ -369,7 +369,7 @@ def test_jipda_weights_are_jpda_with_detection_scaled_by_existence() -> None:
     result = joint_probabilistic_data_association(
         log_g,
         in_gate,
-        clutter_intensity=clutter,
+        clutter_density=clutter,
         detection_probability=P_D,
         gate_probability=P_G,
         existence=prior,
@@ -387,7 +387,7 @@ def test_jipda_weights_are_jpda_with_detection_scaled_by_existence() -> None:
 def test_nearest_neighbour_associators_return_no_weights() -> None:
     """GNN and greedy only assign, so the tracker keeps their hard-assignment path."""
     for associator in (GlobalNearestNeighbour(), GreedyNearestNeighbour()):
-        assert associator.weights(np.zeros((1, 1)), [[True]], clutter_intensity=[1.0]) is None
+        assert associator.weights(np.zeros((1, 1)), [[True]], clutter_density=[1.0]) is None
 
 
 def _every_assignment(
@@ -440,7 +440,7 @@ def test_murty_stops_where_the_next_assignment_costs_more_than_the_gap() -> None
 # --- coalescence shown, and fixed (V3's pair, scenario_011_cst_sweep, at d = 1 across range) ---
 
 ALPHA_RANGE_M, ALPHA_AZIMUTH_RAD = 115.75, np.radians(1.4)
-WINDOW_INTENSITY = 0.21683  # n_gate = 1, plots per (m rad) a scan
+WINDOW_DENSITY = 0.21683  # n_gate = 1, plots per (m rad) a scan
 
 
 def _coalescence_ratio(coalescence: str, trials: int, seed: int) -> NDArray[np.float64]:
@@ -475,7 +475,7 @@ def _coalescence_ratio(coalescence: str, trials: int, seed: int) -> NDArray[np.f
                 gate_probability=0.99,
                 coverage_volume=2 * np.pi * 39e3,
                 survival_probability=1.0,
-                max_birth_clutter_intensity=0.01,
+                max_birth_clutter_density=0.01,
             )
         else:
             associator: TrackOrientedMHT | JointProbabilisticDataAssociation = (
@@ -492,7 +492,7 @@ def _coalescence_ratio(coalescence: str, trials: int, seed: int) -> NDArray[np.f
                 initiator,
                 LifecyclePolicy(1, 1, 40, max_coast_time_s=1e3),
                 assignment="joint",
-                max_birth_clutter_intensity=0.01,
+                max_birth_clutter_density=0.01,
             )
         position = 20e3 * np.column_stack([np.sin(azimuths), np.cos(azimuths)])
         velocity = 72.0 * np.column_stack([np.sin(azimuths), np.cos(azimuths)])
@@ -522,7 +522,7 @@ def _coalescence_ratio(coalescence: str, trials: int, seed: int) -> NDArray[np.f
                 sigma_azimuth_rad=np.radians(0.15),
                 rng=rng,
             )
-            window = ClutterComponent(WINDOW_INTENSITY, truth_r - 2500.0, truth_r + 2500.0)
+            window = ClutterComponent(WINDOW_DENSITY, truth_r - 2500.0, truth_r + 2500.0)
             clutter_r, clutter_az, _ = poisson_clutter_plots([window], time_s, rng)
             near = np.abs(clutter_az - np.radians(45.0)) < np.radians(5.0)
             z = np.column_stack(
@@ -531,9 +531,7 @@ def _coalescence_ratio(coalescence: str, trials: int, seed: int) -> NDArray[np.f
                     np.concatenate([plot_az[found], clutter_az[near]]),
                 ]
             )
-            bank = tracker.process(
-                Scan(time_s, z, noise, "plots", np.full(len(z), WINDOW_INTENSITY))
-            )
+            bank = tracker.process(Scan(time_s, z, noise, "plots", np.full(len(z), WINDOW_DENSITY)))
             if scan > 20 and bank.n_tracks == 2:
                 estimate = np.linalg.norm(bank.mean[0, [0, 2]] - bank.mean[1, [0, 2]])
                 ratio.append(estimate / (truth_r * ALPHA_AZIMUTH_RAD))

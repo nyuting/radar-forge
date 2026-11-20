@@ -130,15 +130,15 @@ class TrackingSettings:
     turn_rate_noise_density_rad2ps3: float = 1.6e-5
     sojourn_time_s: tuple[float, ...] = (120.0, 30.0, 20.0)
     turn_rate_sigma_degps: float = 3.0
-    clutter_intensity: Literal["oracle", "map"] = "oracle"
+    clutter_density_source: Literal["oracle", "map"] = "oracle"
     detection_probability: float = 0.9
-    max_birth_clutter_intensity_per_m_rad: float = 0.01
+    max_birth_clutter_density_per_m_rad: float = 0.01
     initial_speed_sigma_mps: float = 150.0
     max_position_sigma_m: float = np.inf
     # Scenario 011b: MHT's tree, PMBM's births and pruning, cues at the truth, and further
     # trackers to score beside the configured one (tracking.scans.VARIANTS, or "pmbm").
     k_best: int = 10
-    n_scan: int = 3
+    n_scan_depth: int = 3
     confirm_score: float = CONFIRM_SCORE
     delete_drop: float = DELETE_DROP
     birth_intensity_per_scan: float = 0.05
@@ -184,10 +184,10 @@ class SensorSettings:
     range_max_m: float = 40000.0
     sigma_range_m: float = 33.414
     sigma_azimuth_deg: float = 0.15
-    pd_aircraft: float = 0.9
-    pd_bird: float = 0.3
+    detection_probability_aircraft: float = 0.9
+    detection_probability_bird: float = 0.3
     mti_notch_mps: float = 4.0
-    pd_notch: float = 0.3
+    detection_probability_notch: float = 0.3
     n_sectors: int = 16
 
 

@@ -6,9 +6,9 @@ A rotating radar's plot model is three steps: :func:`resolve` merges echoes clos
 resolution cell with probability :math:`P_u(d) = e^{-d^2/2}` [1]; :func:`detect` detects each
 group with :math:`1 - \prod_i (1 - P_{D,i})`, an echo inside the MTI notch at a lower Pd;
 :func:`measure` places one plot per detected group at its centroid plus noise. False plots are
-Poisson in (range, azimuth) at an intensity per (m rad) per scan (:class:`ClutterComponent`),
+Poisson in (range, azimuth) at a density per (m rad) per scan (:class:`ClutterComponent`),
 plus :class:`FixedDiscretes` that report at fixed points. :class:`ClutterMap` estimates the
-intensity from the plots. Headings and azimuths are clockwise from north, a turn rate positive
+density from the plots. Headings and azimuths are clockwise from north, a turn rate positive
 to the right; positions are ENU metres about the radar, ranges horizontal.
 
 References
@@ -38,13 +38,13 @@ from radar_forge.coordinates import (
 )
 
 __all__ = [
-    "LEAST_INTENSITY_PER_M_RAD",
+    "LEAST_DENSITY_PER_M_RAD",
     "Arc",
     "ClutterComponent",
     "ClutterMap",
     "FixedDiscretes",
     "Leg",
-    "clutter_intensity",
+    "clutter_density",
     "detect",
     "detection_probability",
     "measure",
@@ -53,9 +53,9 @@ __all__ = [
 ]
 
 
-# The least false-plot intensity a point is given, plots per (m rad) per scan: a likelihood
+# The least false-plot density a point is given, plots per (m rad) per scan: a likelihood
 # ratio divides by it, and a point outside every clutter region would otherwise get zero.
-LEAST_INTENSITY_PER_M_RAD = 1e-9
+LEAST_DENSITY_PER_M_RAD = 1e-9
 
 
 def _heading(heading_rad: ArrayLike) -> NDArray[np.float64]:
@@ -267,11 +267,11 @@ def measure(
 
 @dataclass(frozen=True)
 class ClutterComponent:
-    r"""A region of Poisson false plots at ``intensity_per_m_rad`` plots per (m rad) per scan.
+    r"""A region of Poisson false plots at ``density_per_m_rad`` plots per (m rad) per scan.
 
     The region is the annulus ``[range_min_m, range_max_m)`` at every azimuth, or, with
     ``centre_enu_m``, a disc of ``radius_m`` drifting at ``drift_enu_mps`` (a rain cell),
-    which must lie inside the annulus and not cover the radar. The intensity is per (m rad),
+    which must lie inside the annulus and not cover the radar. The density is per (m rad),
     not m², because a CFAR holds the rate per resolution cell, uniform in range and azimuth;
     so a disc's volume is :math:`\int dA / r = \int_{-\phi_0}^{\phi_0} 2\sqrt{R^2 - c^2
     \sin^2\phi}\, d\phi`, its chords along each azimuth, :math:`\sin\phi_0 = R/c`, which is
@@ -282,7 +282,7 @@ class ClutterComponent:
     Abramowitz and Stegun [3], §17.3 (the complete elliptic integrals K and E).
     """
 
-    intensity_per_m_rad: float
+    density_per_m_rad: float
     range_min_m: float
     range_max_m: float
     centre_enu_m: tuple[float, float] | None = None
@@ -290,9 +290,9 @@ class ClutterComponent:
     drift_enu_mps: tuple[float, float] = (0.0, 0.0)
 
     def __post_init__(self) -> None:
-        """Check the intensity and the region."""
-        if not (self.intensity_per_m_rad >= 0 and 0 <= self.range_min_m < self.range_max_m):
-            msg = f"need intensity >= 0 and 0 <= range_min_m < range_max_m; got {self}."
+        """Check the density and the region."""
+        if not (self.density_per_m_rad >= 0 and 0 <= self.range_min_m < self.range_max_m):
+            msg = f"need density >= 0 and 0 <= range_min_m < range_max_m; got {self}."
             raise ValueError(msg)
         if self.centre_enu_m is not None and not self.radius_m > 0:
             msg = f"a disc needs radius_m > 0; got {self.radius_m}."
@@ -354,7 +354,7 @@ def poisson_clutter_plots(
             high_r = float(centre_range_m) + component.radius_m
             half = math.asin(min(component.radius_m / float(centre_range_m), 1.0))
             low_az, span_az = float(centre_az) - half, 2 * half
-        count = rng.poisson(component.intensity_per_m_rad * (high_r - low_r) * span_az)
+        count = rng.poisson(component.density_per_m_rad * (high_r - low_r) * span_az)
         draw = rng.random((count, 2))
         # Unguarded: a tiny negative angle rounds up to exactly 2 pi, where _periodic.fold gives 0.
         ranges, azimuths = (
@@ -400,22 +400,22 @@ class FixedDiscretes:
         return range_m, np.mod(self.azimuth_rad[reported] + sigma_azimuth_rad * noise[1], 2 * np.pi)
 
 
-def clutter_intensity(
+def clutter_density(
     components: Sequence[ClutterComponent],
     range_m: ArrayLike,
     azimuth_rad: ArrayLike,
     time_s: float,
 ) -> NDArray[np.float64]:
-    """Return the false-plot intensity at each point: the sum over the regions holding it."""
+    """Return the false-plot density at each point: the sum over the regions holding it."""
     total = np.zeros(np.shape(range_m))
     # A loop over the few components.
     for component in components:
-        total += component.intensity_per_m_rad * component.contains(range_m, azimuth_rad, time_s)
-    return np.maximum(total, LEAST_INTENSITY_PER_M_RAD)
+        total += component.density_per_m_rad * component.contains(range_m, azimuth_rad, time_s)
+    return np.maximum(total, LEAST_DENSITY_PER_M_RAD)
 
 
 class ClutterMap:
-    """The false-plot intensity per (m rad) per scan, estimated per cell by forgetting average.
+    """The false-plot density per (m rad) per scan, estimated per cell by forgetting average.
 
     Each scan adds its plots' counts: with f the forgetting factor, the cell's count sum and
     its scan sum both decay by f per scan, and their ratio over the cell's volume is the
@@ -471,8 +471,8 @@ class ClutterMap:
         self.counts = self.forgetting * self.counts + counts
         self.n_scans = self.forgetting * self.n_scans + 1.0
 
-    def intensity(self, range_m: ArrayLike, azimuth_rad: ArrayLike) -> NDArray[np.float64]:
-        """Return the estimated intensity at each point, plots per (m rad) per scan."""
+    def density(self, range_m: ArrayLike, azimuth_rad: ArrayLike) -> NDArray[np.float64]:
+        """Return the estimated density at each point, plots per (m rad) per scan."""
         volume = self.cell_range_m * self.cell_azimuth_rad
         estimate = self.counts[self._cells(range_m, azimuth_rad)] / max(self.n_scans, 1.0) / volume
         result: NDArray[np.float64] = np.maximum(estimate, self.floor_per_m_rad)
