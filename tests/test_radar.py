@@ -28,7 +28,7 @@ S1_RECEIVER = Receiver(1.0e6, 30.0, 3.0)
 S2_TRANSMITTER = Transmitter(9.8e9, 2.0e6, 1.0e3, 30.0, 10.0e-6, 25.0e3, waveform="pulsed")
 S2_RECEIVER = Receiver(2.5e6, 30.0, 3.0)
 
-# The Duke receiver and the Raleigh-Durham transmitter of scenario 002 (spec §3.1).
+# The Duke receiver and the Raleigh-Durham transmitter of scenario 002.
 DUKE = Site(36.00250, -78.94100, 60.0)
 RDU = Site(35.87750, -78.78750, 25.0)
 
@@ -43,7 +43,7 @@ class TestTransmitter:
         np.testing.assert_allclose(S1_TRANSMITTER.wavelength_m, 0.030_591_067, rtol=1e-7)
 
     def test_fmcw_sweep_rate_is_two_ghz_per_second(self) -> None:
-        """2 MHz over 1 ms is 2.000 GHz/s, per spec §3.4 S1."""
+        """2 MHz over 1 ms is 2.000 GHz/s."""
         np.testing.assert_allclose(S1_TRANSMITTER.sweep_rate_hzps, 2.0e9, rtol=1e-12)
 
     def test_fmcw_runs_at_full_duty(self) -> None:
@@ -120,7 +120,7 @@ class TestRadarLimits:
     """The scenario-001 waveform limits, now stated for the bistatic range and its rate."""
 
     def test_range_resolution_is_seventy_five_metres(self) -> None:
-        """c/2B at 2 MHz is 74.95 m, per spec §2."""
+        """c/2B at 2 MHz is 74.95 m."""
         np.testing.assert_allclose(S1_RADAR.range_resolution_m, 74.948, rtol=1e-4)
 
     def test_s1_unambiguous_bistatic_range_is_c_fs_over_alpha(self) -> None:
@@ -182,7 +182,7 @@ class TestMonostaticAndBistatic:
         assert radar.baseline_m == 0.0
 
     def test_baseline_is_the_scenario_002_figure(self) -> None:
-        """Spec §3.1 quotes 19.601 km between the two sites, computed rather than assumed."""
+        """The two sites are 19.601 km apart, computed rather than assumed."""
         assert not S1_PAIR.is_monostatic
         assert abs(S1_PAIR.baseline_m - 19_601.0) < 0.5
 

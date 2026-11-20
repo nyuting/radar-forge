@@ -228,7 +228,7 @@ def _outer(sigma: NDArray[np.float64]) -> NDArray[np.float64]:
 def test_the_unscented_moments_are_the_kalman_moments_on_linear_models(
     alpha: float, beta: float, kappa: float
 ) -> None:
-    """Spec §3: x⁻, P⁻, z, P_xz and S agree, whatever the accepted weights."""
+    """Tracker-001 §3: x⁻, P⁻, z, P_xz and S agree, whatever the accepted weights."""
     motion, bank = CartesianMotion(), _guard_bank()
     model = LinearMeasurement(motion.state_layout, ("x_m", "y_m", "z_m"))
     unscented, taylor, steps_s = (
@@ -261,7 +261,7 @@ def test_the_unscented_moments_are_the_kalman_moments_on_linear_models(
 
 
 def test_the_ukf_and_the_kf_agree_over_200_steps(rng: np.random.Generator) -> None:
-    """Spec §3: the same measurements through both filters, judged on the current spread."""
+    """Tracker-001 §3: the same measurements through both filters, judged on the current spread."""
     motion = CartesianMotion()
     model = LinearMeasurement(motion.state_layout, ("x_m", "y_m", "z_m"))
     noise = np.diag([50.0**2] * 3)
@@ -289,7 +289,7 @@ SECOND_ORDER_SCALES = np.geomspace(1 / 8, 1, 7)
 
 
 def test_the_ekf_and_the_ukf_differ_at_second_order_on_the_spherical_model() -> None:
-    """Spec §3: scale the prior covariance by s²; the gap in the updated mean shrinks as s².
+    """Tracker-001 §3: scale the prior covariance by s²; the gap in the updated mean shrinks as s².
 
     The UKF's predicted measurement is h(x) + ½ tr(∇²h P) to leading order (Särkkä 2013,
     ch. 5); the EKF's is h(x). A wrong Jacobian leaves a first-order gap, slope about 1. The
@@ -353,7 +353,7 @@ def test_an_innovation_across_due_north_takes_the_short_way(linearisation: Linea
 def test_the_batched_innovation_equals_a_per_pair_loop(
     linearisation: Linearisation, rng: np.random.Generator
 ) -> None:
-    """Spec §7: every (track, measurement) pair scored at once equals each pair alone."""
+    """Tracker-001 §7: every (track, measurement) pair scored at once equals each pair alone."""
     layout = CartesianMotion().state_layout
     model = RangeAzimuthElevationRangeRate(layout, [100.0, 50.0, 10.0])
     means = rng.uniform(-100.0, 100.0, (5, 6))

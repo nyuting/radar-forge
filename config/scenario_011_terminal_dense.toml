@@ -1,4 +1,4 @@
-# Scenario 011, V4 "terminal_dense": the whole terminal area of spec 011 §3.3 at
+# Scenario 011, V4 "terminal_dense": the whole terminal area at
 # once, fourteen aircraft and a flock of twelve birds, in layered clutter:
 # a light background, ground-clutter residue inside 6 km, a rain cell drifting
 # over the holding stack, and 25 fixed discretes. Tracked by an IMM under JIPDA,
@@ -28,7 +28,7 @@ mti_notch_mps = 4.0
 pd_notch = 0.30
 n_sectors = 16
 
-# Spec 011 §3.2, n_gate per 4.6123 m rad reference gate.
+# n_gate per 4.6123 m rad reference gate.
 [[clutter_plots.component]]
 name = "background"             # n_gate 0.01: 531 plots a rotation
 intensity_per_m_rad = 0.0021683
@@ -79,7 +79,7 @@ initial_speed_sigma_mps = 150.0
 # A track whose position sigma passes 300 m after its update is deleted
 # (tracker-001 §5.4): a gate that wide holds 85 rain plots at 20 km.
 max_position_sigma_m = 300.0
-# Spec 011b: the same plots also scored by the IMM under GNN and under MHT, and
+# The same plots also scored by the IMM under GNN and under MHT, and
 # by PMBM, whose one CV model takes the agile mode's noise (3.1623 m/s^2): it
 # carries the turns without the IMM, a caveat on the comparison. Each score is
 # prefixed by its tracker's name; the checks below are JIPDA's.

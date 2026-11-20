@@ -54,8 +54,8 @@ SHORT_RUNS = [
 # rtol 1e-9 holds a value computed the same way; an error is a difference of nearly equal
 # numbers (a measured rate less the truth's), so the platform's FFT round-off, 1e-15 of each,
 # can be 1e-8 of the difference. Each unit also gets an absolute tolerance far below anything
-# physical: a micrometre a second against S1's 0.12 m/s rate bin, a millimetre against its
-# 150 m range bin, a micro-decibel. Counts, indices and fractions stay exact.
+# physical: a micrometre a second against the 0.12 m/s rate bin of S1 (scenario_001_fmcw_low_prf), a
+# millimetre against its 150 m range bin, a micro-decibel. Counts, indices and fractions stay exact.
 ABSOLUTE_TOLERANCE = {"_mps": 1e-6, "_m": 1e-3, "_db": 1e-6, "_dbw": 1e-6}
 
 

@@ -184,7 +184,7 @@ def test_a_pulsed_map_holds_the_same_noise_in_every_range_cell(rng):
 
 
 def test_a_dual_prf_pair_unfolds_a_rate_neither_burst_resolves(rng):
-    """S3's bursts fold 300 m/s of bistatic rate; their pair unfolds it to within a bin."""
+    """S3's bursts (scenario_001_fmcw_dual_prf) fold 300 m/s of rate; the pair unfolds it."""
     scenario = load_scenario(REPO / "config" / "scenario_001_fmcw_dual_prf.toml")
     geometry = TargetGeometry.monostatic(15_000.0, 150.0)
     products = [

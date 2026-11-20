@@ -7,7 +7,7 @@
 # the false-alarm rate over the cells away from the pairs, and the fraction of
 # frames each pair gives one detection: the merge the plot model draws with
 # P_u(d) = exp(-d^2/2). Azimuth is not modelled here: this checks the
-# range-Doppler half of the plot model (spec 011 §3.5).
+# range-Doppler half of the plot model.
 #
 # This file is scenario_011_iq_check.toml but for one key: [detection]
 # mean_shift_bandwidth_bins = 1.0 groups the threshold crossings by the mode
@@ -77,12 +77,12 @@ truth_in_map_fraction = [1.0, 1.0]
 noise_tolerance_db = 0.08
 # Noise-only maps hold 30 expected false alarms; the Poisson 99.9 % interval lies within two.
 pfa_tolerance_factor = 2.0
-# Spec 011 A13: the plot model is given Pd 0.99 for these targets (40 to 48 dB of SNR; a
+# The plot model is given Pd 0.99 for these targets (40 to 48 dB of SNR; a
 # target counts as detected when its pair's window holds a detection, so a merged pair or a
 # member masked by its partner in the CFAR's training cells counts both): over 120 frames of 8
 # targets the 99 % binomial interval is [0.982, 0.997]; 1.0 measured, 960 of 960.
 pd_min = 0.982
-# Spec 011 A13: false alarms away from the pairs over the design Pfa times the cells left,
+# False alarms away from the pairs over the design Pfa times the cells left,
 # 170 expected over 120 frames; the 99 % Poisson upper bound is 205, a ratio of 1.21. 173
 # measured, 1.017.
 false_alarm_rate_max = 1.21

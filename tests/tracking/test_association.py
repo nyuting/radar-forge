@@ -244,7 +244,7 @@ def test_jpda_weights_are_the_marginals_of_every_feasible_joint_event() -> None:
 
 
 def test_jpda_with_certain_detection_and_disjoint_gates_is_the_kalman_filter() -> None:
-    """A3(a): P_D = P_G = 1, one measurement per gate, no clutter in it: weight one, KF update."""
+    """P_D = P_G = 1, one measurement per gate, no clutter in it: weight one, KF update."""
     layout = CartesianMotion("x").state_layout
     model = LinearMeasurement(layout, ["x_m"])
     bank = TrackBank.empty(layout).append(
@@ -263,13 +263,13 @@ def test_jpda_with_certain_detection_and_disjoint_gates_is_the_kalman_filter() -
     np.testing.assert_allclose(weights, [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], rtol=0, atol=1e-290)
     weighted = update_weighted(bank, innovation, weights)
     kalman = update(bank, innovation, [0, 1])
-    # rtol 1e-10 (A3): the same correction through the mixture's moments.
+    # rtol 1e-10: the same correction through the mixture's moments.
     np.testing.assert_allclose(weighted.mean, kalman.mean, rtol=1e-10)
     np.testing.assert_allclose(weighted.covariance, kalman.covariance, rtol=1e-10)
 
 
 def test_jpda_on_one_track_is_pda() -> None:
-    """A3(b): one track in clutter, JPDA's weights against PDA's closed form, rtol 1e-10."""
+    """One track in clutter, JPDA's weights against PDA's closed form, rtol 1e-10."""
     log_g, clutter = np.array([[-4.0, -2.5, -6.0]]), np.array([0.02, 0.05, 0.01])
     in_gate = np.ones((1, 3), bool)
     joint = joint_probabilistic_data_association(
@@ -286,7 +286,7 @@ def test_jpda_on_one_track_is_pda() -> None:
 
 
 def test_a_cluster_past_the_event_bound_raises_naming_its_size() -> None:
-    """A18: no silent truncation; six tracks sharing twelve measurements pass 1000 events."""
+    """No silent truncation; six tracks sharing twelve measurements pass 1000 events."""
     with pytest.raises(ValueError, match="6 tracks and 12 measurements"):
         joint_probabilistic_data_association(
             np.zeros((6, 12)),
@@ -413,7 +413,7 @@ def test_murty_ranks_every_assignment_by_cost_as_enumeration_does(rng: np.random
 def test_murty_first_assignment_is_gnn_with_the_same_non_assignment_cost(
     rng: np.random.Generator,
 ) -> None:
-    """k = 1 is global_nearest_neighbour bit for bit: one solve of the same matrix (A4)."""
+    """k = 1 is global_nearest_neighbour bit for bit: one solve of the same matrix."""
     for _ in range(50):
         cost = rng.normal(size=(4, 6))
         gated = rng.random((4, 6)) < 0.5
@@ -428,7 +428,7 @@ def test_murty_stops_where_the_next_assignment_costs_more_than_the_gap() -> None
     np.testing.assert_array_equal(totals, [1.0, 1.5])
 
 
-# --- spec 011 A16: coalescence shown, and fixed (the V3 pair at d = 1 across range) ---
+# --- coalescence shown, and fixed (V3's pair, scenario_011_cst_sweep, at d = 1 across range) ---
 
 ALPHA_RANGE_M, ALPHA_AZIMUTH_RAD = 115.75, np.radians(1.4)
 WINDOW_INTENSITY = 0.21683  # n_gate = 1, plots per (m rad) a scan
@@ -437,12 +437,12 @@ WINDOW_INTENSITY = 0.21683  # n_gate = 1, plots per (m rad) a scan
 def _coalescence_ratio(coalescence: str, trials: int, seed: int) -> NDArray[np.float64]:
     """Return each trial's mean estimated over true separation of a pair, last 20 scans.
 
-    Spec 011 V3's point d = 1 across range: a pair 1.4 deg apart in azimuth at 20 km, both
+    V3's point d = 1 across range: a pair 1.4 deg apart in azimuth at 20 km, both
     flying out along their own bearings at 72 m/s so d holds, 40 scans at 4.8 s. Plots merge
-    with P_u(1) = 0.61 (scene.resolve), are detected at Pd 0.9 and measured with spec 011's
+    with P_u(1) = 0.61 (scene.resolve), are detected at Pd 0.9 and measured with scenario 011's
     noise, in a window of clutter at n_gate = 1 (range 5 km by azimuth 10 deg about the pair).
     Each trial seeds both tracks at the truth, confirmed, and runs JPDA jointly on them, or
-    (``"mht"``, ``"pmbm"``, spec 011b) MHT or PMBM, neither deleting.
+    (``"mht"``, ``"pmbm"``) MHT or PMBM, neither deleting.
     """
     rng = np.random.default_rng(seed)
     motion = CartesianMotion("xy", sigma_acceleration_mps2=0.5)
@@ -535,14 +535,15 @@ def _coalescence_ratio(coalescence: str, trials: int, seed: int) -> NDArray[np.f
 # Slow: 200 trials of 40 scans for each of five trackers, about eight minutes.
 @pytest.mark.slow
 def test_jpda_pulls_a_close_pair_together_more_than_jpda_star_set_mht_and_pmbm() -> None:
-    """A16 (as measured): at d = 1 across range, n_gate = 1, JPDA coalesces most.
+    """As measured: at d = 1 across range, n_gate = 1, JPDA coalesces most.
 
     The coalescence ratio is each trial's mean estimated over true separation over the last
     20 of 40 scans. Its spread is wide: in n_gate = 1 clutter a quiet CV track loses the pair
     in some trials and wanders off (ratios over 2), so the median over the 200 trials is the
-    statistic, and JPDA's must lie below both fixes' and MHT's and PMBM's (spec 011b), which
-    commit to one plot a track rather than pull both to the merged one. Spec 011's bounds,
-    JPDA at most 0.8 and the fixes at least 0.9, do not hold here: the medians measured 1.14
+    statistic, and JPDA's must lie below both fixes' and MHT's and PMBM's, which
+    commit to one plot a track rather than pull both to the merged one. The scenario was designed
+    expecting a ratio of at most 0.8 for JPDA and at least 0.9 for the fixes; neither holds here:
+    the medians measured 1.14
     (JPDA), 1.40 (JPDA*), 1.24 (set), 1.89 (MHT) and 1.56 (PMBM), the means 1.35, 1.53,
     1.42, 2.10 and 1.73.
     """

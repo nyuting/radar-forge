@@ -2,8 +2,8 @@
 
 Ground truth is closed form where there is one (a turn's radius v/omega, a straight leg's
 kinematics, a disc's volume in m rad), a binomial or Poisson interval for every random
-draw (spec 011 A6, A7), and the scene's own encounter table and notch fractions, which the
-spec states and the configured arcs must regenerate (A8).
+draw, and the scene's own encounter table and notch fractions, which the
+configured arcs must regenerate.
 """
 
 from __future__ import annotations
@@ -82,7 +82,7 @@ def test_an_echo_in_the_notch_takes_the_notch_pd() -> None:
 
 @pytest.mark.parametrize("separation", [0.5, 1.0, 2.0])
 def test_a_pair_merges_with_the_gaussian_resolution_probability(separation: float) -> None:
-    """A7: 10 000 seeded pairs at d resolution units; merged fraction in its 99.9 % interval.
+    """10 000 seeded pairs at d resolution units; merged fraction in its 99.9 % interval.
 
     Pairs lie 10^6 m apart in range, so only the intended partners can merge; half are offset
     in range and half in azimuth.
@@ -134,7 +134,7 @@ def test_a_merged_plot_lies_at_its_echoes_centroid_even_across_north() -> None:
 
 
 def _components() -> list[ClutterComponent]:
-    """Spec 011 §3.2's V4 layers: background, ground residue, the drifting rain cell."""
+    """V4's layers: background, ground residue, the drifting rain cell."""
     return list(load_scenario(TERMINAL).clutter_plots.components)
 
 
@@ -167,7 +167,7 @@ def test_a_disc_of_clutter_has_the_volume_of_its_integral_of_one_over_range(
 
 
 def test_every_clutter_component_draws_its_intensity_times_volume() -> None:
-    """A6: each layer's plots over 125 scans in the 99 % Poisson interval of lambda V.
+    """Each layer's plots over 125 scans in the 99 % Poisson interval of lambda V.
 
     Catches an intensity per square metre where one per (m rad) was meant: the counts would be
     off by the range, thousands of times.
@@ -234,7 +234,7 @@ def test_an_empty_clutter_map_holds_its_prior_then_its_floor() -> None:
     )
 
 
-# --- A8: the scene regenerates spec 011's encounter table and notch fractions ---
+# --- the scene regenerates the encounter table and notch fractions ---
 
 ENCOUNTERS = [
     # (pair, minimum d, at s, ground separation m, track angle deg, scans with P_u > 0.5)
@@ -257,7 +257,7 @@ def _distance(a_m: np.ndarray, b_m: np.ndarray) -> np.ndarray:
 
 @pytest.mark.parametrize("encounter", ENCOUNTERS, ids=["-".join(e[0]) for e in ENCOUNTERS])
 def test_the_scene_regenerates_its_closest_approaches(encounter: tuple) -> None:
-    """A8: min d to 0.01, its first time to 0.1 s, separation to 1 m, angle to 1 deg, scans exact.
+    """Min d to 0.01, its first time to 0.1 s, separation to 1 m, angle to 1 deg, scans exact.
 
     A scan's beam crosses the pair at its mean azimuth, found by fixed point from the rotation's
     start.
@@ -288,7 +288,7 @@ def test_the_scene_regenerates_its_closest_approaches(encounter: tuple) -> None:
 
 
 def test_the_scene_regenerates_its_notch_fractions() -> None:
-    """A8: the fraction of each aircraft's life with |range rate| < 4 m/s, to 0.001."""
+    """The fraction of each aircraft's life with |range rate| < 4 m/s, to 0.001."""
     grid_s = np.arange(0.0, 600.0001, 0.1)
     for target in load_scenario(TERMINAL).arcs:
         position_m, velocity_mps = target.arc.state(grid_s)
@@ -306,11 +306,11 @@ def test_the_scene_regenerates_its_notch_fractions() -> None:
 # Slow: 120 frames of scenario 001's S3 chain, two FFTs and CFAR a burst, about three minutes.
 @pytest.mark.slow
 def test_the_iq_chain_merges_close_pairs_as_the_gaussian_resolution_model(tmp_path: Path) -> None:
-    """A14: V5's one-detection fraction at four separations against the plot model's.
+    """V5's one-detection fraction at four separations against the plot model's.
 
     A pair gives one detection when it merges and is seen, or is resolved and one member is
     missed: P_u (1 - (1 - p)^2) + (1 - P_u) 2 p (1 - p), P_u = exp(-(dr / alpha_r)^2 / 2) and p
-    the Pd the plot model is given for V5, 0.99 (A13). At 6 bins only the second term is left:
+    the Pd the plot model is given for V5, 0.99. At 6 bins only the second term is left:
     there the chain's one detection is a member masked by its partner in the CFAR's training
     cells, a miss the plot model draws at random. alpha_r is fitted by maximum likelihood to the
     four binomial counts; each measured fraction must lie in its 99 % Clopper-Pearson interval

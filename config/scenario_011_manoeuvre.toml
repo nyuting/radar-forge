@@ -17,7 +17,7 @@ seed = 20261106
 start_time_s = 0.0
 duration_s = 600.0     # 125 rotations of 4.8 s
 
-# An S-band airport-surveillance-class radar at the Duke Receiver (spec 011 §3.1):
+# An S-band airport-surveillance-class radar at the Duke Receiver:
 # 12.5 rpm, a 1.4 deg beam, a 1/16 nmi range cell; plots report horizontal range
 # and azimuth, timed when the beam crosses them.
 [sensor]
@@ -36,7 +36,7 @@ pd_notch = 0.30
 n_sectors = 16                   # 22.5 deg, 0.3 s batches
 
 # n_gate = 0.01 over the whole coverage: 0.01 / 4.6123 m rad = 0.0021683 plots
-# per (m rad) per scan, 531 a rotation over 1-40 km (spec 011 §3.2).
+# per (m rad) per scan, 531 a rotation over 1-40 km.
 [[clutter_plots.component]]
 name = "background"
 intensity_per_m_rad = 0.0021683
@@ -72,19 +72,20 @@ max_position_sigma_m = 300.0
 
 [verify]
 stages = ["multitarget"]
-# Mean GOSPA over the 125 rotations, p = 2, c = 300 m (spec 011 §3.6). Not a spec number: it
+# Mean GOSPA over the 125 rotations, p = 2, c = 300 m. Not a derived bound: it
 # pins the run, 524 m measured, most of it false confirmed tracks near the radar, where the
 # clutter per m^2 is densest and a one-plot track's second gate holds a few clutter plots.
 gospa_mean_max_m = 600.0
-# Spec 011 A5 (single run): the IMM's position NEES, chi-square(2) 95 % interval, 0.94 measured.
+# Single run: the IMM's position NEES, chi-square(2) 95 % interval, 0.94 measured.
 nees_fraction_min = 0.9
-# Spec 011 A5 (single run): the median scans to the turn mode after a tracked turn's onset,
-# 4 measured over A3, A4 and H1's turns (A5's Monte Carlo: 90 % of trials within 5).
+# Single run: the median scans to the turn mode after a tracked turn's onset,
+# 4 measured over A3, A4 and H1's turns (Monte Carlo in tests/tracking/test_imm.py: at least 90 %
+# of 200 trials within 5).
 mode_latency_max_scans = 5
 # The plot model's Pd 0.9 outside the notch: the 99 % binomial lower bound over this run's
 # 542 aircraft echoes outside the notch, 0.8653; 0.902 measured.
 pd_min = 0.8653
-# Spec 011 A6, as a run check: clutter plots over the plot model's lambda V; three scans
+# As a run check: clutter plots over the plot model's lambda V; three scans
 # expect 1593, whose 99 % Poisson interval is within 7 %.
 false_alarm_rate_max = 1.1
 

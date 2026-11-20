@@ -1,7 +1,7 @@
 """Tests for radar_forge.tracking.scans: a plot-level scenario's rotations and its tracker.
 
-One rotation of V4 is checked for what it must hold; the sector batching is scenario 011's A12,
-a Monte Carlo over 20 seeds through the multitarget stage.
+One rotation of V4 is checked for what it must hold; the sector batching is checked by a
+Monte Carlo over 20 seeds through the multitarget stage.
 """
 
 from __future__ import annotations
@@ -38,14 +38,14 @@ def test_a_plot_level_rotation_holds_its_echoes_clutter_and_discretes() -> None:
 # Slow: 20 seeds of V4 at 16 and at 32 sectors, 25 rotations each, about six minutes.
 @pytest.mark.slow
 def test_halving_the_sector_moves_the_terminal_scenes_gospa_less_than_its_seed_spread(tmp_path):
-    """A12: mean GOSPA at 32 sectors minus at 16, under one standard deviation over 20 seeds.
+    """Mean GOSPA at 32 sectors minus at 16, under one standard deviation over 20 seeds.
 
     The window is the first 25 rotations (120 s), not 125, to hold the test to minutes; the
     stamp error the sectors trade is the same in every rotation.
     """
     scenario = load_scenario(TERMINAL)
     assert scenario.sensor is not None and scenario.tracking is not None
-    # The configured JIPDA alone: the other trackers V4 scores (011b) do not enter A12.
+    # The configured JIPDA alone: the other trackers V4 scores (011b) are not in the batching check.
     tracking = dataclasses.replace(scenario.tracking, trackers=())
     gospa_m = {16: [], 32: []}
     for seed in range(20):
