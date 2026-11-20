@@ -40,11 +40,8 @@ from radar_forge.tracking.filters import (
 from radar_forge.tracking.hypotheses import TrackOrientedMHT
 from radar_forge.tracking.initiation import DebiasedSphericalInitiator
 from radar_forge.tracking.lifecycle import LifecyclePolicy
-from radar_forge.tracking.models import (
-    CartesianMotion,
-    LinearMeasurement,
-    RangeAzimuthElevationRangeRate,
-)
+from radar_forge.tracking.measurement import LinearMeasurement, RangeAzimuthElevationRangeRate
+from radar_forge.tracking.motion import CartesianMotion
 from radar_forge.tracking.rfs import PmbmTracker
 from radar_forge.tracking.scene import (
     ClutterComponent,

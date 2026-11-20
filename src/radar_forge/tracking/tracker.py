@@ -70,12 +70,8 @@ from radar_forge.tracking.lifecycle import (
     by_existence,
     m_of_n,
 )
-from radar_forge.tracking.models import (
-    MarginalModel,
-    MeasurementModel,
-    MotionModel,
-    check_covariances,
-)
+from radar_forge.tracking.measurement import MarginalModel, MeasurementModel
+from radar_forge.tracking.motion import MotionModel, check_covariances
 
 __all__ = [
     "Coverage",

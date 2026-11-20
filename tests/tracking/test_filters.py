@@ -29,15 +29,13 @@ from radar_forge.tracking.filters import (
     update,
     update_weighted,
 )
-from radar_forge.tracking.metrics import consistency_interval, nees
-from radar_forge.tracking.models import (
+from radar_forge.tracking.measurement import (
     BistaticRangeRateModel,
-    CartesianMotion,
     LinearMeasurement,
-    RadialConstantVelocity,
     RangeAzimuthElevationRangeRate,
-    StateLayout,
 )
+from radar_forge.tracking.metrics import consistency_interval, nees
+from radar_forge.tracking.motion import CartesianMotion, RadialConstantVelocity, StateLayout
 
 SEED = 20261104
 

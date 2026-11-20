@@ -15,7 +15,8 @@ import pytest
 
 from radar_forge.tracking.filters import TrackStatus
 from radar_forge.tracking.initiation import DirectStateInitiator
-from radar_forge.tracking.models import CartesianMotion, LinearMeasurement
+from radar_forge.tracking.measurement import LinearMeasurement
+from radar_forge.tracking.motion import CartesianMotion
 from radar_forge.tracking.rfs import PmbmTracker
 from radar_forge.tracking.tracker import Scan
 

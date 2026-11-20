@@ -27,7 +27,8 @@ twice the radial value when monostatic.
 
 | Module | What it holds |
 | :-- | :-- |
-| `models.py` | `StateLayout` and `Coordinate`, the named coordinates of a state or measurement, which wrap a periodic value (`StateLayout.wrap`, through the shared `_periodic.fold`); `check_covariances`, the one boundary check (symmetric, positive definite). Motion models, which predict a state forward: `RadialConstantVelocity` (state `[bistatic_range_m, bistatic_range_rate_mps]`) and `CartesianMotion` (constant velocity or acceleration on each ENU axis). Measurement models, which predict a measurement from a state: `LinearMeasurement` (some state coordinates, reported directly, optionally folded at a period), `RangeAzimuthElevationRangeRate` (a monostatic radar's spherical measurement of an ENU state), `BistaticRangeRateModel` ($R_T + R_R$ and its rate; $(2r, 2\dot r)$ when the sites coincide) and `marginal` (some of a model's components, such as range alone). |
+| `motion.py` | `StateLayout` and `Coordinate`, the named coordinates of a state or measurement, which wrap a periodic value (`StateLayout.wrap`, through the shared `_periodic.fold`); `check_covariances`, the one boundary check (symmetric, positive definite). Motion models, which predict a state forward: `RadialConstantVelocity` (state `[bistatic_range_m, bistatic_range_rate_mps]`) and `CartesianMotion` (constant velocity or acceleration on each ENU axis). |
+| `measurement.py` | Measurement models, which predict a measurement from a state: `LinearMeasurement` (some state coordinates, reported directly, optionally folded at a period), `RangeAzimuthElevationRangeRate` (a monostatic radar's spherical measurement of an ENU state), `BistaticRangeRateModel` ($R_T + R_R$ and its rate; $(2r, 2\dot r)$ when the sites coincide) and `marginal` (some of a model's components, such as range alone). |
 | `filters.py` | `TrackBank`, every track a row of one immutable struct of arrays; `TrackStatus` and the read-only `TrackSnapshot`; the one Gaussian filter, `predict`, `innovate` and `update`, through `TaylorLinearisation` (the KF on a linear model, the EKF otherwise) or `UnscentedTransform` (the UKF). |
 | `association.py` | `chi_square_gate_threshold` and `gate`; `association_cost`, `"nis"` or `"negative_log_likelihood_ratio"`; `GlobalNearestNeighbour` (GNN) and `GreedyNearestNeighbour`. |
 | `tracker.py` | `Tracker`, which runs one `Scan` at a time; `Scan`, every measurement one sensor made at one time with its R, checked and frozen. `initiation.py` holds the initiators `DirectStateInitiator` and `DebiasedSphericalInitiator`. |
@@ -201,9 +202,10 @@ import numpy as np
 from radar_forge.tracking import Scan, Tracker
 from radar_forge.tracking.association import GlobalNearestNeighbour
 from radar_forge.tracking.filters import UnscentedTransform
-from radar_forge.tracking.models import LinearMeasurement, RadialConstantVelocity
 from radar_forge.tracking.initiation import DirectStateInitiator
 from radar_forge.tracking.lifecycle import LifecyclePolicy
+from radar_forge.tracking.measurement import LinearMeasurement
+from radar_forge.tracking.motion import RadialConstantVelocity
 
 # State and measurement: bistatic range and its rate, positive receding.
 motion = RadialConstantVelocity(8.0)  # sigma_a of bistatic range, m/s^2
@@ -252,7 +254,7 @@ import numpy as np
 from radar_forge.pipeline import map_axes
 from radar_forge.scenario import load_scenario
 from radar_forge.tracking.association import chi_square_gate_threshold
-from radar_forge.tracking.models import RadialConstantVelocity
+from radar_forge.tracking.motion import RadialConstantVelocity
 
 # The UKF on S1: [tracking] gives sigma_a = 8 m/s^2 of bistatic range, tau = 1 s, CWNA.
 scenario = load_scenario("config/scenario_003_ukf_fmcw_low_prf.toml")
@@ -298,7 +300,8 @@ import numpy as np
 
 from radar_forge.tracking.filters import TrackBank, UnscentedTransform, innovate, predict, update
 from radar_forge.tracking.metrics import consistency_interval, nees
-from radar_forge.tracking.models import LinearMeasurement, RadialConstantVelocity
+from radar_forge.tracking.measurement import LinearMeasurement
+from radar_forge.tracking.motion import RadialConstantVelocity
 
 # 200 runs of one UKF as the 200 rows of one bank, measuring range alone.
 motion = RadialConstantVelocity(8.0)

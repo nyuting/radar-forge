@@ -75,7 +75,8 @@ from radar_forge.tracking.filters import (
 )
 from radar_forge.tracking.initiation import DirectStateInitiator
 from radar_forge.tracking.lifecycle import LifecyclePolicy
-from radar_forge.tracking.models import LinearMeasurement, RadialConstantVelocity, marginal
+from radar_forge.tracking.measurement import LinearMeasurement, marginal
+from radar_forge.tracking.motion import RadialConstantVelocity
 from radar_forge.tracking.tracker import Scan, Tracker
 
 __all__ = [

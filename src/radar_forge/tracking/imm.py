@@ -38,7 +38,8 @@ from radar_forge.tracking.filters import (
     innovate,
     update_weighted,
 )
-from radar_forge.tracking.models import MeasurementModel, MotionModel, StateLayout
+from radar_forge.tracking.measurement import MeasurementModel
+from radar_forge.tracking.motion import MotionModel, StateLayout
 
 __all__ = [
     "InteractingMultipleModel",

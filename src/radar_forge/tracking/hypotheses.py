@@ -44,7 +44,7 @@ from radar_forge.tracking.association import (
     non_assignment_cost,
 )
 from radar_forge.tracking.filters import TrackBank, is_confirmed
-from radar_forge.tracking.models import StateLayout
+from radar_forge.tracking.motion import StateLayout
 
 __all__ = [
     "CONFIRM_SCORE",

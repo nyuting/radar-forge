@@ -77,7 +77,7 @@ a different false-alarm rate. Your job is to find out on a problem we control.
     scan times and returns its geometry seen from the radar. Its steps, once `load_flight_csv`,
     `resample` and `to_radar_frame`, are private now; `radar_forge.coordinates.geodetic_to_enu_m`
     converts fixes of your own.
-  - `radar_forge.tracking.models.MotionModel`: the interface a motion model follows.
+  - `radar_forge.tracking.motion.MotionModel`: the interface a motion model follows.
     `radar_forge.tracking.Tracker` and `radar_forge.tracking.filters.predict` accept **any**
     object that follows it, so you can put your own transition into the library's tracker
     from your script.

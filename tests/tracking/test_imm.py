@@ -34,13 +34,9 @@ from radar_forge.tracking.imm import (
     imm_predict,
     imm_update,
 )
+from radar_forge.tracking.measurement import RangeAzimuthElevationRangeRate
 from radar_forge.tracking.metrics import nees
-from radar_forge.tracking.models import (
-    CartesianMotion,
-    CoordinatedTurn,
-    MotionModel,
-    RangeAzimuthElevationRangeRate,
-)
+from radar_forge.tracking.motion import CartesianMotion, CoordinatedTurn, MotionModel
 from radar_forge.tracking.scene import Arc
 
 SEED = 20261106

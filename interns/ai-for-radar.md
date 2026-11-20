@@ -34,7 +34,7 @@ Know this before you choose. Each item is something you may have to build in you
   yours to synthesise. `radar_forge.propagation.line_of_sight_paths` takes a `TargetGeometry` of
   any number of targets and their RCS, so one call can place several targets in one IQ cube.
 - **One tracker.** A KF, EKF or UKF with radial constant-velocity motion
-  (`radar_forge.tracking.models.RadialConstantVelocity`) or Cartesian constant-velocity or
+  (`radar_forge.tracking.motion.RadialConstantVelocity`) or Cartesian constant-velocity or
   constant-acceleration motion (`CartesianMotion`), a chi-square gate, and global or greedy
   nearest-neighbour assignment. There is no IMM, no PDA or JPDA, no MHT and no smoother.
 - **No resource manager.** Nothing schedules beams, revisits or dwells.

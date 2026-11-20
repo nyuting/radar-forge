@@ -32,14 +32,13 @@ from radar_forge.tracking.initiation import (
     debiased_spherical_to_enu,
 )
 from radar_forge.tracking.lifecycle import ExistencePolicy, LifecyclePolicy
-from radar_forge.tracking.models import (
+from radar_forge.tracking.measurement import (
     BistaticRangeRateModel,
-    CartesianMotion,
     LinearMeasurement,
-    RadialConstantVelocity,
     RangeAzimuthElevationRangeRate,
     marginal,
 )
+from radar_forge.tracking.motion import CartesianMotion, RadialConstantVelocity
 from radar_forge.tracking.tracker import Scan, Tracker
 
 TENTATIVE, CONFIRMED = TrackStatus.TENTATIVE, TrackStatus.CONFIRMED

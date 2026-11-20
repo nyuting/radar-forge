@@ -1,6 +1,6 @@
 # Tracker 001 — Tracking architecture
 
-> Status: built, in `src/radar_forge/tracking/` (`models`, `filters`, `imm`, `association`,
+> Status: built, in `src/radar_forge/tracking/` (`motion`, `measurement`, `filters`, `imm`, `association`,
 > `initiation`, `lifecycle`, `tracker`, `hypotheses`, `rfs`, `metrics`, `scene`, `scans`). Where
 > this page and the code differ in a name, the code's name stands.
 >
@@ -282,7 +282,7 @@ the metrics of `spec/data-001-formats.md` §6.9; for many targets GOSPA and traj
 - **Spherical measurements stay spherical.** Rejected: Cartesian conversion then a linear KF
   (state-dependent covariance, bias growing with range × angle error).
 - **Mechanism in `tracking/`, policy in `pipeline.py`** (the range-only selector), not in `Tracker`.
-- **D26: `CoordinatedTurn`, with the turn rate in the state**, in `tracking/models.py`: exact
+- **D26: `CoordinatedTurn`, with the turn rate in the state**, in `tracking/motion.py`: exact
   discretisation with series forms near zero turn rate.
 - **D27: the IMM is functions over a bank with per-mode columns**, `tracking/imm.py`: mixing by
   name in the union layout; switching matrix `expm(Λ T)` for the actual interval.

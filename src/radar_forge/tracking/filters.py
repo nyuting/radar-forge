@@ -33,12 +33,8 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from radar_forge.tracking._linalg import symmetrise
-from radar_forge.tracking.models import (
-    MeasurementModel,
-    MotionModel,
-    StateLayout,
-    check_covariances,
-)
+from radar_forge.tracking.measurement import MeasurementModel
+from radar_forge.tracking.motion import MotionModel, StateLayout, check_covariances
 
 __all__ = [
     "Innovation",

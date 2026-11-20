@@ -32,7 +32,7 @@ from scipy import sparse
 from scipy.optimize import linear_sum_assignment, linprog
 from scipy.stats import chi2
 
-from radar_forge.tracking.models import StateLayout
+from radar_forge.tracking.motion import StateLayout
 
 __all__ = [
     "Gospa",

@@ -23,12 +23,12 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from radar_forge.tracking._linalg import symmetrise
-from radar_forge.tracking.models import (
+from radar_forge.tracking.measurement import (
     LinearMeasurement,
     MeasurementModel,
     RangeAzimuthElevationRangeRate,
-    check_covariances,
 )
+from radar_forge.tracking.motion import check_covariances
 
 __all__ = [
     "DebiasedSphericalInitiator",
@@ -91,7 +91,7 @@ class DirectStateInitiator(_PriorInitiator):
 
     Unmeasured coordinates keep the prior, whose measured block must be uncorrelated with the
     rest. ``seed_names`` copies only those, such as range while a folded rate is untrusted.
-    A model that is not a :class:`~radar_forge.tracking.models.LinearMeasurement` starts none.
+    A model that is not a :class:`~radar_forge.tracking.measurement.LinearMeasurement` starts none.
 
     References
     ----------
@@ -193,7 +193,7 @@ def debiased_spherical_to_enu(
 class DebiasedSphericalInitiator(_PriorInitiator):
     """Start a track at a spherical measurement's debiased position; the rest keeps the prior.
 
-    Needs a :class:`~radar_forge.tracking.models.RangeAzimuthElevationRangeRate` model that
+    Needs a :class:`~radar_forge.tracking.measurement.RangeAzimuthElevationRangeRate` model that
     reports range and azimuth, with independent errors; the height keeps the prior when no
     elevation is reported. Every later update uses the spherical model itself.
 

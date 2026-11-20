@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from radar_forge.tracking.metrics import consistency_interval, gospa, nees, rmse, trajectory_gospa
-from radar_forge.tracking.models import Coordinate, StateLayout
+from radar_forge.tracking.motion import Coordinate, StateLayout
 
 
 def test_nees_is_the_error_weighted_by_the_inverse_covariance() -> None:

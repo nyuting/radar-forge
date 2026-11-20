@@ -45,7 +45,8 @@ from radar_forge.tracking.filters import (
 )
 from radar_forge.tracking.hypotheses import GlobalHypotheses, collapse, extend, split
 from radar_forge.tracking.initiation import Initiator
-from radar_forge.tracking.models import MeasurementModel, MotionModel
+from radar_forge.tracking.measurement import MeasurementModel
+from radar_forge.tracking.motion import MotionModel
 from radar_forge.tracking.tracker import Coverage, Scan
 
 __all__ = ["PmbmTracker"]

@@ -42,11 +42,8 @@ from radar_forge.tracking.hypotheses import TrackOrientedMHT
 from radar_forge.tracking.imm import InteractingMultipleModel
 from radar_forge.tracking.initiation import DebiasedSphericalInitiator
 from radar_forge.tracking.lifecycle import ExistencePolicy, LifecyclePolicy
-from radar_forge.tracking.models import (
-    CartesianMotion,
-    CoordinatedTurn,
-    RangeAzimuthElevationRangeRate,
-)
+from radar_forge.tracking.measurement import RangeAzimuthElevationRangeRate
+from radar_forge.tracking.motion import CartesianMotion, CoordinatedTurn
 from radar_forge.tracking.rfs import PmbmTracker
 from radar_forge.tracking.scene import (
     LEAST_INTENSITY_PER_M_RAD,
