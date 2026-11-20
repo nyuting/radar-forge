@@ -237,7 +237,12 @@ class TargetGeometry:
         elevation_rad: ArrayLike = 0.0,
         radial_acceleration_mps2: ArrayLike = 0.0,
     ) -> TargetGeometry:
-        """Return one site's geometry: twice the range and its derivatives (receding), beta 0."""
+        """Return one site's geometry: twice the range and its derivatives (receding), beta 0.
+
+        ``radial_velocity_mps`` and ``radial_acceleration_mps2`` are the one-way (monostatic)
+        range rate and its derivative, positive receding: the radial velocity, the one name
+        besides a halved display that the glossary (``docs/user-guide/README.md``) allows.
+        """
         range_arr, rate_arr, azimuth_arr, elevation_arr, acceleration_arr = np.broadcast_arrays(
             np.atleast_1d(np.asarray(range_m, dtype=np.float64)),
             np.asarray(radial_velocity_mps, dtype=np.float64),

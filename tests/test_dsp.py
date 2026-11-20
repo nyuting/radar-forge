@@ -330,7 +330,7 @@ class TestBinCenters:
         r"""Bin k is -(k - N/2) lambda / (N T): catches a closing-positive sign or a halving.
 
         Bin 0 holds f_d = -PRF/2, so its rate is +lambda/(2T): the interval is
-        (-v_ua, +v_ua], and the array decreases.
+        (-v_period/2, +v_period/2], and the array decreases.
         """
         rate_mps = doppler_bin_centres_mps(N_PULSES, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)
         step_mps = WAVELENGTH_M / (N_PULSES * PULSE_REPETITION_INTERVAL_S)
@@ -364,7 +364,7 @@ class TestBinCenters:
         assert not np.signbit(rate_mps[N_PULSES // 2])
 
     def test_an_odd_bin_count_is_symmetric_inside_the_interval(self) -> None:
-        """N = 5: rates +-2 and +-1 steps of lambda/(N T), so no bin sits on +v_ua = 15 m/s."""
+        """N = 5: rates +-2 and +-1 steps of lambda/(N T), no bin on +v_period/2 = 15 m/s."""
         np.testing.assert_allclose(
             doppler_bin_centres_mps(5, 1e-3, 0.03), [12.0, 6.0, 0.0, -6.0, -12.0], atol=1e-12
         )
@@ -445,7 +445,7 @@ class TestMtiFilter:
         np.testing.assert_allclose(np.abs(filtered), expected, rtol=1e-10)
 
     def test_two_pulse_output_is_the_later_minus_the_earlier_pulse(self) -> None:
-        """The documented y[m] = x[m+1] - x[m], and the dwell shortens by n - 1."""
+        """The documented y[m] = x[m+1] - x[m], and the burst shortens by n - 1."""
         samples = np.arange(5.0)[:, None] ** 2 * np.ones((1, 3))
         np.testing.assert_allclose(mti_filter(samples, axis=0)[:, 0], [1.0, 3.0, 5.0, 7.0])
         assert mti_filter(np.ones((128, 4)), n_taps=3, axis=0).shape == (126, 4)
@@ -466,7 +466,7 @@ class TestFold:
         assert float(fold_into_period(-1e-17, 15.3, lower=0.0)) == 0.0
 
     def test_fold_range_rate_is_closed_at_the_top_as_the_map_is(self) -> None:
-        """Both edges read +v_ua, since rate bin 0 is +v_ua: catches the closing-positive edge."""
+        """Both edges read +period/2, as rate bin 0 does: catches the closing-positive edge."""
         np.testing.assert_allclose(fold_range_rate_mps([7.65, -7.65], 15.3), [7.65, 7.65])
         folded_mps = fold_range_rate_mps(np.linspace(-500.0, 500.0, 2001), 15.3)
         assert np.all((folded_mps > -7.65) & (folded_mps <= 7.65))
