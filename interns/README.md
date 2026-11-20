@@ -11,7 +11,7 @@ ourselves.
 | # | Task | The question | Time |
 | :--- | :--- | :--- | :--- |
 | 1 | [Where does the tracker break?](tracker-breakpoint.md) | As transmit power falls and the radar starts missing the target, how does detection degrade compared with theory, and when does tracking fall apart? | about 1 day |
-| 2 | [How many dB does TBD buy?](tbd-dynamic-programming.md) | Build dynamic-programming track-before-detect. How far below the single-frame threshold can it go, and how close is that to the best possible? | about 2 days |
+| 2 | [How many dB does TBD buy?](tbd-dynamic-programming.md) | Build dynamic-programming track-before-detect. How far below the single-scan threshold can it go, and how close is that to the best possible? | about 2 days |
 | 3 | [Particle-filter TBD](tbd-particle-filter.md) | Build a particle filter that decides target existence from unthresholded maps. How fast and how reliably does it declare a dim target? | about 2 days |
 | 4 | [Where can learning beat the textbook?](tbd-learned.md) | Put a learned component into a TBD detector. Where, if anywhere, does it beat the classical one at the same false-track rate? | about 2–3 days |
 | 5 | [Do world models help a radar?](world-models.md) | The tracker is already a hand-written world model. Pick one direction (motion, map prediction, clutter or planning) and find out where a learned one beats it. | about 3 days |

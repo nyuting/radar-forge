@@ -7,7 +7,7 @@ target against false alarm [1]: :math:`\ln(P_D g / \lambda)` added on a hit,
 uses no measurement twice; trees sharing a gated measurement or a hypothesis form a cluster,
 whose ``k_best`` hypotheses each scan extends by Murty's ranked assignments [2] [3] and
 N-scan pruning trims [4]. :class:`GlobalHypotheses`, :func:`extend`, :func:`collapse` and
-:func:`split` are what MHT and PMBM (:mod:`~radar_forge.tracking.rfs`) share.
+:func:`split` are what MHT and PMBM (:mod:`~radar_forge.tracking.pmbm`) share.
 :class:`TrackOrientedMHT` is the associator a :class:`~radar_forge.tracking.tracker.Tracker`
 asks for its :meth:`~TrackOrientedMHT.hypotheses`; the tracker updates the leaves and reports,
 at each scan, the leaves of each cluster's best hypothesis, never rewritten later.
@@ -37,9 +37,14 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.sparse import coo_array
 from scipy.sparse.csgraph import connected_components
 
-from radar_forge.tracking.association import Assignment, global_nearest_neighbour, murty_k_best
-from radar_forge.tracking.filters import TrackBank, TrackStatus
-from radar_forge.tracking.models import StateLayout
+from radar_forge.tracking.association import (
+    Assignment,
+    global_nearest_neighbour,
+    murty_k_best,
+    non_assignment_cost,
+)
+from radar_forge.tracking.filters import TrackBank, is_confirmed
+from radar_forge.tracking.motion import CoordinateLayout
 
 __all__ = [
     "CONFIRM_SCORE",
@@ -62,7 +67,6 @@ DELETE_DROP = -math.log(0.1 / (1 - 1e-4))
 
 # A new leaf's measurement code: -1 a miss, -2 an old leaf the scan did not cover.
 _MISS, _CARRIED = -1, -2
-_CONFIRMED = (TrackStatus.CONFIRMED, TrackStatus.COASTING)
 
 
 @dataclass(frozen=True, eq=False)
@@ -402,8 +406,8 @@ class TrackTree:
 
     ``bank.track_id`` is a leaf's tree. ``score`` is its track score and ``peak`` the
     highest along its branch; ``node`` its own node's ID and ``ancestry`` ``(n_leaves,
-    n_scan)`` its branch's nodes over the last ``n_scan`` scans, oldest first (-1 before the
-    tree began); ``hypotheses`` the global hypotheses holding it.
+    n_scan_depth)`` its branch's nodes over the last ``n_scan_depth`` scans, oldest first (-1
+    before the tree began); ``hypotheses`` the global hypotheses holding it.
     """
 
     bank: TrackBank
@@ -415,7 +419,7 @@ class TrackTree:
     next_node: int = 0
 
     @classmethod
-    def empty(cls, layout: StateLayout, n_modes: int = 0) -> TrackTree:
+    def empty(cls, layout: CoordinateLayout, n_modes: int = 0) -> TrackTree:
         """Return a tree with no leaves."""
         nothing = np.zeros(0)
         return cls(
@@ -487,7 +491,7 @@ def _n_scan(
 ) -> NDArray[np.bool_]:
     """Return the hypotheses that agree with their cluster's best on every decided branch.
 
-    ``decided`` is each leaf's ancestor ``n_scan`` scans back, -1 for a tree younger than
+    ``decided`` is each leaf's ancestor ``n_scan_depth`` scans back, -1 for a tree younger than
     that. A tree the best hypothesis lacks may appear elsewhere only while undecided.
     """
     n_leaves = len(tree)
@@ -524,7 +528,7 @@ class Hypothesiser(Protocol):
         log_likelihood: NDArray[np.float64],
         in_gate: NDArray[np.bool_],
         *,
-        clutter_intensity: NDArray[np.float64],
+        clutter_density: NDArray[np.float64],
         born: NDArray[np.bool_],
         linking: NDArray[np.bool_] | None = None,
     ) -> Branching:
@@ -541,7 +545,7 @@ class TrackOrientedMHT:
     :math:`\ln(P_D / (1 - P_D P_G))`, the score's break-even, so ``k_best = 1`` is GNN. A
     branch is confirmed at ``confirm_score`` and deleted when its score falls ``delete_drop``
     below the highest along it; after each scan every hypothesis that disagrees with its
-    cluster's best on a branch ``n_scan`` scans back is dropped [4].
+    cluster's best on a branch ``n_scan_depth`` scans back is dropped [4].
 
     References
     ----------
@@ -552,16 +556,19 @@ class TrackOrientedMHT:
     detection_probability: float
     gate_probability: float
     k_best: int = 10
-    n_scan: int = 3
+    n_scan_depth: int = 3
     confirm_score: float = CONFIRM_SCORE
     delete_drop: float = DELETE_DROP
 
     def __post_init__(self) -> None:
         """Refuse settings that could not work."""
         p_d, p_g = self.detection_probability, self.gate_probability
-        counts = (self.k_best, self.n_scan)
+        counts = (self.k_best, self.n_scan_depth)
         if any(type(n) is not int or n < 1 for n in counts) or not (0 < p_d < 1 and 0 < p_g < 1):
-            msg = f"need int k_best, n_scan >= 1 and 0 < P_D, P_G < 1; got {counts}, {p_d}, {p_g}."
+            msg = (
+                f"need int k_best, n_scan_depth >= 1 and 0 < P_D, P_G < 1; got {counts}, {p_d}, "
+                f"{p_g}."
+            )
             raise ValueError(msg)
         if not (math.isfinite(self.confirm_score) and self.delete_drop > 0):
             msg = f"need a finite confirm_score and delete_drop > 0; got {self}."
@@ -570,8 +577,7 @@ class TrackOrientedMHT:
     @property
     def non_assignment_cost(self) -> float:
         r"""Return :math:`\ln(P_D / (1 - P_D P_G))`, where a hit and a miss score alike."""
-        p_d = self.detection_probability
-        return math.log(p_d / (1 - p_d * self.gate_probability))
+        return non_assignment_cost(self.detection_probability, self.gate_probability)
 
     def assign(self, cost: ArrayLike, in_gate: ArrayLike) -> Assignment:
         """Return the one best assignment, GNN's, for a caller that needs one."""
@@ -588,26 +594,26 @@ class TrackOrientedMHT:
         log_likelihood: NDArray[np.float64],
         in_gate: NDArray[np.bool_],
         *,
-        clutter_intensity: NDArray[np.float64],
+        clutter_density: NDArray[np.float64],
         born: NDArray[np.bool_],
         linking: NDArray[np.bool_] | None = None,
     ) -> Branching:
         """Branch every covered leaf, rank each cluster's hypotheses, and prune; never prints.
 
         ``log_likelihood`` and ``in_gate`` are ``(n_seen, n_meas)`` over the covered leaves,
-        ``clutter_intensity`` λ per measurement, ``born`` where a new tree may start,
+        ``clutter_density`` λ per measurement, ``born`` where a new tree may start,
         ``linking`` the leaves whose gates join clusters (:func:`extend`; None: all).
         """
         p_d, p_g = self.detection_probability, self.gate_probability
         n_old, width = tree.ancestry.shape
         # Every old column gains a last entry, read by a new tree's parent index -1.
-        ancestry = np.full((n_old + 1, self.n_scan), -1, dtype=np.int64)
-        kept_width = min(width, self.n_scan)
-        ancestry[:n_old, self.n_scan - kept_width :] = tree.ancestry[:, width - kept_width :]
+        ancestry = np.full((n_old + 1, self.n_scan_depth), -1, dtype=np.int64)
+        kept_width = min(width, self.n_scan_depth)
+        ancestry[:n_old, self.n_scan_depth - kept_width :] = tree.ancestry[:, width - kept_width :]
         old_score, old_peak = np.append(tree.score, 0.0), np.append(tree.peak, 0.0)
         old_node = np.append(tree.node, -1)
-        was_confirmed = np.append(np.isin(tree.bank.status, _CONFIRMED), False)
-        ratio = np.where(in_gate, log_likelihood - np.log(clutter_intensity)[None, :], -np.inf)
+        was_confirmed = np.append(is_confirmed(tree.bank.status), False)
+        ratio = np.where(in_gate, log_likelihood - np.log(clutter_density)[None, :], -np.inf)
         miss = math.log(1 - p_d * p_g)
         step = extend(
             tree.hypotheses,

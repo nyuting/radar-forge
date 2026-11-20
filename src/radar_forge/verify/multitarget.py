@@ -1,17 +1,19 @@
 r"""The ``multitarget`` stage: many targets through the plot model and a configured tracker.
 
-A plot-level scenario (``[sensor]``) is played rotation by rotation
-(:func:`~radar_forge.tracking.scans.scans`) into :class:`~radar_forge.tracking.scans.PlotTracker`.
-Each rotation's confirmed tracks are scored against the aircraft in coverage by GOSPA [1], each
+A plot-level scenario (``[sensor]``) is played scan by scan
+(:func:`~radar_forge.plot_simulator.plot_scans`) into
+:class:`~radar_forge.scan_tracker.ScanTracker`.
+Each scan's confirmed tracks are scored against the aircraft in coverage by GOSPA [1], each
 truth at its track's own time; over the run the stage measures swaps at every crossing the arcs
 hold, the IMM's latency to its turn mode after each turn onset, the position NEES, the measured
 Pd and false-plot rate against the plot model's, and the JPDA cluster sizes, then trajectory
 GOSPA [2]. ``[tracking] trackers`` adds trackers scored in step on the same plots, each
 score prefixed by its name; MHT's leaf and hypothesis counts and PMBM's Bernoulli and cluster
-sizes are recorded, and a scene of two aircraft (V3) is scored as a pair: resolved or not, and
-its coalescence ratio. An IQ scenario (scenario 011's V5) gives the plot model's rates and
+sizes are recorded, and a scene of two aircraft (V3, ``scenario_011_cst_sweep``) is scored as a
+pair: resolved or not, and its coalescence ratio. An IQ scenario (scenario 011's V5,
+``scenario_011_iq_check``) gives the plot model's rates and
 merging from ``ctx.plots`` instead. Writes ``plots.csv``, ``tracks.csv``, ``gospa.csv`` (one
-row per tracker per rotation) and ``scene.png``.
+row per tracker per scan) and ``scene.png``.
 
 References
 ----------
@@ -34,20 +36,22 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.stats import chi2
 
-from radar_forge import evaluate, plots
+from radar_forge import figures
+from radar_forge.coordinates import range_azimuth_to_east_north_m
+from radar_forge.plot_simulator import PlotScan, plot_scans
+from radar_forge.scan_tracker import ScanTracker, tracker_name
 from radar_forge.scenario import Scenario
-from radar_forge.tracking.filters import TrackBank, TrackStatus
+from radar_forge.tracking.filters import TrackBank, TrackStatus, is_confirmed
 from radar_forge.tracking.metrics import gospa, nees, trajectory_gospa
-from radar_forge.tracking.rfs import PmbmTracker
-from radar_forge.tracking.scans import PlotScan, PlotTracker, scans, tracker_name
-from radar_forge.tracking.scene import to_enu
+from radar_forge.tracking.pmbm import PmbmTracker
+from radar_forge.verify import stepper
 
 __all__ = ["merged_counts", "multitarget", "pair_scores", "pair_windows", "play"]
 
-# GOSPA's settings (spec 011 §3.6): p = 2, cutoff c = 300 m, alpha = 2.
+# GOSPA's settings: p = 2, cutoff c = 300 m, alpha = 2.
 _CUTOFF_M = 300.0
 # A crossing is a pair of aircraft that come within c/2 of each other; a swap is judged from the
-# scan before it to this many after (spec 011 §3.6).
+# scan before it to this many after.
 _SWAP_SCANS = 5
 # A turn shorter than this many scans ends before an IMM can be asked to have seen it.
 _MIN_TURN_SCANS = 4
@@ -60,14 +64,13 @@ _MIN_FALSE_PLOTS, _MIN_ECHOES = 30.0, 100
 # at most 6 bins apart, and the pairs 20 bins or more apart).
 _PAIR_BINS = 8.0
 
-_CONFIRMED = (TrackStatus.CONFIRMED, TrackStatus.COASTING)
-# V3's pair is judged over its last 20 scans (spec 011b §2.1): held within c/2 in 90 % of them.
+# V3's pair is judged over its last 20 scans: held within c/2 in 90 % of them.
 _PAIR_SCANS, _HELD_FRACTION = 20, 0.9
 
 
 @dataclass
 class _Run:
-    """What the rotations accumulate for the scores."""
+    """What the scans accumulate for the scores."""
 
     gospa_rows: list[dict[str, Any]] = field(default_factory=list)
     assigned: list[NDArray[np.int64]] = field(default_factory=list)
@@ -98,12 +101,12 @@ def _truth(scenario: Scenario, time_s: NDArray[np.float64]) -> NDArray[np.float6
     return np.stack([target.arc.state(time_s)[0] for target in scenario.arcs])
 
 
-def _score_rotation(scenario: Scenario, plots_scan: PlotScan, bank: TrackBank, run: _Run) -> None:
-    """Score one rotation's confirmed tracks: GOSPA, its assignment, NEES and mode probability."""
+def _score_scan(scenario: Scenario, plots_scan: PlotScan, bank: TrackBank, run: _Run) -> None:
+    """Score one scan's confirmed tracks: GOSPA, its assignment, NEES and mode probability."""
     aircraft = np.array([t.target_class == "aircraft" for t in scenario.arcs])
     present = np.flatnonzero(aircraft & plots_scan.echo_in_coverage)
-    confirmed = np.flatnonzero(np.isin(bank.status, _CONFIRMED))
-    names = bank.layout.names
+    confirmed = np.flatnonzero(is_confirmed(bank.status))
+    names = bank.state_layout.names
     columns = [names.index("x_m"), names.index("y_m")]
     estimate = bank.mean[confirmed][:, columns]
     truth = _truth(scenario, bank.time_s[confirmed])[present]
@@ -126,7 +129,7 @@ def _score_rotation(scenario: Scenario, plots_scan: PlotScan, bank: TrackBank, r
     error_m = np.full(len(scenario.arcs), np.nan)
     estimate_m = np.full((len(scenario.arcs), 2), np.nan)
     for k, row in zip(present, score.assignment, strict=True):
-        # A few aircraft a rotation; each scored against the one track GOSPA gave it.
+        # A few aircraft a scan; each scored against the one track GOSPA gave it.
         if row < 0:
             continue
         track = confirmed[row]
@@ -209,7 +212,7 @@ def _mode_latency(scenario: Scenario, run: _Run, period_s: float) -> float:
 
 
 def _plot_rows(plots_scan: PlotScan) -> list[dict[str, Any]]:
-    """Return one plots.csv row per plot of a rotation."""
+    """Return one plots.csv row per plot of a scan."""
     return [
         {
             "scan": plots_scan.index,
@@ -227,10 +230,10 @@ def _plot_rows(plots_scan: PlotScan) -> list[dict[str, Any]]:
 def _track_rows(
     plots_scan: PlotScan, bank: TrackBank, tracker: str, score: NDArray[np.float64]
 ) -> list[dict[str, Any]]:
-    """Return one tracks.csv row per live track at the end of a rotation; MHT's has a score."""
+    """Return one tracks.csv row per live track at the end of a scan; MHT's has a score."""
     rows = []
-    names = bank.layout.names
-    # One row per track: tens to a few thousand a rotation.
+    names = bank.state_layout.names
+    # One row per track: tens to a few thousand a scan.
     for r in range(bank.n_tracks):
         row: dict[str, Any] = {"tracker": tracker, "scan": plots_scan.index}
         row["time_s"] = bank.time_s[r]
@@ -244,16 +247,16 @@ def _track_rows(
 
 
 def _expected_false_plots(scenario: Scenario, time_s: float) -> float:
-    """Return the false plots a rotation should hold: Poisson regions and discretes."""
+    """Return the false plots a scan should hold: Poisson regions and discretes."""
     clutter = scenario.clutter_plots
-    regions = sum(c.intensity_per_m_rad * c.volume_m_rad(time_s) for c in clutter.components)
+    regions = sum(c.density_per_m_rad * c.volume_m_rad(time_s) for c in clutter.components)
     discretes = clutter.discretes
     return regions + (
         0.0 if discretes is None else discretes.report_probability * discretes.range_m.size
     )
 
 
-@evaluate.stage(
+@stepper.stage(
     "multitarget",
     "gospa_mean_max_m",
     "swap_fraction_max",
@@ -267,41 +270,40 @@ def _expected_false_plots(scenario: Scenario, time_s: float) -> float:
     "mht_resolved_lead_min",
     "pmbm_resolved_lead_min",
 )
-def multitarget(ctx: evaluate.Context) -> evaluate.Context:
+def multitarget(ctx: stepper.Context) -> stepper.Context:
     """Track a plot-level scene and score it, or measure an IQ chain's plot statistics.
 
-    ``gospa_mean_max_m`` bounds the mean GOSPA over the rotations; ``swap_fraction_max`` the
+    ``gospa_mean_max_m`` bounds the mean GOSPA over the scans; ``swap_fraction_max`` the
     fraction of crossings followed by a swap; ``mode_latency_max_scans`` the median scans an
     IMM takes to its turn mode after the onset of a turn it tracks; ``nees_fraction_min`` the
     fraction of position NEES inside chi-square(2)'s 95 % interval; ``pd_min`` the measured
     Pd; ``false_alarm_rate_max`` ``false_plot_ratio``, false plots over the model's count;
     all of the configured tracker. ``merged_fraction_max`` bounds, pair by pair in range
-    order, the fraction of an IQ chain's frames in which a pair gives one detection.
+    order, the fraction of an IQ chain's scans in which a pair gives one detection.
     ``leaf_count_max`` bounds MHT's most leaves in one tree;
-    ``pmbm_cardinality_error_max`` PMBM's mean |tracks - aircraft| a rotation;
+    ``pmbm_cardinality_error_max`` PMBM's mean |tracks - aircraft| a scan;
     ``mht_resolved_lead_min`` MHT's resolved fraction less JPDA's and
     ``pmbm_resolved_lead_min`` PMBM's less the best other tracker's, on a pair (V3).
     """
     if ctx.scenario.sensor is None:
         return _iq_statistics(ctx)
-    scenario, verify = ctx.scenario, evaluate.thresholds(ctx, "multitarget")
-    sensor = ctx.scenario.sensor
-    runs, plot_rows, track_rows, false_enu, true_enu = play(scenario, ctx.n_frames, rows=True)
+    scenario, verify = ctx.scenario, stepper.thresholds(ctx, "multitarget")
+    runs, plot_rows, track_rows, false_enu, true_enu = play(scenario, ctx.n_scans, rows=True)
     first, *others = runs.items()
-    _record(ctx, verify, first[1], scenario, sensor.scan_period_s)
+    _record(ctx, verify, first[1], scenario, scenario.scan_period_s)
     for name, run in others:
-        _record(ctx, verify, run, scenario, sensor.scan_period_s, prefix=f"{name}_")
+        _record(ctx, verify, run, scenario, scenario.scan_period_s, prefix=f"{name}_")
     _record_trackers(ctx, verify, runs, scenario)
-    evaluate.write_csv(ctx.out_dir / "plots.csv", plot_rows)
-    evaluate.write_csv(ctx.out_dir / "tracks.csv", track_rows)
-    evaluate.write_csv(
+    stepper.write_csv(ctx.out_dir / "plots.csv", plot_rows)
+    stepper.write_csv(ctx.out_dir / "tracks.csv", track_rows)
+    stepper.write_csv(
         ctx.out_dir / "gospa.csv", [r for run in runs.values() for r in run.gospa_rows]
     )
     run = first[1]
     if ctx.render:
-        times_s = scenario.start_time_s + np.arange(0.0, ctx.n_frames * sensor.scan_period_s, 1.0)
+        times_s = scenario.start_time_s + np.arange(0.0, ctx.n_scans * scenario.scan_period_s, 1.0)
         truth = _truth(scenario, times_s)
-        figure = plots.render_scene(
+        figure = figures.render_scene(
             [(t.name, truth[k]) for k, t in enumerate(scenario.arcs)],
             plot_enu_m=np.concatenate([*false_enu, *true_enu]),
             plot_is_false=np.concatenate(
@@ -313,11 +315,11 @@ def multitarget(ctx: evaluate.Context) -> evaluate.Context:
             tracks=[(str(k), np.array(path)) for k, path in run.track_paths.items()],
             title=scenario.name,
         )
-        plots.save_figure(figure, ctx.out_dir / "scene.png")
+        figures.save_figure(figure, ctx.out_dir / "scene.png")
     return ctx
 
 
-def play(scenario: Scenario, n_frames: int | None = None, *, rows: bool = False) -> tuple[Any, ...]:
+def play(scenario: Scenario, n_scans: int | None = None, *, rows: bool = False) -> tuple[Any, ...]:
     """Play the scene once into every tracker, in step; return their runs and, if asked, rows.
 
     Returns each tracker's run by name, then the plots.csv and tracks.csv rows and the false
@@ -328,24 +330,24 @@ def play(scenario: Scenario, n_frames: int | None = None, *, rows: bool = False)
     settings = scenario.tracking
     primary = tracker_name(settings) if settings else "gnn"
     names = [primary, *(n for n in (settings.trackers if settings else ()) if n != primary)]
-    trackers = {name: PlotTracker(scenario, None if name == primary else name) for name in names}
+    trackers = {name: ScanTracker(scenario, None if name == primary else name) for name in names}
     runs = {name: _Run() for name in names}
     plot_rows: list[dict[str, Any]] = []
     track_rows: list[dict[str, Any]] = []
     false_enu: list[NDArray[np.float64]] = []
     true_enu: list[NDArray[np.float64]] = []
     aircraft = np.array([t.target_class == "aircraft" for t in scenario.arcs])
-    # Rotations are sequential: each one's tracks are the next one's prior.
-    for plots_scan in scans(scenario, n_frames=n_frames):
-        # A few trackers, each run over the same rotation.
+    # Scans are sequential: each one's tracks are the next one's prior.
+    for plots_scan in plot_scans(scenario, n_scans=n_scans):
+        # A few trackers, each run over the same scan.
         for name, tracker in trackers.items():
             run = runs[name]
-            for _, association in tracker.rotation(plots_scan):
+            for _, association in tracker.process(plots_scan):
                 if association is not None:
                     run.cluster_tracks += association.cluster_tracks.tolist()
                     run.cluster_events += association.cluster_events.tolist()
             bank = tracker.bank
-            _score_rotation(scenario, plots_scan, bank, run)
+            _score_scan(scenario, plots_scan, bank, run)
             score = _count_hypotheses(tracker, run, bank.n_tracks)
             if rows:
                 track_rows += _track_rows(plots_scan, bank, name, score)
@@ -356,7 +358,7 @@ def play(scenario: Scenario, n_frames: int | None = None, *, rows: bool = False)
         run.false_plots += int(false.sum())
         run.expected_false += _expected_false_plots(scenario, plots_scan.start_time_s)
         if rows:
-            enu = to_enu(plots_scan.range_m, plots_scan.azimuth_rad)
+            enu = range_azimuth_to_east_north_m(plots_scan.range_m, plots_scan.azimuth_rad)
             false_enu.append(enu[false])
             true_enu.append(enu[~false])
             plot_rows += _plot_rows(plots_scan)
@@ -366,7 +368,7 @@ def play(scenario: Scenario, n_frames: int | None = None, *, rows: bool = False)
     return runs, plot_rows, track_rows, false_enu, true_enu
 
 
-def _count_hypotheses(tracker: PlotTracker, run: _Run, n_tracks: int) -> NDArray[np.float64]:
+def _count_hypotheses(tracker: ScanTracker, run: _Run, n_tracks: int) -> NDArray[np.float64]:
     """Keep MHT's largest tree and cluster, PMBM's Bernoullis; return MHT's reported scores."""
     inner = tracker.tracker
     if isinstance(inner, PmbmTracker):
@@ -384,9 +386,9 @@ def pair_scores(scenario: Scenario, run: Any) -> tuple[float, float]:
     """Return whether a scene's two aircraft were resolved (1 or 0), and its coalescence ratio.
 
     Resolved: each aircraft held by one confirmed track, its own, within c/2 in at least 90 %
-    of the last 20 rotations. The ratio is the mean distance between the two aircraft's
-    tracks over their true separation, over the rotations both have one; 0 when never.
-    Spec 011b §2.1; NaN for a run under 20 rotations or a scene not of two aircraft.
+    of the last 20 scans. The ratio is the mean distance between the two aircraft's
+    tracks over their true separation, over the scans both have one; 0 when never.
+    NaN for a run under 20 scans or a scene not of two aircraft.
     """
     aircraft = [k for k, t in enumerate(scenario.arcs) if t.target_class == "aircraft"]
     if len(aircraft) != 2 or len(run.assigned) < _PAIR_SCANS:
@@ -408,7 +410,7 @@ def pair_scores(scenario: Scenario, run: Any) -> tuple[float, float]:
 
 
 def _record_trackers(
-    ctx: evaluate.Context, verify: dict[str, Any], runs: dict[str, _Run], scenario: Scenario
+    ctx: stepper.Context, verify: dict[str, Any], runs: dict[str, _Run], scenario: Scenario
 ) -> None:
     """Record each tracker's tree, mixture and pair scores; check MHT's, PMBM's and the pair's."""
     resolved: dict[str, float] = {}
@@ -452,7 +454,7 @@ def _record_trackers(
         if key not in verify:
             continue
         if name not in resolved or not against or any(n not in resolved for n in against):
-            print(f"  {key.removesuffix('_min')}: no pair, or too few rotations, to judge")
+            print(f"  {key.removesuffix('_min')}: no pair, or too few scans, to judge")
             continue
         lead = ctx.record(
             key.removesuffix("_min"), resolved[name] - max(resolved[n] for n in against)
@@ -461,7 +463,7 @@ def _record_trackers(
 
 
 def _record(
-    ctx: evaluate.Context,
+    ctx: stepper.Context,
     verify: dict[str, Any],
     run: _Run,
     scenario: Scenario,
@@ -482,6 +484,7 @@ def _record(
     swap = ctx.record(f"{prefix}swap_fraction", _swap_fraction(scenario, run, period_s))
     latency = _mode_latency(scenario, run, period_s)
     latency = ctx.record(f"{prefix}mode_latency_median_scans", latency)
+    # Not metrics.consistency_interval(2, 1, 0.95): its (1 - 0.95)/2 rounds above 0.025.
     low, high = chi2.ppf([0.025, 0.975], 2)
     inside = [low <= value <= high for value in run.nees]
     nees_fraction = float(np.mean(inside)) if inside else math.nan
@@ -567,7 +570,7 @@ def _record(
 def _trajectory_score(scenario: Scenario, run: _Run) -> Any:
     """Return trajectory GOSPA over the run's confirmed tracks, or None without any.
 
-    Each confirmed track is one trajectory, present in the rotations it was confirmed; each
+    Each confirmed track is one trajectory, present in the scans it was confirmed; each
     aircraft present while in coverage, taken at each track's time.
     """
     ids = sorted({int(i) for track_id, _, _ in run.confirmed for i in track_id})
@@ -579,7 +582,7 @@ def _trajectory_score(scenario: Scenario, run: _Run) -> Any:
     times = np.full((n_steps, len(ids)), np.nan)
     truths = np.full((n_steps, n_targets, len(ids), 2), np.nan)
     present_at = np.full((n_steps, n_targets, 2), np.nan)
-    # One rotation at a time: its tracks and the aircraft in coverage.
+    # One scan at a time: its tracks and the aircraft in coverage.
     for step, ((track_id, position, time_s), present) in enumerate(
         zip(run.confirmed, run.present, strict=True)
     ):
@@ -589,8 +592,8 @@ def _trajectory_score(scenario: Scenario, run: _Run) -> Any:
             np.isnan(times[step]), np.nanmean(time_s) if time_s.size else 0.0, times[step]
         )
         truths[step, present] = _truth(scenario, at)[present]
-        rotation_s = np.nanmean(time_s) if time_s.size else scenario.start_time_s
-        present_at[step, present] = _truth(scenario, np.array(rotation_s))[present]
+        scan_time_s = np.nanmean(time_s) if time_s.size else scenario.start_time_s
+        present_at[step, present] = _truth(scenario, np.array(scan_time_s))[present]
     aircraft = [k for k, t in enumerate(scenario.arcs) if t.target_class == "aircraft"]
     return trajectory_gospa(
         estimates,
@@ -601,16 +604,16 @@ def _trajectory_score(scenario: Scenario, run: _Run) -> Any:
 
 
 def pair_windows(
-    ctx: evaluate.Context, frame: int, bins: float
+    ctx: stepper.Context, scan: int, bins: float
 ) -> list[tuple[list[int], float, float]]:
     """Return the IQ scene's targets grouped into pairs closer than ``bins`` range bins.
 
-    Each group is its targets and, at ``frame``, the bistatic range window one bin either
-    side of them in which its detections are counted; groups are fixed by frame 0.
+    Each group is its targets and, at ``scan``, the bistatic range window one bin either
+    side of them in which its detections are counted; groups are fixed by scan 0.
     """
-    truth = evaluate.truth(ctx)
-    first, now = truth[0].bistatic_range_m, truth[frame].bistatic_range_m
-    _, _, bin_m = evaluate.spans(ctx.scenario, 0)
+    truth = stepper.truth(ctx)
+    first, now = truth[0].bistatic_range_m, truth[scan].bistatic_range_m
+    _, _, bin_m = stepper.periods(ctx.scenario, 0)
     order = np.argsort(first)
     groups: list[list[int]] = []
     # Targets in range order: a handful, each joining the group before it or starting one.
@@ -622,46 +625,46 @@ def pair_windows(
     return [(g, float(now[g].min() - bin_m), float(now[g].max() + bin_m)) for g in groups]
 
 
-def merged_counts(ctx: evaluate.Context) -> tuple[NDArray[np.float64], NDArray[np.int64], int]:
-    """Return each pair's bistatic separation, its frames with one detection, and the frames.
+def merged_counts(ctx: stepper.Context) -> tuple[NDArray[np.float64], NDArray[np.int64], int]:
+    """Return each pair's bistatic separation, its scans with one detection, and the scans.
 
     A pair's detections are burst 0's clusters inside its window, whatever their pairing
     status: one is a merged group, two or more are resolved.
     """
-    truth = evaluate.truth(ctx)
+    truth = stepper.truth(ctx)
     pairs = [g for g, _, _ in pair_windows(ctx, 0, _PAIR_BINS) if len(g) == 2]
     separation = np.array([abs(np.diff(truth[0].bistatic_range_m[g])[0]) for g in pairs])
     merged = np.zeros(len(pairs), dtype=np.int64)
-    # One frame at a time: its windows follow the pairs as they move.
-    for frame, found in enumerate(ctx.plots):
+    # One scan at a time: its windows follow the pairs as they move.
+    for scan, found in enumerate(ctx.plots):
         ranges = found.bistatic_range_m[found.burst_index == 0]
-        windows = [(lo, hi) for g, lo, hi in pair_windows(ctx, frame, _PAIR_BINS) if len(g) == 2]
+        windows = [(lo, hi) for g, lo, hi in pair_windows(ctx, scan, _PAIR_BINS) if len(g) == 2]
         counts = [np.count_nonzero((ranges >= lo) & (ranges <= hi)) for lo, hi in windows]
         merged += np.array(counts, dtype=np.int64) == 1
     return separation, merged, len(ctx.plots)
 
 
-def _iq_statistics(ctx: evaluate.Context) -> evaluate.Context:
+def _iq_statistics(ctx: stepper.Context) -> stepper.Context:
     """Measure an IQ chain's plot statistics: Pd, false-alarm rate, merged fraction per pair.
 
-    A target is detected in a frame when a burst-0 cluster lies in its pair's window (alone or
+    A target is detected in a scan when a burst-0 cluster lies in its pair's window (alone or
     merged with its partner). False alarms are clusters of either burst outside every window
     widened by the CFAR's training and guard cells, counted against the design Pfa times the
     cells left; the ratio is measured over design.
     """
-    scenario, verify = ctx.scenario, evaluate.thresholds(ctx, "multitarget")
-    if len(ctx.plots) != ctx.n_frames:
+    scenario, verify = ctx.scenario, stepper.thresholds(ctx, "multitarget")
+    if len(ctx.plots) != ctx.n_scans:
         msg = "the multitarget stage on an IQ scenario needs the rd stage's plots; run rd first."
         raise ValueError(msg)
     settings = scenario.detection
     reach = settings.n_train + settings.n_guard
     detected, false_count, cells = [], 0, 0.0
-    for frame, found in enumerate(ctx.plots):
-        windows = pair_windows(ctx, frame, _PAIR_BINS)
+    for scan, found in enumerate(ctx.plots):
+        windows = pair_windows(ctx, scan, _PAIR_BINS)
         for burst, (radar, n_pulses) in enumerate(
-            zip(scenario.radars, scenario.n_pulses, strict=True)
+            zip(scenario.radars, scenario.n_pulses_per_burst, strict=True)
         ):
-            _, _, bin_m = evaluate.spans(scenario, burst)
+            _, _, bin_m = stepper.periods(scenario, burst)
             ranges = found.bistatic_range_m[found.burst_index == burst]
             near = np.zeros(ranges.size, dtype=bool)
             excluded_bins = 0
@@ -678,16 +681,16 @@ def _iq_statistics(ctx: evaluate.Context) -> evaluate.Context:
     expected = settings.pfa * cells
     ratio = ctx.record("false_plot_ratio", false_count / expected)
     ctx.record("n_false_alarms", float(false_count))
-    separation, merged, n_frames = merged_counts(ctx)
+    separation, merged, n_scans = merged_counts(ctx)
     for gap_m, count in zip(separation, merged, strict=True):
-        ctx.record(f"merged_fraction_{gap_m:.0f}m", count / n_frames)
-    if "merged_fraction_max" in verify and n_frames >= _MIN_ECHOES:
+        ctx.record(f"merged_fraction_{gap_m:.0f}m", count / n_scans)
+    if "merged_fraction_max" in verify and n_scans >= _MIN_ECHOES:
         bounds = verify["merged_fraction_max"]
         for gap_m, count, bound in zip(separation, merged, bounds, strict=True):
             name = f"merged_fraction_{gap_m:.0f}m"
-            ctx.check("multitarget", name, count / n_frames, 0.0, bound)
+            ctx.check("multitarget", name, count / n_scans, 0.0, bound)
     elif "merged_fraction_max" in verify:
-        print("  merged_fraction: too few frames in this run to check")
+        print("  merged_fraction: too few scans in this run to check")
     if "pd_min" in verify and len(detected) >= _MIN_ECHOES:
         ctx.check("multitarget", "measured_pd", pd, verify["pd_min"], 1.0)
     elif "pd_min" in verify:

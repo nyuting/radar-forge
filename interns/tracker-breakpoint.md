@@ -14,17 +14,17 @@ Read [the intern README](README.md) first. It covers setup, house rules and how 
 
 `radar-forge` is a Python radar simulation and signal-processing library we use for teaching
 and research. Scenario 003 simulates an X-band FMCW radar watching a light aircraft at about
-20 km. Each frame, the chain:
+20 km. Each scan, the chain:
 
 1. synthesises the IQ data;
 2. forms a range-Doppler map;
 3. detects with cell-averaging CFAR (CA-CFAR; Pfa = 1e-5, 16 training cells each side);
 4. tracks the detections with a Kalman filter that confirms, coasts and deletes tracks.
 
-At the default 100 W transmit power the target is detected in every frame. So the parts of the
+At the default 100 W transmit power the target is detected in every scan. So the parts of the
 tracker that handle a *missed* detection have never been tested against a real one. The
-scenario 003 specification said so itself (§13.1 and §14.9; deleted once the scenario was built,
-its numbers now live in `config/scenario_003_tracking.toml`). Your job is
+scenario 003 specification said so itself (deleted once the scenario was built; its numbers now
+live in `config/scenario_003_tracking.toml`). Your job is
 to find out what happens when the radar starts missing.
 
 ## Setup
@@ -33,23 +33,23 @@ to find out what happens when the radar starts missing.
 - Run `uv sync --extra dev --extra visualisation`.
 - `uv run python scripts/run_scenario.py config/scenario_003_tracking.toml --out out/s1`
   runs the scenario end to end and writes detections, tracks and `metrics.csv` to `out/s1`. Don't
-  commit `out/`. Read that script and the stages it runs, in `radar_forge.evaluate`, to see how
+  commit `out/`. Read that script and the stages it runs, in `radar_forge.verify`, to see how
   the pieces fit together.
 - Useful entry points:
   - `radar_forge.propagation.received_power_w`
   - `radar_forge.radar.Radar.noise_power_matched_w` and
     `radar_forge.radar.Receiver.noise_power_per_sample_w`
   - `radar_forge.detection`
-  - `radar_forge.scenario.load_scenario`, and `radar_forge.pipeline`: `frames`,
+  - `radar_forge.scenario.load_scenario`, and `radar_forge.pipeline`: `scan_iq`,
     `range_doppler_product`
-  - `radar_forge.pipeline`: `frame_plots`, `ScanTracker`; the `track` stage of
-    `radar_forge.evaluate` scores the primary track
+  - `radar_forge.pipeline`: `scan_plots`; `radar_forge.scan_tracker`: `ScanTracker`; the `track`
+    stage of `radar_forge.verify` scores the primary track
 
 You should not need to change anything under `src/`. If you think you do, tell us why instead.
 
 ## The questions
 
-1. **Predict.** Derive the single-frame probability of detection, Pd, as a function of
+1. **Predict.** Derive the single-scan probability of detection, Pd, as a function of
    `transmit_power_w` for `config/scenario_003_tracking.toml`, from first principles (radar
    equation, processing gain, CFAR threshold). The target is non-fluctuating (Swerling 0). State
    every assumption and every loss you include or leave out.
@@ -60,12 +60,12 @@ You should not need to change anything under `src/`. If you think you do, tell u
    quantitatively if you can, and say how you would confirm your explanation.
 4. **Consequences for tracking.** Over the same power range, measure how the tracker copes. At
    minimum report:
-   - the fraction of frames with a confirmed track on the target;
+   - the fraction of scans with a confirmed track on the target;
    - the number of distinct track ids;
    - range error.
 
    Where does track maintenance fall apart, and how does that relate to Pd?
-5. **A second waveform.** `config/scenario_003_tracking_dual_prf.toml` resolves velocity with
+5. **A second waveform.** `config/scenario_003_tracking_dual_prf.toml` resolves the rate with
    two bursts at different PRFs instead. **Before you run it**, write down what you expect its
    Pd and tracking curves to look like compared with question 1, and why. Then test that
    prediction. Being wrong is fine; we are interested in what you learn from it.

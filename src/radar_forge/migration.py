@@ -8,7 +8,7 @@ intermediates; nothing is modified in place. The work is done in the range spect
 along range, unshifted, whose **signed** frequency :math:`f` makes the radio frequency
 :math:`f_0 + f`. There a point echo reads :math:`|P(f)|^2 e^{-j 2\pi (f_0 + f) R_b(t)/c}`:
 the :math:`f R_b` term walks in range, the :math:`f_0 R_b` term is the Doppler phase [1]_.
-Slow time :math:`t = m/\mathrm{PRF}` is zero at pulse 0, the frame's truth time and the
+Slow time :math:`t = m/\mathrm{PRF}` is zero at pulse 0, the scan's truth time and the
 keystone's reference. :math:`R_b` is bistatic and its rate positive receding, so
 :math:`f_D = -\dot R_b/\lambda` (:func:`~radar_forge.propagation.doppler_shift_hz`).
 :func:`pulse_compress` makes ``data_rfst`` from a cube, through its range gate, and
@@ -43,8 +43,8 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from radar_forge._fourier import aboutanios_mulgrew, signed_cycles
-from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.dsp import matched_filter
+from radar_forge.propagation import wavenumber_radpm
 from radar_forge.radar import Radar
 from radar_forge.signal import RangeGate, lfm_chirp
 
@@ -179,7 +179,7 @@ def keystone(
     every range frequency, so each echo stays in its pulse-0 range bin (Perry [1]_). Each
     frequency's slow time is rescaled by band-limited (DFT) interpolation, a chirp-z transform
     (Zhu [2]_), or by the baseline, a Hann-tapered sinc of eight pulses each side. DFT
-    interpolation treats the dwell as periodic: the low frequencies, stretched past the last
+    interpolation treats the burst as periodic: the low frequencies, stretched past the last
     pulse, read the first, so the closing pulses ring. Slow time sees only the alias of a
     Doppler beyond :math:`\pm\mathrm{PRF}/2`; the fold factor :math:`F`, the whole PRFs folded
     away, is put back by :math:`e^{+j 2\pi F m f_0/(f_0 + f)}` (Huang [3]_).
@@ -537,9 +537,9 @@ def _rate_phase_rad(
     r"""Return :math:`H`'s phase per unit acceleration and per unit jerk, ``(n_pulses, n_f)``."""
     tau_s = (np.arange(n_pulses, dtype=np.float64) / prf_hz)[:, None]
     scale = _keystone_scale(range_frequency_hz, carrier_frequency_hz)
-    wavenumber_rad_per_m = 2.0 * np.pi * carrier_frequency_hz / SPEED_OF_LIGHT_MPS
-    quadratic = wavenumber_rad_per_m * scale * tau_s**2 / 2.0
-    cubic = wavenumber_rad_per_m * scale**2 * tau_s**3 / 6.0
+    carrier_wavenumber_radpm = float(wavenumber_radpm(carrier_frequency_hz))
+    quadratic = carrier_wavenumber_radpm * scale * tau_s**2 / 2.0
+    cubic = carrier_wavenumber_radpm * scale**2 * tau_s**3 / 6.0
     return quadratic, cubic
 
 
@@ -582,7 +582,7 @@ def _rows(values: NDArray[np.complex128], ndim: int) -> NDArray[np.complex128]:
 
 
 # One plan is kept, 16 M (2N + L) bytes: 128 MiB for 1024 pulses and 2048 range frequencies.
-# Every frame of a scenario keystones on one grid, and building the plan is most of the cost;
+# Every scan of a scenario keystones on one grid, and building the plan is most of the cost;
 # a second grid (another scenario, or the second-order keystone) replaces it.
 @lru_cache(maxsize=1)
 def _chirp_z_plan(
@@ -618,7 +618,7 @@ def _chirp_z_plan(
 def _sinc_rescale(
     by_frequency: NDArray[np.complex128], scale: NDArray[np.float64]
 ) -> NDArray[np.complex128]:
-    """Return a Hann-tapered sinc interpolation at ``scale * m``, zero beyond the dwell."""
+    """Return a Hann-tapered sinc interpolation at ``scale * m``, zero beyond the burst."""
     n_pulses = by_frequency.shape[1]
     position = scale[:, None] * np.arange(n_pulses, dtype=np.float64)
     base = np.floor(position).astype(np.int64)

@@ -1,15 +1,15 @@
 r"""The ``leakage`` stage: scenario 005's cancellation of a noise radar's leakage and near clutter.
 
-Each frame's cancelled stream is set beside two maps of the same frame: uncancelled, and clean,
-its leakage and clutter paths taken out (same code, noise and target). After ``rd`` the frames
+Each scan's cancelled stream is set beside two maps of the same scan: uncancelled, and clean,
+its leakage and clutter paths taken out (same code, noise and target). After ``rd`` the scans
 and their cancellations are that stage's, kept on the context; alone, the stage makes its own.
 It checks :math:`\mathrm{CA}` beside its ceiling, the floor rise and SINR loss against the clean
 map, and the first target's CFAR detections with and without cancellation; it writes
-``leakage.csv`` and ``cancellation.png`` (frame 0). ``[verify]``, checked per frame:
+``leakage.csv`` and ``cancellation.png`` (scan 0). ``[verify]``, checked per scan:
 ``cancellation_depth_db`` with ``cancellation_tolerance_db``, ``floor_rise_db`` with
 ``floor_rise_tolerance_db``, ``sinr_loss_db`` with ``sinr_loss_tolerance_db``,
-``detections_per_frame``, ``uncancelled_detections_per_frame``; ``acceptance_frames`` keeps the
-window's first frames, those the tolerances were derived for. The floor is the mean power of the
+``detections_per_scan``, ``uncancelled_detections_per_scan``; ``acceptance_scans`` keeps the
+window's first scans, those the tolerances were derived for. The floor is the mean power of the
 216 cells 2 to 4 Doppler bins and 3 to 20 lags from the target's cell, off its row and column,
 where a white code's sinc range response and Doppler straddle bias it. A target off the lag
 window has no cell: its floor and SINR are ``nan``, which fails their checks.
@@ -31,13 +31,15 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from radar_forge import clutter, evaluate, pipeline, plots
+from radar_forge import clutter, figures, pipeline
 from radar_forge.dsp import fold_into_period
 from radar_forge.pipeline import RangeDopplerProduct
 from radar_forge.propagation import disturbance_paths
 from radar_forge.radar import TargetGeometry
 from radar_forge.scenario import Scenario
 from radar_forge.signal import cubic_amplifier, stream_baseband
+from radar_forge.units import db_to_power, power_to_db
+from radar_forge.verify import stepper
 
 __all__ = ["leakage"]
 
@@ -56,17 +58,21 @@ _KEYS = (
     "floor_rise_tolerance_db",
     "sinr_loss_db",
     "sinr_loss_tolerance_db",
-    "detections_per_frame",
-    "uncancelled_detections_per_frame",
-    "acceptance_frames",
+    "detections_per_scan",
+    "uncancelled_detections_per_scan",
+    "acceptance_scans",
 )
 
 
-@evaluate.stage("leakage", *_KEYS)
-def leakage(ctx: evaluate.Context) -> evaluate.Context:
-    """Cancel each frame; CA, floor rise, SINR loss and target detections; leakage.csv."""
-    scenario, verify = ctx.scenario, evaluate.thresholds(ctx, "leakage")
-    radar, n_pulses, n_range_lags = scenario.radar, scenario.n_pulses[0], scenario.n_range_lags[0]
+@stepper.stage("leakage", *_KEYS)
+def leakage(ctx: stepper.Context) -> stepper.Context:
+    """Cancel each scan; CA, floor rise, SINR loss and target detections; leakage.csv."""
+    scenario, verify = ctx.scenario, stepper.thresholds(ctx, "leakage")
+    radar, n_pulses, n_range_lags = (
+        scenario.radar,
+        scenario.n_pulses_per_burst[0],
+        scenario.n_range_lags[0],
+    )
     if radar.transmitter.waveform != "noise":
         msg = "the leakage stage needs a noise burst: a stream beside the code it sent."
         raise ValueError(msg)
@@ -75,11 +81,11 @@ def leakage(ctx: evaluate.Context) -> evaluate.Context:
     amplifier = None if distortion is None else functools.partial(cubic_amplifier, a3=distortion.a3)
     noise_w = radar.receiver.noise_power_per_sample_w
     n_basis, n_fit = _fit_size(scenario, n_pulses * radar.n_samples_per_chirp)
-    n_frames = min(ctx.n_frames, int(verify.get("acceptance_frames", ctx.n_frames)))
+    n_scans = min(ctx.n_scans, int(verify.get("acceptance_scans", ctx.n_scans)))
     rows: list[dict[str, Any]] = []
-    # Frames in order: each is measured before the next is taken.
-    for frame, result, cancelled in _cancelled_frames(ctx, n_frames):
-        stream, code = frame.cubes[0].reshape(-1), frame.references[0].reshape(-1)
+    # Scans in order: each is measured before the next is taken.
+    for scan, result, cancelled in _cancelled_scans(ctx, n_scans):
+        stream, code = scan.cubes[0].reshape(-1), scan.references[0].reshape(-1)
         echo, _ = stream_baseband(
             disturbance, radar, n_pulses, rng=None, reference=code, amplifier=amplifier
         )
@@ -90,35 +96,39 @@ def leakage(ctx: evaluate.Context) -> evaluate.Context:
             for name, samples in (("uncancelled", stream), ("clean", stream - echo))
         }
         maps["cancelled"] = cancelled
-        cell = _truth_cell(maps["clean"], frame.truth)
+        cell = _truth_cell(maps["clean"], scan.truth)
         floor_w = {name: _floor_w(product.rd_map, cell) for name, product in maps.items()}
         sinr_db = {
             name: math.nan
             if cell is None
-            else evaluate.to_db(np.abs(product.rd_map[cell]) ** 2 / floor_w[name])
+            else float(power_to_db(np.abs(product.rd_map[cell]) ** 2 / floor_w[name]))
             for name, product in maps.items()
         }
         # rd has detected on the cancelled map already: its plots are reused when it ran.
-        cancelled_plots = ctx.plots[frame.index] if len(ctx.plots) > frame.index else None
+        cancelled_plots = ctx.plots[scan.index] if len(ctx.plots) > scan.index else None
         found = {
             "cancelled": _target_detections(
-                maps["cancelled"], scenario, frame.truth, cancelled_plots
+                maps["cancelled"], scenario, scan.truth, cancelled_plots
             ),
-            "uncancelled": _target_detections(maps["uncancelled"], scenario, frame.truth),
+            "uncancelled": _target_detections(maps["uncancelled"], scenario, scan.truth),
         }
-        row: dict[str, Any] = {"frame": frame.index, "time_s": frame.time_s}
-        # The ceiling on the frame's own disturbance: paths on one route add in phase.
-        row["disturbance_inr_db"] = evaluate.to_db(np.mean(np.abs(echo) ** 2) / noise_w)
+        row: dict[str, Any] = {"scan": scan.index, "time_s": scan.time_s}
+        # The ceiling on the scan's own disturbance: paths on one route add in phase.
+        row["disturbance_inr_db"] = float(power_to_db(np.mean(np.abs(echo) ** 2) / noise_w))
         row["cancellation_depth_db"] = clutter.cancellation_depth_db(stream, result.residual)
+        # Through dB and back, not the ratio itself: the golden bound was made from the
+        # rounded value.
         row["cancellation_depth_bound_db"] = (
             clutter.expected_cancellation_depth_db(
-                10.0 ** (row["disturbance_inr_db"] / 10.0), n_basis, n_fit
+                float(db_to_power(row["disturbance_inr_db"])), n_basis, n_fit
             )
             if n_basis
             else 0.0
         )
-        row["floor_rise_db"] = evaluate.to_db(floor_w["cancelled"] / floor_w["clean"])
-        row["uncancelled_floor_rise_db"] = evaluate.to_db(floor_w["uncancelled"] / floor_w["clean"])
+        row["floor_rise_db"] = float(power_to_db(floor_w["cancelled"] / floor_w["clean"]))
+        row["uncancelled_floor_rise_db"] = float(
+            power_to_db(floor_w["uncancelled"] / floor_w["clean"])
+        )
         row["sinr_db"], row["clean_sinr_db"] = sinr_db["cancelled"], sinr_db["clean"]
         row["sinr_loss_db"] = sinr_db["clean"] - sinr_db["cancelled"]
         row["uncancelled_sinr_db"] = sinr_db["uncancelled"]
@@ -126,28 +136,28 @@ def leakage(ctx: evaluate.Context) -> evaluate.Context:
         row["uncancelled_target_detections"] = found["uncancelled"]
         row["gram_condition_number_max"] = float(np.max(result.gram_condition_number, initial=0))
         for name, value in row.items():
-            if name not in ("frame", "time_s"):
-                ctx.record(f"{name}[{frame.index}]", value)
+            if name not in ("scan", "time_s"):
+                ctx.record(f"{name}[{scan.index}]", value)
         _check(ctx, verify, row)
         rows.append(row)
-        if frame.index == 0 and ctx.render and cell is not None:
-            _draw(ctx, maps, cell, floor_w["clean"], frame.truth)
-    evaluate.write_csv(ctx.out_dir / "leakage.csv", rows)
+        if scan.index == 0 and ctx.render and cell is not None:
+            _draw(ctx, maps, cell, floor_w["clean"], scan.truth)
+    stepper.write_csv(ctx.out_dir / "leakage.csv", rows)
     return ctx
 
 
-def _cancelled_frames(
-    ctx: evaluate.Context, n_frames: int
-) -> Iterator[tuple[pipeline.Frame, clutter.CancellationResult, RangeDopplerProduct]]:
-    """Yield the first frames, their cancellations and maps: rd's, kept on the context, or new."""
-    if len(ctx.cancelled) >= n_frames:
-        yield from ctx.cancelled[:n_frames]
+def _cancelled_scans(
+    ctx: stepper.Context, n_scans: int
+) -> Iterator[tuple[pipeline.ScanIq, clutter.CancellationResult, RangeDopplerProduct]]:
+    """Yield the first scans, their cancellations and maps: rd's, kept on the context, or new."""
+    if len(ctx.cancelled) >= n_scans:
+        yield from ctx.cancelled[:n_scans]
         return
-    # One frame at a time: synthesised, cancelled, mapped as rd maps it, handed out.
-    for frame in pipeline.frames(ctx.scenario, n_frames=n_frames):
-        code, stream = frame.references[0], frame.cubes[0]
+    # One scan at a time: synthesised, cancelled, mapped as rd maps it, handed out.
+    for scan in pipeline.scan_iq(ctx.scenario, n_scans=n_scans):
+        code, stream = scan.references[0], scan.cubes[0]
         result = clutter.cancel(code, stream, ctx.scenario.cancellation)
-        yield frame, result, pipeline.frame_products(ctx.scenario, frame, cancellation=result)[0]
+        yield scan, result, pipeline.scan_products(ctx.scenario, scan, cancellation=result)[0]
 
 
 def _fit_size(scenario: Scenario, n_samples: int) -> tuple[int, int]:
@@ -160,8 +170,8 @@ def _fit_size(scenario: Scenario, n_samples: int) -> tuple[int, int]:
     return settings.n_taps * len(settings.odd_orders), n_fit
 
 
-def _check(ctx: evaluate.Context, verify: dict[str, Any], row: dict[str, Any]) -> None:
-    """Check one frame's row against the thresholds the scenario gives."""
+def _check(ctx: stepper.Context, verify: dict[str, Any], row: dict[str, Any]) -> None:
+    """Check one scan's row against the thresholds the scenario gives."""
     for key, tolerance_key in (
         ("cancellation_depth_db", "cancellation_tolerance_db"),
         ("floor_rise_db", "floor_rise_tolerance_db"),
@@ -171,8 +181,8 @@ def _check(ctx: evaluate.Context, verify: dict[str, Any], row: dict[str, Any]) -
             expected, tolerance = verify[key], verify.get(tolerance_key, 0.0)
             ctx.check("leakage", key, row[key], expected - tolerance, expected + tolerance)
     for key, column in (
-        ("detections_per_frame", "target_detections"),
-        ("uncancelled_detections_per_frame", "uncancelled_target_detections"),
+        ("detections_per_scan", "target_detections"),
+        ("uncancelled_detections_per_scan", "uncancelled_target_detections"),
     ):
         if key in verify:
             ctx.check("leakage", column, row[column], verify[key], verify[key])
@@ -216,7 +226,7 @@ def _target_detections(
     ``found`` is the map's plots when another stage has made them; else CFAR runs here.
     """
     if found is None:
-        found = pipeline.frame_plots([product], scenario.detection)
+        found = pipeline.scan_plots([product], scenario.detection)
     if not found.detections:
         return 0
     range_index, rate_index = product.index_of(
@@ -230,18 +240,18 @@ def _target_detections(
 
 
 def _draw(
-    ctx: evaluate.Context,
+    ctx: stepper.Context,
     maps: dict[str, RangeDopplerProduct],
     cell: tuple[int, int],
     floor_w: float,
     truth: TargetGeometry,
 ) -> None:
-    """Draw frame 0 about the target before and after cancellation: buried, then clear."""
+    """Draw scan 0 about the target before and after cancellation: buried, then clear."""
     product = maps["clean"]
     n_rate, n_lags = product.rd_map.shape
     rows = slice(max(0, cell[0] - _FIGURE_ROWS), min(n_rate, cell[0] + _FIGURE_ROWS + 1))
     lags = slice(max(0, cell[1] - _FIGURE_LAGS), min(n_lags, cell[1] + _FIGURE_LAGS + 1))
-    figure = plots.render_cancellation(
+    figure = figures.render_cancellation(
         maps["uncancelled"].rd_map[rows, lags],
         maps["cancelled"].rd_map[rows, lags],
         product.range_axis_m[lags],
@@ -250,7 +260,7 @@ def _draw(
         floor_w=floor_w,
         truth_range_m=truth.bistatic_range_m,
         truth_rate_mps=truth.bistatic_range_rate_mps,
-        title=f"{ctx.scenario.name}, frame 0",
+        title=f"{ctx.scenario.name}, scan 0",
         dynamic_range_db=_FIGURE_RANGE_DB,
     )
-    plots.save_figure(figure, ctx.out_dir / "cancellation.png")
+    figures.save_figure(figure, ctx.out_dir / "cancellation.png")

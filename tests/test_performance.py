@@ -1,10 +1,10 @@
-"""Performance budgets: one frame's memory, and each stage's wall time.
+"""Performance budgets: one scan's memory, and each stage's wall time.
 
 Regressions, not correctness (``benchmark``). Memory is measured with ``tracemalloc`` over one
-frame, from synthesis to plots, of the largest shipped scenario and of every one that corrects
+scan, from synthesis to plots, of the largest shipped scenario and of every one that corrects
 range migration: the chain may hold the cube (as its range gate records it), its map and their
 working copies, and a keystone its chirp-z plan and a few range spectra, but nothing that grows
-with the frame count or the paths.
+with the scan count or the paths.
 """
 
 from __future__ import annotations
@@ -16,9 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from radar_forge import evaluate, migration
+from radar_forge import migration, verify
 from radar_forge.detection import cluster_detections
-from radar_forge.pipeline import frame_plots, frame_products, frames
+from radar_forge.pipeline import scan_iq, scan_plots, scan_products
 from radar_forge.scenario import load_scenario
 
 REPO = Path(__file__).resolve().parents[1]
@@ -34,7 +34,11 @@ def _cube_bytes(path: Path) -> int:
     return n_rx * sum(
         16 * n * (gate.n_samples(r) * (2 if lags else 1) + lags)
         for r, n, gate, lags in zip(
-            scenario.radars, scenario.n_pulses, scenario.gates, scenario.n_range_lags, strict=True
+            scenario.radars,
+            scenario.n_pulses_per_burst,
+            scenario.gates,
+            scenario.n_range_lags,
+            strict=True,
         )
     )
 
@@ -51,7 +55,7 @@ def _migration_bytes(path: Path) -> int:
         return 0
     total = 0
     for radar, n_pulses, gate in zip(
-        scenario.radars, scenario.n_pulses, scenario.gates, strict=True
+        scenario.radars, scenario.n_pulses_per_burst, scenario.gates, strict=True
     ):
         n_range_fft = 2 ** math.ceil(math.log2(2 * gate.n_samples(radar)))
         n_convolution = 2 ** math.ceil(math.log2(2 * n_pulses - 1))
@@ -68,8 +72,8 @@ MEASURED = sorted(
 
 @pytest.mark.benchmark
 @pytest.mark.parametrize("path", MEASURED, ids=[path.stem for path in MEASURED])
-def test_one_frame_holds_at_most_two_cubes_a_keystones_working_set_and_64_mib(path):
-    """Synthesis to plots in one frame, through the gate and [migration], within budget.
+def test_one_scan_holds_at_most_two_cubes_a_keystones_working_set_and_64_mib(path):
+    """Synthesis to plots in one scan, through the gate and [migration], within budget.
 
     The chirp-z plan cache (one plan, migration.py) is emptied first, so building the plan is
     measured too.
@@ -78,30 +82,31 @@ def test_one_frame_holds_at_most_two_cubes_a_keystones_working_set_and_64_mib(pa
     migration._chirp_z_plan.cache_clear()
     tracemalloc.start()
     try:
-        frame = next(frames(scenario, n_frames=1))
-        frame_plots(frame_products(scenario, frame), scenario.detection)
+        scan = next(scan_iq(scenario, n_scans=1))
+        scan_plots(scan_products(scenario, scan), scenario.detection)
         _, peak_bytes = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
     assert peak_bytes <= 2 * _cube_bytes(path) + _migration_bytes(path) + 64 * 2**20
 
 
-# Budgets, s, for three frames of S1 without figures: about four times this machine's time.
+# Budgets, s, for three scans of S1 (scenario_001_fmcw_low_prf) without figures: about four
+# times this machine's time.
 STAGE_BUDGET_S = {"geometry": 2.0, "iq": 2.0, "rd": 8.0, "detect": 1.0, "track": 2.0}
 
 
 @pytest.mark.benchmark
-def test_each_stage_of_three_frames_runs_within_its_budget(tmp_path):
-    """Three frames of scenario 003 over S1 through every stage, each inside its budget."""
+def test_each_stage_of_three_scans_runs_within_its_budget(tmp_path):
+    """Three scans of scenario 003 over S1 through every stage, each inside its budget."""
     scenario = load_scenario(REPO / "config" / "scenario_003_tracking.toml")
-    report = evaluate.run(scenario, n_frames=3, out_dir=tmp_path, render=False)
+    report = verify.run(scenario, n_scans=3, out_dir=tmp_path, render=False)
     over = {k: t for k, t in report.wall_time_s.items() if t > STAGE_BUDGET_S[k]}
     assert set(report.wall_time_s) == set(STAGE_BUDGET_S)
     assert not over, f"stages over budget (s): {over}"
 
 
 @pytest.mark.benchmark
-def test_clustering_a_frame_sized_map_runs_within_its_budget(rng):
+def test_clustering_a_scan_sized_map_runs_within_its_budget(rng):
     """A (256, 1000) map, ten 3 x 5 targets and about 30 false alarms, clustered inside 0.02 s.
 
     Both axes wrap. Labelling the whole padded map took 7 ms warm and 23 to 26 ms cold here;
@@ -122,7 +127,7 @@ def test_clustering_a_frame_sized_map_runs_within_its_budget(rng):
 
 
 @pytest.mark.benchmark
-def test_mean_shift_clustering_of_a_frame_sized_map_runs_within_its_budget(rng):
+def test_mean_shift_clustering_of_a_scan_sized_map_runs_within_its_budget(rng):
     """The same map grouped by mean-shift mode at a bandwidth of one cell, inside 0.02 s.
 
     Seeding every flagged cell takes about 4 ms.

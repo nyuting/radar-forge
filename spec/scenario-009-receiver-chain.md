@@ -25,7 +25,7 @@ This document specifies the **receive chain as a vertical slice**, on the 16-cha
    slice shows its Doppler skirt against the closed form, and what calibration can and cannot remove.
 
 The direct-baseband path is **not changed**. The front end is an optional stage selected by the
-presence of a `[front_end]` table, exactly as `[site.rx]` selects bistatic siting in
+presence of a `[front_end]` table, exactly as `[site.rx]` selects a bistatic geometry in
 scenario 002. Absent, every cube is bit-identical to today's (§6, A1).
 
 | Section | What it fixes |
@@ -442,8 +442,8 @@ green on them is a precondition for every commit.
 | 6 | `scenario.py`, `pipeline.py` *(edit)* | TOML order: `… [[burst]] [receiver] [front_end] [impairments] [calibration]`, signal-path order as scenario-002 §3.5 |
 | 7 | tests | A1 first: nothing else means anything until bypass is bit-identical |
 
-Consumed unchanged: `dsp.py` (`matched_filter`, `range_doppler_map`, `range_bin_centers_m`,
-`doppler_bin_centers_mps`, `window`), `signal.py`'s `lfm_chirp`, `constants.py`. Consumed from
+Consumed unchanged: `dsp.py` (`matched_filter`, `range_doppler_map`, `range_bin_centres_m`,
+`doppler_bin_centres_mps`, `window`), `signal.py`'s `lfm_chirp`, `constants.py`. Consumed from
 scenario 006: the steering vector and `array/beamforming.py`.
 
 ---

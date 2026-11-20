@@ -1,7 +1,8 @@
-"""The stepper's command line: three frames of a shipped scenario, its files, its exit status.
+"""The stepper's command line: three scans of a shipped scenario, its files, its exit status.
 
-Scenario 003 criterion 8 is that the pictures exist: this run draws them. S2's maps are the
-smallest shipped, 256 x 100 cells, so it is the cheapest scenario to draw three frames of.
+This run checks that the pictures exist: it draws them. The maps of S2
+(scenario_001_pulsed_medium_prf) are the smallest shipped, 256 x 100 cells, so it is the
+cheapest scenario to draw three scans of.
 """
 
 from __future__ import annotations
@@ -33,13 +34,13 @@ def _load_script() -> ModuleType:
 run_scenario = _load_script()
 
 
-def test_three_frames_write_every_stage_file_and_exit_zero(tmp_path, capsys):
+def test_three_scans_write_every_stage_file_and_exit_zero(tmp_path, capsys):
     """Every stage runs, prints its wall time, and writes its files; the checks pass.
 
-    ``--no-plots``, so it runs without the visualisation extra, as the fast CI job does.
+    ``--no-figures``, so it runs without the visualisation extra, as the fast CI job does.
     """
     status = run_scenario.main(
-        [str(SCENARIO), "--frames", "3", "--save-iq", "--no-plots", "--out", str(tmp_path)]
+        [str(SCENARIO), "--scans", "3", "--save-iq", "--no-figures", "--out", str(tmp_path)]
     )
     printed = capsys.readouterr().out
     assert status == 0
@@ -52,14 +53,14 @@ def test_three_frames_write_every_stage_file_and_exit_zero(tmp_path, capsys):
     with (tmp_path / "truth.csv").open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     # Monostatic, so the file shows the slant range and radial velocity: half the map's values.
-    assert [int(row["frame"]) for row in rows] == [0, 1, 2]
+    assert [int(row["scan"]) for row in rows] == [0, 1, 2]
     assert {"range_m", "range_rate_mps"} <= set(rows[0])
 
 
 def test_the_figures_are_drawn_with_the_visualisation_extra(tmp_path):
-    """Scenario 003 criterion 8: an rd map per frame and the range-time history exist."""
+    """An rd map per scan and the range-time history exist."""
     pytest.importorskip("matplotlib")
-    status = run_scenario.main([str(SCENARIO), "--frames", "2", "--out", str(tmp_path)])
+    status = run_scenario.main([str(SCENARIO), "--scans", "2", "--out", str(tmp_path)])
     assert status == 0
     expected = {"rd_00000.png", "rd_00001.png", "track.png"}
     assert expected <= {path.name for path in tmp_path.iterdir()}
@@ -68,7 +69,16 @@ def test_the_figures_are_drawn_with_the_visualisation_extra(tmp_path):
 def test_stop_after_runs_only_the_stages_up_to_it(tmp_path, capsys):
     """``--stop-after rd`` runs geometry, iq and rd, and nothing downstream of them."""
     status = run_scenario.main(
-        [str(SCENARIO), "--frames", "1", "--stop-after", "rd", "--no-plots", "--out", str(tmp_path)]
+        [
+            str(SCENARIO),
+            "--scans",
+            "1",
+            "--stop-after",
+            "rd",
+            "--no-figures",
+            "--out",
+            str(tmp_path),
+        ]
     )
     printed = capsys.readouterr().out
     assert status == 0
@@ -87,7 +97,7 @@ def test_a_failed_check_exits_one_and_names_it(tmp_path, capsys):
     broken = tmp_path / "broken.toml"
     broken.write_text(text, encoding="utf-8")
     status = run_scenario.main(
-        [str(broken), "--frames", "1", "--stop-after", "geometry", "--out", str(tmp_path / "run")]
+        [str(broken), "--scans", "1", "--stop-after", "geometry", "--out", str(tmp_path / "run")]
     )
     assert status == 1
     assert "predicted_snr_db" in capsys.readouterr().err

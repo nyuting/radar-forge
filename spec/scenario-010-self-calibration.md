@@ -190,7 +190,7 @@ ill-conditioned rather than assumed away.
 | HPBW at broadside (untapered) | **6.346°**, 0.11075 in `u`; 0.1 HPBW = **0.6346°** | Adaptive beamformers run untapered; 009's 8.52° is the Taylor-tapered beam |
 | Per-channel `gain_rx_dbi` | 20.0 | Scenario-006 §3.1 |
 | `boresight_azimuth_deg` | **185.0** (not 006's 235.804; §4.4) | Specified |
-| Scenario-002 transmitter | 35.87750 °N, 78.78750 °W, 25 m; **19.601 km**, bearing **134.99°**, el **−0.19°**; array az **−50.01°** | Computed with the geodesy in `radar.py` |
+| Scenario-002 transmitter | 35.87750 °N, 78.78750 °W, 25 m; **19.601 km**, bearing **134.99°**, el **−0.19°**; array az **−50.01°** | Computed with the geodesy in `coordinates.py` |
 | Transmitter in band at 9.8 GHz | Scenario-002 B1's fiction, kept so the array is one hardware item across 006–010 | Scenario-002 §4.5 |
 | Transmitter line-of-sight SNR | 30 dB per channel per sample, `n_snapshots` 256 per frame | Specified: its antenna pattern towards Duke is unknown |
 | Line of sight | 4/3-Earth radio horizons sum to 52.5 km, against 19.6 km | Computed; terrain ignored |
@@ -323,10 +323,10 @@ As scenario-006 §3.7, plus:
 
 | Where | What |
 | :--- | :--- |
-| `products.h5` `/manifold_truth/` | `element_positions_m` (n_rx, 3), `coupling_matrix_linear` (n_rx, n_rx) complex128, `channel_gain_linear` (n_rx,) complex128; for M3, `channel_gain_linear` is `(n_frames, n_rx)` |
+| `products.h5` `/manifold_truth/` | `element_positions_m` (n_rx, 3), `coupling_matrix_linear` (n_rx, n_rx) complex128, `channel_gain_linear` (n_rx,) complex128; for M3, `channel_gain_linear` is `(n_scans, n_rx)` |
 | `products.h5` `/manifold_estimate/` | The same fields, from `ManifoldEstimate.manifold`; attributes `method`, `gauge`, `null_space_dim`, `condition_number` |
 | `products.h5` `/calibration/` | `fisher_information` (n_params, n_params), `parameter_names` (n_params,) str, `crb_std` (n_params,), `cost_history` (n_iterations,) |
-| `beamformer.csv` | `frame`, `time_s`, `method` (`mpdr`, `mvdr`, `rcb`, `worst_case`, `robust_lcmv`), `manifold` (`nominal`, `refined`, `tracked`, `frozen`), `sinr_loss_db`, `white_noise_gain_db`, `loading_w` |
+| `beamformer.csv` | `scan`, `time_s`, `method` (`mpdr`, `mvdr`, `rcb`, `worst_case`, `robust_lcmv`), `manifold` (`nominal`, `refined`, `tracked`, `frozen`), `sinr_loss_db`, `white_noise_gain_db`, `loading_w` |
 | `metadata.json` `receive_array` | As 006, with `boresight_azimuth_deg` = 185.0 |
 
 ---
@@ -476,7 +476,7 @@ tests/array/test_robust_beamforming.py; scenario criteria in the TOMLs' [verify]
 ```
 
 `array/{geometry,beamforming,doa}.py` (006), the D16 record and `apply_weights` (007), and 009's
-pilot and IQ estimators are consumed, never edited. `signal.py`, `dsp.py`, `radar.py` (geodesy),
+pilot and IQ estimators are consumed, never edited. `signal.py`, `dsp.py`, `coordinates.py` (geodesy),
 `scenario.py` (trajectories) and the scenario-002 sites (`config/scenario_002_*.toml`) are
 consumed. 001–009's tests staying green is a precondition for every commit.
 

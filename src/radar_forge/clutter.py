@@ -43,6 +43,8 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.linalg import cho_factor, cho_solve, lapack
 from scipy.signal import fftconvolve
 
+from radar_forge.units import power_to_db
+
 if TYPE_CHECKING:
     from radar_forge.settings import CancellationSettings
 
@@ -352,7 +354,7 @@ def cancellation_depth_db(surveillance: ArrayLike, residual: ArrayLike) -> float
         raise ValueError(msg)
     if power_out == 0.0:
         return math.inf
-    return 10.0 * math.log10(power_in / power_out)
+    return float(power_to_db(power_in / power_out))
 
 
 def expected_cancellation_depth_db(
@@ -375,7 +377,7 @@ def expected_cancellation_depth_db(
         msg = "need 0 < n_basis < n_samples and non-negative interference ratios."
         raise ValueError(msg)
     kept = (1.0 - n_basis / n_samples) * (1.0 + inr_uncancelled_linear)
-    return 10.0 * math.log10((1.0 + inr_linear) / kept)
+    return float(power_to_db((1.0 + inr_linear) / kept))
 
 
 def doppler_notch_response_linear(
@@ -391,7 +393,7 @@ def doppler_notch_response_linear(
 
     Examples
     --------
-    >>> round(10 * math.log10(doppler_notch_response_linear(78.125, 51200, 8e6)), 2)
+    >>> round(float(power_to_db(doppler_notch_response_linear(78.125, 51200, 8e6))), 2)
     -4.51
     """
     ratio = np.asarray(doppler_hz, dtype=np.float64) / sample_rate_hz
@@ -410,7 +412,7 @@ def distortion_fraction_linear(a3: float) -> float:
 
     Examples
     --------
-    >>> round(10 * math.log10(distortion_fraction_linear(-0.07)), 3)
+    >>> round(float(power_to_db(distortion_fraction_linear(-0.07))), 3)
     -18.835
     """
     return 2.0 * a3**2 / (1.0 + 4.0 * a3 + 6.0 * a3**2)

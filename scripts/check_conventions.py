@@ -28,8 +28,8 @@ R9  Python and Markdown files hold no control characters other than tab, line
     feed and carriage return, such as the BEL a tool writes for ``\\alpha``.
 R10 A Python module under ``src/`` or ``scripts/`` warns past 500 lines and
     fails past 800, except the files grandfathered below.
-R11 The hot path, every library module but the four that run a scenario
-    (``scenario``, ``pipeline``, ``evaluate``, ``plots``) and the ``stages`` package,
+R11 The hot path, every library module but the three that run a scenario or draw it
+    (``scenario``, ``pipeline``, ``figures``) and the ``verify`` package,
     does no I/O, logging or timing: no ``print``, ``open``, ``Path.write_*``,
     ``logging`` or ``time`` clocks.
 R12 ``np.errstate``/``np.seterr`` in ``src/`` carry ``# errstate-exempt: <reason>``.
@@ -579,11 +579,9 @@ def check_module_length(rel: Path, n_lines: int) -> list[Problem]:
 # --- R11 — the hot path does no I/O, logging or timing ---
 
 # The library modules that read a scenario, write a run or draw: they may do I/O.
-OFF_HOT_PATH = frozenset(
-    PKG / name for name in ("scenario.py", "pipeline.py", "evaluate.py", "plots.py")
-)
-# The stepper's stages print, check and write, as evaluate.py does.
-OFF_HOT_PATH_PACKAGES = frozenset({PKG / "stages"})
+OFF_HOT_PATH = frozenset(PKG / name for name in ("scenario.py", "pipeline.py", "figures.py"))
+# The stepper and its stages print, check and write.
+OFF_HOT_PATH_PACKAGES = frozenset({PKG / "verify"})
 HOT_PATH_BUILTINS = {"print", "open"}
 HOT_PATH_CLOCKS = {"time", "time_ns", "perf_counter", "perf_counter_ns", "monotonic"}
 HOT_PATH_WRITES = {
@@ -660,7 +658,7 @@ def check_hot_path(tree: ast.AST, rel: Path) -> list[Problem]:
                 getattr(node, "lineno", 0),
                 "R11 hot path",
                 f"a hot-path module {offence}; it does no I/O, logging or timing.",
-                "return the value and let evaluate.py, a stages module or scripts/ print, log, "
+                "return the value and let a verify module or scripts/ print, log, "
                 "time or write it. Tell the user about a recoverable problem with warnings.warn.",
             )
         )

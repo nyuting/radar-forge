@@ -30,15 +30,15 @@ positive receding. For a monostatic radar that is twice the slant range and twic
 velocity. Only a display halves them ([page 2](02-geometry-and-propagation.md)).
 
 Two numbers matter most when a target shows up in the wrong place: the unambiguous bistatic
-range $R_{b,ua}$ and the span of rates $\dot R_{b,ua}$ the radar can tell apart. A target beyond
-either one *folds*: it appears at a wrong range or rate, wrapped back into the window the radar
-can see. A radar cannot make both large at once, and the three variants of scenario 001 each
-make a different choice.
+range, the range period $R_{\mathrm{period}}$, and the span of rates the radar can tell apart,
+the rate period $v_{\mathrm{period}}$. A target beyond either one *folds*: it appears at a wrong
+range or rate, wrapped back into the window the radar can see. A radar cannot make both large at
+once, and the three variants of scenario 001 each make a different choice.
 
 ```
- P_t, G_t ──► spreads over 4πR_T² ──► target, σ ──► spreads over 4πR_R² ──► antenna G_r λ²/4π ──► P_r
-                                                                                                 vs
-                                                           receiver noise N_0 = k T_0 F, per hertz
+ P_t, G_t ──► spreads over 4π(R_T)² ──► target, σ ──► spreads over 4π(R_R)² ──► antenna G_r λ²/(4π) ──► P_r
+                                                                                                       vs
+                                                                 receiver noise N_0 = k T_0 F, per hertz
 ```
 
 ## Quantities and equations
@@ -58,18 +58,18 @@ make a different choice.
 | Duty cycle | $d$ | $d = T_c \cdot \mathrm{PRF}$ | `Transmitter.duty_cycle_linear` | 1.00 |
 | Sweep rate | $\alpha$ | $\alpha = B / T_c$ | `Transmitter.sweep_rate_hzps` | 2.0000e9 Hz/s |
 | Unambiguous delay | $\tau_{ua}$ | $f_s / \alpha$ (FMCW), $1/\mathrm{PRF}$ (pulsed) | `Radar.unambiguous_delay_s` | 500 µs |
-| Unambiguous bistatic range | $R_{b,ua}$ | $c\,\tau_{ua}$: $c f_s / \alpha$ (FMCW), $c / \mathrm{PRF}$ (pulsed) | `Radar.unambiguous_bistatic_range_m` | 149.896 km (74.948 km slant) |
-| Unambiguous rate span | $\dot R_{b,ua}$ | $\dot R_{b,ua} = \lambda\,\mathrm{PRF}$, shown as $\pm\dot R_{b,ua}/2$ | `Radar.unambiguous_bistatic_range_rate_mps` | 30.5911 m/s: ±15.2955 m/s (±7.6478 m/s radial) |
+| Unambiguous bistatic range | $R_{\mathrm{period}}$ | $c\,\tau_{ua}$: $c f_s / \alpha$ (FMCW), $c / \mathrm{PRF}$ (pulsed) | `Radar.unambiguous_bistatic_range_m` | 149.896 km (74.948 km slant) |
+| Unambiguous rate span | $v_{\mathrm{period}}$ | $v_{\mathrm{period}} = \lambda\,\mathrm{PRF}$, shown as $\pm v_{\mathrm{period}}/2$ | `Radar.unambiguous_bistatic_range_rate_mps` | 30.5911 m/s: ±15.2955 m/s (±7.6478 m/s radial) |
 | Baseline | $L_b$ | distance between the two sites | `Radar.baseline_m` | 0.0 m |
 | Bistatic angle | $\beta$ | $\cos\beta = (R_T^2 + R_R^2 - L_b^2) / (2 R_T R_R)$ | `TargetGeometry.bistatic_angle_rad` | 0 |
 
-The S1 received power and SNR are for the target's true range at frame 0, 17 560.7 m, from
+The S1 received power and SNR are for the target's true range at scan 0, 17 560.7 m, from
 `truth_geometry`. S1 is monostatic, so $R_T = R_R$, $L_b = 0$ and $\beta = 0$. Scenario 002
-(B1) flies the S1 waveform over a 19 601.4 m baseline. Its $R_{b,ua}$ is the same 149.896 km,
-because $c\,\tau_{ua}$ does not depend on where the antennas stand. Its range resolution grows
-from 74.95 m at $\beta = 0$ to 86.54 m at 60° and 105.99 m at 90°: measured in $R_b$ itself a
-resolution cell is always $c/B$ = 149.9 m, and $\Delta R(\beta)$ is that cell on the ground,
-along the bisector of $\beta$.
+(B1) flies the S1 waveform over a 19 601.4 m baseline. Its $R_{\mathrm{period}}$ is the same
+149.896 km, because $c\,\tau_{ua}$ does not depend on where the antennas stand. Its range
+resolution grows from 74.95 m at $\beta = 0$ to 86.54 m at 60° and 105.99 m at 90°: measured
+in $R_b$ itself a resolution cell is always $c/B$ = 149.9 m, and $\Delta R(\beta)$ is that cell
+on the ground, along the bisector of $\beta$.
 
 Symbols used only on this page:
 
@@ -83,7 +83,9 @@ Symbols used only on this page:
 - $L_b$: baseline between the two sites, m (`baseline_m`);
 - $\Delta R$, $\Delta R(\beta)$: monostatic and bistatic range resolution, m;
 - $T_{\mathrm{PRI}}$: pulse repetition interval, s; $d$: duty cycle, linear;
-- $\tau_{ua}$, $R_{b,ua}$, $\dot R_{b,ua}$: unambiguous delay, bistatic range and rate span.
+- $\tau_{ua}$, $R_{\mathrm{period}}$, $v_{\mathrm{period}}$: unambiguous delay, and the
+  bistatic range and rate periods, each the whole width of its axis (the guide's
+  [notation](README.md#notation)).
 
 The radar equation, in Willis's bistatic form. One site has $R_T = R_R = R$, so power falls as
 $1/R^4$ and doubling the range costs 12 dB:
@@ -99,15 +101,45 @@ $$N_0 = k\, T_0\, F, \qquad \mathrm{SNR} = \frac{P_r}{N_0 B}$$
 The two unambiguous limits. Range folds when an echo arrives too late to be told apart; rate
 folds when the carrier phase, $-2\pi R_b/\lambda$, turns more than half a cycle between chirps:
 
-$$R_{b,ua} = \frac{c}{\mathrm{PRF}}\ \text{(pulsed)}, \qquad R_{b,ua} = \frac{c\, f_s}{\alpha}\ \text{(FMCW)}, \qquad |\dot R_b| < \frac{\dot R_{b,ua}}{2} = \frac{\lambda\, \mathrm{PRF}}{2}$$
+$$R_{\mathrm{period}} = \frac{c}{\mathrm{PRF}}\ \text{(pulsed)}, \qquad R_{\mathrm{period}} = \frac{c\, f_s}{\alpha}\ \text{(FMCW)}, \qquad |\dot R_b| < \frac{v_{\mathrm{period}}}{2} = \frac{\lambda\, \mathrm{PRF}}{2}$$
 
-For a pulsed radar the product is fixed: $R_{b,ua}\, \dot R_{b,ua} = c\lambda$, whatever the
-PRF. Halve both for one site and it is the textbook $R_{ua}\, v_{ua} = c\lambda/8$, with
-$R_{ua} = c/2\,\mathrm{PRF}$ and $v_{ua} = \lambda\,\mathrm{PRF}/4$. Raise the PRF to see faster
-targets and you see less far. For FMCW the PRF does not appear in $R_{b,ua}$, so the product
-becomes $c\lambda \cdot d \cdot f_s / B$. S1 has $d = 1$ and $f_s / B = 0.5$, so it reaches
-half of $c\lambda$; S3 samples at $f_s = 2B$ and reaches twice it. The trade has moved from the
-PRF to the sample rate.
+**The trade between the two.** A waveform that repeats every $T_{\mathrm{PRI}}$ cannot tell a
+delay $\tau$ from $\tau + T_{\mathrm{PRI}}$, and a phase sampled once per repetition cannot tell
+a Doppler shift $f$ from $f + \mathrm{PRF}$. The two periods multiply to one whatever the PRF.
+For a pulsed radar, whose range limit is one repetition, that is
+
+$$R_{\mathrm{period}}\, v_{\mathrm{period}} = \frac{c}{\mathrm{PRF}} \cdot \lambda\, \mathrm{PRF} = c\lambda$$
+
+Only the carrier sets it. Halve both for one site and it is $c\lambda/4$; count the rate as
+$\pm v_{ua}$ as well and it is the textbook $R_{ua}\, v_{ua} = c\lambda/8$, with
+$R_{ua} = c/(2\,\mathrm{PRF}) = R_{\mathrm{period}}/2$ and
+$v_{ua} = \lambda\,\mathrm{PRF}/4 = v_{\mathrm{period}}/4$ of radial velocity, the one-sided
+limit of a monostatic figure. The three forms differ by convention, not by physics. A designer
+uses the number three ways:
+
+- **As a test.** Multiply the range span the radar must cover by the rate span it must cover. If
+  the product is above $c\lambda$, no single PRF does both, and the choice is which axis folds:
+  a low PRF keeps range and folds rate (S1); a high PRF keeps rate and folds range (S2, for this
+  aircraft); a medium PRF folds both a little. S2 is called medium because a target faster than
+  ±382 m/s of bistatic rate would fold there too.
+- **To size the cure.** The folded axis is recovered from several PRFs (page 4), and the ratio of
+  the product needed to $c\lambda$ says how far they must stretch it.
+- **To compare bands.** $c\lambda = c^2/f_c$, so at 2.8 GHz it is 3.5 times what it is at
+  9.8 GHz. Scenario 002 shows it: the same waveform and the same flight fold the rate in 107 of
+  120 scans at X-band and in 42 at S-band.
+
+No single burst reaches more than $c\lambda$, and one can reach less. An FMCW receiver reads
+range from the beat frequency, which its sample rate limits to a delay of $f_s/\alpha$; and an
+echo that arrives after its own chirp has ended meets the next chirp, so a real sawtooth radar
+cannot place it. The delay an FMCW burst can use, its *reach*, is the smaller of $f_s/\alpha$
+and $T_c$, and the product of its reach and rate span is $c\lambda \cdot d \cdot \min(f_s/B, 1)$. S1
+and S3 have $d = 1$. S1 has $f_s/B = 0.5$ and reaches half of $c\lambda$: its sample rate, not
+its PRF, is the limit. S3 has $f_s/B = 2$, so its map's range axis,
+$R_{\mathrm{period}} = c f_s/\alpha$, is twice as long as its chirp, and each burst reaches
+exactly $c\lambda$. That is what a real radar could use. The simulator does not apply the cap:
+an S3 target at 80 km of route appears at 80 km, at full strength (see Limits). What S3's
+second PRF buys does not show in a per-burst product: the pair together tells apart six times
+the rates the first burst can, and five times the second's.
 
 ## How it works, step by step
 
@@ -129,8 +161,8 @@ PRF to the sample rate.
    receiver that samples below the bandwidth. It gives `is_monostatic`, `baseline_m`,
    `range_resolution_m`, `unambiguous_delay_s`, `unambiguous_bistatic_range_m`,
    `unambiguous_bistatic_range_rate_mps`, `noise_power_matched_w`, `n_samples_per_chirp` and
-   `n_samples_per_pri`, the same properties for either siting. `n_samples_per_pri` is the row
-   length of the `(n_pulses, n_samples)` IQ cube.
+   `n_samples_per_pri`, the same properties whether the radar is monostatic or bistatic.
+   `n_samples_per_pri` is the row length of the `(n_pulses, n_samples)` IQ cube.
 6. **The geometry.** `Radar.geometry(position_enu_m, velocity_enu_mps)` gives a
    `TargetGeometry` whose `range_tx_m`, `range_rx_m`, `bistatic_range_m`,
    `bistatic_range_rate_mps` and `bistatic_angle_rad` are each of shape `(n_targets,)`.
@@ -138,34 +170,34 @@ PRF to the sample rate.
    `radar.range_resolution_m / np.cos(geometry.bistatic_angle_rad / 2)`.
 7. **The power.** `received_power_w` takes keywords only, among them `range_tx_m` and
    `range_rx_m`; for one site, pass the slant range to both. Gains enter linear:
-   `10.0 ** (gain_tx_dbi / 10.0)`. Every argument broadcasts, so range arrays of shape
+   `tx.gain_tx_linear` and `rx.gain_rx_linear`, which are `db_to_power` of the dBi values
+   (`radar_forge.units` holds the four decibel conversions). Every argument broadcasts, so range arrays of shape
    `(n_targets,)` give a power array of the same shape.
 
 ## Try it
 
-This loads S1, computes its link budget at the target's frame-0 range and prints its limits:
+This loads S1, computes its link budget at the target's scan-0 range and prints its limits:
 
 ```python
-import numpy as np
-
 from radar_forge.propagation import received_power_w
 from radar_forge.scenario import load_scenario, truth_geometry
+from radar_forge.units import power_to_db
 
 scenario = load_scenario("config/scenario_001_fmcw_low_prf.toml")
 radar = scenario.radar  # one Transmitter and one Receiver; no [site.rx], so monostatic
 tx, rx = radar.transmitter, radar.receiver
 target = scenario.targets[0]
-truth = truth_geometry(scenario)[0]  # frame 0
+truth = truth_geometry(scenario)[0]  # scan 0
 power_w = received_power_w(
     transmit_power_w=tx.transmit_power_w,
-    gain_tx_linear=10.0 ** (tx.gain_tx_dbi / 10.0),
-    gain_rx_linear=10.0 ** (rx.gain_rx_dbi / 10.0),
+    gain_tx_linear=tx.gain_tx_linear,
+    gain_rx_linear=rx.gain_rx_linear,
     wavelength_m=radar.wavelength_m,
     rcs_m2=target.rcs_m2,
     range_tx_m=truth.range_tx_m[0],
     range_rx_m=truth.range_rx_m[0],
 )
-rate_span_mps = radar.unambiguous_bistatic_range_rate_mps
+rate_period_mps = radar.unambiguous_bistatic_range_rate_mps
 print(f"monostatic      {radar.is_monostatic}, baseline {radar.baseline_m:.1f} m")
 print(f"R_T, R_R        {truth.range_tx_m[0]:.1f} m, {truth.range_rx_m[0]:.1f} m")
 print(f"wavelength      {radar.wavelength_m * 1e3:.4f} mm")
@@ -174,13 +206,13 @@ print(f"received power  {power_w:.4e} W")
 print(f"N0              {rx.noise_density_w_per_hz:.4e} W/Hz")
 print(f"noise / sample  {rx.noise_power_per_sample_w:.4e} W")
 print(f"noise, matched  {radar.noise_power_matched_w:.4e} W")
-print(f"SNR, matched    {10 * np.log10(power_w / radar.noise_power_matched_w):.2f} dB")
-print(f"SNR / sample    {10 * np.log10(power_w / rx.noise_power_per_sample_w):.2f} dB")
+print(f"SNR, matched    {power_to_db(power_w / radar.noise_power_matched_w):.2f} dB")
+print(f"SNR / sample    {power_to_db(power_w / rx.noise_power_per_sample_w):.2f} dB")
 print(f"range res.      {radar.range_resolution_m:.4f} m")
 print(f"PRI, duty       {tx.pulse_repetition_interval_s * 1e3:.3f} ms, {tx.duty_cycle_linear:.2f}")
 print(f"sweep rate      {tx.sweep_rate_hzps:.4e} Hz/s")
 print(f"R_b,ua          {radar.unambiguous_bistatic_range_m / 1e3:.3f} km")
-print(f"rate span       {rate_span_mps:.4f} m/s, +-{rate_span_mps / 4:.4f} m/s radial")
+print(f"rate span       {rate_period_mps:.4f} m/s, +-{rate_period_mps / 4:.4f} m/s radial")
 ```
 
 ```text
@@ -207,41 +239,57 @@ range FFT gains $B T_c = 2000$ (33.01 dB), so one chirp holds $E/N_0 = P_r T_c /
 per-sample SNR is 3.01 dB higher than the matched one because S1 samples at $f_s = B/2$: each
 sample holds half the noise.
 
-Now the trade. This prints $R_{b,ua}$, $\dot R_{b,ua}$ and their product, as a fraction of
-$c\lambda$, for each burst of the three scenario-001 variants:
+Now the trade. This prints, for each burst of the three scenario-001 variants, the range it can
+reach, its rate span, and their product as a fraction of $c\lambda$:
 
 ```python
+import math
+
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.scenario import load_scenario
 
 for name in ("fmcw_low_prf", "pulsed_medium_prf", "fmcw_dual_prf"):
-    for radar in load_scenario(f"config/scenario_001_{name}.toml").radars:
-        range_m = radar.unambiguous_bistatic_range_m
+    radars = load_scenario(f"config/scenario_001_{name}.toml").radars
+    for radar in radars:
+        tx = radar.transmitter
+        map_delay_s = radar.unambiguous_delay_s  # where the map's range axis wraps
+        # A deramp receiver cannot see an echo later than its own chirp.
+        reach_s = min(map_delay_s, tx.chirp_duration_s) if tx.waveform == "fmcw" else map_delay_s
+        range_m = SPEED_OF_LIGHT_MPS * reach_s
         rate_mps = radar.unambiguous_bistatic_range_rate_mps
         limit = SPEED_OF_LIGHT_MPS * radar.wavelength_m  # c * lambda
         print(
-            f"{name:18s} {radar.transmitter.prf_hz:6.0f} Hz  R_b,ua {range_m / 1e3:6.3f} km  "
+            f"{name:18s} {tx.prf_hz:6.0f} Hz  reach {range_m / 1e3:7.3f} km  "
             f"span {rate_mps:7.3f} m/s  product / (c lambda) {range_m * rate_mps / limit:.3f}"
         )
+    if len(radars) == 2:
+        prfs = [round(radar.transmitter.prf_hz) for radar in radars]
+        pair_mps = radars[0].wavelength_m * math.lcm(*prfs)
+        print(f"{'':18s} the pair unfolds a rate span of {pair_mps:.3f} m/s")
 ```
 
 ```text
-fmcw_low_prf         1000 Hz  R_b,ua 149.896 km  span  30.591 m/s  product / (c lambda) 0.500
-pulsed_medium_prf   25000 Hz  R_b,ua 11.992 km  span 764.777 m/s  product / (c lambda) 1.000
-fmcw_dual_prf        5000 Hz  R_b,ua 119.917 km  span 152.955 m/s  product / (c lambda) 2.000
-fmcw_dual_prf        6000 Hz  R_b,ua 99.931 km  span 183.546 m/s  product / (c lambda) 2.000
+fmcw_low_prf         1000 Hz  reach 149.896 km  span  30.591 m/s  product / (c lambda) 0.500
+pulsed_medium_prf   25000 Hz  reach  11.992 km  span 764.777 m/s  product / (c lambda) 1.000
+fmcw_dual_prf        5000 Hz  reach  59.958 km  span 152.955 m/s  product / (c lambda) 1.000
+fmcw_dual_prf        6000 Hz  reach  49.965 km  span 183.546 m/s  product / (c lambda) 1.000
+                   the pair unfolds a rate span of 917.732 m/s
 ```
 
-S1 sees far and folds in rate; S2 sees fast and folds in range. S3's two bursts each reach
-$2c\lambda$, and page 4 shows how the pair unfolds a rate beyond either burst's span.
+S1 sees far and folds in rate; S2 sees fast and folds in range. Each of S3's bursts reaches
+$c\lambda$ and no more, although `unambiguous_bistatic_range_m` reports 119.917 km and
+99.931 km for them: that property is where the map's range axis wraps, $c f_s/\alpha$, and for
+S3 the far half of that axis lies beyond the chirp. The pair's 917.7 m/s is ±458.9 m/s, six
+times the first burst's span and five times the second's; page 4 shows how the two readings are
+combined. (The scenario itself searches only ±400 m/s, its `max_bistatic_range_rate_mps`.)
 
 ## Try it in a scenario
 
 The scenario file is [scenario 001](../../config/scenario_001_fmcw_low_prf.toml). Run three
-frames of S1; the run goes to `runs/scenario_001_fmcw_low_prf/`:
+scans of S1; the run goes to `runs/scenario_001_fmcw_low_prf/`:
 
 ```bash
-uv run python scripts/run_scenario.py config/scenario_001_fmcw_low_prf.toml --frames 3
+uv run python scripts/run_scenario.py config/scenario_001_fmcw_low_prf.toml --scans 3
 ```
 
 Each stage prints what it measured, checks it against the TOML's `[verify]` table, and gives its
@@ -292,7 +340,7 @@ and the map centres it on zero.
 **S1's limits, 149.9 km and 30.59 m/s, are twice what a monostatic textbook gives.** They
 bound $R_T + R_R$ and its rate, which for one site are $2R$ and twice the radial velocity. B1,
 with the same waveform on two sites, has the same two limits, because they bound the same
-route length. A monostatic figure or CSV halves them (`plots.display_axes`).
+route length. A monostatic figure or CSV halves them (`figures.display_axes`).
 
 ## Limits
 
@@ -309,8 +357,10 @@ route length. A monostatic figure or CSV halves them (`plots.display_axes`).
   $\beta = \pi$ is not modelled.
 - A bistatic pair is perfectly synchronised in time and phase, and the direct signal from
   transmitter to receiver is not modelled.
-- The FMCW $R_{b,ua}$ ignores the $c T_c$ cap of a real sawtooth, whose delay must be shorter
-  than the chirp.
+- The FMCW $R_{\mathrm{period}}$ ignores the $c T_c$ cap of a real sawtooth, whose delay must be
+  shorter than the chirp, and so does the simulator: it writes a full-length beat tone for any
+  delay, so a target beyond $c T_c$ of route appears at full strength wherever the map's axis
+  puts it: at its range up to $c f_s/\alpha$ (S3: 80 km appears at 80 km), folded beyond.
 
 ## References
 

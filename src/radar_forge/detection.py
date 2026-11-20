@@ -160,7 +160,8 @@ def cfar_threshold_factor(
 
     Examples
     --------
-    >>> round(10 * math.log10(cfar_threshold_factor(pfa=1e-5, n_train=16)), 3)
+    >>> from radar_forge.units import power_to_db
+    >>> round(float(power_to_db(cfar_threshold_factor(pfa=1e-5, n_train=16))), 3)
     11.417
     """
     n_reference = cfar_reference_cell_count(n_train, 0)
@@ -316,7 +317,7 @@ def cluster_detections(
     if len(shapes) > 1:
         msg = f"mask {flags.shape}, power_w {values_w.shape} and threshold_w do not match."
         raise ValueError(msg)
-    # Only the flagged cells, in C order: a frame's map has 10^5 cells, its clusters a few.
+    # Only the flagged cells, in C order: a scan's map has 10^5 cells, its clusters a few.
     cells, label_of, n_groups = _label_cells(flags, connectivity, wrap_axes)
     if n_groups == 0:
         return []

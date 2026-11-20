@@ -1,7 +1,7 @@
 """Tests for radar_forge.tracking.imm: the interacting multiple model over a bank.
 
-Ground truth is algebraic: one mode mixes to itself, so a one-mode IMM is its filter
-(spec 011 A2); the switching matrix is a matrix exponential of the generator, so it chains
+Ground truth is algebraic: one mode mixes to itself, so a one-mode IMM is its filter;
+the switching matrix is a matrix exponential of the generator, so it chains
 over steps and its rows are probabilities; with the identity for switching, mixing returns
 each mode's own estimate; a CV mode carries its absent turn rate at the stand-in prior.
 """
@@ -16,6 +16,7 @@ import pytest
 from numpy.typing import NDArray
 from scipy.stats import chi2
 
+from radar_forge.coordinates import east_north_to_range_azimuth_rad
 from radar_forge.scenario import load_scenario
 from radar_forge.tracking.filters import (
     Linearisation,
@@ -33,39 +34,35 @@ from radar_forge.tracking.imm import (
     imm_predict,
     imm_update,
 )
+from radar_forge.tracking.measurement import RangeAzimuthElevationRangeRate
 from radar_forge.tracking.metrics import nees
-from radar_forge.tracking.models import (
-    CartesianMotion,
-    CoordinatedTurn,
-    MotionModel,
-    RangeAzimuthElevationRangeRate,
-)
-from radar_forge.tracking.scene import Arc, polar
+from radar_forge.tracking.motion import ConstantTurn, ConstantVelocity, MotionModel
+from radar_forge.trajectory import Arc
 
 SEED = 20261106
-# A5's latency, as measured: 90 % of trials reach the turn mode within five scans of the onset
-# (97 % did; 87.5 % within four, 37 % within the spec's three).
+# The latency, as measured: 90 % of trials reach the turn mode within five scans of the onset
+# (97 % did; 87.5 % within four; 37 % within three, the figure the scenario was designed to).
 LATENCY_SCANS = 5
 TURN_SIGMA_RADPS = np.radians(3.0)
 
 
 def _three_modes() -> InteractingMultipleModel:
-    """Spec 011's IMM: CV quiet, coordinated turn and CV agile."""
+    """The terminal-area IMM: CV quiet, coordinated turn and CV agile."""
     return InteractingMultipleModel(
         (
-            CartesianMotion("xy", sigma_acceleration_mps2=0.5),
-            CoordinatedTurn(0.5),
-            CartesianMotion("xy", sigma_acceleration_mps2=np.sqrt(10.0)),
+            ConstantVelocity("xy", sigma_acceleration_mps2=0.5),
+            ConstantTurn(0.5),
+            ConstantVelocity("xy", sigma_acceleration_mps2=np.sqrt(10.0)),
         ),
         (120.0, 30.0, 20.0),
         {"turn_rate_radps": TURN_SIGMA_RADPS},
     )
 
 
-def test_the_switching_matrix_at_four_point_eight_seconds_is_the_specs() -> None:
-    """Spec 011 §3.4 tabulates expm(Lambda T) at T = 4.8 s to four places."""
+def test_the_switching_matrix_at_four_point_eight_seconds_is_expm_of_the_generator() -> None:
+    """Pi(4.8 s) for sojourns of 120, 30 and 20 s, against values pinned to four places."""
     expected = [[0.9627, 0.0192, 0.0181], [0.0767, 0.8569, 0.0664], [0.1089, 0.0995, 0.7916]]
-    # atol 5e-5: the table is rounded to four places.
+    # atol 5e-5: the pinned values are rounded to four places.
     np.testing.assert_allclose(_three_modes().switching_matrix(4.8), expected, atol=5e-5)
 
 
@@ -126,15 +123,15 @@ def test_a_cv_mode_carries_its_absent_turn_rate_at_the_stand_in_prior() -> None:
 
 
 CASES: dict[str, tuple[MotionModel, Linearisation]] = {
-    "kf": (CartesianMotion("xy", sigma_acceleration_mps2=2.0), TaylorLinearisation()),
-    "ekf": (CoordinatedTurn(2.0, 1e-4), TaylorLinearisation()),
-    "ukf": (CoordinatedTurn(2.0, 1e-4), UnscentedTransform()),
+    "kf": (ConstantVelocity("xy", sigma_acceleration_mps2=2.0), TaylorLinearisation()),
+    "ekf": (ConstantTurn(2.0, 1e-4), TaylorLinearisation()),
+    "ukf": (ConstantTurn(2.0, 1e-4), UnscentedTransform()),
 }
 
 
 @pytest.mark.parametrize("case", list(CASES))
 def test_a_one_mode_imm_is_its_filter_over_fifty_scans(case: str) -> None:
-    """Spec 011 A2: state, covariance and likelihood equal the bare filter's, 50 scans."""
+    """State, covariance and likelihood equal the bare filter's, 50 scans."""
     motion, linearisation = CASES[case]
     imm = InteractingMultipleModel((motion,), (120.0,))
     layout = motion.state_layout
@@ -157,7 +154,7 @@ def test_a_one_mode_imm_is_its_filter_over_fifty_scans(case: str) -> None:
         time_s = 4.8 * scan
         bare = predict(bare, motion, linearisation, time_s)
         mixed = imm_predict(mixed, imm, linearisation, time_s)
-        truth = model.predict(bare.mean)
+        truth = model.predicted_measurement(bare.mean)
         z = truth + rng.normal(0.0, 1.0, truth.shape) * np.sqrt(np.diag(noise))
         plain = innovate(bare, model, linearisation, z, noise)
         combined, modes = imm_innovate(mixed, model, linearisation, z, noise)
@@ -183,7 +180,7 @@ def test_a_hard_update_moves_mode_probability_by_the_mode_likelihoods() -> None:
         imm.state_layout, np.zeros(3), ("range_m", "azimuth_rad"), fixed={"z_m": 0.0}
     )
     noise = np.diag([33.4**2, np.radians(0.15) ** 2])
-    z = model.predict(bank.mean) + np.array([150.0, 0.004])
+    z = model.predicted_measurement(bank.mean) + np.array([150.0, 0.004])
     combined, modes = imm_innovate(bank, model, linearisation, z, noise)
     updated = imm_update(bank, combined, modes, [[1.0, 0.0]])
     likelihood = np.exp([m.log_likelihood[0, 0] for m in modes])
@@ -192,7 +189,7 @@ def test_a_hard_update_moves_mode_probability_by_the_mode_likelihoods() -> None:
     np.testing.assert_allclose(updated.mode_probability[0], expected / expected.sum(), rtol=1e-12)
 
 
-# --- spec 011 V1 Monte Carlo: A5 (IMM consistent and switching), A11 (IMM's benefit) ---
+# --- V1 Monte Carlo: the IMM is consistent, switches, and benefits ---
 
 N_TRIALS = 200
 TURNS_S = ((166.6667, 30.0), (224.4444, 30.0))
@@ -205,14 +202,14 @@ def _a4() -> tuple[Arc, float]:
 
 
 def _run_v1(
-    motion: CartesianMotion | CoordinatedTurn | InteractingMultipleModel, period_s: float, seed: int
+    motion: ConstantVelocity | ConstantTurn | InteractingMultipleModel, period_s: float, seed: int
 ) -> dict[str, NDArray[np.float64]]:
     """Track A4 alone in every trial at once, the trials the rows of one bank.
 
     Each trial is seeded at the truth 66.7 s before the first turn, with a 50 m and 5 m/s
-    spread; the beam crosses A4 once a rotation, and the plot model draws Pd (0.9, 0.3 in the
+    spread; the beam crosses A4 once a scan, and the plot model draws Pd (0.9, 0.3 in the
     notch) and the measurement noise. No clutter: the scene's n_gate 0.01 seldom reaches a
-    gate, and these criteria are about the motion models.
+    gate, and these tests are about the motion models.
     """
     arc, start_s = _a4()
     rng = np.random.default_rng(seed)
@@ -242,12 +239,15 @@ def _run_v1(
         "nees": [],
         "turn": [],
     }
-    rotation = math.ceil(start_s / period_s)
-    # One rotation at a time: every trial's track is the next rotation's prior.
-    while rotation * period_s < 300.0:
-        time_s = rotation * period_s
+    scan_index = math.ceil(start_s / period_s)
+    # One scan at a time: every trial's track is the next scan's prior.
+    while scan_index * period_s < 300.0:
+        time_s = scan_index * period_s
         for _ in range(3):
-            time_s = rotation * period_s + polar(arc.state(time_s)[0])[1] / (2 * np.pi) * period_s
+            time_s = (
+                scan_index * period_s
+                + east_north_to_range_azimuth_rad(arc.state(time_s)[0])[1] / (2 * np.pi) * period_s
+            )
         truth_m, truth_mps = arc.state(time_s)
         bank = (
             predict(bank, motion, linearisation, time_s)
@@ -256,9 +256,9 @@ def _run_v1(
         )
         rate = truth_m @ truth_mps / np.linalg.norm(truth_m)
         seen = rng.random(N_TRIALS) < (0.3 if abs(rate) < 4.0 else 0.9)
-        z = np.column_stack(polar(truth_m))[0] + rng.normal(0.0, 1.0, (N_TRIALS, 2)) * np.sqrt(
-            np.diag(noise)
-        )
+        z = np.column_stack(east_north_to_range_azimuth_rad(truth_m))[0] + rng.normal(
+            0.0, 1.0, (N_TRIALS, 2)
+        ) * np.sqrt(np.diag(noise))
         weights = np.zeros((N_TRIALS, N_TRIALS + 1))
         weights[np.arange(N_TRIALS), np.where(seen, np.arange(N_TRIALS), N_TRIALS)] = 1.0
         if imm is None:
@@ -275,15 +275,15 @@ def _run_v1(
         records["turn"].append(
             bank.mode_probability[:, 1] if imm is not None else np.full(N_TRIALS, np.nan)
         )
-        rotation += 1
+        scan_index += 1
     return {key: np.array(value) for key, value in records.items()}
 
 
-def _models() -> dict[str, CartesianMotion | CoordinatedTurn | InteractingMultipleModel]:
+def _models() -> dict[str, ConstantVelocity | ConstantTurn | InteractingMultipleModel]:
     """V1's trackers: CV quiet, CV agile and the IMM of the two with the coordinated turn."""
     return {
-        "quiet": CartesianMotion("xy", sigma_acceleration_mps2=0.5),
-        "agile": CartesianMotion("xy", sigma_acceleration_mps2=np.sqrt(10.0)),
+        "quiet": ConstantVelocity("xy", sigma_acceleration_mps2=0.5),
+        "agile": ConstantVelocity("xy", sigma_acceleration_mps2=np.sqrt(10.0)),
         "imm": _three_modes(),
     }
 
@@ -300,10 +300,10 @@ def _turn_rmse_m(record: dict[str, NDArray[np.float64]]) -> float:
 # Slow: 200 trials through A4's turns, three motion models at three revisits (about 20 s).
 @pytest.mark.slow
 def test_the_imm_beats_both_constant_velocity_models_through_the_turns() -> None:
-    """A11, as measured: at 1.2, 2.4 and 4.8 s the IMM's RMSE through A4's turns beats both CVs.
+    """As measured: at 1.2, 2.4 and 4.8 s the IMM's RMSE through A4's turns beats both CVs.
 
-    Spec 011 also expected IMM / best CV to fall as the revisit grows; it rises instead, 0.83,
-    0.86, 0.92, because the agile CV keeps up better at a long revisit (PR report).
+    The scenario was designed expecting IMM / best CV to fall as the revisit grows; it rises
+    instead, 0.83, 0.86, 0.92, because the agile CV keeps up better at a long revisit.
     """
     ratio = {}
     for period_s in (1.2, 2.4, 4.8):
@@ -319,7 +319,7 @@ def test_the_imm_beats_both_constant_velocity_models_through_the_turns() -> None
 # Slow: 200 trials of the IMM through A4's turns at 4.8 s.
 @pytest.mark.slow
 def test_the_imm_is_consistent_and_switches_to_its_turn_mode() -> None:
-    """A5: time-averaged NEES in its 95 % interval; turn mode over 0.5 within five scans.
+    """Time-averaged NEES in its 95 % interval; turn mode over 0.5 within five scans.
 
     The position NEES over every trial and scan from 100 to 300 s, mean of N chi-square(2)
     draws, lies in chi-square(2N) / N's 95 % interval; the turn mode passes 0.5 within

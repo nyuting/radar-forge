@@ -1,7 +1,7 @@
 r"""The stepper: a scenario run as named stages, each printing, checking and writing one step.
 
-The stages live in :mod:`radar_forge.stages` and run in that package's import order;
-:mod:`radar_forge.stages.core` holds ``geometry``, ``iq``, ``rd``, ``detect`` and ``track``.
+The stages live in the modules of :mod:`radar_forge.verify` and run in its import order;
+:mod:`radar_forge.verify.chain` holds ``geometry``, ``iq``, ``rd``, ``detect`` and ``track``.
 Each prints its intermediate quantities and wall time, checks the thresholds the scenario's
 ``[verify]`` table gives, and writes its files under the run directory
 (``spec/data-001-formats.md``). ``[verify]`` holds ``stages`` and thresholds:
@@ -11,26 +11,26 @@ Each prints its intermediate quantities and wall time, checks the thresholds the
 ``range_rate_rmse_max_mps``, ``nees_fraction_min`` and ``confirmation_latency_max_scans``. A
 stage not listed does not run, a threshold not given is not checked, and :func:`run` raises
 :class:`VerificationError` naming every failure. CSVs show a monostatic radar's range and rate
-halved (:func:`~radar_forge.plots.display_axes`); everything else is bistatic. The helpers
+halved (:func:`~radar_forge.figures.display_axes`); everything else is bistatic. The helpers
 below are what a stage module shares.
 
-:mod:`radar_forge.stages.migration` holds ``keystone`` (scenario 004): ``walk_bins`` with
+:mod:`radar_forge.verify.keystone` holds ``keystone`` (scenario 004): ``walk_bins`` with
 ``walk_tolerance_bins``, ``residual_walk_max_bins``, ``uncompensated_loss_db``,
 ``keystone_only_loss_db`` and ``dechirp_only_loss_db`` with ``loss_tolerance_db`` (the
 keystone's own ``keystone_only_loss_tolerance_db``), ``compensated_loss_min_db``,
 ``fold_factor``, ``acceleration_tolerance_mps2`` and ``rate_error_max_crb``.
 
-:mod:`radar_forge.stages.clutter` holds ``leakage`` (scenario 005): ``cancellation_depth_db``
+:mod:`radar_forge.verify.leakage` holds ``leakage`` (scenario 005): ``cancellation_depth_db``
 with ``cancellation_tolerance_db``, ``floor_rise_db`` with ``floor_rise_tolerance_db``,
-``sinr_loss_db`` with ``sinr_loss_tolerance_db``, ``detections_per_frame``,
-``uncancelled_detections_per_frame`` and ``acceptance_frames``.
+``sinr_loss_db`` with ``sinr_loss_tolerance_db``, ``detections_per_scan``,
+``uncancelled_detections_per_scan`` and ``acceptance_scans``.
 
-:mod:`radar_forge.stages.tracking` holds ``multitarget`` (scenario 011): ``gospa_mean_max_m``,
+:mod:`radar_forge.verify.multitarget` holds ``multitarget`` (scenario 011): ``gospa_mean_max_m``,
 ``swap_fraction_max``, ``mode_latency_max_scans``, ``nees_fraction_min``, ``pd_min``,
 ``false_alarm_rate_max`` and ``merged_fraction_max``; 011b's ``leaf_count_max``,
 ``pmbm_cardinality_error_max``, ``mht_resolved_lead_min`` and ``pmbm_resolved_lead_min``.
 
-:mod:`radar_forge.stages.array` holds ``doa`` (scenario 006): ``direction_cosine_tolerance``,
+:mod:`radar_forge.verify.doa` holds ``doa`` (scenario 006): ``direction_cosine_tolerance``,
 ``resolved_fraction_min`` with ``resolved_methods``, ``baseline_resolved_fraction_max`` with
 ``baseline_methods``, ``<method>_rmse_crb_max`` for each :data:`~radar_forge.doa.DOA_LABELS`
 name, ``rank_ratio_max``, ``snapshot_model_tolerance`` and ``parent_coordinates_tolerance``.
@@ -50,7 +50,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from radar_forge.clutter import CancellationResult
-from radar_forge.pipeline import Frame, Plots, RangeDopplerProduct, map_axes
+from radar_forge.pipeline import Plots, RangeDopplerProduct, ScanIq, map_axes
 from radar_forge.propagation import received_power_w
 from radar_forge.radar import Radar, TargetGeometry
 from radar_forge.scenario import Scenario, truth_geometry
@@ -63,13 +63,12 @@ __all__ = [
     "Context",
     "Report",
     "VerificationError",
-    "cached_frames",
+    "n_cached_scans",
+    "periods",
     "run",
-    "spans",
     "stage",
     "target_power_w",
     "thresholds",
-    "to_db",
     "truth",
     "write_csv",
 ]
@@ -125,7 +124,7 @@ class Context:
 
     scenario: Scenario
     out_dir: Path
-    n_frames: int
+    n_scans: int
     save_iq: bool
     report: Report
     render: bool = True
@@ -133,7 +132,7 @@ class Context:
     plots: list[Plots] = field(default_factory=list)
     banks: list[tuple[TrackBank, NDArray[np.intp]]] = field(default_factory=list)
     stages: tuple[str, ...] = ()
-    cancelled: list[tuple[Frame, CancellationResult, RangeDopplerProduct]] = field(
+    cancelled: list[tuple[ScanIq, CancellationResult, RangeDopplerProduct]] = field(
         default_factory=list
     )
 
@@ -179,7 +178,7 @@ def thresholds(ctx: Context, stage_name: str) -> dict[str, Any]:
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     """Write dict rows under the first row's keys; a nan is written as an empty cell."""
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]) if rows else ["frame"])
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]) if rows else ["scan"])
         writer.writeheader()
         writer.writerows(
             {k: "" if isinstance(v, float) and math.isnan(v) else v for k, v in row.items()}
@@ -187,17 +186,12 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         )
 
 
-def to_db(value: ArrayLike) -> float:
-    """Return a power ratio or a power in W as decibels."""
-    return float(10.0 * np.log10(value))
-
-
 def target_power_w(radar: Radar, truth: TargetGeometry, rcs_m2: ArrayLike) -> NDArray[np.float64]:
     """Return each target's received power by the radar equation, W."""
     return received_power_w(
         transmit_power_w=radar.transmitter.transmit_power_w,
-        gain_tx_linear=10.0 ** (radar.transmitter.gain_tx_dbi / 10.0),
-        gain_rx_linear=10.0 ** (radar.receiver.gain_rx_dbi / 10.0),
+        gain_tx_linear=radar.transmitter.gain_tx_linear,
+        gain_rx_linear=radar.receiver.gain_rx_linear,
         wavelength_m=radar.wavelength_m,
         rcs_m2=rcs_m2,
         range_tx_m=truth.range_tx_m,
@@ -205,31 +199,33 @@ def target_power_w(radar: Radar, truth: TargetGeometry, rcs_m2: ArrayLike) -> ND
     )
 
 
-def spans(scenario: Scenario, burst: int) -> tuple[float, float, float]:
-    """Return a burst's range span, rate span and range bin, m and m/s."""
+def periods(scenario: Scenario, burst: int) -> tuple[float, float, float]:
+    """Return a burst's range period, rate period and range bin, m and m/s."""
     range_axis_m, rate_axis_mps = map_axes(
-        scenario.radars[burst], scenario.n_pulses[burst], n_range_lags=scenario.n_range_lags[burst]
+        scenario.radars[burst],
+        scenario.n_pulses_per_burst[burst],
+        n_range_lags=scenario.n_range_lags[burst],
     )
     range_bin_m = float(range_axis_m[1] - range_axis_m[0])
-    rate_span_mps = float(rate_axis_mps.size * (rate_axis_mps[0] - rate_axis_mps[1]))
-    return range_axis_m.size * range_bin_m, rate_span_mps, range_bin_m
+    rate_period_mps = float(rate_axis_mps.size * (rate_axis_mps[0] - rate_axis_mps[1]))
+    return range_axis_m.size * range_bin_m, rate_period_mps, range_bin_m
 
 
-def cached_frames(ctx: Context) -> int:
-    """Return how many noise frames ``rd`` keeps, cancelled, for ``leakage``: its acceptance frames.
+def n_cached_scans(ctx: Context) -> int:
+    """Return how many noise scans ``rd`` keeps, cancelled, for ``leakage``: its acceptance scans.
 
     Each holds a stream, its code, the residual and the map, about 72 MB at 005's size; none is
     kept unless ``leakage`` runs.
     """
     if "leakage" not in ctx.stages:
         return 0
-    return min(ctx.n_frames, int(ctx.scenario.verify.get("acceptance_frames", ctx.n_frames)))
+    return min(ctx.n_scans, int(ctx.scenario.verify.get("acceptance_scans", ctx.n_scans)))
 
 
 def truth(ctx: Context) -> list[TargetGeometry]:
-    """Return every frame's truth, from the geometry stage or computed now."""
+    """Return every scan's truth, from the geometry stage or computed now."""
     if not ctx.truth:
-        ctx.truth = truth_geometry(ctx.scenario)[: ctx.n_frames]
+        ctx.truth = truth_geometry(ctx.scenario)[: ctx.n_scans]
     return ctx.truth
 
 
@@ -237,7 +233,7 @@ def run(
     scenario: Scenario,
     stages: Sequence[str] | None = None,
     *,
-    n_frames: int | None = None,
+    n_scans: int | None = None,
     out_dir: Path | str,
     save_iq: bool = False,
     render: bool = True,
@@ -255,9 +251,9 @@ def run(
         raise ValueError(msg)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    count = scenario.n_frames if n_frames is None else min(n_frames, scenario.n_frames)
+    count = scenario.n_scans if n_scans is None else min(n_scans, scenario.n_scans)
     ctx = Context(scenario, out, count, save_iq, Report(scenario.name), render, stages=tuple(names))
-    print(f"{scenario.name}: {count} frame(s), {len(scenario.radars)} burst(s) -> {out}")
+    print(f"{scenario.name}: {count} scan(s), {len(scenario.radars)} burst(s) -> {out}")
     for name, function in STAGES.items():
         if name in names:
             print(f"[{name}]")
@@ -268,6 +264,3 @@ def run(
     if ctx.report.failures:
         raise VerificationError(ctx.report)
     return ctx.report
-
-
-import radar_forge.stages  # noqa: E402, F401  -- the stages register themselves on import

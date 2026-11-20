@@ -35,13 +35,14 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from radar_forge.coordinates import directions_unit
+
 __all__ = [
     "ArrayGeometry",
     "apply_weights",
     "beam_power",
     "conventional_weights",
     "direction_cosine",
-    "directions_unit",
     "enu_to_array_frame",
     "forward_backward_average",
     "is_centro_symmetric",
@@ -129,26 +130,6 @@ def is_centro_symmetric(geometry: ArrayGeometry) -> bool:
     return bool(np.all(np.abs(mirrored_m) <= _SYMMETRY_TOLERANCE * scale_m))
 
 
-def directions_unit(azimuth_rad: ArrayLike, elevation_rad: ArrayLike) -> NDArray[np.float64]:
-    """Return unit vectors ``[sin az cos el, cos az cos el, sin el]``, ``(n_directions, 3)``.
-
-    In the site's ENU frame for a compass azimuth; in the array frame for one from boresight.
-    """
-    azimuth, elevation = np.broadcast_arrays(
-        np.atleast_1d(np.asarray(azimuth_rad, dtype=np.float64)),
-        np.asarray(elevation_rad, dtype=np.float64),
-    )
-    result: NDArray[np.float64] = np.stack(
-        [
-            np.sin(azimuth) * np.cos(elevation),
-            np.cos(azimuth) * np.cos(elevation),
-            np.sin(elevation),
-        ],
-        axis=-1,
-    )
-    return result
-
-
 def _array_axes(geometry: ArrayGeometry) -> NDArray[np.float64]:
     r"""Return the array's x, y and z axes in ENU, as rows.
 
@@ -220,7 +201,8 @@ def offset_direction_cosine(
     """Return arrival angles ``(n, 2)`` moved by ``offset`` in direction cosine along x.
 
     The array-frame elevation is kept and the direction stays in front of the array; the
-    result is a compass bearing in ``[0, 2 pi)`` and an elevation, as ``aoa_rad`` is.
+    result is a compass bearing in ``[0, 2 pi]`` (2 pi itself only when a tiny negative angle
+    rounds up) and an elevation, as ``aoa_rad`` is.
     """
     angles = np.atleast_2d(np.asarray(aoa_rad, dtype=np.float64))
     in_array = enu_to_array_frame(geometry, directions_unit(angles[:, 0], angles[:, 1]))
@@ -230,6 +212,7 @@ def offset_direction_cosine(
         msg = f"an offset of {offset} in direction cosine leaves the visible region."
         raise ValueError(msg)
     moved = np.stack([u_x, np.sqrt(u_y_squared), in_array[:, 2]], axis=-1) @ _array_axes(geometry)
+    # Unguarded: a tiny negative angle rounds up to exactly 2 pi, where _periodic.fold gives 0.
     bearing_rad = np.mod(np.arctan2(moved[:, 0], moved[:, 1]), 2.0 * np.pi)
     result: NDArray[np.float64] = np.stack(
         [bearing_rad, np.arcsin(np.clip(moved[:, 2], -1.0, 1.0))], axis=-1

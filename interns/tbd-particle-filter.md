@@ -19,9 +19,9 @@ Track-before-detect is not currently implemented in `radar-forge`. You will writ
 script, on top of the library's range-Doppler maps.
 
 The scenario 003 tracker sees only CFAR detections, and decides that a target exists by counting
-them (confirm after 4 hits in 5 frames). A particle-filter TBD instead carries the probability
-that a target exists as part of its state, and updates it from the unthresholded map every frame.
-It can declare a target before any single frame would have, and it says how sure it is. Your job
+them (confirm after 4 hits in 5 scans). A particle-filter TBD instead carries the probability
+that a target exists as part of its state, and updates it from the unthresholded map every scan.
+It can declare a target before any single scan would have, and it says how sure it is. Your job
 is to build one, measure how fast and how reliably it declares a dim target, and find out what
 it costs.
 
@@ -29,26 +29,26 @@ it costs.
 
 1. **Model.** Write down, before you code:
    - the state, including the existence variable;
-   - how existence evolves between frames (target birth and death), and the probabilities you
+   - how existence evolves between scans (target birth and death), and the probabilities you
      choose;
    - the measurement likelihood ratio, and how a target spreads its energy over neighbouring
      cells. Measure the spread from the map itself: the library applies no window, so look at the
      sidelobes. Say whether straddle loss matters.
    - the motion model, sized from what the target actually does in range and Doppler between
-     frames. Measure that from the truth.
+     scans. Measure that from the truth.
 2. **Implement** it, citing the formulation you follow and saying where you depart from it.
 3. **Declare.** Plot the existence probability against time on the real scenario, at a few
    powers. Set the declaration threshold for a false-track probability you choose and justify,
-   from noise-only runs. Then measure Pd and the declaration delay (frames from the start until
+   from noise-only runs. Then measure Pd and the declaration delay (scans from the start until
    the target is declared) against SNR.
-4. **Particles.** How do Pd, range and velocity error, and runtime change with the number of
+4. **Particles.** How do Pd, range and range-rate error, and runtime change with the number of
    particles? Show particle depletion happening (for example through the effective sample size),
    and try one fix. Does it help, and what does it cost?
-5. **Compare.** Put your Pd against SNR on the same plot as the
+5. **Compare.** Put your Pd against SNR on the same figure as the
    [floor and the ceiling](track-before-detect.md#the-bounds). Then, at a power where your filter
    declares and the DBT chain struggles, compare its range error and its time to a confirmed
-   track with the scenario 003 tracker's (`ScanTracker` in `radar_forge.pipeline`, scored by
-   the `track` stage of `radar_forge.evaluate`).
+   track with the scenario 003 tracker's (`ScanTracker` in `radar_forge.scan_tracker`, scored by
+   the `track` stage of `radar_forge.verify`).
 
 ## Deliverables
 

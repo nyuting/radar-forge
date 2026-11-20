@@ -1,8 +1,8 @@
 """Every shipped scenario passes its own ``[verify]`` table and reproduces its fingerprint.
 
-Three frames of each ``config/*.toml`` run through every stage it names, unmarked; the whole
-window is ``slow``. A config in ``scripts/regen_golden.py``'s ``FAST_FRAMES`` runs that many
-frames unmarked instead, and its three are ``slow`` (0: it runs only ``slow``). The checks are
+Three scans of each ``config/*.toml`` run through every stage it names, unmarked; the whole
+window is ``slow``. A config in ``scripts/regen_golden.py``'s ``FAST_SCANS`` runs that many
+scans unmarked instead, and its three are ``slow`` (0: it runs only ``slow``). The checks are
 the scenario's acceptance criteria, re-derived for bistatic range and rate in each file's
 comments. The fingerprint is golden data (``docs/conventions/testing.md`` §6): it proves the
 short run's numbers did not move, not that they are right.
@@ -20,7 +20,7 @@ from types import ModuleType
 import numpy as np
 import pytest
 
-from radar_forge import evaluate
+from radar_forge import verify
 from radar_forge.scenario import load_scenario
 
 REPO = Path(__file__).resolve().parents[1]
@@ -41,11 +41,11 @@ def _load_golden_script() -> ModuleType:
 
 
 regen_golden = _load_golden_script()
-FAST_FRAMES: dict[str, int] = regen_golden.FAST_FRAMES
-# Each config's first run: unmarked unless its fast frames are 0.
+FAST_SCANS: dict[str, int] = regen_golden.FAST_SCANS
+# Each config's first run: unmarked unless its fast scans are 0.
 SHORT_RUNS = [
     pytest.param(
-        path, id=path.stem, marks=[pytest.mark.slow] if FAST_FRAMES.get(path.stem) == 0 else []
+        path, id=path.stem, marks=[pytest.mark.slow] if FAST_SCANS.get(path.stem) == 0 else []
     )
     for path in CONFIGS
 ]
@@ -54,8 +54,8 @@ SHORT_RUNS = [
 # rtol 1e-9 holds a value computed the same way; an error is a difference of nearly equal
 # numbers (a measured rate less the truth's), so the platform's FFT round-off, 1e-15 of each,
 # can be 1e-8 of the difference. Each unit also gets an absolute tolerance far below anything
-# physical: a micrometre a second against S1's 0.12 m/s rate bin, a millimetre against its
-# 150 m range bin, a micro-decibel. Counts, indices and fractions stay exact.
+# physical: a micrometre a second against the 0.12 m/s rate bin of S1 (scenario_001_fmcw_low_prf), a
+# millimetre against its 150 m range bin, a micro-decibel. Counts, indices and fractions stay exact.
 ABSOLUTE_TOLERANCE = {"_mps": 1e-6, "_m": 1e-3, "_db": 1e-6, "_dbw": 1e-6}
 
 
@@ -71,24 +71,24 @@ def _golden() -> dict[str, dict[str, float]]:
 
 @pytest.fixture(scope="module", params=SHORT_RUNS)
 def short_run(request, tmp_path_factory):
-    """A config's fingerprinted frames (three, or its fast frames) through its stages."""
+    """A config's fingerprinted scans (three, or its fast scans) through its stages."""
     path = request.param
     out_dir = tmp_path_factory.mktemp(path.stem)
-    n_frames = regen_golden.fingerprint_frames(path.stem)
-    return path.stem, evaluate.run(
-        load_scenario(path), n_frames=n_frames, out_dir=out_dir, render=False
+    n_scans = regen_golden.fingerprint_scans(path.stem)
+    return path.stem, verify.run(
+        load_scenario(path), n_scans=n_scans, out_dir=out_dir, render=False
     )
 
 
-def test_three_frames_pass_every_check_they_reach(short_run):
-    """The stages run, and the checks a three-frame run can judge all pass."""
+def test_three_scans_pass_every_check_they_reach(short_run):
+    """The stages run, and the checks a three-scan run can judge all pass."""
     _, report = short_run
     assert report.checks, "the scenario's [verify] table checks nothing"
     assert not report.failures
 
 
-def test_three_frames_match_the_golden_fingerprint(short_run):
-    """Regression: the three-frame numbers equal those of scripts/regen_golden.py."""
+def test_three_scans_match_the_golden_fingerprint(short_run):
+    """Regression: the three-scan numbers equal those of scripts/regen_golden.py."""
     name, report = short_run
     golden = _golden()
     assert name in golden, f"no fingerprint for {name}: run scripts/regen_golden.py"
@@ -110,25 +110,25 @@ def test_every_scenario_has_a_fingerprint():
     assert set(_golden()) == {path.stem for path in CONFIGS}
 
 
-# Slow: a config whose fast run is shorter runs its three frames here, 5 to 10 s each.
+# Slow: a config whose fast run is shorter runs its three scans here, 5 to 10 s each.
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "path",
-    [path for path in CONFIGS if FAST_FRAMES.get(path.stem)],
-    ids=[path.stem for path in CONFIGS if FAST_FRAMES.get(path.stem)],
+    [path for path in CONFIGS if FAST_SCANS.get(path.stem)],
+    ids=[path.stem for path in CONFIGS if FAST_SCANS.get(path.stem)],
 )
-def test_three_frames_of_a_shortened_config_pass_every_check(path, tmp_path):
-    """The three frames the fast suite skips for a config listed in FAST_FRAMES."""
-    report = evaluate.run(load_scenario(path), n_frames=3, out_dir=tmp_path, render=False)
+def test_three_scans_of_a_shortened_config_pass_every_check(path, tmp_path):
+    """The three scans the fast suite skips for a config listed in FAST_SCANS."""
+    report = verify.run(load_scenario(path), n_scans=3, out_dir=tmp_path, render=False)
     assert report.checks
     assert not report.failures
 
 
-# Slow: each window is 120 frames of synthesis, two FFTs and CFAR, 5 to 50 s a scenario.
+# Slow: each window is 120 scans of synthesis, two FFTs and CFAR, 5 to 50 s a scenario.
 @pytest.mark.slow
 @pytest.mark.parametrize("path", CONFIGS, ids=[path.stem for path in CONFIGS])
 def test_the_whole_window_passes_every_check(path, tmp_path):
     """The full window meets every criterion its [verify] table encodes."""
-    report = evaluate.run(load_scenario(path), out_dir=tmp_path, render=False)
+    report = verify.run(load_scenario(path), out_dir=tmp_path, render=False)
     assert report.checks
     assert not report.failures

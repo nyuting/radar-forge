@@ -1,10 +1,10 @@
-r"""The ``keystone`` stage: range migration measured, corrected and estimated on frame 0.
+r"""The ``keystone`` stage: range migration measured, corrected and estimated on scan 0.
 
-On frame 0's noiseless cube (the generator's ``rng=None`` path) it measures the walk, the
+On scan 0's noiseless cube (the generator's ``rng=None`` path) it measures the walk, the
 loss of the uncorrected map, the keystone alone and the dechirp alone, then runs ``[migration]``
 and measures its searches, residual walk and loss. A loss is the map's peak, off the bin grid,
 over :math:`N^2` times pulse 0's compressed peak: 0 dB is ideal integration, :math:`10\log_{10}N`
-above one pulse's SNR. On frame 0 with noise, the frame the ``rd`` stage mapped, it crops a
+above one pulse's SNR. On scan 0 with noise, the scan the ``rd`` stage mapped, it crops a
 chip at the corrected map's peak and estimates range, rate and acceleration against their
 Cramér-Rao bounds. Writes ``migration.csv`` and ``keystone.png``.
 
@@ -23,29 +23,31 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from radar_forge import evaluate, plots
+from radar_forge import figures, migration
 from radar_forge.datachip import ChipProcessing, FineMethod, crop_slow_time, estimate_fine
 from radar_forge.migration import (
     CompensatedPulses,
     compensate_migration,
     doppler_rate_compensation,
     integrated_peak,
-    keystone,
     pulse_compress,
 )
-from radar_forge.pipeline import frames, map_axes, synthesise
+from radar_forge.pipeline import map_axes, scan_iq, synthesise
 from radar_forge.radar import Radar
 from radar_forge.settings import MigrationSettings
+from radar_forge.units import power_to_db
+from radar_forge.verify import stepper
 
-__all__ = ["keystone_stage"]
+__all__ = ["keystone"]
 
-# The pulses either end of the dwell that DFT interpolation leaves ringing (spec A2).
+# The pulses either end of the burst that DFT interpolation leaves ringing: the residual walk
+# leaves them out.
 _RINGING_PULSES = 1
 # Range bins either side of the target that keystone.png shows.
 _PLOT_HALF_WIDTH = 120
 
 
-@evaluate.stage(
+@stepper.stage(
     "keystone",
     "walk_bins",
     "walk_tolerance_bins",
@@ -60,8 +62,8 @@ _PLOT_HALF_WIDTH = 120
     "acceleration_tolerance_mps2",
     "rate_error_max_crb",
 )
-def keystone_stage(ctx: evaluate.Context) -> evaluate.Context:
-    """Walk, losses, searches and fine estimates of the first target on frame 0.
+def keystone(ctx: stepper.Context) -> stepper.Context:
+    """Walk, losses, searches and fine estimates of the first target on scan 0.
 
     ``[verify]``: ``walk_bins`` within ``walk_tolerance_bins``; ``residual_walk_max_bins``;
     ``uncompensated_loss_db``, ``keystone_only_loss_db`` and ``dechirp_only_loss_db`` within
@@ -71,19 +73,19 @@ def keystone_stage(ctx: evaluate.Context) -> evaluate.Context:
     rate within ``rate_error_max_crb`` of its bound. ``dechirp_only_loss_db`` is measured for
     any method it is asked of: with no acceleration the filter changes nothing.
     """
-    scenario, verify = ctx.scenario, evaluate.thresholds(ctx, "keystone")
-    radar, n_pulses, gate = scenario.radar, scenario.n_pulses[0], scenario.gates[0]
-    truth = evaluate.truth(ctx)[0]
+    scenario, verify = ctx.scenario, stepper.thresholds(ctx, "keystone")
+    radar, n_pulses, gate = scenario.radar, scenario.n_pulses_per_burst[0], scenario.gates[0]
+    truth = stepper.truth(ctx)[0]
     rcs_m2 = [target.rcs_m2 for target in scenario.targets]
     clean = pulse_compress(
         synthesise(radar, truth, rcs_m2, n_pulses, rng=None, gate=gate), radar, gate=gate
     )
     reference_w = integrated_peak(clean[:1]).power_linear * n_pulses**2
-    row: dict[str, Any] = {"frame": 0}
+    row: dict[str, Any] = {"scan": 0}
 
     def loss(name: str, data: NDArray[np.complex128]) -> float:
         row[name] = ctx.record(
-            name, evaluate.to_db(integrated_peak(data).power_linear / reference_w)
+            name, float(power_to_db(integrated_peak(data).power_linear / reference_w))
         )
         return float(row[name])
 
@@ -95,7 +97,7 @@ def keystone_stage(ctx: evaluate.Context) -> evaluate.Context:
     sample_rate_hz = radar.receiver.sample_rate_hz
     compensated = _compensate(clean, radar, scenario.migration)
     # The keystone at fold factor 0: the method's own first step, unless it searched folds.
-    keystoned = compensated.keystone or keystone(
+    keystoned = compensated.keystone or migration.keystone(
         clean, carrier_frequency_hz=carrier, sample_rate_hz=sample_rate_hz
     )
     loss("keystone_only_loss_db", keystoned.data_rfst)
@@ -115,7 +117,7 @@ def keystone_stage(ctx: evaluate.Context) -> evaluate.Context:
     row.update(_searches(ctx, compensated, truth.bistatic_range_acceleration_mps2[0]))
     row.update(_estimates(ctx))
     _check(ctx, verify, row)
-    evaluate.write_csv(ctx.out_dir / "migration.csv", [row])
+    stepper.write_csv(ctx.out_dir / "migration.csv", [row])
     if ctx.render:
         centre = int(np.rint(track[0]))
         window = slice(max(0, centre - _PLOT_HALF_WIDTH), centre + _PLOT_HALF_WIDTH)
@@ -126,28 +128,28 @@ def keystone_stage(ctx: evaluate.Context) -> evaluate.Context:
             panels.append((label, compensated.data_rfst))
         elif compensated.fold_factor != 0:
             panels.append((f"keystone, F = {compensated.fold_factor}", compensated.data_rfst))
-        figure = plots.render_range_slow_time(
+        figure = figures.render_range_slow_time(
             [(label, data[:, window]) for label, data in panels],
             range_axis_m[window],
             radar,
-            title=f"{scenario.name}, frame 0, noiseless",
+            title=f"{scenario.name}, scan 0, noiseless",
         )
-        plots.save_figure(figure, ctx.out_dir / "keystone.png")
+        figures.save_figure(figure, ctx.out_dir / "keystone.png")
     return ctx
 
 
 def _searches(
-    ctx: evaluate.Context, compensated: CompensatedPulses, true_acceleration_mps2: float
+    ctx: stepper.Context, compensated: CompensatedPulses, true_acceleration_mps2: float
 ) -> dict[str, float]:
     """Record the fold-factor and acceleration searches' curves and choices."""
     found: dict[str, float] = {}
     if compensated.fold is not None:
-        curve_db = 10.0 * np.log10(compensated.fold.integrated_peak_linear)
+        curve_db = power_to_db(compensated.fold.integrated_peak_linear)
         for factor, value_db in zip(compensated.fold.fold_factors, curve_db, strict=True):
             print(f"    fold factor {factor:+d}: integrated peak {value_db:.2f} dB")
         found["fold_factor"] = ctx.record("fold_factor", compensated.fold_factor)
     if compensated.rate is not None:
-        curve_db = 10.0 * np.log10(compensated.rate.integrated_peak_linear[:, 0])
+        curve_db = power_to_db(compensated.rate.integrated_peak_linear[:, 0])
         for value_mps2, value_db in zip(compensated.rate.accelerations_mps2, curve_db, strict=True):
             print(f"    acceleration {value_mps2:+.1f} m/s^2: integrated peak {value_db:.3f} dB")
         found["acceleration_mps2"] = ctx.record("acceleration_mps2", compensated.acceleration_mps2)
@@ -157,40 +159,43 @@ def _searches(
     return found
 
 
-def _estimates(ctx: evaluate.Context) -> dict[str, Any]:
-    """Correct frame 0 with noise as configured, crop a chip at its peak, estimate on it."""
+def _estimates(ctx: stepper.Context) -> dict[str, Any]:
+    """Correct scan 0 with noise as configured, crop a chip at its peak, estimate on it."""
     scenario = ctx.scenario
-    radar, n_pulses, gate = scenario.radar, scenario.n_pulses[0], scenario.gates[0]
-    frame = next(frames(scenario, n_frames=1))
-    noisy = pulse_compress(frame.cubes[0], radar, gate=gate)
+    radar, n_pulses, gate = scenario.radar, scenario.n_pulses_per_burst[0], scenario.gates[0]
+    scan = next(scan_iq(scenario, n_scans=1))
+    noisy = pulse_compress(scan.cubes[0], radar, gate=gate)
     compensated = _compensate(noisy, radar, scenario.migration)
     range_axis_m, rate_axis_mps = map_axes(radar, n_pulses, gate=gate)
     peak = integrated_peak(compensated.data_rfst, refine_range=False)
     chip = crop_slow_time(
         compensated.data_rfst,
         int(peak.range_bin),
-        range_bin_centers_m=range_axis_m,
-        rate_bin_centers_mps=rate_axis_mps,
+        range_bin_centres_m=range_axis_m,
+        rate_bin_centres_mps=rate_axis_mps,
         processing=_processing(radar, compensated, scenario.migration.method != "none"),
     )
     method: FineMethod = "grft" if compensated.rate is not None else "aboutanios_mulgrew"
     estimate = estimate_fine(chip, method=method)
-    truth, crb = frame.truth, estimate.crb
+    truth, crb = scan.truth, estimate.crb
     errors = {
-        "range": (estimate.bistatic_range_m - truth.bistatic_range_m[0], crb.bistatic_range_m),
+        "range": (
+            estimate.bistatic_range_m - truth.bistatic_range_m[0],
+            crb.sigma_bistatic_range_m,
+        ),
         "rate": (
             estimate.bistatic_range_rate_mps - truth.bistatic_range_rate_mps[0],
-            crb.bistatic_range_rate_mps,
+            crb.sigma_bistatic_range_rate_mps,
         ),
         "acceleration": (
             estimate.bistatic_range_acceleration_mps2 - truth.bistatic_range_acceleration_mps2[0],
-            crb.bistatic_range_acceleration_mps2,
+            crb.sigma_bistatic_range_acceleration_mps2,
         ),
     }
     found: dict[str, Any] = {
         "estimator": method,
         "fine_fold_factor": compensated.fold_factor,
-        "fine_snr_db": ctx.record("fine_snr_db", evaluate.to_db(estimate.snr_linear)),
+        "fine_snr_db": ctx.record("fine_snr_db", float(power_to_db(estimate.snr_linear))),
         "fine_bistatic_range_m": ctx.record("fine_bistatic_range_m", estimate.bistatic_range_m),
         "fine_bistatic_range_rate_mps": ctx.record(
             "fine_bistatic_range_rate_mps", estimate.bistatic_range_rate_mps
@@ -247,7 +252,7 @@ def _peak_track_bins(data_rfst: NDArray[np.complex128]) -> NDArray[np.float64]:
     return result
 
 
-def _check(ctx: evaluate.Context, verify: dict[str, Any], row: dict[str, Any]) -> None:
+def _check(ctx: stepper.Context, verify: dict[str, Any], row: dict[str, Any]) -> None:
     """Check every threshold ``[verify]`` gives against what the stage measured."""
     tolerance_db = verify.get("loss_tolerance_db", 1.0)
     if "walk_bins" in verify:

@@ -31,15 +31,15 @@ from radar_forge.tracking.initiation import (
     DirectStateInitiator,
     debiased_spherical_to_enu,
 )
-from radar_forge.tracking.models import (
-    BistaticRangeRateModel,
-    CartesianMotion,
+from radar_forge.tracking.lifecycle import ExistencePolicy, LifecyclePolicy
+from radar_forge.tracking.measurement import (
+    BistaticRangeAndRangeRate,
     LinearMeasurement,
-    RadialConstantVelocity,
     RangeAzimuthElevationRangeRate,
     marginal,
 )
-from radar_forge.tracking.tracker import ExistencePolicy, LifecyclePolicy, Scan, Tracker
+from radar_forge.tracking.motion import ConstantVelocity
+from radar_forge.tracking.tracker import Scan, Tracker
 
 TENTATIVE, CONFIRMED = TrackStatus.TENTATIVE, TrackStatus.CONFIRMED
 COASTING, DELETED = TrackStatus.COASTING, TrackStatus.DELETED
@@ -52,7 +52,7 @@ def _one_axis(
     **settings: Any,
 ) -> Tracker:
     """Position measured along x; q = 2 sigma² · 0.5 s, so q = 1 m²/s³ by default."""
-    motion = CartesianMotion(
+    motion = ConstantVelocity(
         "x", sigma_acceleration_mps2=sigma_acceleration_mps2, acceleration_correlation_time_s=0.5
     )
     model = LinearMeasurement(motion.state_layout, ("x_m",))
@@ -276,7 +276,7 @@ def test_a_policy_that_could_not_work_is_rejected(settings: dict[str, Any]) -> N
 # The scenario mechanisms (tracker-001 §5.1, §5.4): the selector, its range-only retry, the
 # likelihood ratio and the re-acquisition reset. q = 1 m²/s³, so a settled track's rate gate
 # is about a metre per second wide and a detection 40 m/s out, a wrong fold, fails it.
-RADIAL = RadialConstantVelocity(1.0, acceleration_correlation_time_s=0.5)
+RADIAL = ConstantVelocity.bistatic_range(1.0, acceleration_correlation_time_s=0.5)
 BOTH = LinearMeasurement(RADIAL.state_layout, ("bistatic_range_m", "bistatic_range_rate_mps"))
 MODELS = {"both": BOTH, "range": marginal(BOTH, ("bistatic_range_m",))}
 DENSITIES = {"both": 1e-6, "range": 1e-4}
@@ -311,7 +311,7 @@ def _radial_scan(time_s: float, detections: Any) -> Scan:
 
 
 def test_a_pair_that_fails_its_rate_gate_is_kept_through_range_alone() -> None:
-    """Spec §5.4's retry: a wrong fold costs the rate, not the range."""
+    """Tracker-001 §5.4's retry: a wrong fold costs the rate, not the range."""
     plain = _radial()
     retrying = _radial(
         cost="negative_log_likelihood_ratio",
@@ -350,8 +350,8 @@ def test_the_retry_reports_the_nis_of_the_model_it_passed() -> None:
 
 
 def test_nis_costs_of_two_dimensions_in_one_scan_are_refused_and_change_nothing() -> None:
-    """Spec §5.1: a 1-D NIS undercuts a 2-D one. One detection gates at two components, the other
-    through range alone."""
+    """Tracker-001 §5.1: a 1-D NIS undercuts a 2-D one. One detection gates at two components,
+    the other through range alone."""
     tracker = _radial(model_selector=_full_then_range)
     bank = tracker.bank
     with pytest.raises(ValueError, match="likelihood ratio"):
@@ -426,7 +426,7 @@ def test_the_constructor_rejects_settings_that_do_not_fit(settings: dict[str, An
 def test_a_model_or_prior_in_another_layout_is_rejected() -> None:
     with pytest.raises(ValueError, match=r"layout|coordinates"):
         Tracker(
-            {"x": LinearMeasurement(CartesianMotion("x").state_layout, ("x_m",))},
+            {"x": LinearMeasurement(ConstantVelocity("x").state_layout, ("x_m",))},
             RADIAL,
             TaylorLinearisation(),
             0.997,
@@ -448,8 +448,8 @@ def test_a_bistatic_tracker_tracks_a_seeded_target_and_starts_none(
     linearisation: Linearisation, rng: np.random.Generator
 ) -> None:
     """One bistatic measurement cannot fix a position, so tracks come from a cue."""
-    motion = CartesianMotion("xy", sigma_acceleration_mps2=0.5)
-    model = BistaticRangeRateModel(
+    motion = ConstantVelocity("xy", sigma_acceleration_mps2=0.5)
+    model = BistaticRangeAndRangeRate(
         motion.state_layout, np.zeros(3), [20_000.0, 0.0, 0.0], {"z_m": 3000.0, "zdot_mps": 0.0}
     )
     tracker = Tracker(
@@ -469,7 +469,9 @@ def test_a_bistatic_tracker_tracks_a_seeded_target_and_starts_none(
     for step in range(1, 31):
         # Scans are processed in time order; each depends on the one before.
         truth = motion.transition(truth, 1.0)
-        z = model.predict(truth)[None] + rng.multivariate_normal(np.zeros(2), noise, 1)
+        z = model.predicted_measurement(truth)[None] + rng.multivariate_normal(
+            np.zeros(2), noise, 1
+        )
         bank = tracker.process(Scan(float(step), z, noise, "bistatic"))
     assert bank.track_id.tolist() == [1] and bank.status.tolist() == [CONFIRMED]
 
@@ -478,7 +480,7 @@ def test_every_linearisation_tracks_a_target_from_spherical_measurements(
     linearisation: Linearisation, rng: np.random.Generator
 ) -> None:
     """The debiased start, then spherical updates: one confirmed track, on the target."""
-    motion = CartesianMotion()
+    motion = ConstantVelocity()
     model = RangeAzimuthElevationRangeRate(motion.state_layout, np.zeros(3))
     prior = DebiasedSphericalInitiator(np.zeros(6), np.diag([1e8, 200.0**2] * 3))
     tracker = Tracker(
@@ -488,7 +490,9 @@ def test_every_linearisation_tracks_a_target_from_spherical_measurements(
     truth = np.array([12_000.0, -150.0, 16_000.0, 0.0, 3_000.0, 0.0])
     for step in range(20):
         # Scans are processed in time order; each depends on the one before.
-        z = model.predict(truth)[None] + rng.multivariate_normal(np.zeros(4), noise, 1)
+        z = model.predicted_measurement(truth)[None] + rng.multivariate_normal(
+            np.zeros(4), noise, 1
+        )
         bank = tracker.process(Scan(float(step), z, noise, "radar"))
         truth = motion.transition(truth, 1.0)
     assert bank.track_id.tolist() == [1] and bank.status.tolist() == [CONFIRMED]
@@ -521,7 +525,7 @@ def test_a_target_keeps_one_track_through_clutter_and_missed_detections(
 
 
 def test_unscented_and_taylor_trackers_agree_on_a_linear_scene() -> None:
-    """On linear models the UKF is the KF (spec §3), so the whole loop gives the same banks."""
+    """On linear models the UKF is the KF (tracker-001 §3): the whole loop gives the same banks."""
     banks = []
     for linearisation in (TaylorLinearisation(), UnscentedTransform()):
         tracker = _one_axis(linearisation=linearisation)
@@ -536,7 +540,7 @@ def test_unscented_and_taylor_trackers_agree_on_a_linear_scene() -> None:
 
 # Initiation.
 
-LAYOUT = CartesianMotion().state_layout
+LAYOUT = ConstantVelocity().state_layout
 PRIOR_MEAN = np.array([0.0, 1.0, 0.0, 2.0, 500.0, 3.0])
 PRIOR_COVARIANCE = np.diag([1e8, 100.0, 1e8, 100.0, 1e6, 100.0])
 
@@ -568,7 +572,7 @@ def test_a_prior_that_ties_measured_to_unmeasured_coordinates_is_refused() -> No
 
 
 def test_a_nonlinear_model_starts_no_direct_track() -> None:
-    model = BistaticRangeRateModel(LAYOUT, np.zeros(3), np.ones(3))
+    model = BistaticRangeAndRangeRate(LAYOUT, np.zeros(3), np.ones(3))
     initiator = DirectStateInitiator(PRIOR_MEAN, PRIOR_COVARIANCE)
     assert initiator.initiate(np.zeros((1, 2)), np.eye(2)[None], model) is None
 
@@ -714,7 +718,7 @@ def test_a_track_the_scan_cannot_see_keeps_its_row_time_and_counts() -> None:
 
 def test_an_existence_policy_confirms_a_steady_target_and_deletes_a_one_off() -> None:
     """JIPDA: a target seen every scan climbs past 0.95; a plot seen once falls under 0.05."""
-    motion = CartesianMotion("x", sigma_acceleration_mps2=1.0, acceleration_correlation_time_s=0.5)
+    motion = ConstantVelocity("x", sigma_acceleration_mps2=1.0, acceleration_correlation_time_s=0.5)
     tracker = Tracker(
         {"x": LinearMeasurement(motion.state_layout, ("x_m",))},
         motion,
@@ -741,7 +745,7 @@ def test_the_existence_policy_needs_an_associator_that_weights() -> None:
 
 @pytest.mark.parametrize(
     "settings",
-    [{"delete": 0.5, "initial": 0.2}, {"confirm": 0.01}, {"p_survival": 0.0}],
+    [{"delete": 0.5, "initial": 0.2}, {"confirm": 0.01}, {"survival_probability": 0.0}],
 )
 def test_an_existence_policy_that_could_not_work_is_rejected(settings: dict[str, Any]) -> None:
     with pytest.raises(ValueError, match="delete"):
@@ -764,15 +768,15 @@ def test_a_confirmed_track_whose_position_sigma_passes_the_limit_is_deleted() ->
 
 
 def test_no_track_starts_where_the_clutter_is_denser_than_the_birth_limit() -> None:
-    """Births only from the measurement whose clutter intensity is at most the limit."""
-    tracker = _one_axis(LifecyclePolicy(1, 1), max_birth_clutter_intensity=0.01)
+    """Births only from the measurement whose clutter density is at most the limit."""
+    tracker = _one_axis(LifecyclePolicy(1, 1), max_birth_clutter_density=0.01)
     bank = tracker.process(Scan(0.0, [[0.0], [100.0], [200.0]], [[1.0]], "x", [0.001, 0.02, 0.01]))
     np.testing.assert_array_equal(bank.measurement_index, [0, 2])
 
 
 def _one_axis_jpda(policy: LifecyclePolicy, existence: ExistencePolicy | None = None) -> Tracker:
     """The one-axis tracker of _one_axis with JPDA, gate 0.99, Pd 0.9."""
-    motion = CartesianMotion("x", sigma_acceleration_mps2=1.0, acceleration_correlation_time_s=0.5)
+    motion = ConstantVelocity("x", sigma_acceleration_mps2=1.0, acceleration_correlation_time_s=0.5)
     return Tracker(
         {"x": LinearMeasurement(motion.state_layout, ("x_m",))},
         motion,
@@ -791,9 +795,9 @@ def test_a_reacquisition_reset_reaches_every_imm_mode() -> None:
     Two CV modes; four hits, then misses: on the second miss, which opens re-acquisition, every
     mode's rate variance is the prior's and its cross-covariance zero.
     """
-    layout_motion = CartesianMotion("x", sigma_acceleration_mps2=1.0)
+    layout_motion = ConstantVelocity("x", sigma_acceleration_mps2=1.0)
     imm = InteractingMultipleModel(
-        (layout_motion, CartesianMotion("x", sigma_acceleration_mps2=3.0)), (60.0, 20.0)
+        (layout_motion, ConstantVelocity("x", sigma_acceleration_mps2=3.0)), (60.0, 20.0)
     )
     prior = np.diag([1.0, 100.0**2])
     tracker = Tracker(
@@ -830,16 +834,16 @@ def test_a_jpda_track_whose_gate_holds_only_an_unlikely_plot_misses() -> None:
         assert (bank.measurement_index[0] == 0) == hit
 
 
-def test_a_weighting_tracker_refuses_a_scan_without_clutter_intensity() -> None:
+def test_a_weighting_tracker_refuses_a_scan_without_clutter_density() -> None:
     """JPDA needs lambda at each measurement; the message names the Scan's field."""
     tracker = _one_axis_jpda(LifecyclePolicy(1, 1))
-    with pytest.raises(ValueError, match="clutter_intensity"):
+    with pytest.raises(ValueError, match="clutter_density"):
         tracker.process(Scan(0.0, [[0.0]], [[1.0]], "x"))
 
 
 def test_existence_stays_at_most_one_when_survival_is_certain() -> None:
-    """With p_survival = 1 a steady target's existence rounds towards 1 + eps; it is clipped."""
-    tracker = _one_axis_jpda(LifecyclePolicy(1, 1), ExistencePolicy(p_survival=1.0))
+    """With certain survival a steady target's existence rounds to 1 + eps; it is clipped."""
+    tracker = _one_axis_jpda(LifecyclePolicy(1, 1), ExistencePolicy(survival_probability=1.0))
     # Thirty scans of one target in light clutter: existence climbs to one and stays.
     for t in range(30):
         bank = tracker.process(Scan(float(t), [[20.0 * t]], [[1.0]], "x", [1e-4]))

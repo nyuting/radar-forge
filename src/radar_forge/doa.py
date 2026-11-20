@@ -49,6 +49,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.optimize import minimize, minimize_scalar
 
+from radar_forge._periodic import fold
 from radar_forge.array import (
     ArrayGeometry,
     beam_power,
@@ -59,6 +60,7 @@ from radar_forge.array import (
     spatial_smoothing,
     subarray,
 )
+from radar_forge.units import power_to_db
 
 __all__ = [
     "COVARIANCE_KINDS",
@@ -473,7 +475,7 @@ def resolution_snr_db(
     signal = np.array([1.0, np.exp(1j * relative_phase_rad)])
     bound = crb_deterministic(a, steering_derivative_u(geometry, u, wavelength_m), signal, 1.0)
     difference = np.array([1.0, -1.0])
-    return 10.0 * math.log10(float(difference @ bound @ difference) / separation**2)
+    return float(power_to_db(float(difference @ bound @ difference) / separation**2))
 
 
 def _halves(geometry: ArrayGeometry) -> tuple[NDArray[np.bool_], float]:
@@ -719,5 +721,5 @@ def _peaks(
         )
         found.append(float(best.x))
     # A half-wavelength array sees u and u + 2 alike: fold back into [-1, 1).
-    result: NDArray[np.float64] = np.sort(np.mod(np.asarray(found) + 1.0, 2.0) - 1.0)
+    result: NDArray[np.float64] = np.sort(fold(found, 2.0, lower=-1.0))
     return result

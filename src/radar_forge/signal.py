@@ -33,8 +33,13 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.signal import fftconvolve
 
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
-from radar_forge.propagation import PropagationPaths, propagation_delay_s, propagation_phase_rad
-from radar_forge.radar import Radar, Transmitter
+from radar_forge.propagation import (
+    PropagationPaths,
+    bistatic_range_rate_from_doppler_mps,
+    propagation_delay_s,
+    propagation_phase_rad,
+)
+from radar_forge.radar import Radar, Transmitter, sweep_rate_hzps
 
 __all__ = [
     "RangeGate",
@@ -47,9 +52,7 @@ __all__ = [
     "noise_waveform",
     "pulsed_baseband",
     "range_gate_first_sample",
-    "range_resolution_m",
     "stream_baseband",
-    "sweep_rate_hzps",
     "thermal_noise",
 ]
 
@@ -63,22 +66,6 @@ _BYTES_PER_COMPLEX = 16
 _WHOLE_SAMPLE = 1e-9
 # Relative amplitude at which a moving path's delay series stops: -200 dB of the path.
 _DELAY_TOLERANCE = 1e-10
-
-
-def range_resolution_m(bandwidth_hz: ArrayLike) -> NDArray[np.float64]:
-    r"""Return the monostatic range resolution :math:`c/2B`, m (Richards [1], §4.6.1)."""
-    result: NDArray[np.float64] = SPEED_OF_LIGHT_MPS / (
-        2.0 * np.asarray(bandwidth_hz, dtype=np.float64)
-    )
-    return result
-
-
-def sweep_rate_hzps(bandwidth_hz: ArrayLike, chirp_duration_s: ArrayLike) -> NDArray[np.float64]:
-    r"""Return the chirp slope :math:`\alpha = B/T`, Hz/s."""
-    result: NDArray[np.float64] = np.asarray(bandwidth_hz, dtype=np.float64) / np.asarray(
-        chirp_duration_s, dtype=np.float64
-    )
-    return result
 
 
 def beat_frequency_hz(
@@ -137,7 +124,7 @@ def lfm_chirp(
         msg = f"chirp_duration_s {chirp_duration_s:g} is too short for one sample."
         raise ValueError(msg)
 
-    sweep_rate = bandwidth_hz / chirp_duration_s
+    sweep_rate = float(sweep_rate_hzps(bandwidth_hz, chirp_duration_s))
     if sweep_direction == "down":
         sweep_rate = -sweep_rate
     if start_frequency_hz is None:
@@ -506,6 +493,8 @@ def stream_baseband(
     spectrum = np.fft.fft(radiated)
     cycles_per_sample = np.fft.fftfreq(n_samples).astype(np.float64)
     sample_rate_hz, wavelength_m = radar.receiver.sample_rate_hz, radar.wavelength_m
+    # Delay in samples as (R f_s)/c, not propagation_delay_s(R) * f_s: the two orders differ in
+    # the last bit, and scenario 005's golden values were made with this one.
     batch_delay = (
         paths.bistatic_range_at_m(_slow_time_s(n_pulses, radar), wavelength_m)
         * sample_rate_hz
@@ -567,7 +556,7 @@ def _delayed(
 
 
 def _check_dwell(radar: Radar, n_pulses: int, waveform: str) -> None:
-    """Reject an empty dwell, or a radar of the other waveform family."""
+    """Reject an empty burst, or a radar of the other waveform family."""
     if n_pulses < 1:
         msg = f"n_pulses must be at least one; got {n_pulses}."
         raise ValueError(msg)
@@ -641,7 +630,8 @@ def _fast_time_s(radar: Radar) -> NDArray[np.float64]:
 
 def _warn_if_stop_and_hop_is_strained(paths: PropagationPaths, radar: Radar) -> None:
     r"""Warn when a path moves a quarter of a range bin (:math:`c/B` of route) within one chirp."""
-    fastest_mps = float(np.max(np.abs(paths.doppler_hz), initial=0.0)) * radar.wavelength_m
+    rate_mps = bistatic_range_rate_from_doppler_mps(paths.doppler_hz, radar.wavelength_m)
+    fastest_mps = float(np.max(np.abs(rate_mps), initial=0.0))
     bin_fraction = (
         fastest_mps * radar.transmitter.chirp_duration_s / (2.0 * radar.range_resolution_m)
     )
