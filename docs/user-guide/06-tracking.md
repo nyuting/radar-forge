@@ -25,24 +25,34 @@ twice the radial value when monostatic.
 
 ### What's in the package
 
-| Module | What it holds |
-| :-- | :-- |
-| `motion.py` | `CoordinateLayout` and `Coordinate`, the named coordinates of a state or measurement, which wrap a periodic value (`CoordinateLayout.wrap`, through the shared `_periodic.fold`); `check_covariances`, the one boundary check (symmetric, positive definite). Motion models, which predict a state forward: `ConstantVelocity` (on each ENU axis, or, built by `ConstantVelocity.bistatic_range`, on the state `[bistatic_range_m, bistatic_range_rate_mps]`), `ConstantAcceleration`, and `ConstantTurn` (also called the coordinated turn). |
-| `measurement.py` | Measurement models, which predict a measurement from a state: `LinearMeasurement` (some state coordinates, reported directly, optionally folded at a period), `RangeAzimuthElevationRangeRate` (a monostatic radar's spherical measurement of an ENU state), `BistaticRangeAndRangeRate` ($R_T + R_R$ and its rate; $(2r, 2\dot r)$ when the sites coincide) and `marginal` (some of a model's components, such as range alone). |
-| `filters.py` | `TrackBank`, every track a row of one immutable struct of arrays; `TrackStatus` and the read-only `TrackSnapshot`; the one Gaussian filter, `predict`, `innovate` and `update`, through `TaylorLinearisation` (the KF on a linear model, the EKF otherwise) or `UnscentedTransform` (the UKF). |
-| `association.py` | `chi_square_gate_threshold` and `gate`; `association_cost`, `"nis"` or `"negative_log_likelihood_ratio"`; `GlobalNearestNeighbour` (GNN) and `GreedyNearestNeighbour`. |
-| `tracker.py` | `Tracker`, which runs one `Scan` at a time; `Scan`, every measurement one sensor made at one time with its R, checked and frozen. `initiation.py` holds the initiators `DirectStateInitiator` and `DebiasedSphericalInitiator`. |
-| `metrics.py` | `nees`, `consistency_interval` and `rmse`, which score a tracker against the truth; `gospa` and `trajectory_gospa` for a many-target scene. |
-| `lifecycle.py` | `LifecyclePolicy`, the M-of-N rule this page uses, with deletion and re-acquisition, and `ExistencePolicy`, confirmation by existence probability (scenario 011). |
-| `imm.py`, `hypotheses.py`, `pmbm.py` | The many-target methods of scenario 011, not walked through here: the interacting multiple model, track-oriented MHT and the PMBM tracker. |
-| `clutter_map.py` | `ClutterMap`, the clutter density per (m rad) learnt from the plots no confirmed track took (scenario 011). |
+One line per module. **Tracker** code estimates; **scoring** compares tracks with the truth;
+**simulation** makes the truth and the plots of a plot-level scenario.
+
+| Module | Kind | What it is for |
+| :-- | :-- | :-- |
+| `tracking/motion.py` | tracker | The state's named coordinates, `CoordinateLayout`, which wraps a periodic one, and the motion models, F and Q: `ConstantVelocity` (on ENU axes, or on `[bistatic_range_m, bistatic_range_rate_mps]` built by `ConstantVelocity.bistatic_range`), `ConstantAcceleration`, `ConstantTurn` (the coordinated turn); `check_covariances`, the one boundary check. |
+| `tracking/measurement.py` | tracker | The measurement models, h and H: `LinearMeasurement` (state coordinates reported directly, optionally folded at a period), `RangeAzimuthElevationRangeRate` (a monostatic radar's spherical measurement of an ENU state), `BistaticRangeAndRangeRate` ($R_T + R_R$ and its rate) and `marginal` (some of a model's components, such as range alone). |
+| `tracking/filters.py` | tracker | `TrackBank`, every track a row of one immutable struct of arrays, with `TrackStatus` and the read-only `TrackSnapshot`; the one Gaussian filter, `predict`, `innovate`, `update` and `update_weighted`, through `TaylorLinearisation` (the KF on a linear model, the EKF otherwise) or `UnscentedTransform` (the UKF). |
+| `tracking/initiation.py` | tracker | A new track's prior from one measurement: `DirectStateInitiator`, `DebiasedSphericalInitiator`. |
+| `tracking/association.py` | tracker | The gate and the cost (`chi_square_gate_threshold`, `gate`, `association_cost`); GNN and greedy assignment; PDA, JPDA and its coalescence fixes; Murty's k best. |
+| `tracking/lifecycle.py` | tracker | `LifecyclePolicy`, the M-of-N rule this page uses, with deletion and re-acquisition; `ExistencePolicy`, confirmation by existence probability (JIPDA). |
+| `tracking/imm.py` | tracker | The interacting multiple model: each track's estimate under every mode, mixed, predicted and corrected. |
+| `tracking/hypotheses.py` | tracker | Track-oriented MHT: each target a tree of association histories, scored, ranked by Murty's method and pruned N scans back. |
+| `tracking/pmbm.py` | tracker | `PmbmTracker`, the Poisson multi-Bernoulli mixture tracker. |
+| `tracking/clutter_map.py` | tracker | `ClutterMap`, the clutter density per (m rad) learnt from the plots no confirmed track took. |
+| `tracking/tracker.py` | tracker | `Scan`, every measurement one sensor made at one time with its R, checked and frozen; `Tracker`, which runs one scan at a time; `Coverage`, which tracks a scan could see. |
+| `tracking/metrics.py` | scoring | `nees`, `consistency_interval` and `rmse` for one target; `gospa` and `trajectory_gospa` for a many-target scene. |
+| `scan_tracker.py` | tracker | `ScanTracker`: a scenario's `[tracking]` table built into one tracker, and the policy that feeds it each scan ([below](#the-scenarios-tracker)). |
+| `trajectory.py` | simulation | `Arc` and `Leg`: the closed-form true trajectories of scenario 011's targets. |
+| `plot_simulator.py` | simulation | `plot_scans`: the plots a rotating surveillance radar makes of those trajectories, scan by scan (merged echoes, missed detections, false plots), each carrying the clutter density at it. |
+| `verify/chain.py` | scoring | The stepper's `track` stage (one target, from IQ): scores the tracks against the truth and checks the scores against `[verify]`. |
+| `verify/multitarget.py` | scoring | The `multitarget` stage (many targets, from plots): the same scoring and check (011's IQ check: detection statistics only). |
 
 `radar_forge.tracking` exports `Scan` and `Tracker`; everything else is imported from its
-module. Outside the package, `scan_tracker.py` builds a scenario's tracker from its
-`[tracking]` table and feeds it each scan. Not tracker code: `trajectory.py` holds the true
-trajectories of scenario 011's targets, and `plot_simulator.py` the plots a rotating
-surveillance radar makes of them (merged echoes, missed detections, false plots), scan by
-scan. Four of scenario 011's six variants use them in place of IQ.
+module. The package imports nothing else from `radar_forge` but the shared fold
+(`_periodic`): the last four rows, which know about scenarios, TOML and the truth, live
+outside it. Four of scenario 011's six variants track the plot simulator's plots in place of
+IQ.
 
 ## Quantities and equations
 
@@ -158,13 +168,13 @@ hit, miss, hit, miss, hit confirms on scan 5, and hit, miss, miss, miss deletes 
 ### The scenario's tracker
 
 `scan_tracker.ScanTracker(scenario)` builds a `Tracker` from `[tracking]` (`linearisation`,
-`white_noise`, `initiator`, `cost`, `assignment`, `association`, the lifecycle counts) on
-`ConstantVelocity.bistatic_range`, and `ScanTracker.process(plots, time_s)` feeds it a scan's
-accepted plots as one batch; a rotating radar's scan (scenario 011) reaches the same class as
-one batch a sector. Range is measured modulo the map's period, 149,896 m for S1, while the
-state stays continuous. The rate is measured only where it cannot fold: after dual-PRF pairing, from
-one burst whose rate interval covers `max_bistatic_range_rate_mps`, or once a track can unfold
-it (`rate_unfolding = "track_aided"`); otherwise range alone. Track-aided unfolding lets a track
+`white_noise`, `initiator`, `cost`, `assignment`, `association`, the lifecycle counts) and
+feeds it each scan ([below](#how-a-scan-reaches-the-tracker)). For an IQ scenario such as 003
+the motion model is `ConstantVelocity.bistatic_range`. Range is measured modulo the map's
+period, 149,896 m for S1, while the state stays continuous. The rate is measured only where it
+cannot fold: after dual-PRF pairing, from one burst whose rate interval covers
+`max_bistatic_range_rate_mps`, or once a track can unfold it
+(`rate_unfolding = "track_aided"`); otherwise range alone. Track-aided unfolding lets a track
 unfold once it holds N associated ranges, the least N whose least-squares slope is certain to a
 `unfold_sigma_gate`-th of the rate period:
 
@@ -175,6 +185,82 @@ $v_{\mathrm{period}}$ = 30.591 m/s and $g$ = 6 give N = 10. Of the tracks that m
 one with the longest range history then gives each plot the fold nearest its rate, unless that
 lies over half a period from the slope of its last `n_slope_scans` ranges (the **fold monitor**):
 a wrong fold agrees with the prediction that chose it, never with the range.
+
+### How a scan reaches the tracker
+
+`ScanTracker.process` takes one scan and returns one `(bank, association)` pair for each batch
+it ran, in order; `association` holds a weighting associator's clusters, and is None for GNN,
+MHT and PMBM. What a batch is depends on how the radar looks at the scene:
+
+- **Staring**, an IQ scenario with no `[sensor]`: the radar sees the whole scene in one scan,
+  so `process(plots, time_s)` makes the scan's accepted `Plots` one `Scan` at the scan's time.
+  The state is bistatic range and its rate, and every plot carries the map's uniform clutter
+  density: one false plot a scan over the range period and the rate span a plot can take.
+- **Rotating**, a plot-level scenario with a `[sensor]` (scenario 011): the beam crosses each
+  azimuth at its own time, so `process(plot_scan)` cuts the `PlotScan` into `n_sectors`
+  batches by azimuth, each a `Scan` at its sector's centre time, each sector's tracks the next
+  one's prior. The `Tracker`'s `coverage`, here `ScanTracker`'s sector test, hands a batch only
+  the tracks whose azimuth, extrapolated to its time, lies in its sector: a track outside is
+  neither predicted, gated nor charged a miss, and waits at its own time for the sector that
+  sees it (`tracking.tracker.Coverage`). The state is ENU position and velocity on the ground
+  plane, z is (horizontal range, azimuth), and each plot carries the clutter density at it:
+  the scene's (`clutter_density_source = "oracle"`) or a `ClutterMap`'s (`"map"`).
+  `n_sectors = 1` makes a rotating scan one batch, as `scenario_011_cst_sweep.toml` does.
+
+MATLAB delivers a rotating radar's scan the same way, a field of view at a time, and sets
+`IsScanDone` at the end of the rotation.
+
+### Choosing the associator and the motion model
+
+`[tracking]` chooses both, for either kind of scenario. `ScanTracker` refuses when built what it
+cannot run (JPDA or MHT beside a range-only fallback; PMBM or `seed_truth` on an IQ scenario),
+rather than on the first scan; an IQ scenario's `track` stage does not read `motion` or
+`trackers`:
+
+| Choice | `[tracking]` keys | Staring (IQ) | Rotating (plots) |
+| :-- | :-- | :-- | :-- |
+| GNN | `association = "gnn"`, the default; with `detection_probability`, a pair costlier than ln(P_D / (1 − P_D P_G)) is left unassigned | yes | yes |
+| JPDA, JPDA*, set JPDA | `association = "jpda"`, `coalescence = "none"`, `"jpda_star"` or `"set"`, and `detection_probability` | with one measurement model a scan | yes |
+| JIPDA | as JPDA, with `existence = true` and `survival_probability` | as JPDA | yes |
+| MHT | `association = "mht"`, `detection_probability`, `k_best`, `n_scan_depth`, `confirm_score`, `delete_drop` | as JPDA | yes |
+| PMBM | `trackers = [..., "pmbm"]` beside the configured tracker, or `ScanTracker(scenario, "pmbm")`; `detection_probability`, `birth_intensity_per_scan`, `survival_probability`, `prune_existence`, `prune_weight` | `ScanTracker(scenario, "pmbm")` refused; `trackers` not read | yes, on one CV model |
+| IMM | `motion = "imm"`: modes CV quiet, constant turn and CV agile, `mode_sigma_acceleration_mps2`, `sojourn_time_s`, `turn_rate_noise_density_rad2ps3`, `turn_rate_sigma_degps` | not read: the state is range and rate | yes, under GNN, JPDA or MHT; PMBM takes the agile mode alone |
+
+JPDA and MHT weigh or branch on one measurement model a scan. An IQ scenario offers two where
+a track may fall back to range alone, with `range_only_retry = true` or
+`rate_unfolding = "track_aided"` as in both `scenario_003_tracking*.toml` files; there
+`ScanTracker` refuses them when built. The three `scenario_003_ukf_*` files offer one, and take
+them. For example, two lines added to the `[tracking]` table of
+`config/scenario_003_ukf_fmcw_dual_prf.toml`:
+
+```toml
+association = "jpda"
+detection_probability = 0.9
+```
+
+A copy of the file with these lines passes all 11 of its checks over the 120-scan window, as
+GNN does: a range RMSE of 5.05 m under both, and a `nees_fraction` of 0.856 against 0.864.
+`tests/test_scan_tracker.py` confirms the target's track under them.
+
+A rotating scenario sets the same keys beside its motion model. This is the `[tracking]` table
+of `config/scenario_011_terminal_dense.toml`, cut to the keys that choose: an IMM under JIPDA
+with a clutter map, and GNN, MHT and PMBM scored beside it on the same plots, each score
+prefixed by its tracker's name:
+
+```toml
+motion = "imm"
+mode_sigma_acceleration_mps2 = [0.5, 0.5, 3.1623]
+sojourn_time_s = [120.0, 30.0, 20.0]
+association = "jpda"
+coalescence = "none"
+existence = true
+detection_probability = 0.90
+clutter_density_source = "map"
+trackers = ["gnn", "mht", "pmbm"]
+```
+
+`uv run python scripts/run_scenario.py config/scenario_011_terminal_dense.toml --scans 10`
+runs all four in about 40 s and passes the checks a ten-scan run can make.
 
 ### Choosing the process noise
 
@@ -411,21 +497,13 @@ from here.
 
 ## Limits
 
-**Built, but not covered on this page.** The page walks through the single-target tracker of
-scenario 003. The package also holds, for the many-target scenario 011: the interacting multiple
-model filter (`imm.py`) and the `ConstantTurn` motion model; probabilistic association (PDA,
-JPDA and its variants) and Murty's k-best assignments (`association.py`); track-oriented
-multiple hypothesis tracking (`hypotheses.py`) and the Poisson multi-Bernoulli mixture tracker
-(`pmbm.py`); confirmation by existence probability (`lifecycle.py`); GOSPA and trajectory GOSPA
-(`metrics.py`); and sensor coverage, so that a scan counts a miss only against the tracks it
-could have seen (`tracker.Coverage`). Their docstrings and `spec/tracker-001.md` describe them.
-`scan_tracker.ScanTracker` configures any of the associators for either kind of scenario
-(`association`, `coalescence`, `existence` in `[tracking]`, with `detection_probability`);
-this page's scenarios configure GNN, with a range-and-rate state, and PMBM and the IMM need
-a plot-level scenario's ground-plane state. An IQ scenario takes JPDA or MHT only with one
-measurement model a scan: where the rate is measured, `range_only_retry = false` and
-`rate_unfolding = "none"`, as in the three `scenario_003_ukf_*` files; `ScanTracker` refuses
-the rest when built.
+**Built, but not walked through on this page.** The page walks through the single-target
+tracker of scenario 003. The many-target methods of scenario 011 (the IMM and `ConstantTurn`,
+PDA and the JPDA family, Murty's k best, track-oriented MHT, PMBM, confirmation by existence,
+GOSPA and trajectory GOSPA, and coverage) are configured as
+[above](#choosing-the-associator-and-the-motion-model); their docstrings and
+`spec/tracker-001.md` describe them. An IQ scenario takes JPDA or MHT only with one
+measurement model a scan, and PMBM and the IMM not at all.
 
 **Not yet supported:**
 

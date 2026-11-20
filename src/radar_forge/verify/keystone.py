@@ -40,7 +40,7 @@ from radar_forge.verify import stepper
 
 __all__ = ["keystone"]
 
-# The pulses either end of the dwell that DFT interpolation leaves ringing: the residual walk
+# The pulses either end of the burst that DFT interpolation leaves ringing: the residual walk
 # leaves them out.
 _RINGING_PULSES = 1
 # Range bins either side of the target that keystone.png shows.

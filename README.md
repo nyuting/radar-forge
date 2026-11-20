@@ -26,9 +26,10 @@ stitching together seven incompatible codebases.
 ## Status
 
 **Pre-alpha.** Nothing is on PyPI yet. The radar chain is built and tested as flat modules,
-from geometry to tracks, and scenarios 001–003 run end to end through the stepper; the other
-areas under [Scope](#scope) are designed but not built. The [user guide](docs/user-guide/README.md)
-explains each module. The design documents live in [`spec/`](spec/):
+from geometry to tracks, and scenarios 001–006 and 011 run end to end through the stepper; the
+other areas under [Scope](#scope) are designed but not built. The
+[user guide](docs/user-guide/README.md) explains each module. The design documents live in
+[`spec/`](spec/):
 
 - [`spec/data-001-formats.md`](spec/data-001-formats.md): the files a run writes, with columns,
   units and conventions
@@ -46,9 +47,9 @@ The [Quickstart](#quickstart) below runs on today's `main`.
 
 | Area | What it covers |
 | :--- | :--- |
-| **The radar chain** | `radar` (sites, transmitter, receiver, bistatic geometry), `propagation` (the radar equation, Swerling models), `signal` (FMCW and pulsed waveforms, IQ), `dsp` (range-Doppler processing, windows, MTI, dual-PRF unfolding), `detection` (CFAR and clustering), `tracking/` (KF, EKF and UKF over a batched track bank) |
-| **Scenarios** | `scenario` (a TOML file and its truth), `pipeline` (scans to tracks), `verify` (the stepper and its stages, each checked against the file's `[verify]` table), `figures` |
-| **`array`** | Phased array geometries (linear, planar, circular, conformal), Taylor/Chebyshev tapering, beam and null steering, phase quantization, DoA estimation |
+| **The radar chain** | `radar` (sites, transmitter, receiver, bistatic geometry), `coordinates` (geodetic, ECEF, ENU), `propagation` (the radar equation, Swerling models), `signal` (FMCW, pulsed and noise waveforms, IQ), `dsp` (range-Doppler processing, windows, MTI, dual-PRF unfolding), `migration`, `clutter`, `detection` (CFAR and clustering), `datachip`, `array` and `doa` (a receive array and direction finding), `tracking/` (KF, EKF and UKF over a batched track bank; IMM, the JPDA family, MHT and PMBM) |
+| **Scenarios** | `scenario` (a TOML file and its truth), `pipeline` (IQ scans to range-Doppler maps and plots), `scan_tracker` (plots to tracks), `trajectory` and `plot_simulator` (true trajectories and the plots a rotating radar makes of them), `verify` (the stepper and its stages, each checked against the file's `[verify]` table), `figures` |
+| **`array`, beyond the receive array** | Planar, circular and conformal geometries, deterministic null steering, phase quantisation |
 | **`raytracing`** | A single scene abstraction over pluggable ray-tracing backends (RadarSimPy, Mitsuba/Dr.Jit, NVIDIA Omniverse RTX), all optional extras |
 | **Datasets** | ML dataset synthesis, with COCO-annotation and range-Doppler-cube exporters plus PyTorch dataset wrappers (planned) |
 
@@ -71,8 +72,8 @@ From source, for development:
 ```bash
 git clone https://github.com/<org>/radar-forge.git
 cd radar-forge
-pip install -e ".[dev]"
-pytest
+uv sync --extra dev --extra visualisation
+make test-fast
 ```
 
 ---
@@ -88,7 +89,7 @@ uv run python scripts/run_scenario.py config/scenario_001_fmcw_low_prf.toml --sc
 ```
 
 `--stop-after rd` stops after a stage, `--save-iq` keeps the cubes, and a failed check exits 1
-and names it. The same chain, one dwell by hand:
+and names it. The same chain, one burst by hand:
 
 ```python
 import numpy as np
@@ -150,7 +151,7 @@ radar-forge/
         ├── radar.py            # Transmitter, receiver, sites, bistatic geometry
         ├── coordinates.py      # WGS-84 geodetic, ECEF, ENU, range-azimuth-elevation
         ├── propagation.py      # Propagation paths, the radar equation, Swerling draws
-        ├── signal.py           # LFM chirp, thermal noise, FMCW and pulsed IQ synthesis
+        ├── signal.py           # LFM chirp, noise code, thermal noise; FMCW, pulsed and noise IQ
         ├── dsp.py              # Windows, matched filter, range and Doppler FFTs, unfolding
         ├── migration.py        # Range migration: keystone, Doppler-rate compensation
         ├── clutter.py          # Leakage and near-clutter cancellation
@@ -161,7 +162,7 @@ radar-forge/
         ├── doa.py              # Direction of arrival: spectra, subspace and sparse estimators
         ├── trajectory.py       # Closed-form true trajectories: legs and arcs
         ├── plot_simulator.py   # The plots a rotating radar makes of a scene, scan by scan
-        ├── tracking/           # Models, filters, association, tracker, MHT, PMBM, metrics
+        ├── tracking/           # Models, filters, association, IMM, MHT, PMBM, metrics
         ├── settings.py         # The settings a scenario's TOML tables hold
         ├── scenario.py         # A scenario TOML and its truth
         ├── pipeline.py         # IQ scans, range-Doppler products, plots
@@ -193,10 +194,10 @@ much can be borrowed — GPL-licensed code is treated as a **reference to reimpl
 | [complexPyTorch](https://github.com/wavefrontshaping/complexPyTorch) | MIT | Complex-valued layers, activations and batch normalisation after Trabelsi et al. (ICLR '18) | Complex batch-norm formulation and minimal layer set; the library Steinmetz builds on |
 | [Steinmetz Neural Networks](https://github.com/shyamven/SteinmetzNeuralNetworks) | *(no licence declared)* | Complex-valued networks keeping I/Q as an analytic pair (AISTATS '25) by the RASPNet author; ships a RASPNet regression notebook | Reference for the complex-valued I/Q feature convention in a planned `datasets` module; paired with RASPNet as a dataset-plus-model benchmark |
 | [RadarSim (GUI)](https://github.com/SpaceEngineerSS/RadarSim) | MIT | Educational pulse-Doppler visualizer with real-time PySide6 scopes | Blueprint for interactive scopes beside `figures` (A-Scope, B-Scope, PPI, RHI) |
-| [Stone Soup](https://github.com/dstl/Stone-Soup) | MIT | Dstl's target-tracking and state-estimation framework: filters, gaters, data associators, initiators, OSPA/GOSPA metrics | The architectural reference for `tracking/` — its predictor/updater/associator seams and its `Detection`/`Track`/`Hypothesis` vocabulary, at a fraction of the surface area; the reference for JPDA and IMM when those arrive |
+| [Stone Soup](https://github.com/dstl/Stone-Soup) | MIT | Dstl's target-tracking and state-estimation framework: filters, gaters, data associators, initiators, OSPA/GOSPA metrics | The architectural reference for `tracking/` — its predictor/updater/associator seams and its `Detection`/`Track`/`Hypothesis` vocabulary, at a fraction of the surface area; a reference for the JPDA and IMM in `tracking/` |
 | [FilterPy](https://github.com/rlabbe/filterpy) | MIT | Kalman, extended, unscented and particle filters, with the *Kalman and Bayesian Filters in Python* companion text | Reference formulation for the constant-velocity KF and the `Q_discrete_white_noise` process-noise construction, reimplemented in `tracking/` from the cited papers rather than depended on |
 | [motpy](https://github.com/wmuron/motpy) | MIT | Minimal tracking-by-detection multi-object tracker: predict, Hungarian match, update, prune | Shape reference for the scan loop: one scan in, the current tracks out, as `tracking.Tracker.process(scan)` |
-| [Tracktable](https://github.com/sandialabs/tracktable) | BSD-3-Clause | Sandia's C++/Python moving-object trajectory analysis: coordinate domains, spatial indexing, clustering, map rendering | Prior art for the trajectory handling in `scenario.py` and the range-time plot; **not a dependency** — matplotlib already draws the one plot needed |
+| [Tracktable](https://github.com/sandialabs/tracktable) | BSD-3-Clause | Sandia's C++/Python moving-object trajectory analysis: coordinate domains, spatial indexing, clustering, map rendering | Prior art for the trajectory handling in `scenario.py` and the range-time figure; **not a dependency** — matplotlib already draws the one figure needed |
 | [labeledRFS](https://github.com/linh-gist/labeledRFS) / [VisualRFS](https://github.com/linh-gist/VisualRFS) | MIT (ports of Ba-Tuong Vo's MATLAB, whose own terms differ) | GLMB/LMB random-finite-set multi-target trackers with Gibbs-sampled ranked assignment and OSPA metrics | The target state for high-clutter multi-target tracking: no heuristic gate, no M-of-N initiator, no deleter. Written from the papers if implemented; nothing vendored |
 
 ### PyPI packages

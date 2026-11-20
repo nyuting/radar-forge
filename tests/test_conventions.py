@@ -127,7 +127,7 @@ def test_a_python_list_is_accepted_and_a_float64_array_returned(function, argume
 
 
 def test_a_window_is_returned_as_a_fresh_writable_array():
-    """Two calls must not share a buffer, or scaling one dwell's window scales every other."""
+    """Two calls must not share a buffer, or scaling one burst's window scales every other."""
     first, second = window("hann", 16), window("hann", 16)
     first *= 2.0
     np.testing.assert_allclose(window("hann", 16), second, rtol=0.0, atol=0.0)

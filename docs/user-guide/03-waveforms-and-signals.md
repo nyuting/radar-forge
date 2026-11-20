@@ -9,13 +9,13 @@ with noise.
 
 ## What this stage does
 
-Every waveform in the library is a **linear-FM chirp**: a tone whose frequency sweeps in a
+Every waveform on this page is a **linear-FM chirp**: a tone whose frequency sweeps in a
 straight line across a bandwidth $B$ in a time $T_c$. The sweep is centred on the carrier, so it
 covers $f_c \pm B/2$. Its **range resolution** is $c/2B$: the bandwidth alone decides it, not the
 chirp's length or power. That is why radars chirp: a long chirp carries a lot of energy and still
 resolves like a short pulse.
 
-The library has two receivers. An **FMCW** (frequency-modulated continuous-wave) radar transmits
+This page covers two receivers. An **FMCW** (frequency-modulated continuous-wave) radar transmits
 chirp after chirp and **deramps** each echo: it mixes the echo with the chirp being transmitted.
 An echo delayed by $\tau$ is a copy of the chirp shifted in time, so the mixer's output is a
 steady tone, the **beat frequency**, proportional to the delay. A **pulsed** radar transmits short
@@ -58,7 +58,7 @@ generator for you; `pipeline.scan_iq` does that for every scan of a scenario.
 | Beat frequency | $f_b$ | $f_b = \alpha \tau = \alpha R_b / c$ | `signal.beat_frequency_hz` | 234304.7 Hz |
 | Bistatic range from beat | $R_b$ | $R_b = c f_b / \alpha$ | `signal.bistatic_range_from_beat_frequency_m` | 35121.4 m |
 | Samples per chirp | $N_s$ | $N_s = T_c f_s$ | `Radar.n_samples_per_chirp`, `Radar.n_samples_per_pri` | 1000 |
-| Span of the FMCW range axis | $R_{\mathrm{span}}$ | $R_{\mathrm{span}} = c f_s / \alpha$ | `pipeline.map_axes`, `RangeDopplerProduct.range_period_m`, `Radar.unambiguous_bistatic_range_m` | 149896.2 m (74948.1 m slant) |
+| Period of the FMCW range axis | $R_{\mathrm{period}}$ | $R_{\mathrm{period}} = c f_s / \alpha$ | `pipeline.map_axes`, `RangeDopplerProduct.range_period_m`, `Radar.unambiguous_bistatic_range_m` | 149896.2 m (74948.1 m slant) |
 | Motion during one chirp | $\delta R_b$ | $\delta R_b = \lvert \dot R_b \rvert T_c$ | checked in both generators | 0.0562 m (warns above $\Delta R_b/4$ = 37.4741 m) |
 | Noise density | $N_0$ | $N_0 = k T_0 F$ | `Receiver.noise_density_w_per_hz` | 7.9888e-21 W/Hz |
 | Noise power per sample | $P_n$ | $P_n = N_0 f_s$ | `Receiver.noise_power_per_sample_w` | 7.9888e-15 W |
@@ -70,7 +70,7 @@ Symbols used only on this page:
 
 - $R_b$, bistatic range $R_T + R_R$ (m); $\dot R_b$, its rate, positive receding (m/s);
   $\Delta R$, range resolution (m), and $\Delta R_b$ the same in bistatic range (m); $N_s$,
-  fast-time samples per chirp; $R_{\mathrm{span}}$, the bistatic range an FMCW map covers before
+  fast-time samples per chirp; $R_{\mathrm{period}}$, the bistatic range an FMCW map covers before
   it wraps (m); $\delta R_b$, route change during one chirp (m); $N_0$, noise power spectral
   density (W/Hz); $P_n$, noise power in one complex sample (W).
 
@@ -217,7 +217,7 @@ change `sample_rate_hz = 1.0e6` to `2.0e5`, and run the copy with `--out runs/s1
 
 What changes:
 
-- The range axis of `rd_00000.png` shrinks from 0–75 km to 0–15 km: $R_{\mathrm{span}}$ goes from
+- The range axis of `rd_00000.png` shrinks from 0–75 km to 0–15 km: $R_{\mathrm{period}}$ goes from
   149896.2 m to 29979.2 m of bistatic range. `[geometry]` prints
   `unambiguous_bistatic_range_m = 29979.2`, the span.
 - The target's beat, 234.3 kHz, is now above $f_s$ = 200 kHz, so it wraps. `[rd]` prints
@@ -260,17 +260,18 @@ $f_s < B$.
 - **Stop-and-hop.** Range is held constant during each chirp and moves only between chirps. This
   is good while a target moves much less than a range bin per chirp; both generators warn when a
   route changes by more than a quarter of a bin, $\Delta R_b / 4$.
-- **Constant velocity over a CPI.** Acceleration during the dwell is ignored unless a path
+- **Constant velocity over a CPI.** Acceleration during the burst is ignored unless a path
   carries a `doppler_rate_hzps`; line-of-sight paths do not.
 - **No eclipsing.** A pulsed echo that arrives while the transmitter is on is received anyway.
   At S2's 25 % duty cycle that is a quarter of all ranges.
 - **No sawtooth delay limit.** A real FMCW echo must arrive within the chirp, $\tau < T_c$; the
   simulator does not model this.
 - **Magnitude only.** The generators use $\lvert A_p \rvert$ and rebuild the phase from the
-  delay, so a backend cannot add a phase of its own, such as a complex reflection coefficient
-  (`PropagationPaths`'s docstring).
-- **Two waveforms only**: linear-FM FMCW and linear-FM pulses. No phase codes, no non-linear FM,
-  no stepped frequency.
+  delay, so a backend adds a phase of its own, such as a complex reflection coefficient, only
+  through `PropagationPaths.scattering_phase_rad` (`PropagationPaths`'s docstring).
+- **Three waveforms only**: linear-FM FMCW and linear-FM pulses, on this page, and scenario
+  005's continuous noise code (`signal.noise_waveform`, `signal.stream_baseband`). No phase
+  codes, no non-linear FM, no stepped frequency.
 
 ## References
 

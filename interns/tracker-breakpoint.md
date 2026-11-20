@@ -65,7 +65,7 @@ You should not need to change anything under `src/`. If you think you do, tell u
    - range error.
 
    Where does track maintenance fall apart, and how does that relate to Pd?
-5. **A second waveform.** `config/scenario_003_tracking_dual_prf.toml` resolves velocity with
+5. **A second waveform.** `config/scenario_003_tracking_dual_prf.toml` resolves the rate with
    two bursts at different PRFs instead. **Before you run it**, write down what you expect its
    Pd and tracking curves to look like compared with question 1, and why. Then test that
    prediction. Being wrong is fine; we are interested in what you learn from it.

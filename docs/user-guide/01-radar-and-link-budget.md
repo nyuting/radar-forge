@@ -30,10 +30,10 @@ positive receding. For a monostatic radar that is twice the slant range and twic
 velocity. Only a display halves them ([page 2](02-geometry-and-propagation.md)).
 
 Two numbers matter most when a target shows up in the wrong place: the unambiguous bistatic
-range $R_{b,ua}$ and the span of rates $\dot R_{b,ua}$ the radar can tell apart. A target beyond
-either one *folds*: it appears at a wrong range or rate, wrapped back into the window the radar
-can see. A radar cannot make both large at once, and the three variants of scenario 001 each
-make a different choice.
+range, the range period $R_{\mathrm{period}}$, and the span of rates the radar can tell apart,
+the rate period $v_{\mathrm{period}}$. A target beyond either one *folds*: it appears at a wrong
+range or rate, wrapped back into the window the radar can see. A radar cannot make both large at
+once, and the three variants of scenario 001 each make a different choice.
 
 ```
  P_t, G_t ──► spreads over 4π(R_T)² ──► target, σ ──► spreads over 4π(R_R)² ──► antenna G_r λ²/(4π) ──► P_r
@@ -58,18 +58,18 @@ make a different choice.
 | Duty cycle | $d$ | $d = T_c \cdot \mathrm{PRF}$ | `Transmitter.duty_cycle_linear` | 1.00 |
 | Sweep rate | $\alpha$ | $\alpha = B / T_c$ | `Transmitter.sweep_rate_hzps` | 2.0000e9 Hz/s |
 | Unambiguous delay | $\tau_{ua}$ | $f_s / \alpha$ (FMCW), $1/\mathrm{PRF}$ (pulsed) | `Radar.unambiguous_delay_s` | 500 µs |
-| Unambiguous bistatic range | $R_{b,ua}$ | $c\,\tau_{ua}$: $c f_s / \alpha$ (FMCW), $c / \mathrm{PRF}$ (pulsed) | `Radar.unambiguous_bistatic_range_m` | 149.896 km (74.948 km slant) |
-| Unambiguous rate span | $\dot R_{b,ua}$ | $\dot R_{b,ua} = \lambda\,\mathrm{PRF}$, shown as $\pm\dot R_{b,ua}/2$ | `Radar.unambiguous_bistatic_range_rate_mps` | 30.5911 m/s: ±15.2955 m/s (±7.6478 m/s radial) |
+| Unambiguous bistatic range | $R_{\mathrm{period}}$ | $c\,\tau_{ua}$: $c f_s / \alpha$ (FMCW), $c / \mathrm{PRF}$ (pulsed) | `Radar.unambiguous_bistatic_range_m` | 149.896 km (74.948 km slant) |
+| Unambiguous rate span | $v_{\mathrm{period}}$ | $v_{\mathrm{period}} = \lambda\,\mathrm{PRF}$, shown as $\pm v_{\mathrm{period}}/2$ | `Radar.unambiguous_bistatic_range_rate_mps` | 30.5911 m/s: ±15.2955 m/s (±7.6478 m/s radial) |
 | Baseline | $L_b$ | distance between the two sites | `Radar.baseline_m` | 0.0 m |
 | Bistatic angle | $\beta$ | $\cos\beta = (R_T^2 + R_R^2 - L_b^2) / (2 R_T R_R)$ | `TargetGeometry.bistatic_angle_rad` | 0 |
 
 The S1 received power and SNR are for the target's true range at scan 0, 17 560.7 m, from
 `truth_geometry`. S1 is monostatic, so $R_T = R_R$, $L_b = 0$ and $\beta = 0$. Scenario 002
-(B1) flies the S1 waveform over a 19 601.4 m baseline. Its $R_{b,ua}$ is the same 149.896 km,
-because $c\,\tau_{ua}$ does not depend on where the antennas stand. Its range resolution grows
-from 74.95 m at $\beta = 0$ to 86.54 m at 60° and 105.99 m at 90°: measured in $R_b$ itself a
-resolution cell is always $c/B$ = 149.9 m, and $\Delta R(\beta)$ is that cell on the ground,
-along the bisector of $\beta$.
+(B1) flies the S1 waveform over a 19 601.4 m baseline. Its $R_{\mathrm{period}}$ is the same
+149.896 km, because $c\,\tau_{ua}$ does not depend on where the antennas stand. Its range
+resolution grows from 74.95 m at $\beta = 0$ to 86.54 m at 60° and 105.99 m at 90°: measured
+in $R_b$ itself a resolution cell is always $c/B$ = 149.9 m, and $\Delta R(\beta)$ is that cell
+on the ground, along the bisector of $\beta$.
 
 Symbols used only on this page:
 
@@ -83,7 +83,9 @@ Symbols used only on this page:
 - $L_b$: baseline between the two sites, m (`baseline_m`);
 - $\Delta R$, $\Delta R(\beta)$: monostatic and bistatic range resolution, m;
 - $T_{\mathrm{PRI}}$: pulse repetition interval, s; $d$: duty cycle, linear;
-- $\tau_{ua}$, $R_{b,ua}$, $\dot R_{b,ua}$: unambiguous delay, bistatic range and rate span.
+- $\tau_{ua}$, $R_{\mathrm{period}}$, $v_{\mathrm{period}}$: unambiguous delay, and the
+  bistatic range and rate periods, each the whole width of its axis (the guide's
+  [notation](README.md#notation)).
 
 The radar equation, in Willis's bistatic form. One site has $R_T = R_R = R$, so power falls as
 $1/R^4$ and doubling the range costs 12 dB:
@@ -99,19 +101,21 @@ $$N_0 = k\, T_0\, F, \qquad \mathrm{SNR} = \frac{P_r}{N_0 B}$$
 The two unambiguous limits. Range folds when an echo arrives too late to be told apart; rate
 folds when the carrier phase, $-2\pi R_b/\lambda$, turns more than half a cycle between chirps:
 
-$$R_{b,ua} = \frac{c}{\mathrm{PRF}}\ \text{(pulsed)}, \qquad R_{b,ua} = \frac{c\, f_s}{\alpha}\ \text{(FMCW)}, \qquad |\dot R_b| < \frac{\dot R_{b,ua}}{2} = \frac{\lambda\, \mathrm{PRF}}{2}$$
+$$R_{\mathrm{period}} = \frac{c}{\mathrm{PRF}}\ \text{(pulsed)}, \qquad R_{\mathrm{period}} = \frac{c\, f_s}{\alpha}\ \text{(FMCW)}, \qquad |\dot R_b| < \frac{v_{\mathrm{period}}}{2} = \frac{\lambda\, \mathrm{PRF}}{2}$$
 
 **The trade between the two.** A waveform that repeats every $T_{\mathrm{PRI}}$ cannot tell a
 delay $\tau$ from $\tau + T_{\mathrm{PRI}}$, and a phase sampled once per repetition cannot tell
 a Doppler shift $f$ from $f + \mathrm{PRF}$. The two periods multiply to one whatever the PRF.
 For a pulsed radar, whose range limit is one repetition, that is
 
-$$R_{b,ua}\, \dot R_{b,ua} = \frac{c}{\mathrm{PRF}} \cdot \lambda\, \mathrm{PRF} = c\lambda$$
+$$R_{\mathrm{period}}\, v_{\mathrm{period}} = \frac{c}{\mathrm{PRF}} \cdot \lambda\, \mathrm{PRF} = c\lambda$$
 
 Only the carrier sets it. Halve both for one site and it is $c\lambda/4$; count the rate as
 $\pm v_{ua}$ as well and it is the textbook $R_{ua}\, v_{ua} = c\lambda/8$, with
-$R_{ua} = c/(2\,\mathrm{PRF})$ and $v_{ua} = \lambda\,\mathrm{PRF}/4$ of radial velocity. The
-three forms differ by convention, not by physics. A designer uses the number three ways:
+$R_{ua} = c/(2\,\mathrm{PRF}) = R_{\mathrm{period}}/2$ and
+$v_{ua} = \lambda\,\mathrm{PRF}/4 = v_{\mathrm{period}}/4$ of radial velocity, the one-sided
+limit of a monostatic figure. The three forms differ by convention, not by physics. A designer
+uses the number three ways:
 
 - **As a test.** Multiply the range span the radar must cover by the rate span it must cover. If
   the product is above $c\lambda$, no single PRF does both, and the choice is which axis folds:
@@ -130,12 +134,12 @@ echo that arrives after its own chirp has ended meets the next chirp, so a real 
 cannot place it. The delay an FMCW burst can use, its *reach*, is the smaller of $f_s/\alpha$
 and $T_c$, and the product of its reach and rate span is $c\lambda \cdot d \cdot \min(f_s/B, 1)$. S1
 and S3 have $d = 1$. S1 has $f_s/B = 0.5$ and reaches half of $c\lambda$: its sample rate, not
-its PRF, is the limit. S3 has $f_s/B = 2$, so its map's range axis, $R_{b,ua} = c f_s/\alpha$,
-is twice as long as its chirp, and each burst reaches exactly $c\lambda$. That is what a real
-radar could use. The simulator does not apply the cap: an S3 target at 80 km of route appears
-at 80 km, at full strength (see Limits). What S3's second PRF buys does not show in a per-burst
-product: the pair together tells apart six times the rates the first burst can, and five times
-the second's.
+its PRF, is the limit. S3 has $f_s/B = 2$, so its map's range axis,
+$R_{\mathrm{period}} = c f_s/\alpha$, is twice as long as its chirp, and each burst reaches
+exactly $c\lambda$. That is what a real radar could use. The simulator does not apply the cap:
+an S3 target at 80 km of route appears at 80 km, at full strength (see Limits). What S3's
+second PRF buys does not show in a per-burst product: the pair together tells apart six times
+the rates the first burst can, and five times the second's.
 
 ## How it works, step by step
 
@@ -353,10 +357,10 @@ route length. A monostatic figure or CSV halves them (`figures.display_axes`).
   $\beta = \pi$ is not modelled.
 - A bistatic pair is perfectly synchronised in time and phase, and the direct signal from
   transmitter to receiver is not modelled.
-- The FMCW $R_{b,ua}$ ignores the $c T_c$ cap of a real sawtooth, whose delay must be shorter
-  than the chirp, and so does the simulator: it writes a full-length beat tone for any delay, so
-  a target beyond $c T_c$ of route appears at full strength wherever the map's axis puts it: at
-  its range up to $c f_s/\alpha$ (S3: 80 km appears at 80 km), folded beyond.
+- The FMCW $R_{\mathrm{period}}$ ignores the $c T_c$ cap of a real sawtooth, whose delay must be
+  shorter than the chirp, and so does the simulator: it writes a full-length beat tone for any
+  delay, so a target beyond $c T_c$ of route appears at full strength wherever the map's axis
+  puts it: at its range up to $c f_s/\alpha$ (S3: 80 km appears at 80 km), folded beyond.
 
 ## References
 

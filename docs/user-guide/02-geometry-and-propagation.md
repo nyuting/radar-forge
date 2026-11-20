@@ -149,17 +149,19 @@ halves them:
    `bistatic_angle_rad`, plus `aod_rad` and `aoa_rad` of shape `(n_targets, 2)`, each in its own
    site's frame. It raises `ValueError` for a target exactly on a site.
    `TargetGeometry.monostatic(range_m, radial_velocity_mps)` builds one by hand from a slant range
-   and a radial velocity, positive receding, and doubles both.
+   and the one-way range rate, positive receding, and doubles both; the one-way rate of a single
+   site is the radial velocity, the one place outside a display where that name appears.
 6. **Paths.** `line_of_sight_paths(radar, geometry, rcs_m2)` returns a `PropagationPaths` with
    one path per target, monostatic or bistatic. Its fields are `delay_s`, `doppler_hz` and
    `amplitude_linear`, each of shape `(n_paths,)`; `aoa_rad` and `aod_rad` of shape
    `(n_paths, 2)` as (azimuth, elevation); `n_bounces`, which is 1 for a direct return; and
-   `doppler_rate_hzps`, zero here. `bistatic_range_m` is `delay_s` times $c$. The amplitude's
-   magnitude comes from `received_power_w` (page 1), and a negative `rcs_m2` raises `ValueError`.
+   `doppler_rate_hzps`, `doppler_jerk_hzps2` and `scattering_phase_rad`, zero here.
+   `bistatic_range_m` is `delay_s` times $c$. The amplitude's magnitude comes from
+   `received_power_w` (page 1), and a negative `rcs_m2` raises `ValueError`.
 7. **Hand-off.** `signal.fmcw_deramp_baseband(paths, radar, n_pulses, rng=rng)` or
    `signal.pulsed_baseband` turns the paths into a cube of shape `(n_pulses, n_samples_per_pri)`.
    They use only `abs(amplitude_linear)` and rebuild the phase from `bistatic_range_at_m`, so
-   that the phase moves with the delay from chirp to chirp.
+   that the phase moves with the delay from chirp to chirp, and add `scattering_phase_rad`.
 
 ## Try it
 
@@ -325,10 +327,11 @@ carries the right carrier phase, and it models no direct signal (`radar`'s modul
 - **Ellipsoidal heights only.** There is no geoid model, so a height above sea level must be
   converted before it goes in.
 - **Only the amplitude's magnitude reaches `signal`.** A backend cannot impose an extra phase,
-  such as a complex reflection coefficient, through `amplitude_linear` today
-  (`PropagationPaths`'s docstring).
-- **Angles are carried but not used.** `aoa_rad` and `aod_rad` wait for the array modules; the
-  generators assume one isotropic channel.
+  such as a complex reflection coefficient, through `amplitude_linear`; it passes one through
+  `scattering_phase_rad`, which the generators add (`PropagationPaths`'s docstring).
+- **Angles reach only a receive array.** `aoa_rad` steers each path onto scenario 006's
+  receive array (`pipeline.synthesise` with an `array`); `aod_rad` is carried and unused, and
+  without an array the generators assume one isotropic channel.
 - **Bistatic:** the sites are perfectly synchronised in time and phase, the direct signal from
   transmitter to receiver is not modelled, and the bistatic RCS is one fixed number at every
   $\beta$ (`radar`'s module docstring, and scenario 002).

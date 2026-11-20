@@ -232,7 +232,7 @@ def _fine(
 ) -> FineEstimate:
     """Refine range and rate on a slow-time chip of the beam's profiles, in parent coordinates.
 
-    The range is the dwell's mean, the walk not taken out.
+    The range is the burst's mean, the walk not taken out.
     """
     # The beam averages n_rx channels of a range FFT of n_samples: noise per profile cell.
     n_rx = 1 if product.channels is None else product.channels.shape[-1]

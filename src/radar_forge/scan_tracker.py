@@ -118,11 +118,11 @@ class ScanTracker:
     ``rate_unfolding = "track_aided"`` is scenario 003's policy: a track may unfold after N
     associated ranges, the least N whose least-squares slope is certain to a
     ``unfold_sigma_gate``-th of the rate period,
-    :math:`(\sigma_R/T)\sqrt{12/(N(N^2-1))} < v_{period}/g` (Bar-Shalom [1] §5.5). The track
-    with the longest such history gives each plot the fold nearest its rate, unless that lies
-    over half a period from the slope of its last ``n_slope_scans`` ranges, the fold monitor: a
-    wrong fold agrees with the prediction that chose it, never with the range. One reference
-    track serves a scan: single-target policy.
+    :math:`(\sigma_R/T)\sqrt{12/(N(N^2-1))} < v_{\mathrm{period}}/g`
+    (Bar-Shalom [1] §5.5). The track with the longest such history gives each plot the fold
+    nearest its rate, unless that lies over half a period from the slope of its last
+    ``n_slope_scans`` ranges, the fold monitor: a wrong fold agrees with the prediction that
+    chose it, never with the range. One reference track serves a scan: single-target policy.
 
     Rotating: the state is ENU (x, y) and velocity, plus the turn rate under ``motion =
     "imm"``, whose modes are CV quiet, constant turn and CV agile; z is (horizontal range,

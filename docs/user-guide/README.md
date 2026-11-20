@@ -32,7 +32,7 @@ target's route; `coordinates` turns latitude and longitude into the local frame 
 | [3. Waveforms and signals](03-waveforms-and-signals.md) | `signal` | The chirp, how range turns into a beat frequency, and how the library builds the complex samples a receiver records |
 | [4. Range-Doppler processing](04-range-doppler-processing.md) | `dsp`, and `pipeline.range_doppler_product` | How two FFTs turn those samples into a map of range against velocity, what a taper costs, and how two PRFs undo folding |
 | [5. Detection](05-detection.md) | `detection`, and `pipeline.scan_plots` | How CFAR decides which cells of the map hold a target, at a false-alarm rate you choose |
-| [6. Tracking](06-tracking.md) | `tracking/`, and `scan_tracker.ScanTracker` | How detections from scan after scan become tracks |
+| [6. Tracking](06-tracking.md) | `tracking/`, and `scan_tracker.ScanTracker` | How plots, scan after scan, become tracks, and how to choose GNN, JPDA, MHT, PMBM or an IMM |
 
 Every page has the same sections in the same order: what the stage does, a table of quantities
 and equations with a worked value, how it works step by step, a short example to run, a
@@ -84,32 +84,45 @@ Each symbol means the same thing on every page.
 | $\dot R_b$ | bistatic range rate, positive receding | m/s | `bistatic_range_rate_mps` |
 | $\beta$ | bistatic angle, at the target between the two sites | rad | `bistatic_angle_rad` |
 | $\tau$ | route delay, $R_b / c$ | s | `delay_s` |
+| $R_{\mathrm{period}}$ | range period: the bistatic range a map's range axis covers before it wraps, $c/\mathrm{PRF}$ pulsed, $c f_s/\alpha$ FMCW | m | `unambiguous_bistatic_range_m`, `range_period_m` |
+| $v_{\mathrm{period}}$ | rate period, $\lambda\,\mathrm{PRF}$: the map's rate axis holds $(-v_{\mathrm{period}}/2, +v_{\mathrm{period}}/2]$ | m/s | `unambiguous_bistatic_range_rate_mps`, `rate_period_mps` |
 | $f_d$ | Doppler shift | Hz | `doppler_hz` |
 | $f_b$ | beat frequency after the FMCW deramp | Hz | `beat_frequency_hz` |
-| $N$ | chirps in one coherent processing interval (CPI) | — | `n_pulses` |
+| $N$ | chirps in one burst, a coherent processing interval (CPI) | — | `n_pulses` |
 | $P_{fa}$ | probability of false alarm | — | `pfa` |
 | $\alpha_{\mathrm{cfar}}$ | CFAR threshold factor. The code's docstrings write it $\alpha$; the subscript keeps it apart from the sweep rate | — | `cfar_threshold_factor` |
 
 A page may add a symbol of its own. When it does, it defines it in its own table.
 
-Each word below means one thing on every page; the code follows as Phase 5 lands. The last
-column is what a MATLAB, Stone Soup, TI or radarsimpy reader would look for.
+Both periods are in route units, the whole width of the axis. Textbooks give the one-sided
+monostatic limits instead, $R_{ua} = c/(2\,\mathrm{PRF})$ and $v_{ua} = \lambda\,\mathrm{PRF}/4$
+of radial velocity: half of $R_{\mathrm{period}}$ for a pulsed radar, and a quarter of
+$v_{\mathrm{period}}$. For scenario 001's S1, $v_{\mathrm{period}}$ is 30.5911 m/s, the map
+holds ±15.2955 m/s, and a monostatic figure shows ±7.6478 m/s, which is the textbook's
+$v_{ua}$. [Page 1](01-radar-and-link-budget.md) uses $R_{ua}$ and $v_{ua}$ once, to compare.
+
+Each word below means one thing on every page and in the code's public names (a few private
+and test names, and `report_probability`, wait for a later rename PR). The last column is the word a
+MATLAB, Stone Soup, TI or radarsimpy reader would search for, and the traps where theirs
+differs.
 
 | Word | Meaning | Elsewhere |
 | :-- | :-- | :-- |
-| scan | One revisit of the scene: a full rotation, a full electronic scan pattern or, for a staring radar, one transmission of all its bursts. `[scans] scan_period_s` sets how often | TI and radarsimpy: frame; MATLAB: update |
-| burst | One coherent processing interval (CPI) at one PRF | MATLAB: CPI, and its dwell is a scan's set of bursts; TI: burst of chirps |
-| pulse, chirp | The repeated waveform unit, counted by `n_pulses`; a chirp is an LFM sweep, `chirp_duration_s` long | MATLAB `NumPulses`; radarsimpy `pulses` |
-| detection | A CFAR cluster, in map cells | |
-| plot | What reaches the tracker, in physical units, after dual-PRF pairing and unfolding | MATLAB and Stone Soup call our plot a detection; ASTERIX says plot |
-| measurement | A plot's vector and covariance inside the filter | |
-| figure | A picture; "plot" is kept for the tracker's input | |
-| range rate | The time derivative of a route's length, positive receding | TI and radarsimpy: radial velocity, used here only for the halved monostatic display; MATLAB's "speed" is positive approaching |
-| period (span in prose) | The whole width of a circular axis before a value folds: a map's unambiguous range or range rate, in route units. The code names it `*_period_*`; the pages also say span | Most sources give the one-sided monostatic limits, c / 2 PRF and ±λ PRF / 4 |
-| trajectory, track | The true path of a target; a track is the tracker's estimate of it | MATLAB `waypointTrajectory`; Stone Soup: ground truth path |
-| clutter density | False plots per unit of measurement space. "Intensity" is kept for the PMBM birth process | MATLAB `ClutterDensity`; Stone Soup `clutter_spatial_density` |
+| scan | One revisit of the scene: a full rotation, a full electronic scan pattern or, for a staring radar, one transmission of all its bursts. `[scans] scan_period_s` sets how often. A rotating radar's scan reaches the tracker in sectors ([page 6](06-tracking.md#how-a-scan-reaches-the-tracker)) | TI and radarsimpy: frame; MATLAB: update, and `IsScanDone` at the end of a rotation |
+| burst | One coherent processing interval (CPI) at one PRF: a `[[burst]]` table, `n_pulses` long. "Dwell" is not used | MATLAB: CPI, and its dwell is the set of CPIs at one beam position, several to a scan; TI: burst of chirps |
+| pulse, chirp | The repeated waveform unit, counted by `n_pulses`; a chirp is an LFM sweep, `chirp_duration_s` long | MATLAB `NumPulses`, `PulseWidth`, `SweepTime`; TI: chirp; radarsimpy `pulses` |
+| detection | A CFAR cluster, in map cells (`detection.Detection`) | Not MATLAB's or Stone Soup's detection, which is our plot |
+| plot | What reaches the tracker, in physical units, after dual-PRF pairing and unfolding (`pipeline.Plots`, `plot_simulator.PlotScan`) | MATLAB `objectDetection` and Stone Soup `Detection`; ASTERIX and surveillance radars: plot |
+| measurement | A plot's vector and covariance inside the filter (`tracking.Scan`) | MATLAB's `Measurement` and `MeasurementNoise`; order differs: our spherical model reports range first, Stone Soup's `CartesianToElevationBearingRange` elevation, bearing, then range |
+| figure | A picture (`figures.py`, `--no-figures`); "plot" is kept for the tracker's input | |
+| range rate | The time derivative of a route's length, positive receding (`bistatic_range_rate_mps`) | MATLAB's range rate has our sign, but its "speed" is positive approaching; TI and radarsimpy: radial velocity, used here only for the halved monostatic display and `TargetGeometry.monostatic`'s one-way inputs; Stone Soup `CartesianToBearingRangeRate` |
+| period (span in prose) | The whole width of a circular axis before a value folds: a map's unambiguous range or range rate, in route units, $R_{\mathrm{period}}$ and $v_{\mathrm{period}}$. The code names it `*_period_*`; the pages also say span | Most sources give the one-sided monostatic limits, c / 2 PRF and ±λ PRF / 4: see above |
+| trajectory, track | The true path of a target (`trajectory.Arc`, or a CSV of fixes); a track is the tracker's estimate of it | MATLAB `waypointTrajectory`; Stone Soup: ground truth path |
+| clutter density | False plots per unit of measurement space (`clutter_density`), never "clutter intensity". "Intensity" names only PMBM's Poisson birth and undetected intensities (`birth_intensity_per_scan`, `undetected_intensity`) and, on page 6, the process-noise intensity $q$ | MATLAB `ClutterDensity`; Stone Soup `clutter_spatial_density` |
 | monostatic or bistatic | Spelled out; "geometry" where a noun is needed | MATLAB: `Mode` |
-| geodetic | Latitude, longitude and height above the WGS-84 ellipsoid | pymap3d, MATLAB; NavPy and Stone Soup: lla |
+| geodetic | Latitude, longitude and height above the WGS-84 ellipsoid (`coordinates.geodetic_to_enu_m`) | pymap3d, MATLAB; NavPy and Stone Soup: lla |
+| range, azimuth, elevation | Azimuth clockwise from north, elevation up from the horizon; `enu_to_range_azimuth_elevation_rad` returns range first | pymap3d `enu2aer` has the same azimuth but returns (azimuth, elevation, range); Stone Soup's bearing is `atan2(y, x)`, counter-clockwise from east |
+| stage, the stepper | One named step of a scenario run, checked against its `[verify]` table; `radar_forge.verify` runs them | No library has one |
 
 ## Which scenario to try each page in
 
@@ -122,6 +135,7 @@ guide ends by sending you to one of them, with one setting to change and what to
 | [001, X-band](../../config/scenario_001_fmcw_low_prf.toml): one site, three waveforms | 1, 2, 3, 4 | `uv run python scripts/run_scenario.py config/scenario_001_fmcw_low_prf.toml --scans 3` |
 | [002, bistatic](../../config/scenario_002_bistatic_xband.toml): two sites | 1, 2, 3 | `uv run python scripts/run_scenario.py config/scenario_002_bistatic_xband.toml --scans 3` |
 | [003, tracking](../../config/scenario_003_tracking.toml): detection and tracking | 5, 6 | `uv run python scripts/run_scenario.py config/scenario_003_tracking.toml --scans 3` |
+| [011, terminal area](../../config/scenario_011_manoeuvre.toml): five manoeuvring aircraft, as a rotating radar's plots, tracked by an IMM | 6 | `uv run python scripts/run_scenario.py config/scenario_011_manoeuvre.toml --scans 3` |
 
 Set up once with `uv sync --extra dev --extra visualisation`. A run writes `runs/<name>/`; drop
 `--scans` for the whole window, and add `--stop-after rd` to stop after a stage.
@@ -133,6 +147,7 @@ page links to the tasks that build on it.
 
 - The module docstrings hold the full derivations, and every page links to them. In Python,
   `help(radar_forge.dsp)` shows one.
-- [`spec/`](../../spec/) says what the library is meant to do; where a page and a spec disagree,
-  the spec wins.
+- [`spec/`](../../spec/) holds the file formats (data-001), the tracking architecture
+  (tracker-001) and the scenarios not yet built; where a page and a spec disagree, the spec
+  wins. A built scenario's numbers live in its TOML's `[verify]` table.
 - [`docs/conventions/style.md`](../conventions/style.md) explains the naming rules used above.

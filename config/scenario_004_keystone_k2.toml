@@ -19,7 +19,7 @@ acceleration_enu_mps2 = [0.0, -147.09975, 0.0] # 15 g closing: -294.1995 m/s^2 b
 [scans]
 start_time_s = 0.0
 duration_s = 0.075   # three scans; a fixed gate holds the target no longer
-scan_period_s = 0.025 # one 20.48 ms dwell every 25 ms
+scan_period_s = 0.025 # one 20.48 ms burst every 25 ms
 
 [site.tx]
 # A tracking radar downrange of a sounding-rocket pad; no [site.rx]: monostatic.
@@ -73,7 +73,7 @@ peak_tolerance_db = 0.01
 truth_within_bins = 1.0
 detection_fraction = 1.0
 rate_tolerance_mps = 1.49370
-# The peak track's least-squares slope is the mid-dwell rate, 680 + 294.1995 x 0.01024 =
+# The peak track's least-squares slope is the mid-burst rate, 680 + 294.1995 x 0.01024 =
 # 683.01 m/s: 683.01 x 20.48 ms / 0.49965 m = 27.995 bins, +-1 bin.
 walk_bins = 27.995
 walk_tolerance_bins = 1.0

@@ -13,7 +13,9 @@ equations with worked values, an example to run, and a scenario to try it in.
 5. [Detection](user-guide/05-detection.md)
 6. [Tracking](user-guide/06-tracking.md)
 
-The [scenarios](#scenarios) below are where you try each page out.
+The guide's README holds the [notation and the glossary](user-guide/README.md#notation): one
+symbol and one word per concept, with the word a MATLAB, Stone Soup or TI reader would search
+for. The [scenarios](#scenarios) below are where you try each page out.
 
 ## Conventions
 
@@ -38,7 +40,6 @@ The rules, and the check that enforces each, are summarised in [CLAUDE.md](../CL
 
 ## Design
 
-
 - [`spec/data-001-formats.md`](../spec/data-001-formats.md) — the files a run writes.
 - [`spec/tracker-001.md`](../spec/tracker-001.md) — the tracking architecture.
 
@@ -62,5 +63,5 @@ comments, tests and each TOML's `description` use (S1-S3 for 001, B1-B2 for 002,
 | [008, STAP](../spec/scenario-008-stap.md): airborne clutter ridge | none | none | Specified, not built |
 | [009, receiver chain](../spec/scenario-009-receiver-chain.md): front end, DDC, impairments | none | none | Specified, not built |
 | [010, self-calibration](../spec/scenario-010-self-calibration.md): array perturbations | none | none | Specified, not built |
-| 011a, terminal-area tracking: turns, crossings, clutter; IMM, JPDA, JIPDA, the plot model | `scenario_011_manoeuvre.toml`, `scenario_011_crossing.toml`, `scenario_011_terminal_dense.toml`, `scenario_011_iq_check.toml`, `scenario_011_iq_check_mean_shift.toml` (the same chain clustered by mean-shift mode) | V1 `manoeuvre`, V2 `crossing`, V4 `terminal_dense`, V5 `iq_check` and `iq_check_mean_shift` | Runs; checked by `[verify]` |
+| 011a, terminal-area tracking: turns, crossings, clutter; IMM, JPDA, JIPDA, the plot simulator | `scenario_011_manoeuvre.toml`, `scenario_011_crossing.toml`, `scenario_011_terminal_dense.toml`, `scenario_011_iq_check.toml`, `scenario_011_iq_check_mean_shift.toml` (the same chain clustered by mean-shift mode) | V1 `manoeuvre`, V2 `crossing`, V4 `terminal_dense`, V5 `iq_check` and `iq_check_mean_shift` | Runs; checked by `[verify]` |
 | 011b, track-oriented MHT and PMBM: the separation sweep | `scenario_011_cst_sweep.toml`; MHT and PMBM also score `scenario_011_crossing.toml` and `scenario_011_terminal_dense.toml` | V3 `cst_sweep` | Runs; checked by `[verify]` |

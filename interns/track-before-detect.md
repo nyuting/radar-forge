@@ -93,7 +93,7 @@ Use these, or say exactly where and why you depart from them.
   probability of CFAR, which does not carry over: a per-cell probability of 1e-3 on a map of this
   size is hundreds of false alarms per scan, and a TBD detector does not decide cell by cell.
 - **Detection** means the detector declares a target, and the declared trajectory's final cell is
-  within one range bin and one velocity bin of the truth. A declaration anywhere else is a false
+  within one range bin and one rate bin of the truth. A declaration anywhere else is a false
   track, even if a target is present.
 
 ### The bounds
@@ -116,7 +116,7 @@ it, and why, is the interesting part.
 - **The threshold.** A TBD score is a maximum over very many trajectories. Its noise-only
   distribution is not the per-cell one, and you will need to estimate its tail at small
   probabilities from a finite number of runs. Say how, and how confident you are.
-- **Velocity folding.** The target's true velocity is well outside the map's unambiguous
+- **Rate folding.** The target's true range rate is well outside the map's unambiguous
   interval. Its Doppler cell wraps around.
 - **How far the target moves.** Measure, from the truth, how far the target moves in range and in
   Doppler between scans, before you design anything that depends on it. Do not assume both are
