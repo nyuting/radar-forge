@@ -3,7 +3,7 @@
 A range-Doppler map holds a power in every cell. Detection decides which cells hold a target.
 This page covers `radar_forge.detection`: constant-false-alarm-rate (CFAR) thresholds, the
 false-alarm arithmetic behind them, and clustering the cells that cross into one detection per
-target. It also covers `pipeline.frame_plots`, which runs all of it on a scenario's maps and
+target. It also covers `pipeline.scan_plots`, which runs all of it on a scenario's maps and
 hands the tracker one **plot** per detection. It sits between
 [range-Doppler processing](04-range-doppler-processing.md) and [tracking](06-tracking.md) in
 [the chain](README.md#the-chain).
@@ -136,12 +136,12 @@ fewer reference cells pays more: 12.268 dB with 16.
    `clustering.cluster_points(points, epsilon, min_samples=, period=)`: DBSCAN with one radius
    per column and a period on each circular one, a label per point and `-1` for noise. The
    pipeline does not call it.
-8. **Plots.** `pipeline.frame_plots(products, scenario.detection)` runs steps 1 to 7 on each
+8. **Plots.** `pipeline.scan_plots(products, scenario.detection)` runs steps 1 to 7 on each
    burst's map with the scenario's `[detection]` table: CA-CFAR along range with range wrapped,
    so every cell keeps its full window; clusters on the circle of both axes, connected cells
    or, with `mean_shift_bandwidth_bins` above 0, mean-shift modes (on
    `scenario_011_iq_check_mean_shift.toml` a pair 1.5 range bins apart is one detection in 28
-   frames of 120, against 61 with connected cells); then keeps only the
+   scans of 120, against 61 with connected cells); then keeps only the
    strongest cluster within `merge_range_bins` range cells (scenario 003: 1), since an untapered
    map's Doppler sidelobes cross at the target's own range. Each kept centroid becomes a
    bistatic range and a folded rate through the map's own axes, with one bin over $\sqrt{12}$
@@ -219,21 +219,21 @@ target's six cells become one detection; its threshold, 12.36 W, is 13.856 times
 its 32 reference cells. The other three detections are that noise map's own false alarms, one
 cell each.
 
-The pipeline does the same on a real map. This runs frame 0 of scenario 003 through it:
+The pipeline does the same on a real map. This runs scan 0 of scenario 003 through it:
 
 ```python
-from radar_forge.dsp import fold_velocity_mps
-from radar_forge.pipeline import frame_plots, frames, range_doppler_product
+from radar_forge.dsp import fold_range_rate_mps
+from radar_forge.pipeline import range_doppler_product, scan_iq, scan_plots
 from radar_forge.scenario import load_scenario
 
-# Frame 0 of scenario 003: one burst, one map, CFAR along range, clusters, plots.
+# Scan 0 of scenario 003: one burst, one map, CFAR along range, clusters, plots.
 scenario = load_scenario("config/scenario_003_tracking.toml")
-frame = next(frames(scenario, n_frames=1))
-product = range_doppler_product(frame.cubes[0], scenario.radar)
-plots = frame_plots([product], scenario.detection)
+scan = next(scan_iq(scenario, n_scans=1))
+product = range_doppler_product(scan.cubes[0], scenario.radar)
+plots = scan_plots([product], scenario.detection)
 
-range_m, rate_mps = frame.truth.bistatic_range_m[0], frame.truth.bistatic_range_rate_mps[0]
-folded_mps = fold_velocity_mps(rate_mps, product.rate_period_mps)
+range_m, rate_mps = scan.truth.bistatic_range_m[0], scan.truth.bistatic_range_rate_mps[0]
+folded_mps = fold_range_rate_mps(rate_mps, product.rate_period_mps)
 bins = f"{product.range_bin_m:.3f} m, {product.rate_bin_mps:.6f} m/s"
 print(f"map {product.rd_map.shape}: bins {bins}")
 print(f"truth: {range_m:.1f} m, {rate_mps:.3f} m/s, folded to {folded_mps:.3f} m/s")
@@ -263,18 +263,18 @@ map folds the rate at ±15.30 m/s.
 
 ## Try it in a scenario
 
-[Scenario 003](../../config/scenario_003_tracking.toml) runs this on every frame of scenario
-001's S1 radar and tracks what it finds. Run ten frames through the stepper:
+[Scenario 003](../../config/scenario_003_tracking.toml) runs this on every scan of scenario
+001's S1 radar and tracks what it finds. Run ten scans through the stepper:
 
 ```bash
-uv run python scripts/run_scenario.py config/scenario_003_tracking.toml --frames 10
+uv run python scripts/run_scenario.py config/scenario_003_tracking.toml --scans 10
 ```
 
-`[rd]` prints `n_detections`, the plots over all frames, and `false_alarm_ratio`: the measured
+`[rd]` prints `n_detections`, the plots over all scans, and `false_alarm_ratio`: the measured
 over the design $P_{fa}$ on noise-only maps, which `[verify]` holds within a factor of two.
 `[detect]` checks the rate of the plot nearest each target against the truth, folded as the
 map folds it, and writes `runs/scenario_003_tracking/detections.csv`, one row per detection. A
-monostatic radar's CSV shows range and rate halved (`plots.display_axes`), so `range_m` is the
+monostatic radar's CSV shows range and rate halved (`figures.display_axes`), so `range_m` is the
 slant range and `sigma_range_m` is 21.64 m.
 
 **Knob:** in a copy of the TOML in `config/`, change `pfa = 1e-5` to `pfa = 1e-4` in
@@ -284,23 +284,23 @@ drawn.
 
 | | `pfa = 1e-5` | `pfa = 1e-4` |
 | :-- | --: | --: |
-| Expected false alarms per frame, $N_{\mathrm{cells}} P_{fa}$ | 2.56 | 25.6 |
-| `n_detections`, 10 frames | 40 | 235 |
-| Track IDs started (largest `track_id` in `tracks.csv`), 10 frames | 29 | 154 |
-| `n_confirmed_tracks`, whole 120-frame window (drop `--frames`) | 1 | 10 |
+| Expected false alarms per scan, $N_{\mathrm{cells}} P_{fa}$ | 2.56 | 25.6 |
+| `n_detections`, 10 scans | 40 | 235 |
+| Track IDs started (largest `track_id` in `tracks.csv`), 10 scans | 29 | 154 |
+| `n_confirmed_tracks`, whole 120-scan window (drop `--scans`) | 1 | 10 |
 
 Ten times the $P_{fa}$ gives about six times the detections and five times the tentative tracks
-in ten frames: every plot no track takes starts one. Both ten-frame runs pass every check, and
+in ten scans: every plot no track takes starts one. Both ten-scan runs pass every check, and
 neither confirms a false track. The threshold drops only 1.13 dB (11.417 to 10.283 dB), yet
 over the full window nine false tracks are confirmed where there were none. The target's own
 track gets worse too: its range RMSE rises from 23.8 to 25.6 m, and its `nees_fraction` falls
 from 0.37 to 0.29, so that check fails. That is why scenario 003 treats `pfa` as its main
-difficulty knob. The target itself is detected in every frame either way: it sits far above
+difficulty knob. The target itself is detected in every scan either way: it sits far above
 both thresholds.
 
 Count the false alarms yourself (plots more than two range bins from the truth) and they come
-out a little under $N_{\mathrm{cells}} P_{fa}$: over the full window, 2.1 per frame at 1e-5 and
-23.0 at 1e-4. At 1e-4 about one a frame is lost to `merge_range_bins`, which keeps only the
+out a little under $N_{\mathrm{cells}} P_{fa}$: over the full window, 2.1 per scan at 1e-5 and
+23.0 at 1e-4. At 1e-4 about one a scan is lost to `merge_range_bins`, which keeps only the
 stronger of two alarms within a range cell of each other.
 
 Intern tasks that build on this page: [Thresholds from the tail](../../interns/evt-thresholds.md)
@@ -324,7 +324,7 @@ estimate is noisier and the factor rises to hold the same $P_{fa}$.
 also falls with bin index, because $f_d = -\dot R_b / \lambda$ and the Doppler axis rises.
 
 **A plot's range is twice the target's distance.** The map's range is bistatic,
-$R_T + R_R$; for a monostatic radar that is twice the slant range. Only `plots.display_axes`
+$R_T + R_R$; for a monostatic radar that is twice the slant range. Only `figures.display_axes`
 halves it, for a figure or a CSV.
 
 **A measured false-alarm rate comes out above `pfa` on a real map.** The closed forms assume
@@ -332,7 +332,7 @@ independent reference cells. A taper, zero-padding or oversampling correlates ne
 cells, and the measured rate rises (the `detection` module docstring). Clutter heavier-tailed
 than Gaussian noise does the same. Measure on independent, Gaussian cells first.
 
-**A single target crosses in dozens of cells.** Frame 0's target crosses in 53, and frame 1's in
+**A single target crosses in dozens of cells.** Scan 0's target crosses in 53, and scan 1's in
 eight separate clusters at its range: Doppler sidelobes, since scenario 001 applies no Doppler
 taper. `merge_range_bins` keeps the strongest per range cell. Two clusters at opposite
 ends of the Doppler axis instead mean `wrap_axes` was left out.

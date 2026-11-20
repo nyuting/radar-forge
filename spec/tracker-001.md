@@ -53,8 +53,8 @@ tracker in the filter, the tracker or `pipeline.py` breaks this. There is one `T
 **Dependencies.** `tracking/` imports NumPy, SciPy, `coordinates.py` (the ENU ↔ range-azimuth
 conversions `scene.py` and `scans.py` use) and the private `_periodic.fold` (the guarded
 half-open fold that `StateLayout` shares with `dsp.fold_into_period`; `scene.py` and
-`RangeAzimuthElevationRangeRate.predict` still wrap inline), never `dsp`, `pipeline`, `scenario`, `evaluate` or
-`plots` at run time; `scans.py` names `Scenario` and `TrackingSettings` under `TYPE_CHECKING` only, because
+`RangeAzimuthElevationRangeRate.predict` still wrap inline), never `dsp`, `pipeline`, `scenario`, `verify` or
+`figures` at run time; `scans.py` names `Scenario` and `TrackingSettings` under `TYPE_CHECKING` only, because
 `scenario.py` imports `tracking.scene`. The pipeline builds an IQ scenario's `Scan`, `scans.py` a
 plot-level one's.
 
@@ -124,7 +124,7 @@ interval at 99.9 %; covariances stay symmetric to `rtol=1e-12` with Cholesky suc
 - **Radial state**: `RadialConstantVelocity`, `[bistatic_range_m, bistatic_range_rate_mps]`:
   the route length R_T + R_R and its time derivative, positive receding, with transition
   `[[1, T], [0, 1]]`. Monostatic, both are twice the slant values; nothing in the pipeline
-  halves the state, and only a display does (`plots.display_axes`). Scenario 003 tracks with it.
+  halves the state, and only a display does (`figures.display_axes`). Scenario 003 tracks with it.
 - **Coordinated turn**: `CoordinatedTurn`, `[x_m, xdot_mps, y_m, ydot_mps, turn_rate_radps]`,
   the rate the heading's, positive to the right; exact discretisation with series forms near zero
   rate (scenario 011 D26).
@@ -247,10 +247,10 @@ Built with scenario 011a (`config/scenario_011_*.toml`); none changes the loop.
 
 ## 7. Integration, performance and validation
 
-**Data flow.** `detection.Detection` (cell indices, W) is converted by `pipeline.frame_plots` to
+**Data flow.** `detection.Detection` (cell indices, W) is converted by `pipeline.scan_plots` to
 plots (bistatic m and m/s, positive receding), which `pipeline.ScanTracker` builds into a `Scan`
 and passes to `Tracker.process(scan)`; that returns the bank, each row with its NIS and the
-measurement it took. The stepper's track stage (`evaluate.py`) writes `tracks.csv` and
+measurement it took. The stepper's track stage (`verify/chain.py`) writes `tracks.csv` and
 `metrics.csv` from them (`spec/data-001-formats.md` §6.6, §6.9). Settings come from the scenario
 TOML's `[tracking]` table, read once; scenario-only policy (track-aided unfolding) stays in
 `pipeline.py`. Every

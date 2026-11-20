@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from radar_forge import evaluate
+from radar_forge import verify
 from radar_forge.array import (
     ArrayGeometry,
     apply_weights,
@@ -40,7 +40,7 @@ from radar_forge.propagation import line_of_sight_paths
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter
 from radar_forge.scenario import load_scenario, scattering_phase_rad, truth_geometry
 from radar_forge.signal import fmcw_deramp_baseband, pulsed_baseband
-from radar_forge.stages import array as array_stage
+from radar_forge.verify import doa as doa_stage
 
 REPO = Path(__file__).resolve().parents[1]
 F2 = REPO / "config" / "scenario_006_parallel_subrayleigh.toml"
@@ -292,12 +292,12 @@ def test_a_channel_map_keeps_the_channel_axis_and_detects_on_its_boresight_beam(
 def test_aircraft_b_shares_aircraft_as_range_and_rate_at_half_a_rayleigh_width():
     """B has A's ranges, rate and elevation, and u + 0.5 x 0.125."""
     scenario = load_scenario(F2)
-    for frame in truth_geometry(scenario)[:5]:
-        np.testing.assert_array_equal(frame.bistatic_range_m[1], frame.bistatic_range_m[0])
+    for truth in truth_geometry(scenario)[:5]:
+        np.testing.assert_array_equal(truth.bistatic_range_m[1], truth.bistatic_range_m[0])
         np.testing.assert_array_equal(
-            frame.bistatic_range_rate_mps[1], frame.bistatic_range_rate_mps[0]
+            truth.bistatic_range_rate_mps[1], truth.bistatic_range_rate_mps[0]
         )
-        u = direction_cosine(scenario.array, frame.aoa_rad)
+        u = direction_cosine(scenario.array, truth.aoa_rad)
         assert u[1] - u[0] == pytest.approx(0.0625, rel=1e-12)
     phases = scattering_phase_rad(scenario)
     assert phases.shape == (120, 2) and not phases[:, 0].any()
@@ -305,8 +305,8 @@ def test_aircraft_b_shares_aircraft_as_range_and_rate_at_half_a_rayleigh_width()
 
 
 def test_truth_csv_carries_both_aircraft_and_their_direction_cosines(tmp_path):
-    """The geometry stage writes a row per aircraft per frame, u and the off-boresight azimuth."""
-    evaluate.run(load_scenario(F2), ["geometry"], n_frames=2, out_dir=tmp_path, render=False)
+    """The geometry stage writes a row per aircraft per scan, u and the off-boresight azimuth."""
+    verify.run(load_scenario(F2), ["geometry"], n_scans=2, out_dir=tmp_path, render=False)
     with (tmp_path / "truth.csv").open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     assert [row["target"] for row in rows] == ["aircraft-a", "aircraft-b"] * 2
@@ -335,12 +335,12 @@ def test_the_loader_refuses_an_array_off_fmcw_and_aircraft_b_without_one(tmp_pat
 
 
 def test_doa_csv_truth_rows_carry_the_link_budgets_cell_snr(tmp_path):
-    """Truth rows' snr_db is the per-channel cell SNR, F2's 42.01 dB at frame 0 for both."""
+    """Truth rows' snr_db is the per-channel cell SNR, F2's 42.01 dB at scan 0 for both."""
     scenario = load_scenario(F2)
-    ctx = evaluate.Context(scenario, tmp_path, 1, False, evaluate.Report(scenario.name))
+    ctx = verify.stepper.Context(scenario, tmp_path, 1, False, verify.stepper.Report(scenario.name))
     truth = truth_geometry(dataclasses.replace(scenario, duration_s=1.0))[0]
     u = direction_cosine(scenario.array, truth.aoa_rad)
-    rows = array_stage._truth_rows(ctx, 0, truth, u, scenario.array)
+    rows = doa_stage._truth_rows(ctx, 0, truth, u, scenario.array)
     # The config's expected_snr_db and its tolerance: the radar equation by hand.
     assert [row["snr_db"] for row in rows] == pytest.approx([42.01, 42.01], abs=0.01)
     assert abs(rows[0]["range_rate_mps_folded"]) <= 30.5911 / 4  # folded: half the radial span

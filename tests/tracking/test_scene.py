@@ -303,7 +303,7 @@ def test_the_scene_regenerates_its_notch_fractions() -> None:
             assert fraction < 0.0125, target.name
 
 
-# Slow: 120 frames of scenario 001's S3 chain, two FFTs and CFAR a burst, about three minutes.
+# Slow: 120 scans of scenario 001's S3 chain, two FFTs and CFAR a burst, about three minutes.
 @pytest.mark.slow
 def test_the_iq_chain_merges_close_pairs_as_the_gaussian_resolution_model(tmp_path: Path) -> None:
     """V5's one-detection fraction at four separations against the plot model's.
@@ -318,10 +318,10 @@ def test_the_iq_chain_merges_close_pairs_as_the_gaussian_resolution_model(tmp_pa
     """
     from scipy.optimize import minimize_scalar
 
-    from radar_forge import evaluate
+    from radar_forge import verify
 
     config = TERMINAL.parent / "scenario_011_iq_check.toml"
-    report = evaluate.run(
+    report = verify.run(
         load_scenario(config), ["rd", "multitarget"], out_dir=tmp_path, render=False
     )
     measured = {
@@ -330,7 +330,7 @@ def test_the_iq_chain_merges_close_pairs_as_the_gaussian_resolution_model(tmp_pa
         if key.startswith("merged_fraction_")
     }
     separation_m, fraction = np.array(list(measured)), np.array(list(measured.values()))
-    n_frames, merged = 120, np.round(fraction * 120).astype(int)
+    n_scans, merged = 120, np.round(fraction * 120).astype(int)
     assert separation_m.size == 4
 
     pd = 0.99
@@ -342,12 +342,12 @@ def test_the_iq_chain_merges_close_pairs_as_the_gaussian_resolution_model(tmp_pa
 
     def negative_log_likelihood(alpha_m: float) -> float:
         p = one_detection(alpha_m)
-        return -float(np.sum(merged * np.log(p) + (n_frames - merged) * np.log(1 - p)))
+        return -float(np.sum(merged * np.log(p) + (n_scans - merged) * np.log(1 - p)))
 
     alpha_m = minimize_scalar(negative_log_likelihood, bounds=(10.0, 2000.0), method="bounded").x
     model = one_detection(alpha_m)
-    low = beta.ppf(0.005, merged, n_frames - merged + 1)
-    high = beta.ppf(0.995, merged + 1, n_frames - merged)
+    low = beta.ppf(0.005, merged, n_scans - merged + 1)
+    high = beta.ppf(0.995, merged + 1, n_scans - merged)
     low, high = np.nan_to_num(low, nan=0.0), np.nan_to_num(high, nan=1.0)
     print("alpha_r", alpha_m, "separations", separation_m, "measured", fraction, "model", model)
     assert np.all((low <= model) & (model <= high))

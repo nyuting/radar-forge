@@ -32,7 +32,7 @@ Both generators take a `PropagationPaths` from `propagation` (one entry per rout
 delay, Doppler and amplitude) and return a cube of shape `(n_pulses, n_samples)`: slow time
 (one row per chirp) on axis 0, fast time (samples within a chirp) on axis 1. Both add thermal
 noise if you give them a random generator. `pipeline.synthesise` builds the paths and picks the
-generator for you; `pipeline.frames` does that for every frame of a scenario.
+generator for you; `pipeline.scan_iq` does that for every scan of a scenario.
 
 ```
  frequency
@@ -51,7 +51,7 @@ generator for you; `pipeline.frames` does that for every frame of a scenario.
 | Band swept | — | $f_c \pm B/2$ | `Transmitter.carrier_frequency_hz`, `bandwidth_hz` | 9.799 to 9.801 GHz |
 | Sweep rate | $\alpha$ | $\alpha = B / T_c$ | `radar.sweep_rate_hzps`, `Transmitter.sweep_rate_hzps` | 2.0000e9 Hz/s |
 | Range resolution | $\Delta R$ | $\Delta R = c / 2B$ | `radar.range_resolution_m`, `Radar.range_resolution_m` | 74.9481 m |
-| The same, in bistatic range | $\Delta R_b$ | $\Delta R_b = c / B$ | the bin spacing of `dsp.range_bin_centers_m` | 149.8962 m |
+| The same, in bistatic range | $\Delta R_b$ | $\Delta R_b = c / B$ | the bin spacing of `dsp.range_bin_centres_m` | 149.8962 m |
 | Time-bandwidth product | — | $B T_c$ | `signal.lfm_chirp` | 2000 |
 | Bistatic range | $R_b$ | $R_b = R_T + R_R$, $2R$ monostatic | `TargetGeometry.bistatic_range_m` | 35121.4 m at $R$ = 17560.7 m |
 | Delay | $\tau$ | $\tau = R_b / c$ | `propagation.propagation_delay_s` | 117.15 µs |
@@ -63,7 +63,7 @@ generator for you; `pipeline.frames` does that for every frame of a scenario.
 | Noise density | $N_0$ | $N_0 = k T_0 F$ | `Receiver.noise_density_w_per_hz` | 7.9888e-21 W/Hz |
 | Noise power per sample | $P_n$ | $P_n = N_0 f_s$ | `Receiver.noise_power_per_sample_w` | 7.9888e-15 W |
 
-The S1 values are for frame 0, where the target is at 17560.7 m and opening at 28.08 m/s: a
+The S1 values are for scan 0, where the target is at 17560.7 m and opening at 28.08 m/s: a
 bistatic range of 35121.4 m and a rate of +56.16 m/s.
 
 Symbols used only on this page:
@@ -137,7 +137,7 @@ The noise in one sample fills the band the sampler sees, $f_s$ wide, not the swe
 
 ## Try it
 
-This loads scenario 001 S1, builds frame 0's cube from its truth, and checks the beat frequency
+This loads scenario 001 S1, builds scan 0's cube from its truth, and checks the beat frequency
 against the cube itself:
 
 ```python
@@ -149,10 +149,10 @@ from radar_forge.propagation import line_of_sight_paths, propagation_delay_s
 from radar_forge.scenario import load_scenario, truth_geometry
 
 scenario = load_scenario("config/scenario_001_fmcw_low_prf.toml")
-radar, n_pulses = scenario.radar, scenario.n_pulses[0]
+radar, n_pulses = scenario.radar, scenario.n_pulses_per_burst[0]
 tx, rx = radar.transmitter, radar.receiver
 bandwidth_hz, chirp_duration_s = tx.bandwidth_hz, tx.chirp_duration_s
-truth = truth_geometry(scenario)[0]  # frame 0
+truth = truth_geometry(scenario)[0]  # scan 0
 paths = line_of_sight_paths(radar, truth, [target.rcs_m2 for target in scenario.targets])
 rng = np.random.default_rng(scenario.seed)
 cube = signal.fmcw_deramp_baseband(paths, radar, n_pulses, rng=rng)  # (n_pulses, n_samples)
@@ -202,7 +202,7 @@ Read the scenario file first: [scenario 001, X-band](../../config/scenario_001_f
 Run S1 through the stepper:
 
 ```bash
-uv run python scripts/run_scenario.py config/scenario_001_fmcw_low_prf.toml --frames 3
+uv run python scripts/run_scenario.py config/scenario_001_fmcw_low_prf.toml --scans 3
 ```
 
 It prints each stage's quantities and wall time, checks them against the TOML's `[verify]`

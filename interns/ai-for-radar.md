@@ -55,7 +55,7 @@ probability and detection. Use those definitions, or say where and why you depar
   windows of the trajectory.
 - **Shift.** Test under at least one change from the training conditions: a different SNR,
   clutter parameter, part of the flight or manoeuvre. Report how fast any advantage disappears.
-- **Cost.** Report training time, and operations and memory per frame at inference, against the
+- **Cost.** Report training time, and operations and memory per scan at inference, against the
   baseline.
 - **Small models.** Anything learned should train in minutes on a laptop CPU. A large model that
   wins is a weaker result than a small one that wins.
@@ -95,12 +95,12 @@ The "Build first" column is what the library lacks for that direction. Count it 
 | Foundation model | A large pretrained model used without training, or fine-tuned | Constant-velocity and constant-acceleration Kalman prediction | Does a pretrained time-series model forecast the ADS-B track better than a Kalman filter, per operation? | **Ask us first.** Pretrained weights come from outside, and their use needs our agreement |
 | Physics-informed network | A network trained with a physics residual in its loss | A Rauch–Tung–Striebel (RTS) smoother | The RTS smoother is optimal when its motion model is right. Does a kinematics-constrained network reconstruct the ADS-B path better when the model is wrong? | An RTS smoother |
 | Reinforcement learning | A policy learned from reward by trial and error | Fixed revisit rate; covariance-triggered revisit (Van Keuk and Blackman) | Can a learned policy hold track with less energy on target than covariance-triggered revisits? | A revisit environment |
-| Cognitive radar | A perception–action loop: the radar adapts what it transmits to what it believes (Haykin) | Always one waveform | Choose the waveform each frame by expected information gain from the tracker's posterior, with no learning. How close does it get to a learned policy? | Overlaps [task 5, direction D](world-models.md#the-questions) |
+| Cognitive radar | A perception–action loop: the radar adapts what it transmits to what it believes (Haykin) | Always one waveform | Choose the waveform each scan by expected information gain from the tracker's posterior, with no learning. How close does it get to a learned policy? | Overlaps [task 5, direction D](world-models.md#the-questions) |
 
 Diffusion models and self-supervised pretraining are not on the list, for now. A diffusion
 model trained on our one aircraft's track has nothing to teach the tracker that the same data
 cannot teach directly. And self-supervised pretraining pays off when labels are scarce, which
-they are not in a simulation that labels every frame.
+they are not in a simulation that labels every scan.
 
 ## Sources
 

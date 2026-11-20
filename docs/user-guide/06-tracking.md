@@ -20,7 +20,7 @@ enough to report, or gone for good?
 The scenarios' state is the map's own: bistatic range $R_b = R_T + R_R$ and its rate
 $\dot R_b$, the time derivative, **positive receding**. For a monostatic radar $R_b$ is twice
 the slant range. Nothing in the tracker halves it; only a figure or a CSV does
-(`plots.display_axes`). So every rate and acceleration in `[tracking]` is of bistatic range,
+(`figures.display_axes`). So every rate and acceleration in `[tracking]` is of bistatic range,
 twice the radial value when monostatic.
 
 ### What's in the package
@@ -62,7 +62,7 @@ alone and infers the rate.
 | Gate | $\gamma$ | accept when $d^2 \le \gamma = \chi^2_m(P_G)$ | `chi_square_gate_threshold`, `gate` | 8.81 (range), 11.62 (range and rate), $P_G$ = 0.997 |
 | Kalman gain | $K$ | $K = P_{xz}S^{-1}$, with $P_{xz} = P^-H^\mathsf{T}$ | `update` | — |
 | Update | $\mathbf{x}^+$, $P^+$ | $\mathbf{x}^+ = \mathbf{x}^- + K\boldsymbol{\nu}$; $P^+$ below | `update` | — |
-| Normalised estimation error squared (NEES) | $\epsilon$ | $\epsilon = \mathbf{e}^\mathsf{T} P^{-1} \mathbf{e}$, $\mathbf{e} = \mathbf{x}_{\mathrm{true}} - \hat{\mathbf{x}}$ | `metrics.nees` | inside $\chi^2_2$'s 95 % interval in 0.89 of the confirmed frames |
+| Normalised estimation error squared (NEES) | $\epsilon$ | $\epsilon = \mathbf{e}^\mathsf{T} P^{-1} \mathbf{e}$, $\mathbf{e} = \mathbf{x}_{\mathrm{true}} - \hat{\mathbf{x}}$ | `metrics.nees` | inside $\chi^2_2$'s 95 % interval in 0.89 of the confirmed scans |
 | Confirmation | M of N | M hits in a track's first N scans | `LifecyclePolicy` | 3 of 5 |
 
 Symbols used only on this page: $R_b$ and $\dot R_b$, bistatic range and its rate;
@@ -155,7 +155,7 @@ hit, miss, hit, miss, hit confirms on scan 5, and hit, miss, miss, miss deletes 
 
 `pipeline.ScanTracker(scenario)` builds a `Tracker` from `[tracking]` (`linearisation`,
 `process_noise`, `initiator`, `cost`, `assignment`, the lifecycle counts) on
-`RadialConstantVelocity`, and `ScanTracker.scan(plots, time_s)` feeds it a frame's accepted
+`RadialConstantVelocity`, and `ScanTracker.scan(plots, time_s)` feeds it a scan's accepted
 plots. Range is measured modulo the map's span, 149,896 m for S1, while the state stays
 continuous. The rate is measured only where it cannot fold: after dual-PRF pairing, from
 one burst whose rate interval covers `max_bistatic_range_rate_mps`, or once a track can unfold
@@ -262,12 +262,12 @@ motion = RadialConstantVelocity(
     acceleration_correlation_time_s=settings.acceleration_correlation_time_s,
     process_noise=settings.process_noise,
 )
-step_s = 1.0 / scenario.frame_rate_hz
+step_s = scenario.scan_period_s
 print("F(1 s) =", motion.jacobian(np.zeros(2), step_s).tolist())
 print("Q(1 s) =", motion.process_noise(np.zeros(2), step_s).round(3).tolist())
 
 # Measurement noise: one bin of the map's own axes over sqrt(12).
-range_axis_m, rate_axis_mps = map_axes(scenario.radar, scenario.n_pulses[0])
+range_axis_m, rate_axis_mps = map_axes(scenario.radar, scenario.n_pulses_per_burst[0])
 range_bin_m = range_axis_m[1] - range_axis_m[0]
 rate_bin_mps = rate_axis_mps[0] - rate_axis_mps[1]  # the rate axis falls with index
 print(f"sigma_range = {range_bin_m:.3f} / sqrt(12) = {range_bin_m / np.sqrt(12):.2f} m")
@@ -345,7 +345,7 @@ says, so the filter is consistent. A real target does not, which is what the ste
 
 ## Try it in a scenario
 
-Run the UKF on S1 through the stepper, over its whole 120-frame window:
+Run the UKF on S1 through the stepper, over its whole 120-scan window:
 
 ```bash
 uv run python scripts/run_scenario.py config/scenario_003_ukf_fmcw_low_prf.toml
@@ -354,18 +354,18 @@ uv run python scripts/run_scenario.py config/scenario_003_ukf_fmcw_low_prf.toml
 `[track]` prints its scores of the target's primary track: `range_rmse_m = 15.1152`,
 `range_rate_rmse_mps = 12.0151`, `nees_fraction = 0.889831`, `confirmation_latency_scans = 2`
 and `n_confirmed_tracks = 1`, and all 11 checks pass. The one track is confirmed in 118 of the
-120 frames. `runs/scenario_003_ukf_fmcw_low_prf/` holds `tracks.csv` (one row per track per
-frame, with its NIS and the detection it took), `metrics.csv` and `track.png`. A run shorter
-than 2 × `n_confirm_scans` frames, 10 here, skips the tracker's checks.
+120 scans. `runs/scenario_003_ukf_fmcw_low_prf/` holds `tracks.csv` (one row per track per
+scan, with its NIS and the detection it took), `metrics.csv` and `track.png`. A run shorter
+than 2 × `n_confirm_scans` scans, 10 here, skips the tracker's checks.
 
 **Knob:** in a copy of the TOML in `config/`, set `sigma_acceleration_mps2 = 0.6` in
 `[tracking]` (0.3 m/s² radial: the filter now believes the aircraft barely accelerates), and run
 it again. The filter trusts its prediction too much, so whenever the aircraft's rate changes the
 track falls behind until its plots land outside the gate. `[track]` now counts **three**
 confirmed tracks where there was one: the target's track broke and restarted. The primary track
-is confirmed in only 63 frames, its range RMSE grows to 77.2 m and its rate RMSE to 16.6 m/s,
+is confirmed in only 63 scans, its range RMSE grows to 77.2 m and its rate RMSE to 16.6 m/s,
 and the copy ends `2 check(s) failed`, on `range_rate_rmse_mps` and on `nees_fraction` (0.16).
-`nees_fraction` is the share of the primary track's confirmed frames whose NEES lies inside
+`nees_fraction` is the share of the primary track's confirmed scans whose NEES lies inside
 $\chi^2_2$'s two-sided 95 % interval, 0.051 to 7.38.
 
 For the hard case, run [scenario 003](../../config/scenario_003_tracking.toml) itself: a Kalman
@@ -380,7 +380,7 @@ from here.
 
 - **A track's range is twice the target's distance.** The state is bistatic range,
   $R_T + R_R$: $2R$ for a monostatic radar. `tracks.csv` shows it halved, as `range_m`, through
-  `plots.display_axes`; the bank never is.
+  `figures.display_axes`; the bank never is.
 - **A receding target has a positive rate but a negative Doppler.** The rate is the range's
   time derivative, so $F$ has $+T$, and $f_d = -\dot R_b / \lambda$.
 - **The gate is a number, not a distance in metres.** It bounds $d^2$, which has no unit, and

@@ -13,9 +13,9 @@ there too, but may move. Modules, in signal-path order:
 ``dsp``, ``clutter``, ``detection``, ``clustering``, ``tracking``
     Range-Doppler processing; leakage and clutter cancellation; CFAR and clustering of cells;
     clustering of points; batched multi-target tracking.
-``scenario``, ``pipeline``, ``evaluate``, ``stages``, ``plots``
-    A scenario file, the chain from it to tracks, the stepper that checks each stage, the
-    stages it runs, and figures (the ``visualisation`` extra, imported only when drawing).
+``scenario``, ``pipeline``, ``verify``, ``figures``
+    A scenario file, the chain from it to tracks, the stepper and the stages it runs, and
+    figures (the ``visualisation`` extra, imported only when drawing).
 """
 
 from __future__ import annotations
@@ -23,15 +23,15 @@ from __future__ import annotations
 from radar_forge.clustering import cluster_points, mean_shift
 from radar_forge.detection import Detection, cfar_detect, cfar_detect_2d, cluster_detections
 from radar_forge.dsp import (
-    doppler_bin_centers_mps,
+    doppler_bin_centres_mps,
     doppler_fft,
     matched_filter,
-    range_bin_centers_m,
+    range_bin_centres_m,
     range_doppler_map,
     range_fft,
     window,
 )
-from radar_forge.pipeline import frames, range_doppler_product
+from radar_forge.pipeline import range_doppler_product, scan_iq
 from radar_forge.propagation import (
     doppler_shift_hz,
     line_of_sight_paths,
@@ -71,11 +71,10 @@ __all__ = [
     "cluster_points",
     "db_to_amplitude",
     "db_to_power",
-    "doppler_bin_centers_mps",
+    "doppler_bin_centres_mps",
     "doppler_fft",
     "doppler_shift_hz",
     "fmcw_deramp_baseband",
-    "frames",
     "lfm_chirp",
     "line_of_sight_paths",
     "load_scenario",
@@ -83,11 +82,12 @@ __all__ = [
     "mean_shift",
     "power_to_db",
     "pulsed_baseband",
-    "range_bin_centers_m",
+    "range_bin_centres_m",
     "range_doppler_map",
     "range_doppler_product",
     "range_fft",
     "received_power_w",
+    "scan_iq",
     "swerling_rcs_m2",
     "thermal_noise",
     "window",

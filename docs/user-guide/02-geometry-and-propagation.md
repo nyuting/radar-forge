@@ -47,11 +47,11 @@ this to the test by moving the transmitter 19.6 km away from the receiver. The s
 
 ## Quantities and equations
 
-The monostatic rows are for scenario 001 S1 at frame 0 (t = 0 s, the target's first fix). The
-bistatic rows, marked B1, are for scenario 002 B1 at its frame 0 (t = 13329 s). Every value comes
+The monostatic rows are for scenario 001 S1 at scan 0 (t = 0 s, the target's first fix). The
+bistatic rows, marked B1, are for scenario 002 B1 at its scan 0 (t = 13329 s). Every value comes
 from the two examples under [Try it](#try-it).
 
-| Quantity | Symbol | Equation | In the code | Scenario 001 S1, frame 0 |
+| Quantity | Symbol | Equation | In the code | Scenario 001 S1, scan 0 |
 | :-- | :-- | :-- | :-- | :-- |
 | Target's geodetic position | $\varphi, \ell, h$ | from the trajectory CSV; $h$ is the target's fixed altitude | `Target.trajectory_path`, `Target.altitude_m` | 35.90608°, −79.0945°, 1500 m |
 | Prime-vertical radius | $N$ | $N = a / \sqrt{1 - e^2 \sin^2\varphi}$ | inside `geodetic_to_ecef_m` | — |
@@ -122,7 +122,7 @@ $$\tau = \frac{2R}{c}, \qquad f_d = -\frac{2\dot R}{\lambda}$$
 `propagation_phase_rad`, `doppler_shift_hz`), and a monostatic and a bistatic radar call the
 same functions. The range-Doppler map keeps $R_b$ and $\dot R_b$ on its axes too. Only a display
 halves them:
-`plots.display_axes(radar)` gives a monostatic radar a scale of 0.5 and the names `range_m` and
+`figures.display_axes(radar)` gives a monostatic radar a scale of 0.5 and the names `range_m` and
 `range_rate_mps`, which the figures and the stepper's CSVs use. A bistatic display keeps $R_b$.
 
 ## How it works, step by step
@@ -138,7 +138,7 @@ halves them:
 3. **ENU to range and angles.** `enu_to_range_azimuth_elevation_rad(enu_m)` returns three arrays
    of shape `(...,)`: range in metres, and azimuth and elevation in radians.
    `range_azimuth_elevation_to_enu_m` goes back the other way.
-4. **Motion.** `truth_geometry(scenario)` interpolates each target's trajectory onto the frame
+4. **Motion.** `truth_geometry(scenario)` interpolates each target's trajectory onto the scan
    times, converts it to ENU about the receiving site, and takes its velocity with
    `numpy.gradient`. A
    `[[target]]` given `position_enu_m` and `velocity_enu_mps` instead moves at constant velocity.
@@ -163,7 +163,7 @@ halves them:
 
 ## Try it
 
-This takes the S1 target's first fix through every frame, then builds its route and its path:
+This takes the S1 target's first fix through every scan, then builds its route and its path:
 
 ```python
 import csv
@@ -175,7 +175,7 @@ from radar_forge.coordinates import (
     geodetic_to_ecef_m,
     geodetic_to_enu_m,
 )
-from radar_forge.plots import display_axes
+from radar_forge.figures import display_axes
 from radar_forge.propagation import line_of_sight_paths
 from radar_forge.scenario import load_scenario, truth_geometry
 
@@ -194,7 +194,7 @@ range_m, azimuth_rad, elevation_rad = enu_to_range_azimuth_elevation_rad(enu_m)
 azimuth_deg, elevation_deg = np.degrees(azimuth_rad), np.degrees(elevation_rad)
 print(f"R = {range_m:.1f} m, az = {azimuth_deg:.2f} deg, el = {elevation_deg:.3f} deg")
 
-truth = truth_geometry(scenario)[0]  # frame 0: the same geometry, plus the rate
+truth = truth_geometry(scenario)[0]  # scan 0: the same geometry, plus the rate
 rate_mps = truth.bistatic_range_rate_mps[0]
 print(f"R_T = R_R = {truth.range_tx_m[0]:.1f} m, R_b = {truth.bistatic_range_m[0]:.1f} m")
 print(f"rate = {rate_mps:+.3f} m/s, lambda = {radar.wavelength_m * 1e3:.3f} mm")
@@ -219,7 +219,7 @@ range_m = 17560.7, range_rate_mps = +28.081
 
 The target is 13.9 km west and 10.7 km south of the radar, so it lies south-west, at 232°. It is
 moving away, so its rate is positive and its Doppler shift negative. The last line is what the
-stepper writes to `truth.csv` for this frame.
+stepper writes to `truth.csv` for this scan.
 
 The bistatic pair in scenario 002 B1 uses the same waveform, with the transmitter at
 Raleigh-Durham Airport. The code is the same; only the TOML has a `[site.rx]`:
@@ -233,7 +233,7 @@ from radar_forge.scenario import load_scenario, truth_geometry
 
 scenario = load_scenario("config/scenario_002_bistatic_xband.toml")
 radar = scenario.radar
-truth = truth_geometry(scenario)[0]  # frame 0, t = 13329 s
+truth = truth_geometry(scenario)[0]  # scan 0, t = 13329 s
 paths = line_of_sight_paths(radar, truth, scenario.targets[0].rcs_m2)
 r_t, r_r = truth.range_tx_m[0], truth.range_rx_m[0]
 
@@ -260,10 +260,10 @@ Here the route is shortening, so the rate is negative and the Doppler shift posi
 ## Try it in a scenario
 
 Read the scenario file [scenario 002, bistatic](../../config/scenario_002_bistatic_xband.toml),
-then run ten frames of B1 into `runs/scenario_002_bistatic_xband/`:
+then run ten scans of B1 into `runs/scenario_002_bistatic_xband/`:
 
 ```bash
-uv run python scripts/run_scenario.py config/scenario_002_bistatic_xband.toml --frames 10
+uv run python scripts/run_scenario.py config/scenario_002_bistatic_xband.toml --scans 10
 ```
 
 **The knob:** in a copy of the TOML, change `carrier_frequency_hz = 9.8e9` to `2.8e9`. That is
@@ -273,8 +273,8 @@ exactly what `scenario_002_bistatic_sband.toml` (B2) does, so run that file the 
 30.5911 at X-band and 107.069 at S-band: the map holds rates within ±15.30 m/s, or ±53.53 m/s.
 Then open `truth.csv` in both folders. `bistatic_range_m`, `range_tx_m`, `range_rx_m`,
 `bistatic_angle_deg` and `bistatic_range_rate_mps` are identical, row for row: geometry does
-not depend on the carrier, and nor does the delay (74.4653 µs at frame 0). What changes is
-$\lambda$, from 30.591 mm to 107.069 mm, and with it the Doppler shift. At frame 9
+not depend on the carrier, and nor does the delay (74.4653 µs at scan 0). What changes is
+$\lambda$, from 30.591 mm to 107.069 mm, and with it the Doppler shift. At scan 9
 (t = 13338 s) the rate of −40.649 m/s gives $f_d$ = +1328.8 Hz at X-band, but +379.7 Hz at
 S-band. The chirp rate is 1 kHz, so only shifts within ±500 Hz are seen as they are. Now open
 `rd_00009.png` in each folder; a bistatic map is labelled in $R_T + R_R$ and its rate, not
@@ -297,14 +297,14 @@ range).
 $R_b$, positive receding; the Doppler shift is positive closing. `doppler_shift_hz` relates them
 once, $f_d = -\dot R_b / \lambda$.
 
-**S1's frame 0 has a Doppler shift of −1835.9 Hz, far outside the ±500 Hz the radar can see.**
+**S1's scan 0 has a Doppler shift of −1835.9 Hz, far outside the ±500 Hz the radar can see.**
 Paths carry the true, unfolded shift. Folding happens later, when the slow-time FFT samples it
 once per chirp: −1835.9 Hz folds to +164.1 Hz, a bistatic rate of −5.02 m/s, so the figure shows
 −2.51 m/s of radial velocity for a target receding at 28.08 m/s. Page 4 covers this.
 
 **The map's arrays put the S1 target at 35121.4 m, twice its range.** The map, `TargetGeometry`
 and `PropagationPaths` all carry $R_b = R_T + R_R$, which for one site is $2R$. The figure and
-the CSVs halve it through `plots.display_axes`, so they read 17.56 km. A bistatic map is not
+the CSVs halve it through `figures.display_axes`, so they read 17.56 km. A bistatic map is not
 halved: surfaces of constant $R_b$ are ellipsoids with the two sites at the foci, and half of
 $R_b$ is not a distance from either site.
 

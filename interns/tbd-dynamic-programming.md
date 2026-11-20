@@ -18,8 +18,8 @@ low-SNR maps out of scenario 003.
 Track-before-detect is not currently implemented in `radar-forge`. You will write it, in your own
 script, on top of the library's range-Doppler maps.
 
-Published dynamic-programming TBD results often quote a gain of "a few dB" over single-frame
-detection. A number like that means nothing without the number of frames, the false-track rate,
+Published dynamic-programming TBD results often quote a gain of "a few dB" over single-scan
+detection. A number like that means nothing without the number of scans, the false-track rate,
 the target's motion and the reference it is measured against. Your job is to produce that
 number for one real radar, scenario 003, with all four stated, and to say where it comes from.
 
@@ -27,10 +27,10 @@ number for one real radar, scenario 003, with all four stated, and to say where 
 
 1. **Bounds first.** Before you write a TBD detector, derive the
    [floor and the ceiling](track-before-detect.md#the-bounds) analytically, as Pd against SNR at a
-   false-track probability you choose and justify, for K = 1, 5, 10 and 20 frames. Plot them.
+   false-track probability you choose and justify, for K = 1, 5, 10 and 20 scans. Plot them.
    How much could TBD buy at each K, at most?
 2. **Build** a dynamic-programming TBD over the low-SNR maps.
-   - Choose the transition neighbourhood (how far a trajectory may move between frames, in range
+   - Choose the transition neighbourhood (how far a trajectory may move between scans, in range
      and in Doppler) from what the target actually does. Measure that from the truth. Say what
      happens to a target that moves outside it.
    - Compare two per-cell scores: raw power, and the log-likelihood ratio for a non-fluctuating
@@ -45,9 +45,9 @@ number for one real radar, scenario 003, with all four stated, and to say where 
    change with the size of the neighbourhood? Show error bars that mean something.
 5. **Recover the track.** At a power where TBD detects and the DBT chain struggles, compare the
    range error of TBD's best trajectory with the scenario 003 tracker's
-   (`ScanTracker` in `radar_forge.pipeline`, scored by the `track` stage of `radar_forge.evaluate`).
+   (`ScanTracker` in `radar_forge.pipeline`, scored by the `track` stage of `radar_forge.verify`).
    Which would you trust, and for what?
-6. **Cost.** Count the operations and memory per frame as functions of the map size, the
+6. **Cost.** Count the operations and memory per scan as functions of the map size, the
    neighbourhood size and K. What would have to change to run this once a second on embedded
    radar hardware?
 

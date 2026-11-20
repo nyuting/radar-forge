@@ -85,10 +85,10 @@ class ChipProcessing:
 
     ``noise_power_w`` is the noise in one cell of the parent's ``data_rfst``; the fold factor,
     acceleration and jerk are what the migration correction applied (bistatic).
-    ``band_centre_hz`` and ``band_width_hz`` place the echo's band in the chip's range spectrum,
+    ``band_centre_hz`` and ``band_extent_hz`` place the echo's band in the chip's range spectrum,
     the FFT along its range bins. A compressed pulse's is its own band about zero, the default.
     A deramped FMCW profile's is the sweep's fast time, one-sided: the sweep's start at 0 Hz and
-    a whole sample rate below it, ``band_centre_hz = -f_s/2``, ``band_width_hz = f_s``.
+    a whole sample rate below it, ``band_centre_hz = -f_s/2``, ``band_extent_hz = f_s``.
     """
 
     carrier_frequency_hz: float
@@ -101,7 +101,7 @@ class ChipProcessing:
     compensated_acceleration_mps2: float = 0.0
     compensated_jerk_mps3: float = 0.0
     band_centre_hz: float = 0.0
-    band_width_hz: float | None = None
+    band_extent_hz: float | None = None
 
 
 @dataclass(frozen=True)
@@ -111,7 +111,7 @@ class DataChip:
     Axis 0 is slow time (``domain = "slow_time"``, every pulse) or shifted Doppler bins. Chip
     cell ``(i, j)`` is parent cell ``((i + axis0_offset) % parent_shape[0], j + range_offset)``,
     and its range and rate are the parent's bin values; on a slow-time chip
-    ``rate_bin_centers_mps`` is the parent's whole Doppler axis.
+    ``rate_bin_centres_mps`` is the parent's whole Doppler axis.
     """
 
     data: NDArray[np.complex128]
@@ -119,8 +119,8 @@ class DataChip:
     axis0_offset: int
     range_offset: int
     parent_shape: tuple[int, int]
-    range_bin_centers_m: NDArray[np.float64]
-    rate_bin_centers_mps: NDArray[np.float64]
+    range_bin_centres_m: NDArray[np.float64]
+    rate_bin_centres_mps: NDArray[np.float64]
     processing: ChipProcessing
 
     def parent_index(
@@ -132,9 +132,9 @@ class DataChip:
 
     def range_at_m(self, fractional_bin: ArrayLike) -> NDArray[np.float64]:
         """Return the bistatic range at fractional chip range indices, by the uniform spacing."""
-        spacing_m = self.range_bin_centers_m[1] - self.range_bin_centers_m[0]
+        spacing_m = self.range_bin_centres_m[1] - self.range_bin_centres_m[0]
         result: NDArray[np.float64] = (
-            self.range_bin_centers_m[0] + np.asarray(fractional_bin, dtype=np.float64) * spacing_m
+            self.range_bin_centres_m[0] + np.asarray(fractional_bin, dtype=np.float64) * spacing_m
         )
         return result
 
@@ -144,10 +144,10 @@ class CramerRaoBounds:
     """Standard deviations the Cramér-Rao bound allows, bistatic; nan for a term not fitted."""
 
     snr_linear: float
-    bistatic_range_m: float
-    bistatic_range_rate_mps: float
-    bistatic_range_acceleration_mps2: float
-    bistatic_range_jerk_mps3: float
+    sigma_bistatic_range_m: float
+    sigma_bistatic_range_rate_mps: float
+    sigma_bistatic_range_acceleration_mps2: float
+    sigma_bistatic_range_jerk_mps3: float
 
 
 @dataclass(frozen=True)
@@ -174,8 +174,8 @@ def crop_slow_time(
     data_rfst: ArrayLike,
     centre_range_bin: int,
     *,
-    range_bin_centers_m: ArrayLike,
-    rate_bin_centers_mps: ArrayLike,
+    range_bin_centres_m: ArrayLike,
+    rate_bin_centres_mps: ArrayLike,
     processing: ChipProcessing,
     half_width_bins: int = 16,
 ) -> DataChip:
@@ -191,8 +191,8 @@ def crop_slow_time(
         0,
         first,
         (data.shape[0], data.shape[1]),
-        np.asarray(range_bin_centers_m, dtype=np.float64)[first:stop].copy(),
-        np.asarray(rate_bin_centers_mps, dtype=np.float64).copy(),
+        np.asarray(range_bin_centres_m, dtype=np.float64)[first:stop].copy(),
+        np.asarray(rate_bin_centres_mps, dtype=np.float64).copy(),
         processing,
     )
 
@@ -202,8 +202,8 @@ def crop_range_doppler(
     centre_doppler_bin: int,
     centre_range_bin: int,
     *,
-    range_bin_centers_m: ArrayLike,
-    rate_bin_centers_mps: ArrayLike,
+    range_bin_centres_m: ArrayLike,
+    rate_bin_centres_mps: ArrayLike,
     processing: ChipProcessing,
     half_width_bins: int = 16,
 ) -> DataChip:
@@ -222,8 +222,8 @@ def crop_range_doppler(
         int(rows[0]),
         first,
         (n_doppler, data.shape[1]),
-        np.asarray(range_bin_centers_m, dtype=np.float64)[first:stop].copy(),
-        np.asarray(rate_bin_centers_mps, dtype=np.float64)[rows],
+        np.asarray(range_bin_centres_m, dtype=np.float64)[first:stop].copy(),
+        np.asarray(rate_bin_centres_mps, dtype=np.float64)[rows],
         processing,
     )
 
@@ -354,7 +354,7 @@ def estimate_fine(
         # top for an FMCW profile is 0 Hz, the sweep's start.
         top_hz = centre_hz + process.sample_rate_hz / 2.0
         frequency_hz = top_hz - np.mod(top_hz - frequency_hz, process.sample_rate_hz)
-    width_hz = process.bandwidth_hz if process.band_width_hz is None else process.band_width_hz
+    width_hz = process.bandwidth_hz if process.band_extent_hz is None else process.band_extent_hz
     band = np.argsort(frequency_hz)
     band = band[np.abs(frequency_hz[band] - centre_hz) <= width_hz / 2.0]
     in_band = np.fft.fft(chip.data, n=n_fft, axis=1)[:, band]

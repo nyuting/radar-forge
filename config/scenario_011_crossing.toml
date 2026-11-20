@@ -12,13 +12,13 @@ name = "scenario-011-crossing"
 description = "V2: six pairs of aircraft crossing at 90, 30 and 10 deg, closing along and across range, in local clutter at n_gate = 1, tracked by JPDA with M-of-N."
 seed = 20261107
 
-[frames]
+[scans]
 start_time_s = 0.0
 duration_s = 300.0     # 62.5 -> 62 rotations; every crossing at 200 s, scan 41
+scan_period_s = 4.8
 
 [sensor]
 carrier_frequency_hz = 2.8e9
-scan_period_s = 4.8
 beamwidth_azimuth_deg = 1.4
 range_cell_m = 115.75
 range_min_m = 1000.0

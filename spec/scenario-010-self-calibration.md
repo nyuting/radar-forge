@@ -323,10 +323,10 @@ As scenario-006 §3.7, plus:
 
 | Where | What |
 | :--- | :--- |
-| `products.h5` `/manifold_truth/` | `element_positions_m` (n_rx, 3), `coupling_matrix_linear` (n_rx, n_rx) complex128, `channel_gain_linear` (n_rx,) complex128; for M3, `channel_gain_linear` is `(n_frames, n_rx)` |
+| `products.h5` `/manifold_truth/` | `element_positions_m` (n_rx, 3), `coupling_matrix_linear` (n_rx, n_rx) complex128, `channel_gain_linear` (n_rx,) complex128; for M3, `channel_gain_linear` is `(n_scans, n_rx)` |
 | `products.h5` `/manifold_estimate/` | The same fields, from `ManifoldEstimate.manifold`; attributes `method`, `gauge`, `null_space_dim`, `condition_number` |
 | `products.h5` `/calibration/` | `fisher_information` (n_params, n_params), `parameter_names` (n_params,) str, `crb_std` (n_params,), `cost_history` (n_iterations,) |
-| `beamformer.csv` | `frame`, `time_s`, `method` (`mpdr`, `mvdr`, `rcb`, `worst_case`, `robust_lcmv`), `manifold` (`nominal`, `refined`, `tracked`, `frozen`), `sinr_loss_db`, `white_noise_gain_db`, `loading_w` |
+| `beamformer.csv` | `scan`, `time_s`, `method` (`mpdr`, `mvdr`, `rcb`, `worst_case`, `robust_lcmv`), `manifold` (`nominal`, `refined`, `tracked`, `frozen`), `sinr_loss_db`, `white_noise_gain_db`, `loading_w` |
 | `metadata.json` `receive_array` | As 006, with `boresight_azimuth_deg` = 185.0 |
 
 ---

@@ -233,8 +233,8 @@ As scenario-001 §3.6, plus:
 
 | File / group | Content |
 | :--- | :--- |
-| `interference.csv` | One row per interferer per frame: `frame`, `interferer_id`, `kind` (`noise`), `azimuth_boresight_deg`, `elevation_deg`, `range_m` (true, one-way), `erp_w`, `received_power_w` (per element), `inr_db` (per element, unprocessed) |
-| `products.h5` `/beam/{method}/burst{k}/data` | Beam output `(n_frames, n_doppler_bins, n_range_bins)` complex128, one group per method (`quiescent`, `slc`, `smi_mvdr`, `lcmv`, `incm`, `emp_peak`); attrs `n_snapshots`, `n_guard_cells`, `loading_w` |
+| `interference.csv` | One row per interferer per frame: `scan`, `interferer_id`, `kind` (`noise`), `azimuth_boresight_deg`, `elevation_deg`, `range_m` (true, one-way), `erp_w`, `received_power_w` (per element), `inr_db` (per element, unprocessed) |
+| `products.h5` `/beam/{method}/burst{k}/data` | Beam output `(n_scans, n_doppler_bins, n_range_bins)` complex128, one group per method (`quiescent`, `slc`, `smi_mvdr`, `lcmv`, `incm`, `emp_peak`); attrs `n_snapshots`, `n_guard_cells`, `loading_w` |
 | `metrics.csv` | `sinr_loss_db`, `null_depth_db`, `peak_shift_deg` per method per frame window |
 
 `truth.csv` lists the aircraft only. Interferers are not targets, so they live in
@@ -418,7 +418,7 @@ and must reuse `AdaptiveWeights`.
 | 1 | `propagation.py` *(edit)* | Additive. `received_power_w`, which covers monostatic and bistatic, untouched |
 | 2 | `interference.py` *(new)* | Consumes `PropagationPaths` and `thermal_noise`'s conventions; adds no field to either |
 | 3–6 | `array/adaptive.py` *(new)* | One function per step of §3.5, each returning its intermediate quantities. Baselines are built and tested before the current methods that are derived from them |
-| 7 | `scenario.py`, `pipeline.py` *(edit)* | TOML order: `[scenario] [[target]] [frames] [[noise_interferer]] [site.tx] [[burst]] [receive_array] [receiver] [adaptive]`: the truth, the emitters, the transmit end, the receive end, then processing. `[receive_array]` is 006's table unchanged; a `[[target]]` with `position_enu_m` and `velocity_enu_mps` instead of `trajectory_path` is the fixed geometry, which the loader already reads |
+| 7 | `scenario.py`, `pipeline.py` *(edit)* | TOML order: `[scenario] [[target]] [scans] [[noise_interferer]] [site.tx] [[burst]] [receive_array] [receiver] [adaptive]`: the truth, the emitters, the transmit end, the receive end, then processing. `[receive_array]` is 006's table unchanged; a `[[target]]` with `position_enu_m` and `velocity_enu_mps` instead of `trajectory_path` is the fixed geometry, which the loader already reads |
 | 9 | tests | `dsp.py`, `detection.py` consumed unchanged; scenarios 001 and 006 pass their `[verify]` tables throughout |
 
 ---

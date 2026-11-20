@@ -324,7 +324,7 @@ class Radar:
         r"""Delay period the map wraps at: one PRI; FMCW :math:`f_s/\alpha` (Oppenheim [7]_ §8.5).
 
         Pulsed, the map holds ``round(PRI f_s)`` samples, equal whenever the PRI is a whole number
-        of samples (every config is). FMCW, it mirrors :func:`~radar_forge.dsp.range_bin_centers_m`
+        of samples (every config is). FMCW, it mirrors :func:`~radar_forge.dsp.range_bin_centres_m`
         and can exceed the chirp (S3, ``scenario_001_fmcw_dual_prf``: :math:`2T_c` at
         :math:`f_s = 2B`), though a sawtooth deramp caps the physical reach at :math:`T_c` (Charvat
         [6]_, ch. 3). A noise code folds nothing,

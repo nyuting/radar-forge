@@ -65,16 +65,16 @@ a different false-alarm rate. Your job is to find out on a problem we control.
   weaker result than a small one that wins.
 - `uv run python scripts/run_scenario.py config/scenario_003_tracking.toml --out out/s1`
   runs the classical chain end to end. Read that script and the stages it runs, in
-  `radar_forge.evaluate`, to see how the pieces fit together. Don't commit `out/`.
+  `radar_forge.verify`, to see how the pieces fit together. Don't commit `out/`.
 - Useful entry points:
-  - `radar_forge.scenario.load_scenario`, and `radar_forge.pipeline`: `frames`,
-    `range_doppler_product`. Each frame carries its IQ (`frame.cubes`) and the truth
-    (`frame.truth.bistatic_range_m`, `frame.truth.bistatic_range_rate_mps`: unfolded, twice the
+  - `radar_forge.scenario.load_scenario`, and `radar_forge.pipeline`: `scan_iq`,
+    `range_doppler_product`. Each scan carries its IQ (`scan.cubes`) and the truth
+    (`scan.truth.bistatic_range_m`, `scan.truth.bistatic_range_rate_mps`: unfolded, twice the
     slant values here, positive receding). The map has shape `(n_doppler, n_range)`.
-  - `radar_forge.pipeline`: `frame_plots`, `ScanTracker`, and the `track` stage of
-    `radar_forge.evaluate` that scores it. This is the classical baseline.
+  - `radar_forge.pipeline`: `scan_plots`, `ScanTracker`, and the `track` stage of
+    `radar_forge.verify` that scores it. This is the classical baseline.
   - `radar_forge.scenario.truth_geometry`: reads each target's trajectory, resamples it onto the
-    frame times and returns its geometry seen from the radar. Its steps, once `load_flight_csv`,
+    scan times and returns its geometry seen from the radar. Its steps, once `load_flight_csv`,
     `resample` and `to_radar_frame`, are private now; `radar_forge.coordinates.geodetic_to_enu_m`
     converts fixes of your own.
   - `radar_forge.tracking.models.MotionModel`: the interface a motion model follows.
@@ -87,7 +87,7 @@ a different false-alarm rate. Your job is to find out on a problem we control.
   aircraft. Scenario 003 uses only 120 s of it (from 663 s). The rest is yours for training,
   validation and testing; decide how to split it and justify the split. The fixes are 2–8 s
   apart and noisy, which is why the simulated target's range rate jumps by several m/s between
-  frames. Read the comment above `sigma_acceleration_mps2` in
+  scans. Read the comment above `sigma_acceleration_mps2` in
   `config/scenario_003_tracking.toml`.
 
 ## The questions
@@ -127,7 +127,7 @@ Everyone answers questions 1 and 2. Then choose one direction for question 3.
      `scenario_003_ukf_pulsed_medium_prf.toml` folds range; the dual-PRF FMCW of
      `scenario_003_tracking_dual_prf.toml` resolves velocity but splits its pulses between two
      bursts. Treat the waveform as the action. Use a world model (learned, or the tracker's own)
-     to choose the waveform frame by frame, and compare with always using one. Count what each
+     to choose the waveform scan by scan, and compare with always using one. Count what each
      action costs in time and energy on target, so the comparison is fair.
    - **E. Your own.** You may propose a different direction, if it uses the real library and has
      a classical baseline. Agree it with us before you start.
@@ -142,7 +142,7 @@ Everyone answers questions 1 and 2. Then choose one direction for question 3.
    - **Shift.** Test under at least one change from the training conditions, such as a different
      part of the flight, a different SNR or different clutter parameters. How fast does any
      advantage disappear?
-   - **Cost.** Report training time, and operations and memory per frame at inference, against
+   - **Cost.** Report training time, and operations and memory per scan at inference, against
      the baseline.
 
 4. **What next.** Half a page: if you had four more weeks, what would you do, what would you

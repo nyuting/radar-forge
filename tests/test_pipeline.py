@@ -4,7 +4,7 @@ Ground truth is closed form wherever the test can compute it apart from the code
 bistatic route length |p - tx| + |p| and its rate v . (u_T + u_R), the map bin of an exact
 range and rate, the noise of every range cell, and a rate that folds in both bursts of a pair.
 The tier-3 scene is four targets at mixed range, rate and cross-section, monostatic and
-bistatic, run three frames through ``evaluate.run``.
+bistatic, run three scans through ``verify.run``.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from radar_forge import evaluate, plots
+from radar_forge import figures, verify
 from radar_forge import pipeline as pipeline_module
 from radar_forge.clutter import cancel
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
@@ -27,18 +27,18 @@ from radar_forge.pipeline import (
     Plots,
     RangeDopplerProduct,
     ScanTracker,
-    frame_plots,
-    frame_products,
-    frames,
     map_axes,
     range_doppler_product,
+    scan_iq,
+    scan_plots,
+    scan_products,
     synthesise,
 )
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter
 from radar_forge.scenario import RangeGate, load_scenario, truth_geometry
 from radar_forge.settings import CancellationSettings, Target
 from radar_forge.signal import noise_waveform, thermal_noise
-from radar_forge.stages import core
+from radar_forge.verify import chain
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -87,9 +87,9 @@ def _closed_form(tx_enu_m: np.ndarray, time_s: float) -> tuple[np.ndarray, np.nd
 
 @pytest.fixture(params=[False, True], ids=["monostatic", "bistatic"])
 def scene_run(request, write_scene, tmp_path):
-    """The four-target scene, three frames through every stage, and its run directory."""
-    scenario = write_scene(SCENE, bistatic=request.param, n_frames=3, extra=SCENE_SETTINGS)
-    report = evaluate.run(scenario, out_dir=tmp_path / "run", render=False)
+    """The four-target scene, three scans through every stage, and its run directory."""
+    scenario = write_scene(SCENE, bistatic=request.param, n_scans=3, extra=SCENE_SETTINGS)
+    report = verify.run(scenario, out_dir=tmp_path / "run", render=False)
     return scenario, report, tmp_path / "run"
 
 
@@ -105,9 +105,9 @@ def test_truth_is_the_closed_form_route_and_its_rate(scene_run):
     )
     rows = _rows(run_dir / "truth.csv")
     assert len(rows) == 3 * len(SCENE)
-    for frame in range(3):
-        bistatic_m, rate_mps = _closed_form(tx_enu_m, float(frame))
-        written = [r for r in rows if int(r["frame"]) == frame]
+    for scan in range(3):
+        bistatic_m, rate_mps = _closed_form(tx_enu_m, float(scan))
+        written = [r for r in rows if int(r["scan"]) == scan]
         # rtol 1e-12: the same few float64 operations in a different order.
         np.testing.assert_allclose(
             [float(r[range_name]) for r in written], scale * bistatic_m, rtol=1e-12
@@ -117,41 +117,41 @@ def test_truth_is_the_closed_form_route_and_its_rate(scene_run):
         )
 
 
-def _predicted_bins(scenario, frame: int) -> np.ndarray:
+def _predicted_bins(scenario, scan: int) -> np.ndarray:
     """Return each target's (rate, range) bin, computed here from c/B and lambda PRF / N."""
     radar = scenario.radar
     tx_enu_m = radar.tx_site.enu_m(radar.rx_site or radar.tx_site)
-    bistatic_m, rate_mps = _closed_form(tx_enu_m, float(frame))
+    bistatic_m, rate_mps = _closed_form(tx_enu_m, float(scan))
     range_bin_m = SPEED_OF_LIGHT_MPS / radar.transmitter.bandwidth_hz
-    n_pulses = scenario.n_pulses[0]
+    n_pulses = scenario.n_pulses_per_burst[0]
     rate_bin_mps = radar.wavelength_m * radar.transmitter.prf_hz / n_pulses
     # Rate falls with Doppler index: zero at n / 2, receding below it.
     return np.column_stack([n_pulses / 2 - rate_mps / rate_bin_mps, bistatic_m / range_bin_m])
 
 
 def test_every_target_is_one_cluster_and_nothing_else_is_detected(scene_run):
-    """One detection within a bin of each target's own bin, every frame, and none elsewhere."""
+    """One detection within a bin of each target's own bin, every scan, and none elsewhere."""
     scenario, _, run_dir = scene_run
     detections = _rows(run_dir / "detections.csv")
-    for frame in range(3):
+    for scan in range(3):
         cells = np.array(
             [
                 [float(r["rate_index"]), float(r["range_index"])]
                 for r in detections
-                if int(r["frame"]) == frame
+                if int(r["scan"]) == scan
             ]
         )
-        gaps = np.abs(cells[None, :, :] - _predicted_bins(scenario, frame)[:, None, :])
+        gaps = np.abs(cells[None, :, :] - _predicted_bins(scenario, scan)[:, None, :])
         near = np.all(gaps <= 1.0, axis=2)
         assert cells.shape[0] == len(SCENE)
-        assert np.all(near.sum(axis=1) == 1), f"frame {frame}: a target is not exactly one cluster"
-        assert np.all(near.any(axis=0)), f"frame {frame}: a detection no target predicts"
+        assert np.all(near.sum(axis=1) == 1), f"scan {scan}: a target is not exactly one cluster"
+        assert np.all(near.any(axis=0)), f"scan {scan}: a detection no target predicts"
 
 
 def test_one_confirmed_track_per_target_after_confirmation(scene_run):
-    """Two hits in three scans confirm every target by the last frame, and nothing else."""
+    """Two hits in three scans confirm every target by the last scan, and nothing else."""
     _, report, run_dir = scene_run
-    last = [r for r in _rows(run_dir / "tracks.csv") if int(r["frame"]) == 2]
+    last = [r for r in _rows(run_dir / "tracks.csv") if int(r["scan"]) == 2]
     assert sum(r["status"] == "confirmed" for r in last) == len(SCENE)
     assert report.values["n_confirmed_tracks"] == len(SCENE)
 
@@ -189,10 +189,10 @@ def test_a_dual_prf_pair_unfolds_a_rate_neither_burst_resolves(rng):
     geometry = TargetGeometry.monostatic(15_000.0, 150.0)
     products = [
         range_doppler_product(synthesise(r, geometry, [10.0], n, rng=rng), r)
-        for r, n in zip(scenario.radars, scenario.n_pulses, strict=True)
+        for r, n in zip(scenario.radars, scenario.n_pulses_per_burst, strict=True)
     ]
     assert all(p.rate_period_mps / 2.0 < 300.0 for p in products)
-    plots = frame_plots(products, scenario.detection)
+    plots = scan_plots(products, scenario.detection)
     accepted = plots.accepted
     assert accepted.size == 1
     assert abs(plots.bistatic_range_rate_mps[accepted[0]] - 300.0) < abs(products[0].rate_bin_mps)
@@ -206,7 +206,7 @@ def test_the_radars_unambiguous_limits_are_the_maps_periods(path: Path) -> None:
     A noise burst's lags are a window that folds nothing: its delay period is infinite.
     """
     scenario = load_scenario(path)
-    bursts = zip(scenario.radars, scenario.n_pulses, scenario.n_range_lags, strict=True)
+    bursts = zip(scenario.radars, scenario.n_pulses_per_burst, scenario.n_range_lags, strict=True)
     for radar, n_pulses, n_range_lags in bursts:
         range_m, rate_mps = map_axes(radar, n_pulses, n_range_lags=n_range_lags)
         assert min(range_m.size, rate_mps.size) > 1, f"{path.stem}: an axis of one bin has no step"
@@ -238,12 +238,16 @@ def test_an_unknown_key_or_a_wrong_type_is_refused(tmp_path):
             load_scenario(path)
 
 
-def test_a_failed_check_names_every_failure(one_frame_scenario, tmp_path):
+def test_a_failed_check_names_every_failure(one_scan_scenario, tmp_path):
     """VerificationError lists each failed check, not only the first."""
-    verify = {"stages": ["geometry"], "expected_snr_db": 0.0, "truth_in_map_fraction": [2.0, 3.0]}
-    scenario = dataclasses.replace(one_frame_scenario, verify=verify)
-    with pytest.raises(evaluate.VerificationError) as caught:
-        evaluate.run(scenario, out_dir=tmp_path / "run")
+    thresholds = {
+        "stages": ["geometry"],
+        "expected_snr_db": 0.0,
+        "truth_in_map_fraction": [2.0, 3.0],
+    }
+    scenario = dataclasses.replace(one_scan_scenario, verify=thresholds)
+    with pytest.raises(verify.VerificationError) as caught:
+        verify.run(scenario, out_dir=tmp_path / "run")
     assert len(caught.value.report.failures) == 2
     assert all(c.name in str(caught.value) for c in caught.value.report.failures)
     assert math.isfinite(caught.value.report.values["predicted_snr_db"])
@@ -276,11 +280,13 @@ def test_the_fold_monitor_fits_the_slope_on_the_scans_own_times():
     wrong prediction and the wrong fold stood.
     """
     tracker = ScanTracker(load_scenario(REPO / "config" / "scenario_003_tracking.toml"))
-    span_mps, rate_mps = tracker.fold_span_mps, 50.0
-    ids = tracker.tracker.seed([[20_600.0, rate_mps + span_mps]], np.diag([100.0, 1.0])[None], 12.0)
+    period_mps, rate_mps = tracker.rate_period_mps, 50.0
+    ids = tracker.tracker.seed(
+        [[20_600.0, rate_mps + period_mps]], np.diag([100.0, 1.0])[None], 12.0
+    )
     times_s = [*range(9), 12.0]
     tracker.history[int(ids[0])] = [(float(t), 20_000.0 + rate_mps * t) for t in times_s]
-    folded_mps = rate_mps - span_mps * round(rate_mps / span_mps)
+    folded_mps = rate_mps - period_mps * round(rate_mps / period_mps)
     # abs 1e-9: whole spans added to a folded reading, a few float64 operations.
     np.testing.assert_allclose(tracker.unfold(np.array([folded_mps])), [rate_mps], atol=1e-9)
 
@@ -334,26 +340,26 @@ def test_a_contradictory_or_unknown_tracking_choice_is_refused_at_load(
 
 def test_a_second_stage_of_the_same_name_is_refused():
     """Catches a later stage module silently replacing a core stage and its [verify] keys."""
-    keys = evaluate.VERIFY_KEYS["geometry"]
+    keys = verify.stepper.VERIFY_KEYS["geometry"]
     with pytest.raises(ValueError, match="'geometry' is already registered"):
-        evaluate.stage("geometry", "detection_fraction")(lambda ctx: ctx)
-    assert evaluate.STAGES["geometry"] is core.geometry
-    assert evaluate.VERIFY_KEYS["geometry"] == keys
+        verify.stepper.stage("geometry", "detection_fraction")(lambda ctx: ctx)
+    assert verify.STAGES["geometry"] is chain.geometry
+    assert verify.stepper.VERIFY_KEYS["geometry"] == keys
 
 
-def test_an_unknown_verify_key_is_refused_before_any_stage(one_frame_scenario, tmp_path):
+def test_an_unknown_verify_key_is_refused_before_any_stage(one_scan_scenario, tmp_path):
     """A misspelt threshold raises, naming it, instead of being skipped in silence."""
-    verify = {"stages": ["geometry"], "nees_fraction_mn": 0.5}
-    scenario = dataclasses.replace(one_frame_scenario, verify=verify)
+    thresholds = {"stages": ["geometry"], "nees_fraction_mn": 0.5}
+    scenario = dataclasses.replace(one_scan_scenario, verify=thresholds)
     with pytest.raises(ValueError, match="nees_fraction_mn"):
-        evaluate.run(scenario, out_dir=tmp_path / "run")
+        verify.run(scenario, out_dir=tmp_path / "run")
     assert not (tmp_path / "run" / "truth.csv").exists()
 
 
-def test_a_window_with_no_frame_is_refused(one_frame_scenario):
-    """0.4 s at 1 Hz rounds to no frame: refused at construction, not deep in the geometry."""
-    with pytest.raises(ValueError, match="no frame"):
-        dataclasses.replace(one_frame_scenario, duration_s=0.4)
+def test_a_window_with_no_scan_is_refused(one_scan_scenario):
+    """0.4 s at 1 Hz rounds to no scan: refused at construction, not deep in the geometry."""
+    with pytest.raises(ValueError, match="no scan"):
+        dataclasses.replace(one_scan_scenario, duration_s=0.4)
 
 
 def _trajectory(path: Path, times_s: list[float]) -> Path:
@@ -363,15 +369,15 @@ def _trajectory(path: Path, times_s: list[float]) -> Path:
     return path
 
 
-def test_a_one_frame_window_with_no_fix_either_side_is_refused(one_frame_scenario, tmp_path):
-    """One frame, its track ending half a frame later: no velocity, refused by name."""
+def test_a_one_scan_window_with_no_fix_either_side_is_refused(one_scan_scenario, tmp_path):
+    """One scan, its track ending half a scan later: no velocity, refused by name."""
     target = Target("short", 0.0, _trajectory(tmp_path / "short.csv", [0.0, 0.5]), 1000.0)
-    scenario = dataclasses.replace(one_frame_scenario, targets=(target,))
-    with pytest.raises(ValueError, match="one-frame window"):
+    scenario = dataclasses.replace(one_scan_scenario, targets=(target,))
+    with pytest.raises(ValueError, match="one-scan window"):
         truth_geometry(scenario)
 
 
-def test_trajectory_files_share_one_time_base(one_frame_scenario, tmp_path):
+def test_trajectory_files_share_one_time_base(one_scan_scenario, tmp_path):
     """Regression: each file was rebased to its own first fix, so these two played 10 s apart.
 
     Both files follow one law in absolute time, from first fixes 10 s apart; at 12 s they are
@@ -379,7 +385,7 @@ def test_trajectory_files_share_one_time_base(one_frame_scenario, tmp_path):
     """
     early = Target("early", 0.0, _trajectory(tmp_path / "a.csv", [0.0, 10.0, 20.0]), 1000.0)
     late = Target("late", 0.0, _trajectory(tmp_path / "b.csv", [10.0, 20.0, 30.0]), 1000.0)
-    scenario = dataclasses.replace(one_frame_scenario, targets=(early, late), start_time_s=12.0)
+    scenario = dataclasses.replace(one_scan_scenario, targets=(early, late), start_time_s=12.0)
     truth = truth_geometry(scenario)[0]
     # rtol 1e-12: one interpolation each, between different fixes of the same straight line.
     np.testing.assert_allclose(truth.bistatic_range_m[1], truth.bistatic_range_m[0], rtol=1e-12)
@@ -418,11 +424,22 @@ def test_a_noise_target_lands_on_its_lag_and_doppler_bin():
         range_doppler_product(cube, radar, n_range_lags=1024)
 
 
+@pytest.mark.parametrize("config", ["scenario_001_fmcw_low_prf.toml", "scenario_011_crossing.toml"])
+def test_a_scans_table_without_a_period_is_refused_by_name(config, tmp_path):
+    """IQ and plot-level loaders alike name the missing key, not a bare KeyError."""
+    text = (REPO / "config" / config).read_text(encoding="utf-8")
+    kept = [line for line in text.splitlines() if not line.startswith("scan_period_s")]
+    path = tmp_path / config
+    path.write_text("\n".join(kept), encoding="utf-8")
+    with pytest.raises(ValueError, match=r"\[scans\] needs scan_period_s"):
+        load_scenario(path)
+
+
 def test_noise_tables_need_a_noise_burst(tmp_path):
     """[leakage] and the rest describe a noise burst; a scenario without one refuses them."""
     text = (REPO / "config" / "scenario_001_fmcw_low_prf.toml").read_text(encoding="utf-8")
     path = tmp_path / "fmcw_with_leakage.toml"
-    path.write_text(text + "\n[leakage]\nlags = [0]\ninr_db = [40.0]\n", encoding="utf-8")
+    path.write_text(text + "\n[leakage]\nlags_samples = [0]\ninr_db = [40.0]\n", encoding="utf-8")
     with pytest.raises(ValueError, match="noise burst"):
         load_scenario(path)
 
@@ -435,27 +452,27 @@ def test_cancellation_settings_refuse_what_wiener_smi_cannot_do():
         CancellationSettings("least_squares", 192, n_samples_extension=400)
 
 
-def test_each_noise_frame_carries_its_code_beside_the_stream():
-    """frames() hands a noise burst's stream with the code it sent, the same shape."""
+def test_each_noise_scan_carries_its_code_beside_the_stream():
+    """scan_iq() hands a noise burst's stream with the code it sent, the same shape."""
     scenario = load_scenario(NOISE_CONFIG)
-    frame = next(frames(scenario, n_frames=1))
-    assert len(frame.cubes) == len(frame.references) == 1
-    assert frame.cubes[0].shape == frame.references[0].shape == (2048, 400)
-    product = frame_products(scenario, frame)[0]
+    scan = next(scan_iq(scenario, n_scans=1))
+    assert len(scan.cubes) == len(scan.references) == 1
+    assert scan.cubes[0].shape == scan.references[0].shape == (2048, 400)
+    product = scan_products(scenario, scan)[0]
     assert product.rd_map.shape == (2048, 1024)
 
 
 def _short_noise_scenario():
-    """P1 cut to 64 batches and 64 lags: the same chain, 25 600 samples a frame."""
+    """P1 cut to 64 batches and 64 lags: the same chain, 25 600 samples a scan."""
     scenario = load_scenario(NOISE_CONFIG)
-    return dataclasses.replace(scenario, n_pulses=(64,), n_range_lags=(64,))
+    return dataclasses.replace(scenario, n_pulses_per_burst=(64,), n_range_lags=(64,))
 
 
 def test_a_noise_maps_lags_do_not_wrap():
     """A route past the lag window has no index; inside it, the unwrapped lag."""
     scenario = _short_noise_scenario()
-    frame = next(frames(scenario, n_frames=1))
-    product = frame_products(scenario, frame)[0]
+    scan = next(scan_iq(scenario, n_scans=1))
+    product = scan_products(scenario, scan)[0]
     lag_m = SPEED_OF_LIGHT_MPS / 8.0e6
     range_index, _ = product.index_of([10.5 * lag_m, 64.2 * lag_m, 130.0 * lag_m], 0.0)
     np.testing.assert_allclose(range_index[0], 10.5, rtol=1e-12)
@@ -464,20 +481,20 @@ def test_a_noise_maps_lags_do_not_wrap():
 
 
 def test_the_cancellers_notch_holds_the_maps_noise_level_not_round_off():
-    """Zero Doppler below lag K is exactly emptied by the fit; frame_products floors it to the
+    """Zero Doppler below lag K is exactly emptied by the fit; scan_products floors it to the
     map's noise power, so CFAR finds no round-off there.
     """
     scenario = _short_noise_scenario()
-    frame = next(frames(scenario, n_frames=1))
-    code, stream = frame.references[0], frame.cubes[0]
+    scan = next(scan_iq(scenario, n_scans=1))
+    code, stream = scan.references[0], scan.cubes[0]
     residual = cancel(code, stream, scenario.cancellation).residual.reshape(stream.shape)
     raw = range_doppler_product(residual, scenario.radar, reference=code, n_range_lags=64).rd_map
     noise_w = np.median(np.abs(raw) ** 2) / np.log(2.0)
     # The projection's null: round-off, far under the noise.
     assert np.max(np.abs(raw[32, :64]) ** 2) < 1e-20 * noise_w
-    product = frame_products(scenario, frame)[0]
+    product = scan_products(scenario, scan)[0]
     np.testing.assert_allclose(np.abs(product.rd_map[32, :64]) ** 2, noise_w, rtol=1e-12)
-    found = frame_plots([product], scenario.detection)
+    found = scan_plots([product], scenario.detection)
     rows = np.array([d.centroid_index[0] for d in found.detections])
     assert not np.any(np.abs(rows - 32) < 0.5)
 
@@ -519,7 +536,7 @@ def test_the_cancellation_figure_labels_truth_once_and_draws_without_it():
     rd_map = np.ones((8, 16), dtype=complex)
     range_m = SPEED_OF_LIGHT_MPS * np.arange(16) / 8.0e6
     rate_mps = np.linspace(10.0, -10.0, 8, endpoint=False)
-    figure = plots.render_cancellation(
+    figure = figures.render_cancellation(
         rd_map,
         rd_map,
         range_m,
@@ -531,31 +548,31 @@ def test_the_cancellation_figure_labels_truth_once_and_draws_without_it():
     )
     labels = [t.get_text() for t in figure.axes[1].get_legend().get_texts()]
     assert labels == ["truth"]
-    bare = plots.render_cancellation(rd_map, rd_map, range_m, rate_mps, radar, floor_w=1.0)
+    bare = figures.render_cancellation(rd_map, rd_map, range_m, rate_mps, radar, floor_w=1.0)
     assert bare.axes[1].get_legend() is None
     pyplot = pytest.importorskip("matplotlib.pyplot")
     pyplot.close(figure)
     pyplot.close(bare)
 
 
-# Slow: one frame of P1 through rd and leakage, about five seconds.
+# Slow: one scan of P1 through rd and leakage, about five seconds.
 @pytest.mark.slow
-def test_the_leakage_stage_reuses_rds_frames(tmp_path, monkeypatch):
-    """After rd, leakage measures rd's frames and cancellations; alone, it makes its own."""
+def test_the_leakage_stage_reuses_rds_scans(tmp_path, monkeypatch):
+    """After rd, leakage measures rd's scans and cancellations; alone, it makes its own."""
     calls = []
-    original = pipeline_module.frames
+    original = pipeline_module.scan_iq
 
     def counted(*args, **kwargs):
         calls.append(1)
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(pipeline_module, "frames", counted)
+    monkeypatch.setattr(pipeline_module, "scan_iq", counted)
     scenario = load_scenario(NOISE_CONFIG)
-    together = evaluate.run(scenario, ["rd", "leakage"], n_frames=1, out_dir=tmp_path, render=False)
+    together = verify.run(scenario, ["rd", "leakage"], n_scans=1, out_dir=tmp_path, render=False)
     assert calls == []
-    alone = evaluate.run(scenario, ["leakage"], n_frames=1, out_dir=tmp_path, render=False)
+    alone = verify.run(scenario, ["leakage"], n_scans=1, out_dir=tmp_path, render=False)
     assert calls == [1]
-    # The same seed, the same frame: the same numbers either way.
+    # The same seed, the same scan: the same numbers either way.
     for key in ("cancellation_depth_db[0]", "floor_rise_db[0]", "sinr_loss_db[0]"):
         assert together.values[key] == alone.values[key]
 
@@ -567,7 +584,7 @@ def _k_variant(variant: str) -> str:
 def test_a_gated_map_labels_its_window_of_the_range_circle():
     """A gated map's axis starts at the gate and its range circle is still c times the PRI.
 
-    The noiseless K1 echo at frame 0 peaks in the bin index_of predicts, within one.
+    The noiseless K1 echo at scan 0 peaks in the bin index_of predicts, within one.
     """
     scenario = load_scenario(REPO / "config" / "scenario_004_keystone_k1.toml")
     radar, gate, truth = scenario.radar, scenario.gates[0], truth_geometry(scenario)[0]
@@ -619,10 +636,10 @@ def test_a_migration_or_gate_setting_that_cannot_run_is_refused(tmp_path, old, n
 
 
 def test_an_accelerating_target_carries_its_route_acceleration():
-    """K2's 15 g along the line of sight is -294.1995 m/s^2 bistatic at every frame."""
+    """K2's 15 g along the line of sight is -294.1995 m/s^2 bistatic at every scan."""
     scenario = load_scenario(REPO / "config" / "scenario_004_keystone_k2.toml")
-    for frame in truth_geometry(scenario):
-        np.testing.assert_allclose(frame.bistatic_range_acceleration_mps2, [-294.1995], rtol=1e-12)
+    for truth in truth_geometry(scenario):
+        np.testing.assert_allclose(truth.bistatic_range_acceleration_mps2, [-294.1995], rtol=1e-12)
     np.testing.assert_allclose(scenario.migration.accelerations_mps2[[0, -1]], [-400.0, -200.0])
     assert scenario.migration.accelerations_mps2.size == 21
 
@@ -643,7 +660,7 @@ def test_a_detection_across_a_gated_window_is_not_a_hit_on_its_far_side():
     for range_index, expected in ((99.6, False), (0.5, True)):
         detection = Detection((4, int(range_index)), (4.0, range_index), 1.0, 1.0, 1)
         found = dataclasses.replace(_one_plot(1000.0, 0.0), detections=(detection,))
-        assert core._hits(found, 0, product, truth, 1.0) == [expected]
+        assert chain._hits(found, 0, product, truth, 1.0) == [expected]
 
 
 def test_only_a_target_given_an_acceleration_carries_its_routes_acceleration(tmp_path):

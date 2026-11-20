@@ -25,7 +25,7 @@ covariance being honest in two places:
 
 Both are promises that hold only if the motion and measurement models are right. Scenario 003's
 target is not a constant-velocity target. It is built from noisy ADS-B fixes 2–8 s apart, and
-its range rate jumps by several m/s between frames; read the comment above
+its range rate jumps by several m/s between scans; read the comment above
 `sigma_acceleration_mps2` in `config/scenario_003_tracking.toml`. So the promise may already be
 broken, and the question is by how much.
 
@@ -50,7 +50,7 @@ Nothing conformal is implemented in `radar-forge`. You will write it in your own
 - Use this repository at the latest `main`, and record the commit hash you used in your report.
 - Run `uv sync --extra dev --extra visualisation`. Add `--extra ml` only for the optional learned model.
 - `uv run python scripts/run_scenario.py config/scenario_003_tracking.toml --out out/s1`
-  runs the chain end to end. Read that script and the stages it runs, in `radar_forge.evaluate`,
+  runs the chain end to end. Read that script and the stages it runs, in `radar_forge.verify`,
   to see how the pieces fit together. Don't commit `out/`.
 - Two filters in the one `Tracker` gate by chi-square:
   - `scenario_003_tracking.toml` runs the linear Kalman filter (`linearisation = "taylor"`);
@@ -58,19 +58,19 @@ Nothing conformal is implemented in `radar-forge`. You will write it in your own
 
   Pick one and say why.
 - Useful entry points:
-  - `radar_forge.pipeline`: `ScanTracker(scenario)` and its `scan`, fed by `frame_plots`. Each
+  - `radar_forge.pipeline`: `ScanTracker(scenario)` and its `scan`, fed by `scan_plots`. Each
     scan returns a `TrackBank`, whose rows carry each track's `mean`, `covariance` and `nis`.
-    The `track` stage of `radar_forge.evaluate` scores each target's primary track into
+    The `track` stage of `radar_forge.verify` scores each target's primary track into
     `metrics.csv` (RMSE, NEES fraction, latency); nothing reports the mean NIS any more.
-  - `radar_forge.scenario.load_scenario` and `radar_forge.pipeline.frames`. Each frame carries
-    the truth (`frame.truth.bistatic_range_m`, `frame.truth.bistatic_range_rate_mps`: twice the
+  - `radar_forge.scenario.load_scenario` and `radar_forge.pipeline.scan_iq`. Each scan carries
+    the truth (`scan.truth.bistatic_range_m`, `scan.truth.bistatic_range_rate_mps`: twice the
     slant values here and positive receding, as the tracker's state is), so you can compute the
     normalised estimation error squared (NEES) as well as the NIS.
   - `radar_forge.tracking.filters.innovate`: the NIS and log-likelihood of every track against
     every measurement of a scan.
 - **Data.** `data/flight_coordinates.csv` holds about 16,500 s of flight. Scenario 003 uses
   120 s of it, from `start_time_s = 663.0`. To get calibration and test windows, copy the TOML
-  and change `start_time_s` in `[frames]`. The target's `trajectory_path` is resolved relative
+  and change `start_time_s` in `[scans]`. The target's `trajectory_path` is resolved relative
   to the TOML's own folder, so keep the copy next to the original or make the path absolute.
   Decide how to split the flight, and justify the split.
 - A gate is a threshold on the NIS. Work out how to apply a threshold of your own without

@@ -14,10 +14,10 @@ rcs_dbsm = 10.0        # 10 m^2, Swerling 0 (non-fluctuating)
 trajectory_path = "../data/flight_coordinates.csv"
 altitude_m = 1500.0    # the CSV has no altitude column; held constant
 
-[frames]
+[scans]
 start_time_s = 0.0
-duration_s = 120.0     # the full track is ~16,500 frames; this window is opt-out
-frame_rate_hz = 1.0
+duration_s = 120.0     # the full track is ~16,500 scans; this window is opt-out
+scan_period_s = 1.0
 
 [site.tx]
 # The Duke Receiver: 101 Science Drive, Durham NC. 60 m rooftop antenna. With
@@ -27,7 +27,7 @@ longitude_deg = -78.94100
 altitude_m = 60.0
 
 # One burst. 1 ms sweep at 2 GHz/s, deramped at 1 MHz -> 1000 samples/chirp.
-# 256 chirps = 256 ms of CPI inside each 1 s frame.
+# 256 chirps = 256 ms of CPI inside each 1 s scan.
 [[burst]]
 waveform = "fmcw"
 carrier_frequency_hz = 9.8e9
@@ -44,7 +44,7 @@ gain_rx_dbi = 30.0
 noise_figure_db = 3.0
 
 # Cell-averaging CFAR along range, which wraps, as scenario 003 runs it. At
-# pfa = 1e-5, S1's map of 256 x 1000 cells holds about 2.6 false alarms a frame.
+# pfa = 1e-5, S1's map of 256 x 1000 cells holds about 2.6 false alarms a scan.
 [detection]
 pfa = 1e-5
 n_train = 16
@@ -53,14 +53,14 @@ variant = "ca"
 merge_range_bins = 1.0
 max_bistatic_range_rate_mps = 400.0   # 200 m/s radial
 
-# What the stepper checks (radar_forge.evaluate). Every number is re-derived for
+# What the stepper checks (radar_forge.verify). Every number is re-derived for
 # bistatic range and rate, positive receding: twice the slant values.
 [verify]
 stages = ["geometry", "iq", "rd", "detect"]
-# Fraction of frames whose true range and rate lie inside the map, unfolded.
-# S1 folds the rate at +-15.3 m/s: 20 of 120 frames lie inside.
+# Fraction of scans whose true range and rate lie inside the map, unfolded.
+# S1 folds the rate at +-15.3 m/s: 20 of 120 scans lie inside.
 truth_in_map_fraction = [0.0, 0.25]
-# P_r T N / (k T0 F) on an exact bin at frame 0's ranges (R = 17,560.7 m), from the
+# P_r T N / (k T0 F) on an exact bin at scan 0's ranges (R = 17,560.7 m), from the
 # radar equation by hand: P_r = -143.046 dBW.
 expected_snr_db = 52.01
 snr_tolerance_db = 0.01
@@ -68,7 +68,7 @@ snr_tolerance_db = 0.01
 noise_tolerance_db = 0.05
 # A noiseless echo has |a|^2 = P_r in every sample it fills.
 peak_tolerance_db = 0.01
-# A detection within one bin of the truth, its rate wrapped, every frame.
+# A detection within one bin of the truth, its rate wrapped, every scan.
 truth_within_bins = 1.0
 detection_fraction = 1.0
 # Noise-only maps hold 30 expected false alarms; the Poisson 99.9 % interval,

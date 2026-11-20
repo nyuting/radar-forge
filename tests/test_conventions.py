@@ -42,7 +42,7 @@ MODULE_NAMES = sorted(
     info.name for info in pkgutil.walk_packages(radar_forge.__path__, prefix="radar_forge.")
 )
 PUBLIC_MODULE_NAMES = [n for n in MODULE_NAMES if not n.rsplit(".", 1)[-1].startswith("_")]
-PACKAGE_NAMES = ["radar_forge.stages", "radar_forge.tracking"]
+PACKAGE_NAMES = ["radar_forge.tracking", "radar_forge.verify"]
 
 
 def test_package_imports_and_has_version():
@@ -57,7 +57,7 @@ def test_package_imports_and_has_version():
 def test_importing_the_library_does_not_pull_in_matplotlib():
     """Regression: one convenience import of pyplot at module level costs every user the extra."""
     code = (
-        "import sys, radar_forge, radar_forge.plots, radar_forge.evaluate; "
+        "import sys, radar_forge, radar_forge.figures, radar_forge.verify; "
         "assert 'matplotlib' not in sys.modules, 'matplotlib imported'"
     )
     result = subprocess.run(
@@ -66,19 +66,19 @@ def test_importing_the_library_does_not_pull_in_matplotlib():
     assert result.returncode == 0, result.stderr
 
 
-# Slow: a fresh interpreter, so no earlier import of radar_forge.stages hides a missing one.
+# Slow: a fresh interpreter, so no earlier import of radar_forge.verify hides a missing one.
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "first_import", ["radar_forge.evaluate", "radar_forge.stages", "radar_forge.stages.core"]
+    "first_import", ["radar_forge.verify.stepper", "radar_forge.verify", "radar_forge.verify.chain"]
 )
 def test_the_core_stages_register_in_their_run_order(first_import: str) -> None:
     """Whichever module is imported first, the five core stages register first, in run order.
 
-    Catches the stages import at the foot of evaluate.py going missing or going lazy, and
-    either stages import breaking on the partly initialised module it passes through.
+    Catches a stage import in verify/__init__.py going missing, lazy or out of order, and a
+    stage module's import breaking on the partly initialised package it passes through.
     """
     code = (
-        f"import {first_import}; from radar_forge.evaluate import STAGES; "
+        f"import {first_import}; from radar_forge.verify import STAGES; "
         "assert list(STAGES)[:5] == ['geometry', 'iq', 'rd', 'detect', 'track'], list(STAGES); "
         "assert list(STAGES).index('keystone') > 4, list(STAGES); "
         "assert list(STAGES).index('leakage') > 4, list(STAGES); "

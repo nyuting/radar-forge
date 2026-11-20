@@ -46,7 +46,7 @@ The rules, and the check that enforces each, are summarised in [CLAUDE.md](../CL
 
 A scenario is specified in `spec/` until it is built; then its TOML in `config/` carries its
 acceptance numbers in a `[verify]` table and its spec is deleted. Run one with
-`uv run python scripts/run_scenario.py config/<file>.toml --frames 3`, which writes
+`uv run python scripts/run_scenario.py config/<file>.toml --scans 3`, which writes
 `runs/<file>/` and exits 1 if a check fails. The Labels column gives the variant names that
 comments, tests and each TOML's `description` use (S1-S3 for 001, B1-B2 for 002, and so on).
 

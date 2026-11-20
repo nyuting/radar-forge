@@ -4,7 +4,7 @@ Matplotlib is the ``visualisation`` extra and is imported inside each drawing fu
 ``import radar_forge`` needs no extra. :func:`display_axes` is the one place a monostatic
 radar's bistatic range and rate are halved and relabelled range and radial velocity, for a
 figure or a CSV column; a bistatic radar keeps :math:`R_T + R_R` and its rate. Every rate is
-positive receding. Magnitudes are shown in decibels relative to the frame's own peak.
+positive receding. Magnitudes are shown in decibels relative to the scan's own peak.
 
 References
 ----------
@@ -23,7 +23,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from radar_forge.dsp import fold_velocity_mps
+from radar_forge.dsp import fold_range_rate_mps
 from radar_forge.radar import Radar
 from radar_forge.units import amplitude_to_db, db_to_amplitude, power_to_db
 
@@ -125,7 +125,7 @@ def magnitude_db(
 
 
 def save_figure(figure: Any, path: Path | str, *, dpi: int = 100) -> None:
-    """Write a figure and close it: a run draws one per frame, and pyplot keeps them all open."""
+    """Write a figure and close it: a run draws one per scan, and pyplot keeps them all open."""
     figure.savefig(path, dpi=dpi, bbox_inches="tight")
     _pyplot().close(figure)
 
@@ -192,7 +192,7 @@ def render_range_doppler(
     truth_mps = np.asarray(truth_rate_mps, dtype=np.float64)
     axes.plot(truth_m * km, truth_mps * show.scale, "x", color="red", ms=10, label="truth")
     folded_m = np.mod(truth_m, range_m.size * range_bin_m)
-    folded_mps = fold_velocity_mps(truth_mps, rate_mps.size * rate_bin_mps)
+    folded_mps = fold_range_rate_mps(truth_mps, rate_mps.size * rate_bin_mps)
     for range_value_m, rate_value_mps in zip(folded_m, folded_mps, strict=True):
         # A crosshair per target, so the peak it predicts can be read off either axis.
         axes.axvline(range_value_m * km, color="white", linestyle="--", linewidth=0.8)
@@ -267,7 +267,7 @@ def render_range_time_history(
     range_period_m: float | None = None,
     title: str | None = None,
 ) -> Any:
-    """Draw range and rate against time: truth ``(n_frames, n_targets)``, detections, tracks.
+    """Draw range and rate against time: truth ``(n_scans, n_targets)``, detections, tracks.
 
     Each track is ``(label, time_s, range_m, rate_mps)``. With ``range_period_m`` every range
     is shown modulo it, the way the map sees it, and a line is broken where it wraps.

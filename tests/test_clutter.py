@@ -3,7 +3,7 @@
 The unit tests hold the projection to closed forms on short streams: the Gram matrix against
 the explicit basis, the orthogonality of the residual, the degeneracy chain from sliding
 to batched to full-CPI to Wiener, and the Doppler notch. The slow tests run the
-scenario's own frames for the comparisons its configs cannot hold, one method each: Wiener-SMI,
+scenario's own scans for the comparisons its configs cannot hold, one method each: Wiener-SMI,
 too few taps, a full-CPI fit of moving clutter and a linear fit of a distorted
 transmitter, and the sliding fit against the batched one.
 """
@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from radar_forge import clutter, evaluate
+from radar_forge import clutter, verify
 from radar_forge.clutter import (
     cancel,
     cancellation_depth_db,
@@ -34,11 +34,11 @@ from radar_forge.clutter import (
     wiener_smi,
 )
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
-from radar_forge.pipeline import RangeDopplerProduct, frames, range_doppler_product
+from radar_forge.pipeline import RangeDopplerProduct, range_doppler_product, scan_iq
 from radar_forge.radar import TargetGeometry
 from radar_forge.scenario import load_scenario
 from radar_forge.signal import cubic_amplifier, noise_waveform
-from radar_forge.stages.clutter import _truth_cell
+from radar_forge.verify.leakage import _truth_cell
 
 REPO = Path(__file__).resolve().parents[1]
 SAMPLE_RATE_HZ = 8.0e6
@@ -282,91 +282,91 @@ def test_bad_orders_and_block_lengths_are_refused(code, received):
         ls_cancel(code, received, N_SHORT + 1)
 
 
-# --- Slow: scenario 005's own frames, 819 200 samples each, through one other method. ---
+# --- Slow: scenario 005's own scans, 819 200 samples each, through one other method. ---
 
 
-def _variant(config, verify, **cancellation):
+def _variant(config, thresholds, **cancellation):
     """Return a 005 config with its [cancellation] changed and only the leakage stage checked."""
     scenario = load_scenario(REPO / "config" / config)
     settings = dataclasses.replace(scenario.cancellation, **cancellation)
     return dataclasses.replace(
-        scenario, cancellation=settings, verify={"stages": ["leakage"], **verify}
+        scenario, cancellation=settings, verify={"stages": ["leakage"], **thresholds}
     )
 
 
 @pytest.fixture(scope="module")
-def static_frame():
-    """P1's frame 0: the stream and the code."""
+def static_scan():
+    """P1's scan 0: the stream and the code."""
     scenario = load_scenario(REPO / "config" / "scenario_005_static_leakage.toml")
-    frame = next(frames(scenario, n_frames=1))
-    return frame.references[0].reshape(-1), frame.cubes[0].reshape(-1)
+    scan = next(scan_iq(scenario, n_scans=1))
+    return scan.references[0].reshape(-1), scan.cubes[0].reshape(-1)
 
 
-# Slow: one frame through Wiener-SMI and least squares, a second each.
+# Slow: one scan through Wiener-SMI and least squares, a second each.
 @pytest.mark.slow
-def test_wiener_smi_matches_least_squares_on_the_static_scene(static_frame):
+def test_wiener_smi_matches_least_squares_on_the_static_scene(static_scan):
     """Residual powers agree to rtol 1e-3 (edge terms O(K/N) = 2.3e-4, four times over)."""
-    code, stream = static_frame
+    code, stream = static_scan
     wiener = np.sum(np.abs(wiener_smi(code, stream, 192).residual) ** 2)
     least = np.sum(np.abs(ls_cancel(code, stream, 192).residual) ** 2)
     np.testing.assert_allclose(wiener, least, rtol=1e-3)
 
 
-# Slow: five frames of the static scene with 96 taps.
+# Slow: five scans of the static scene with 96 taps.
 @pytest.mark.slow
 def test_96_taps_cannot_reach_the_lag_160_echo(tmp_path):
-    """CA 28.680 dB and the floor 12.27 dB up; the target still detected every frame."""
-    verify = {
+    """CA 28.680 dB and the floor 12.27 dB up; the target still detected every scan."""
+    thresholds = {
         # Ten standard errors of a power over 819 200 samples.
         "cancellation_depth_db": 28.680,
         "cancellation_tolerance_db": 0.05,
         # 10 log10((1 - 96/N)(1 + 15.85)) = 12.27 dB; 216 cells of floor.
         "floor_rise_db": 12.27,
         "floor_rise_tolerance_db": 1.0,
-        # Predicted SINR 14.4-15.0 dB: Pd >= 0.987 a frame.
-        "detections_per_frame": 1,
+        # Predicted SINR 14.4-15.0 dB: Pd >= 0.987 a scan.
+        "detections_per_scan": 1,
     }
-    scenario = _variant("scenario_005_static_leakage.toml", verify, n_taps=96)
-    evaluate.run(scenario, n_frames=5, out_dir=tmp_path, render=False)
+    scenario = _variant("scenario_005_static_leakage.toml", thresholds, n_taps=96)
+    verify.run(scenario, n_scans=5, out_dir=tmp_path, render=False)
 
 
-# Slow: five frames of the distorted transmitter through a linear basis.
+# Slow: five scans of the distorted transmitter through a linear basis.
 @pytest.mark.slow
 def test_a_linear_basis_stops_at_the_amplifier_distortion(tmp_path):
-    """CA 18.810 dB, the floor 22.14 dB up, the target found in at most one frame."""
-    verify = {
+    """CA 18.810 dB, the floor 22.14 dB up, the target found in at most one scan."""
+    thresholds = {
         # 40.946 - 10 log10(1 + 12 430 x 0.013077) = 18.810 dB; |x|^6 statistics, 0.1 dB.
         "cancellation_depth_db": 18.810,
         "cancellation_tolerance_db": 0.1,
         "floor_rise_db": 22.14,
         "floor_rise_tolerance_db": 1.0,
     }
-    scenario = _variant("scenario_005_distorted_transmitter.toml", verify, odd_orders=(1,))
-    report = evaluate.run(scenario, n_frames=5, out_dir=tmp_path, render=False)
-    # Predicted SINR about 5 dB, Pd <= 4.7e-3 a frame: two hits in five has P <= 2e-4.
+    scenario = _variant("scenario_005_distorted_transmitter.toml", thresholds, odd_orders=(1,))
+    report = verify.run(scenario, n_scans=5, out_dir=tmp_path, render=False)
+    # Predicted SINR about 5 dB, Pd <= 4.7e-3 a scan: two hits in five has P <= 2e-4.
     assert sum(report.values[f"target_detections[{k}]"] >= 1 for k in range(5)) <= 1
 
 
-# Slow: five frames of the moving clutter through one fit over the whole CPI.
+# Slow: five scans of the moving clutter through one fit over the whole CPI.
 @pytest.mark.slow
 def test_a_full_cpi_fit_lets_the_moving_clutter_through(tmp_path):
     """A one-bin notch, 13 % of a 30 dB echo escapes: floor 21.19 dB up, at most one hit."""
-    verify = {"floor_rise_db": 21.19, "floor_rise_tolerance_db": 1.0}
-    scenario = _variant("scenario_005_varying_clutter.toml", verify, n_samples_per_batch=0)
-    report = evaluate.run(scenario, n_frames=5, out_dir=tmp_path, render=False)
-    # Predicted SINR about 6 dB, Pd <= 1.1e-2 a frame: two hits in five has P <= 1.2e-3.
+    thresholds = {"floor_rise_db": 21.19, "floor_rise_tolerance_db": 1.0}
+    scenario = _variant("scenario_005_varying_clutter.toml", thresholds, n_samples_per_batch=0)
+    report = verify.run(scenario, n_scans=5, out_dir=tmp_path, render=False)
+    # Predicted SINR about 6 dB, Pd <= 1.1e-2 a scan: two hits in five has P <= 1.2e-3.
     assert sum(report.values[f"target_detections[{k}]"] >= 1 for k in range(5)) <= 1
 
 
-# Slow: the sliding fit is 2048 solves a frame, about 5-15 s here.
+# Slow: the sliding fit is 2048 solves a scan, about 5-15 s here.
 @pytest.mark.slow
 def test_the_sliding_fit_cancels_the_moving_clutter_to_the_noise(tmp_path):
-    """P2's current method: 50 us blocks, 6.45 ms windows; floor and SINR as clean, every frame.
+    """P2's current method: 50 us blocks, 6.45 ms windows; floor and SINR as clean, every scan.
 
     The window follows the 2 Hz phase block by block, so the moving copy keeps 8.7e-6 of its
     power (from the clipped windows at the CPI's ends); the noise loses K over each window.
     """
-    verify = {
+    thresholds = {
         # 41.738 + 0.017 - 0.038 = 41.717 dB: the ceiling with the sliding residual.
         "cancellation_depth_db": 41.717,
         "cancellation_tolerance_db": 0.05,
@@ -374,25 +374,25 @@ def test_the_sliding_fit_cancels_the_moving_clutter_to_the_noise(tmp_path):
         "floor_rise_tolerance_db": 1.0,
         "sinr_loss_db": 0.0,
         "sinr_loss_tolerance_db": 1.0,
-        "detections_per_frame": 1,
-        "uncancelled_detections_per_frame": 0,
+        "detections_per_scan": 1,
+        "uncancelled_detections_per_scan": 0,
     }
     scenario = _variant(
         "scenario_005_varying_clutter.toml",
-        verify,
+        thresholds,
         n_samples_per_batch=400,
         n_samples_extension=25_600,
     )
-    evaluate.run(scenario, n_frames=5, out_dir=tmp_path, render=False)
+    verify.run(scenario, n_scans=5, out_dir=tmp_path, render=False)
 
 
-# Slow: one frame through the batched and the sliding fits.
+# Slow: one scan through the batched and the sliding fits.
 @pytest.mark.slow
 def test_sliding_removes_the_batched_fits_parasitic_lines():
     """At lag 16 and +-156.25 Hz the sliding map is >= 20 dB under the batched one."""
     scenario = load_scenario(REPO / "config" / "scenario_005_varying_clutter.toml")
-    frame = next(frames(scenario, n_frames=1))
-    code, stream = frame.references[0], frame.cubes[0]
+    scan = next(scan_iq(scenario, n_scans=1))
+    code, stream = scan.references[0], scan.cubes[0]
     maps = {}
     for name, settings in (
         ("batched", scenario.cancellation),
@@ -428,11 +428,11 @@ def test_cancellation_depth_is_infinite_for_a_silent_residual_and_refused_withou
 def test_a_target_past_the_lag_window_records_nan_and_the_stage_finishes(tmp_path):
     """Regression: with no truth cell the floor is nan, and each ratio in dB of it stays nan.
 
-    The static scene's target sits past lag 512; one frame of the leakage stage, about 2 s.
+    The static scene's target sits past lag 512; one scan of the leakage stage, about 2 s.
     """
     scenario = load_scenario(REPO / "config" / "scenario_005_static_leakage.toml")
     scenario = dataclasses.replace(scenario, n_range_lags=(512,), verify={"stages": ["leakage"]})
-    report = evaluate.run(scenario, n_frames=1, out_dir=tmp_path, render=False)
+    report = verify.run(scenario, n_scans=1, out_dir=tmp_path, render=False)
     for name in ("floor_rise_db", "sinr_db", "clean_sinr_db", "uncancelled_sinr_db"):
         assert math.isnan(report.values[f"{name}[0]"]), name
     assert math.isfinite(report.values["cancellation_depth_db[0]"])

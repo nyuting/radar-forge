@@ -46,7 +46,7 @@ weaker result than a small one that wins.
 2. **Break the model.** Add one thing the classical score gets wrong, generated in your own
    script (leave `src/` alone). Choose one:
    - heavy-tailed, spiky clutter, such as compound-Gaussian clutter with a gamma texture;
-   - a target that fluctuates from frame to frame;
+   - a target that fluctuates from scan to scan;
    - a target that manoeuvres harder than your transition neighbourhood allows.
 
    Justify your parameters from a cited source on real radar data, and show what the mismatch
@@ -59,7 +59,7 @@ weaker result than a small one that wins.
    dB over the classical one, against the [floor and the ceiling](track-before-detect.md#the-bounds)
    where they apply. Then change the clutter or motion parameters it was trained on. How fast does
    its advantage disappear?
-5. **Cost and deployment.** Training time, inference operations per frame, and memory, against
+5. **Cost and deployment.** Training time, inference operations per scan, and memory, against
    the classical detector. Then half a page: what would stop you deploying the learned detector on
    embedded radar hardware (latency, fixed-point arithmetic, and how you would convince someone
    its false-alarm rate holds on data it has never seen)?
