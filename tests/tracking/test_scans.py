@@ -1,7 +1,7 @@
-"""Tests for radar_forge.tracking.scans: a plot-level scenario's rotations and its tracker.
+"""Tests for radar_forge.tracking.scans: the tracker a plot-level scenario's scans feed.
 
-One rotation of V4 is checked for what it must hold; the sector batching is checked by a
-Monte Carlo over 20 seeds through the multitarget stage.
+The sector batching is checked by a Monte Carlo over 20 seeds through the multitarget stage,
+and the likelihood ratio's density against the drifting rain cell.
 """
 
 from __future__ import annotations
@@ -13,35 +13,19 @@ import numpy as np
 import pytest
 
 from radar_forge import verify
+from radar_forge.plot_simulator import plot_scans
 from radar_forge.scenario import load_scenario
-from radar_forge.tracking.scans import scans
 
 TERMINAL = Path(__file__).resolve().parents[2] / "config" / "scenario_011_terminal_dense.toml"
 
 
-def test_a_plot_level_rotation_holds_its_echoes_clutter_and_discretes() -> None:
-    """One V4 rotation: every plot timed within its rotation and batched by its azimuth."""
-    scenario = load_scenario(TERMINAL)
-    rotation = next(scans(scenario, n_scans=1))
-    assert scenario.sensor is not None
-    period_s = scenario.scan_period_s
-    assert np.all((rotation.time_s >= 0.0) & (rotation.time_s < period_s))
-    sector = np.floor(rotation.azimuth_rad / (2 * np.pi / scenario.sensor.n_sectors))
-    np.testing.assert_array_equal(
-        rotation.sector, np.minimum(sector, scenario.sensor.n_sectors - 1)
-    )
-    kinds = set(rotation.source)
-    assert {"target", "clutter", "discrete"} <= kinds
-    assert rotation.echo_in_coverage.sum() >= 10
-
-
-# Slow: 20 seeds of V4 at 16 and at 32 sectors, 25 rotations each, about six minutes.
+# Slow: 20 seeds of V4 at 16 and at 32 sectors, 25 scans each, about six minutes.
 @pytest.mark.slow
 def test_halving_the_sector_moves_the_terminal_scenes_gospa_less_than_its_seed_spread(tmp_path):
     """Mean GOSPA at 32 sectors minus at 16, under one standard deviation over 20 seeds.
 
-    The window is the first 25 rotations (120 s), not 125, to hold the test to minutes; the
-    stamp error the sectors trade is the same in every rotation.
+    The window is the first 25 scans (120 s), not 125, to hold the test to minutes; the
+    stamp error the sectors trade is the same in every scan.
     """
     scenario = load_scenario(TERMINAL)
     assert scenario.sensor is not None and scenario.tracking is not None
@@ -65,14 +49,14 @@ def test_halving_the_sector_moves_the_terminal_scenes_gospa_less_than_its_seed_s
 
 
 def test_gnn_clutter_density_follows_the_drifting_rain_cell() -> None:
-    """The regions' mean density is set each rotation, at that rotation's time."""
+    """The regions' mean density is set each scan, at that scan's time."""
     from radar_forge.tracking.scans import PlotTracker
 
     scenario = load_scenario(TERMINAL)
     tracker = PlotTracker(scenario)
     assert tracker.mean_density(0.0) != tracker.mean_density(600.0)
-    rotations = scans(scenario, n_scans=2)
-    next(rotations)
-    second = next(rotations)
+    scans = plot_scans(scenario, n_scans=2)
+    next(scans)
+    second = next(scans)
     tracker.rotation(second)
     assert tracker.tracker.clutter_density["plots"] == tracker.mean_density(second.start_time_s)

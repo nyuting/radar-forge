@@ -69,7 +69,7 @@ class PmbmTracker:
     One motion model and one measurement model. ``coverage_volume`` is the measurement-space
     volume the birth intensity spreads over (m rad for range and azimuth); the undetected
     intensity is held at the fixed point of :math:`\lambda_u \leftarrow p_S (1 - P_D)
-    \lambda_u + \lambda_b`, uniform, so every sector of a rotation sees it alike, and zero
+    \lambda_u + \lambda_b`, uniform, so every sector of a scan sees it alike, and zero
     where ``Scan.clutter_density`` exceeds ``max_birth_clutter_density``, the birth limit
     every tracker shares. ``initiator`` places a first detection's density. Under
     ``"confirmed_first"`` only Bernoullis of existence 0.5 or more join clusters, as the

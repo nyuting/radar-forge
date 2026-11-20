@@ -16,6 +16,13 @@ import pytest
 from numpy.typing import NDArray
 from scipy.stats import beta
 
+from radar_forge.plot_simulator import (
+    ClutterComponent,
+    detect,
+    measure,
+    poisson_clutter_plots,
+    resolve,
+)
 from radar_forge.tracking.association import (
     GlobalNearestNeighbour,
     GreedyNearestNeighbour,
@@ -43,13 +50,6 @@ from radar_forge.tracking.lifecycle import LifecyclePolicy
 from radar_forge.tracking.measurement import LinearMeasurement, RangeAzimuthElevationRangeRate
 from radar_forge.tracking.motion import ConstantVelocity
 from radar_forge.tracking.pmbm import PmbmTracker
-from radar_forge.tracking.scene import (
-    ClutterComponent,
-    detect,
-    measure,
-    poisson_clutter_plots,
-    resolve,
-)
 from radar_forge.tracking.tracker import Scan, Tracker
 
 ALL = np.ones((2, 2), dtype=bool)

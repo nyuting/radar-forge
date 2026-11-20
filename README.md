@@ -159,6 +159,8 @@ radar-forge/
         ├── datachip.py         # A crop around one target, and fine estimates on it
         ├── array.py            # The receive array: geometry, steering, weights, covariance
         ├── doa.py              # Direction of arrival: spectra, subspace and sparse estimators
+        ├── trajectory.py       # Closed-form true trajectories: legs and arcs
+        ├── plot_simulator.py   # The plots a rotating radar makes of a scene, scan by scan
         ├── tracking/           # Models, filters, association, tracker, MHT, PMBM, metrics
         ├── settings.py         # The settings a scenario's TOML tables hold
         ├── scenario.py         # A scenario TOML and its truth

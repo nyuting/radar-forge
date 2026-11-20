@@ -37,7 +37,7 @@ from radar_forge.tracking.imm import (
 from radar_forge.tracking.measurement import RangeAzimuthElevationRangeRate
 from radar_forge.tracking.metrics import nees
 from radar_forge.tracking.motion import ConstantTurn, ConstantVelocity, MotionModel
-from radar_forge.tracking.scene import Arc
+from radar_forge.trajectory import Arc
 
 SEED = 20261106
 # The latency, as measured: 90 % of trials reach the turn mode within five scans of the onset
@@ -207,7 +207,7 @@ def _run_v1(
     """Track A4 alone in every trial at once, the trials the rows of one bank.
 
     Each trial is seeded at the truth 66.7 s before the first turn, with a 50 m and 5 m/s
-    spread; the beam crosses A4 once a rotation, and the plot model draws Pd (0.9, 0.3 in the
+    spread; the beam crosses A4 once a scan, and the plot model draws Pd (0.9, 0.3 in the
     notch) and the measurement noise. No clutter: the scene's n_gate 0.01 seldom reaches a
     gate, and these tests are about the motion models.
     """
@@ -239,13 +239,13 @@ def _run_v1(
         "nees": [],
         "turn": [],
     }
-    rotation = math.ceil(start_s / period_s)
-    # One rotation at a time: every trial's track is the next rotation's prior.
-    while rotation * period_s < 300.0:
-        time_s = rotation * period_s
+    scan_index = math.ceil(start_s / period_s)
+    # One scan at a time: every trial's track is the next scan's prior.
+    while scan_index * period_s < 300.0:
+        time_s = scan_index * period_s
         for _ in range(3):
             time_s = (
-                rotation * period_s
+                scan_index * period_s
                 + east_north_to_range_azimuth_rad(arc.state(time_s)[0])[1] / (2 * np.pi) * period_s
             )
         truth_m, truth_mps = arc.state(time_s)
@@ -275,7 +275,7 @@ def _run_v1(
         records["turn"].append(
             bank.mode_probability[:, 1] if imm is not None else np.full(N_TRIALS, np.nan)
         )
-        rotation += 1
+        scan_index += 1
     return {key: np.array(value) for key, value in records.items()}
 
 

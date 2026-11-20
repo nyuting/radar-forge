@@ -1,7 +1,7 @@
 # Tracker 001 — Tracking architecture
 
 > Status: built, in `src/radar_forge/tracking/` (`motion`, `measurement`, `filters`, `imm`, `association`,
-> `initiation`, `lifecycle`, `tracker`, `hypotheses`, `pmbm`, `metrics`, `scene`, `scans`). Where
+> `initiation`, `lifecycle`, `tracker`, `hypotheses`, `pmbm`, `metrics`, `clutter_map`, `scans`). Where
 > this page and the code differ in a name, the code's name stands.
 >
 > The tracker after the tracking refactor: one Gaussian filter, a batched track bank, one
@@ -51,12 +51,13 @@ one constructor argument and no pipeline code. A branch on the type of a transfo
 tracker in the filter, the tracker or `pipeline.py` breaks this. There is one `Tracker`.
 
 **Dependencies.** `tracking/` imports NumPy, SciPy, `coordinates.py` (the ENU ↔ range-azimuth
-conversions `scene.py` and `scans.py` use) and the private `_periodic.fold` (the guarded
-half-open fold that `CoordinateLayout` shares with `dsp.fold_into_period`; `scene.py` and
-`RangeAzimuthElevationRangeRate.predicted_measurement` still wrap inline), never `dsp`, `pipeline`, `scenario`, `verify` or
-`figures` at run time; `scans.py` names `Scenario` and `TrackingSettings` under `TYPE_CHECKING` only, because
-`scenario.py` imports `tracking.scene`. The pipeline builds an IQ scenario's `Scan`, `scans.py` a
-plot-level one's.
+conversions `scans.py` uses) and the private `_periodic.fold` (the guarded half-open fold that
+`CoordinateLayout` shares with `dsp.fold_into_period`;
+`RangeAzimuthElevationRangeRate.predicted_measurement` still wraps inline), never `dsp`,
+`pipeline`, `scenario`, `verify` or `figures` at run time. `scans.py` also imports
+`plot_simulator.py`, and names `Scenario` and `TrackingSettings` under `TYPE_CHECKING` only,
+because `scenario.py` imports `plot_simulator.py`. The pipeline builds an IQ scenario's
+`Scan`, `scans.py` a plot-level one's.
 
 ## 3. The filter
 
@@ -240,7 +241,7 @@ Built with scenario 011a (`config/scenario_011_*.toml`); none changes the loop.
   and posterior existence, applied through `update_weighted`; clusters are enumerated exactly,
   with a bound that raises.
 - **Coverage**: a `Coverage` predicate tells `Tracker` which tracks a scan could see, so a rotating
-  radar's sector batches predict, gate and count each track once a rotation.
+  radar's sector batches predict, gate and count each track once a scan.
 - **Track-oriented MHT** (scenario 011b), `tracking/hypotheses.py`: an associator with a
   `hypotheses` method; `Tracker` then keeps a `TrackTree` of leaves, rows of a bank, scored by
   Blackman's track score, ranked per cluster by `murty_k_best` and N-scan pruned, and reports

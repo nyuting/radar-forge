@@ -41,6 +41,7 @@ from radar_forge.array import (
     uniform_linear_array,
 )
 from radar_forge.coordinates import geodetic_to_enu_m
+from radar_forge.plot_simulator import ClutterComponent, FixedDiscretes
 from radar_forge.propagation import dbsm_to_m2
 from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter
 from radar_forge.settings import (
@@ -60,7 +61,7 @@ from radar_forge.settings import (
     TrackingSettings,
 )
 from radar_forge.signal import RangeGate
-from radar_forge.tracking.scene import Arc, ClutterComponent, FixedDiscretes, Leg
+from radar_forge.trajectory import Arc, Leg
 
 __all__ = [
     "RangeGate",

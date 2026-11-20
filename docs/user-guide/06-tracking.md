@@ -35,11 +35,14 @@ twice the radial value when monostatic.
 | `metrics.py` | `nees`, `consistency_interval` and `rmse`, which score a tracker against the truth; `gospa` and `trajectory_gospa` for a many-target scene. |
 | `lifecycle.py` | `LifecyclePolicy`, the M-of-N rule this page uses, with deletion and re-acquisition, and `ExistencePolicy`, confirmation by existence probability (scenario 011). |
 | `imm.py`, `hypotheses.py`, `pmbm.py` | The many-target methods of scenario 011, not walked through here: the interacting multiple model, track-oriented MHT and the PMBM tracker. |
-| `scene.py` | Not tracker code: a simulator of the plots a rotating surveillance radar makes (true trajectories, merged echoes, missed detections, false plots). Four of scenario 011's six variants use it in place of IQ. |
-| `scans.py` | Plays that scene a rotation at a time, and holds `PlotTracker`, the tracker scenario 011 builds from its `[tracking]` table. |
+| `clutter_map.py` | `ClutterMap`, the clutter density per (m rad) learnt from the plots no confirmed track took (scenario 011). |
+| `scans.py` | `PlotTracker`, the tracker scenario 011 builds from its `[tracking]` table, fed each scan's plots as sector batches. |
 
 `radar_forge.tracking` exports `Scan` and `Tracker`; everything else is imported from its
-module.
+module. Not tracker code, and outside the package: `trajectory.py` holds the true
+trajectories of scenario 011's targets, and `plot_simulator.py` the plots a rotating
+surveillance radar makes of them (merged echoes, missed detections, false plots), scan by
+scan. Four of scenario 011's six variants use them in place of IQ.
 
 ## Quantities and equations
 

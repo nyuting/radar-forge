@@ -18,6 +18,14 @@ import pytest
 
 from radar_forge import verify
 from radar_forge.coordinates import east_north_to_range_azimuth_rad
+from radar_forge.plot_simulator import (
+    ClutterComponent,
+    detect,
+    measure,
+    plot_scans,
+    poisson_clutter_plots,
+    resolve,
+)
 from radar_forge.scenario import Scenario, load_scenario
 from radar_forge.tracking.association import GlobalNearestNeighbour
 from radar_forge.tracking.filters import TaylorLinearisation, TrackStatus
@@ -32,16 +40,9 @@ from radar_forge.tracking.initiation import DebiasedSphericalInitiator, DirectSt
 from radar_forge.tracking.lifecycle import LifecyclePolicy
 from radar_forge.tracking.measurement import LinearMeasurement, RangeAzimuthElevationRangeRate
 from radar_forge.tracking.motion import ConstantVelocity
-from radar_forge.tracking.scans import PlotTracker, scans
-from radar_forge.tracking.scene import (
-    Arc,
-    ClutterComponent,
-    detect,
-    measure,
-    poisson_clutter_plots,
-    resolve,
-)
+from radar_forge.tracking.scans import PlotTracker
 from radar_forge.tracking.tracker import Scan, Tracker
+from radar_forge.trajectory import Arc
 
 REPO = Path(__file__).resolve().parents[2]
 P_D, P_G = 0.9, 0.99
@@ -226,7 +227,7 @@ def test_duplicate_hypotheses_merge_and_each_cluster_keeps_its_k_best() -> None:
 def test_tracks_csv_reports_each_scan_as_mht_saw_it_then(tmp_path: Path) -> None:
     """V4's tracks.csv row at scan k is MHT's reported state at scan k, recorded live.
 
-    Two rotations of V4 under MHT, played once by hand and once through the stage; MHT may
+    Two scans of V4 under MHT, played once by hand and once through the stage; MHT may
     later prefer another hypothesis, but a row once written is never rewritten.
     """
     scenario = load_scenario(REPO / "config" / "scenario_011_terminal_dense.toml")
@@ -237,8 +238,8 @@ def test_tracks_csv_reports_each_scan_as_mht_saw_it_then(tmp_path: Path) -> None
     scenario = dataclasses.replace(scenario, tracking=tracking, verify={})
     live = PlotTracker(scenario)
     seen = []
-    for rotation in scans(scenario, n_scans=2):
-        live.rotation(rotation)
+    for plot_scan in plot_scans(scenario, n_scans=2):
+        live.rotation(plot_scan)
         seen.append(live.bank)
     verify.run(scenario, ["multitarget"], n_scans=2, out_dir=tmp_path, render=False)
     with (tmp_path / "tracks.csv").open(encoding="utf-8", newline="") as handle:
@@ -280,7 +281,7 @@ def _crossing(seed: int) -> Scenario:
     )
 
 
-# Slow: 200 trials of 22 rotations of three trackers in 16 sector batches, about eight minutes.
+# Slow: 200 trials of 22 scans of three trackers in 16 sector batches, about eight minutes.
 @pytest.mark.slow
 def test_a_pair_closing_across_the_beam_swaps_under_gnn_and_as_often_under_mht(
     tmp_path: Path,

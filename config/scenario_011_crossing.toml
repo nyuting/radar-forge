@@ -14,7 +14,7 @@ seed = 20261107
 
 [scans]
 start_time_s = 0.0
-duration_s = 300.0     # 62.5 -> 62 rotations; every crossing at 200 s, scan 41
+duration_s = 300.0     # 62.5 -> 62 scans; every crossing at 200 s, scan 41
 scan_period_s = 4.8
 
 [sensor]
@@ -59,7 +59,7 @@ trackers = ["gnn", "jpda_star", "set", "jipda", "mht", "pmbm"]
 stages = ["multitarget"]
 # An MHT tree holds at most k_best = 10 leaves, one per hypothesis.
 leaf_count_max = 10
-# Mean GOSPA over the 62 rotations; pins the run (323 m measured): until 41 every aircraft is
+# Mean GOSPA over the 62 scans; pins the run (323 m measured): until 41 every aircraft is
 # alone, then the crossings and the clutter discs.
 gospa_mean_max_m = 400.0
 # V2: the fraction of crossings after which either aircraft's GOSPA track changed, under JPDA:

@@ -20,9 +20,10 @@ from numpy.typing import NDArray
 
 from radar_forge.detection import CfarVariant
 from radar_forge.doa import label_parts
+from radar_forge.plot_simulator import ClutterComponent, FixedDiscretes
 from radar_forge.propagation import dbsm_to_m2
 from radar_forge.tracking.hypotheses import CONFIRM_SCORE, DELETE_DROP
-from radar_forge.tracking.scene import Arc, ClutterComponent, FixedDiscretes
+from radar_forge.trajectory import Arc
 
 __all__ = [
     "ArcTarget",
