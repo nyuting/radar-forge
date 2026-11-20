@@ -101,26 +101,27 @@ $v_{\mathrm{period}}$. For scenario 001's S1, $v_{\mathrm{period}}$ is 30.5911 m
 holds ±15.2955 m/s, and a monostatic figure shows ±7.6478 m/s, which is the textbook's
 $v_{ua}$. [Page 1](01-radar-and-link-budget.md) uses $R_{ua}$ and $v_{ua}$ once, to compare.
 
-Each word below means one thing on every page and in the code. The last column is the word a
+Each word below means one thing on every page and in the code's public names (a few private
+and test names, and `report_probability`, wait for a later rename PR). The last column is the word a
 MATLAB, Stone Soup, TI or radarsimpy reader would search for, and the traps where theirs
 differs.
 
 | Word | Meaning | Elsewhere |
 | :-- | :-- | :-- |
 | scan | One revisit of the scene: a full rotation, a full electronic scan pattern or, for a staring radar, one transmission of all its bursts. `[scans] scan_period_s` sets how often. A rotating radar's scan reaches the tracker in sectors ([page 6](06-tracking.md#how-a-scan-reaches-the-tracker)) | TI and radarsimpy: frame; MATLAB: update, and `IsScanDone` at the end of a rotation |
-| burst | One coherent processing interval (CPI) at one PRF: a `[[burst]]` table, `n_pulses` long. "Dwell" is not used | MATLAB: CPI, and its dwell is a scan's set of bursts; TI: burst of chirps |
+| burst | One coherent processing interval (CPI) at one PRF: a `[[burst]]` table, `n_pulses` long. "Dwell" is not used | MATLAB: CPI, and its dwell is the set of CPIs at one beam position, several to a scan; TI: burst of chirps |
 | pulse, chirp | The repeated waveform unit, counted by `n_pulses`; a chirp is an LFM sweep, `chirp_duration_s` long | MATLAB `NumPulses`, `PulseWidth`, `SweepTime`; TI: chirp; radarsimpy `pulses` |
 | detection | A CFAR cluster, in map cells (`detection.Detection`) | Not MATLAB's or Stone Soup's detection, which is our plot |
 | plot | What reaches the tracker, in physical units, after dual-PRF pairing and unfolding (`pipeline.Plots`, `plot_simulator.PlotScan`) | MATLAB `objectDetection` and Stone Soup `Detection`; ASTERIX and surveillance radars: plot |
 | measurement | A plot's vector and covariance inside the filter (`tracking.Scan`) | MATLAB's `Measurement` and `MeasurementNoise`; order differs: our spherical model reports range first, Stone Soup's `CartesianToElevationBearingRange` elevation, bearing, then range |
 | figure | A picture (`figures.py`, `--no-figures`); "plot" is kept for the tracker's input | |
-| range rate | The time derivative of a route's length, positive receding (`bistatic_range_rate_mps`) | MATLAB's range rate has our sign, but its "speed" is positive approaching; TI and radarsimpy: radial velocity, used here only for the halved monostatic display; Stone Soup `CartesianToBearingRangeRate` |
+| range rate | The time derivative of a route's length, positive receding (`bistatic_range_rate_mps`) | MATLAB's range rate has our sign, but its "speed" is positive approaching; TI and radarsimpy: radial velocity, used here only for the halved monostatic display and `TargetGeometry.monostatic`'s one-way inputs; Stone Soup `CartesianToBearingRangeRate` |
 | period (span in prose) | The whole width of a circular axis before a value folds: a map's unambiguous range or range rate, in route units, $R_{\mathrm{period}}$ and $v_{\mathrm{period}}$. The code names it `*_period_*`; the pages also say span | Most sources give the one-sided monostatic limits, c / 2 PRF and ±λ PRF / 4: see above |
 | trajectory, track | The true path of a target (`trajectory.Arc`, or a CSV of fixes); a track is the tracker's estimate of it | MATLAB `waypointTrajectory`; Stone Soup: ground truth path |
-| clutter density | False plots per unit of measurement space (`clutter_density`), never "clutter intensity". "Intensity" names only PMBM's Poisson birth and, on page 6, the process-noise intensity $q$ | MATLAB `ClutterDensity`; Stone Soup `clutter_spatial_density` |
+| clutter density | False plots per unit of measurement space (`clutter_density`), never "clutter intensity". "Intensity" names only PMBM's Poisson birth and undetected intensities (`birth_intensity_per_scan`, `undetected_intensity`) and, on page 6, the process-noise intensity $q$ | MATLAB `ClutterDensity`; Stone Soup `clutter_spatial_density` |
 | monostatic or bistatic | Spelled out; "geometry" where a noun is needed | MATLAB: `Mode` |
 | geodetic | Latitude, longitude and height above the WGS-84 ellipsoid (`coordinates.geodetic_to_enu_m`) | pymap3d, MATLAB; NavPy and Stone Soup: lla |
-| range, azimuth, elevation | Azimuth clockwise from north, elevation up from the horizon; `enu_to_range_azimuth_elevation_rad` returns range first | pymap3d `enu2aer` has the same azimuth but returns (azimuth, elevation, range) |
+| range, azimuth, elevation | Azimuth clockwise from north, elevation up from the horizon; `enu_to_range_azimuth_elevation_rad` returns range first | pymap3d `enu2aer` has the same azimuth but returns (azimuth, elevation, range); Stone Soup's bearing is `atan2(y, x)`, counter-clockwise from east |
 | stage, the stepper | One named step of a scenario run, checked against its `[verify]` table; `radar_forge.verify` runs them | No library has one |
 
 ## Which scenario to try each page in

@@ -28,7 +28,8 @@ stitching together seven incompatible codebases.
 **Pre-alpha.** Nothing is on PyPI yet. The radar chain is built and tested as flat modules,
 from geometry to tracks, and scenarios 001–006 and 011 run end to end through the stepper; the
 other areas under [Scope](#scope) are designed but not built. The
-[user guide](docs/user-guide/README.md) explains each module. The design documents live in [`spec/`](spec/):
+[user guide](docs/user-guide/README.md) explains each module. The design documents live in
+[`spec/`](spec/):
 
 - [`spec/data-001-formats.md`](spec/data-001-formats.md): the files a run writes, with columns,
   units and conventions
@@ -48,7 +49,7 @@ The [Quickstart](#quickstart) below runs on today's `main`.
 | :--- | :--- |
 | **The radar chain** | `radar` (sites, transmitter, receiver, bistatic geometry), `coordinates` (geodetic, ECEF, ENU), `propagation` (the radar equation, Swerling models), `signal` (FMCW, pulsed and noise waveforms, IQ), `dsp` (range-Doppler processing, windows, MTI, dual-PRF unfolding), `migration`, `clutter`, `detection` (CFAR and clustering), `datachip`, `array` and `doa` (a receive array and direction finding), `tracking/` (KF, EKF and UKF over a batched track bank; IMM, the JPDA family, MHT and PMBM) |
 | **Scenarios** | `scenario` (a TOML file and its truth), `pipeline` (IQ scans to range-Doppler maps and plots), `scan_tracker` (plots to tracks), `trajectory` and `plot_simulator` (true trajectories and the plots a rotating radar makes of them), `verify` (the stepper and its stages, each checked against the file's `[verify]` table), `figures` |
-| **`array`** | Phased array geometries (linear, planar, circular, conformal), Taylor/Chebyshev tapering, beam and null steering, phase quantization, DoA estimation |
+| **`array`, beyond the receive array** | Planar, circular and conformal geometries, deterministic null steering, phase quantisation |
 | **`raytracing`** | A single scene abstraction over pluggable ray-tracing backends (RadarSimPy, Mitsuba/Dr.Jit, NVIDIA Omniverse RTX), all optional extras |
 | **Datasets** | ML dataset synthesis, with COCO-annotation and range-Doppler-cube exporters plus PyTorch dataset wrappers (planned) |
 
@@ -150,7 +151,7 @@ radar-forge/
         ├── radar.py            # Transmitter, receiver, sites, bistatic geometry
         ├── coordinates.py      # WGS-84 geodetic, ECEF, ENU, range-azimuth-elevation
         ├── propagation.py      # Propagation paths, the radar equation, Swerling draws
-        ├── signal.py           # LFM chirp, thermal noise, FMCW and pulsed IQ synthesis
+        ├── signal.py           # LFM chirp, noise code, thermal noise; FMCW, pulsed and noise IQ
         ├── dsp.py              # Windows, matched filter, range and Doppler FFTs, unfolding
         ├── migration.py        # Range migration: keystone, Doppler-rate compensation
         ├── clutter.py          # Leakage and near-clutter cancellation

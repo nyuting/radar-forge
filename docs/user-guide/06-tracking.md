@@ -45,7 +45,8 @@ One line per module. **Tracker** code estimates; **scoring** compares tracks wit
 | `scan_tracker.py` | tracker | `ScanTracker`: a scenario's `[tracking]` table built into one tracker, and the policy that feeds it each scan ([below](#the-scenarios-tracker)). |
 | `trajectory.py` | simulation | `Arc` and `Leg`: the closed-form true trajectories of scenario 011's targets. |
 | `plot_simulator.py` | simulation | `plot_scans`: the plots a rotating surveillance radar makes of those trajectories, scan by scan (merged echoes, missed detections, false plots), each carrying the clutter density at it. |
-| `verify/chain.py`, `verify/multitarget.py` | scoring | The stepper's `track` stage (one target, from IQ) and `multitarget` stage (many targets, from plots): each scores the tracks against the truth and checks the scores against `[verify]`. |
+| `verify/chain.py` | scoring | The stepper's `track` stage (one target, from IQ): scores the tracks against the truth and checks the scores against `[verify]`. |
+| `verify/multitarget.py` | scoring | The `multitarget` stage (many targets, from plots): the same scoring and check (011's IQ check: detection statistics only). |
 
 `radar_forge.tracking` exports `Scan` and `Tracker`; everything else is imported from its
 module. The package imports nothing else from `radar_forge` but the shared fold
@@ -188,8 +189,8 @@ a wrong fold agrees with the prediction that chose it, never with the range.
 ### How a scan reaches the tracker
 
 `ScanTracker.process` takes one scan and returns one `(bank, association)` pair for each batch
-it ran, in order; `association` holds a weighting associator's clusters, and is None for GNN
-and MHT. What a batch is depends on how the radar looks at the scene:
+it ran, in order; `association` holds a weighting associator's clusters, and is None for GNN,
+MHT and PMBM. What a batch is depends on how the radar looks at the scene:
 
 - **Staring**, an IQ scenario with no `[sensor]`: the radar sees the whole scene in one scan,
   so `process(plots, time_s)` makes the scan's accepted `Plots` one `Scan` at the scan's time.
@@ -211,8 +212,10 @@ MATLAB delivers a rotating radar's scan the same way, a field of view at a time,
 
 ### Choosing the associator and the motion model
 
-`[tracking]` chooses both, for either kind of scenario, and `ScanTracker` refuses when built a
-combination it cannot run, rather than on the first scan:
+`[tracking]` chooses both, for either kind of scenario. `ScanTracker` refuses when built what it
+cannot run (JPDA or MHT beside a range-only fallback; PMBM or `seed_truth` on an IQ scenario),
+rather than on the first scan; an IQ scenario's `track` stage does not read `motion` or
+`trackers`:
 
 | Choice | `[tracking]` keys | Staring (IQ) | Rotating (plots) |
 | :-- | :-- | :-- | :-- |
@@ -220,7 +223,7 @@ combination it cannot run, rather than on the first scan:
 | JPDA, JPDA*, set JPDA | `association = "jpda"`, `coalescence = "none"`, `"jpda_star"` or `"set"`, and `detection_probability` | with one measurement model a scan | yes |
 | JIPDA | as JPDA, with `existence = true` and `survival_probability` | as JPDA | yes |
 | MHT | `association = "mht"`, `detection_probability`, `k_best`, `n_scan_depth`, `confirm_score`, `delete_drop` | as JPDA | yes |
-| PMBM | `trackers = [..., "pmbm"]` beside the configured tracker, or `ScanTracker(scenario, "pmbm")`; `detection_probability`, `birth_intensity_per_scan`, `survival_probability`, `prune_existence`, `prune_weight` | refused | yes, on one CV model |
+| PMBM | `trackers = [..., "pmbm"]` beside the configured tracker, or `ScanTracker(scenario, "pmbm")`; `detection_probability`, `birth_intensity_per_scan`, `survival_probability`, `prune_existence`, `prune_weight` | `ScanTracker(scenario, "pmbm")` refused; `trackers` not read | yes, on one CV model |
 | IMM | `motion = "imm"`: modes CV quiet, constant turn and CV agile, `mode_sigma_acceleration_mps2`, `sojourn_time_s`, `turn_rate_noise_density_rad2ps3`, `turn_rate_sigma_degps` | not read: the state is range and rate | yes, under GNN, JPDA or MHT; PMBM takes the agile mode alone |
 
 JPDA and MHT weigh or branch on one measurement model a scan. An IQ scenario offers two where

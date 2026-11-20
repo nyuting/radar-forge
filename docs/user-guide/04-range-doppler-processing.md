@@ -133,8 +133,8 @@ $$L = -10\log_{10}\frac{\left(\sum_n w[n]\right)^2}{N\sum_n w[n]^2}.$$
    chirps: $x[m+1] - x[m]$, or $x[m+2] - 2x[m+1] + x[m]$ for three. `axis` has no default.
    Stationary echoes cancel. The slow-time axis gets `n_pulses - 1` shorter, and targets at
    multiples of the blind rate $\lambda\,\mathrm{PRF}$ cancel too.
-7. **Fold and unfold.** `dsp.fold_range_rate_mps(rate_mps, period_mps)` predicts where a target of
-   true rate `rate_mps` appears: in $(-v_{\mathrm{period}}/2, +v_{\mathrm{period}}/2]$, closed at
+7. **Fold and unfold.** `dsp.fold_range_rate_mps(range_rate_mps, period_mps)` predicts where a target
+   of true rate `range_rate_mps` appears: in $(-v_{\mathrm{period}}/2, +v_{\mathrm{period}}/2]$, closed at
    the top as the map is. Range folds with `dsp.fold_into_period(range_m, period_m, lower=0.0)`.
    `unfold_doppler_dual_prf` and `unfold_range_dual_prf` take one reading from each of two
    bursts and try every candidate

@@ -393,10 +393,10 @@ def doppler_bin_centres_mps(
     r"""Return the **bistatic range rate, positive receding**, of each shifted Doppler bin.
 
     :math:`\dot{R} = -\lambda f_d`, **not halved**, and so **decreasing** with index over
-    :math:`(-v_{period}/2, +v_{period}/2]`, the rate period
-    :math:`v_{period} = \lambda / T_{\mathrm{PRI}}`; zero at ``n_bins // 2``. The interval and
-    bin 0 at exactly :math:`+v_{period}/2` hold for even ``n_bins``; an odd count is symmetric,
-    :math:`\pm (N-1)/2` steps, strictly inside it.
+    :math:`(-v_{\mathrm{period}}/2, +v_{\mathrm{period}}/2]`, the rate period
+    :math:`v_{\mathrm{period}} = \lambda / T_{\mathrm{PRI}}`; zero at ``n_bins // 2``. The
+    interval and bin 0 at exactly :math:`+v_{\mathrm{period}}/2` hold for even ``n_bins``; an odd
+    count is symmetric, :math:`\pm (N-1)/2` steps, strictly inside it.
 
     References
     ----------

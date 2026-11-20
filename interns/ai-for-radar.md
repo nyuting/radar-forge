@@ -42,7 +42,7 @@ Know this before you choose. Each item is something you may have to build in you
   or constant-acceleration motion (`ConstantVelocity`, `ConstantAcceleration`), a chi-square
   gate, and global or greedy nearest-neighbour assignment. IMM, the JPDA family, MHT and PMBM
   exist, configured through `radar_forge.scan_tracker`; there is no smoother.
-- **No resource manager.** Nothing schedules beams, revisits or dwells.
+- **No resource manager.** Nothing schedules beams, revisits or bursts.
 
 ## Rules for every task and direction
 

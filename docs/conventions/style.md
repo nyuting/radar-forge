@@ -98,10 +98,10 @@ libraries use; a name follows it:
   `fold_range_rate_mps`); "radial velocity" only for the halved monostatic display and the
   one-way inputs of `TargetGeometry.monostatic`.
 - **trajectory** for the truth, **track** for its estimate; **clutter density** for false plots
-  per unit of measurement space ("intensity" only for PMBM's Poisson birth and the
-  process-noise intensity); **geodetic** for
-  latitude, longitude and height; "monostatic or bistatic" spelled out, **geometry** where a
-  noun is needed.
+  per unit of measurement space ("intensity" only for PMBM's Poisson birth and undetected
+  intensities, `birth_intensity_per_scan` and `undetected_intensity`, and the process-noise
+  intensity); **geodetic** for latitude, longitude and height; "monostatic or bistatic" spelled
+  out, **geometry** where a noun is needed.
 
 ## 4. Docstrings
 

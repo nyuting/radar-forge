@@ -31,10 +31,9 @@ velocity. Only a display halves them ([page 2](02-geometry-and-propagation.md)).
 
 Two numbers matter most when a target shows up in the wrong place: the unambiguous bistatic
 range, the range period $R_{\mathrm{period}}$, and the span of rates the radar can tell apart,
-the rate period $v_{\mathrm{period}}$. A target beyond
-either one *folds*: it appears at a wrong range or rate, wrapped back into the window the radar
-can see. A radar cannot make both large at once, and the three variants of scenario 001 each
-make a different choice.
+the rate period $v_{\mathrm{period}}$. A target beyond either one *folds*: it appears at a wrong
+range or rate, wrapped back into the window the radar can see. A radar cannot make both large at
+once, and the three variants of scenario 001 each make a different choice.
 
 ```
  P_t, G_t ──► spreads over 4π(R_T)² ──► target, σ ──► spreads over 4π(R_R)² ──► antenna G_r λ²/(4π) ──► P_r
