@@ -173,7 +173,7 @@ $$\frac{\sigma_R}{T}\sqrt{\frac{12}{N(N^2-1)}} < \frac{v_{\mathrm{period}}}{g}$$
 with $v_{\mathrm{period}}$ the rate period and $g$ the gate. On S1, $\sigma_R$ = 43.27 m,
 $v_{\mathrm{period}}$ = 30.591 m/s and $g$ = 6 give N = 10. Of the tracks that may unfold, the
 one with the longest range history then gives each plot the fold nearest its rate, unless that
-lies over half a span from the slope of its last `n_slope_scans` ranges (the **fold monitor**):
+lies over half a period from the slope of its last `n_slope_scans` ranges (the **fold monitor**):
 a wrong fold agrees with the prediction that chose it, never with the range.
 
 ### Choosing the process noise
@@ -405,7 +405,7 @@ from here.
   `max_bistatic_range_rate_mps`, 400 m/s, because the plot's rate is folded and would start the
   track confidently wrong.
 - **A scenario-003 track measures range only until it holds ten ranges.** Track-aided unfolding
-  needs a range slope certain to a sixth of a fold span first, which takes N = 10 ranges
+  needs a range slope certain to a sixth of the rate period first, which takes N = 10 ranges
   ([the scenario's tracker](#the-scenarios-tracker)).
 
 ## Limits
