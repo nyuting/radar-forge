@@ -137,7 +137,7 @@ class TrackingSettings:
     initial_speed_sigma_mps: float = 150.0
     max_position_sigma_m: float = np.inf
     # Scenario 011b: MHT's tree, PMBM's births and pruning, cues at the truth, and further
-    # trackers to score beside the configured one (tracking.scans.VARIANTS, or "pmbm").
+    # trackers to score beside the configured one (scan_tracker.VARIANTS, or "pmbm").
     k_best: int = 10
     n_scan_depth: int = 3
     confirm_score: float = CONFIRM_SCORE

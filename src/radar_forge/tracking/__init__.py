@@ -5,9 +5,10 @@
 interacting multiple model; ``association`` gating, assignment, JPDA and Murty's k best;
 ``initiation`` the initiators; ``lifecycle`` M-of-N and existence; ``tracker`` the scan loop;
 ``hypotheses`` track-oriented MHT; ``pmbm`` the PMBM tracker; ``metrics`` NEES, RMSE and GOSPA;
-``clutter_map`` the clutter density learnt from plots; ``scans`` the tracker a plot-level
-scenario's scans feed. The scene and its plots are simulated outside the package, in
-:mod:`radar_forge.trajectory` and :mod:`radar_forge.plot_simulator`.
+``clutter_map`` the clutter density learnt from plots. A scenario's tracker is built from
+its ``[tracking]`` table outside the package, by :mod:`radar_forge.scan_tracker`; the scene
+and its plots are simulated by :mod:`radar_forge.trajectory` and
+:mod:`radar_forge.plot_simulator`.
 """
 
 from radar_forge.tracking import (
@@ -22,7 +23,6 @@ from radar_forge.tracking import (
     metrics,
     motion,
     pmbm,
-    scans,
     tracker,
 )
 from radar_forge.tracking.tracker import Scan, Tracker
@@ -41,6 +41,5 @@ __all__ = [
     "metrics",
     "motion",
     "pmbm",
-    "scans",
     "tracker",
 ]

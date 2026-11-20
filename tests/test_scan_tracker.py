@@ -1,4 +1,4 @@
-"""Tests for radar_forge.tracking.scans: the tracker a plot-level scenario's scans feed.
+"""Tests for radar_forge.scan_tracker: the tracker a plot-level scenario's scans feed.
 
 The sector batching is checked by a Monte Carlo over 20 seeds through the multitarget stage,
 and the likelihood ratio's density against the drifting rain cell.
@@ -14,9 +14,10 @@ import pytest
 
 from radar_forge import verify
 from radar_forge.plot_simulator import plot_scans
+from radar_forge.scan_tracker import PlotTracker
 from radar_forge.scenario import load_scenario
 
-TERMINAL = Path(__file__).resolve().parents[2] / "config" / "scenario_011_terminal_dense.toml"
+TERMINAL = Path(__file__).resolve().parents[1] / "config" / "scenario_011_terminal_dense.toml"
 
 
 # Slow: 20 seeds of V4 at 16 and at 32 sectors, 25 scans each, about six minutes.
@@ -50,8 +51,6 @@ def test_halving_the_sector_moves_the_terminal_scenes_gospa_less_than_its_seed_s
 
 def test_gnn_clutter_density_follows_the_drifting_rain_cell() -> None:
     """The regions' mean density is set each scan, at that scan's time."""
-    from radar_forge.tracking.scans import PlotTracker
-
     scenario = load_scenario(TERMINAL)
     tracker = PlotTracker(scenario)
     assert tracker.mean_density(0.0) != tracker.mean_density(600.0)

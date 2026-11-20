@@ -36,10 +36,10 @@ twice the radial value when monostatic.
 | `lifecycle.py` | `LifecyclePolicy`, the M-of-N rule this page uses, with deletion and re-acquisition, and `ExistencePolicy`, confirmation by existence probability (scenario 011). |
 | `imm.py`, `hypotheses.py`, `pmbm.py` | The many-target methods of scenario 011, not walked through here: the interacting multiple model, track-oriented MHT and the PMBM tracker. |
 | `clutter_map.py` | `ClutterMap`, the clutter density per (m rad) learnt from the plots no confirmed track took (scenario 011). |
-| `scans.py` | `PlotTracker`, the tracker scenario 011 builds from its `[tracking]` table, fed each scan's plots as sector batches. |
 
 `radar_forge.tracking` exports `Scan` and `Tracker`; everything else is imported from its
-module. Not tracker code, and outside the package: `trajectory.py` holds the true
+module. Outside the package, `scan_tracker.py` holds `PlotTracker`, the tracker scenario 011
+builds from its `[tracking]` table, fed each scan's plots as sector batches. Not tracker code: `trajectory.py` holds the true
 trajectories of scenario 011's targets, and `plot_simulator.py` the plots a rotating
 surveillance radar makes of them (merged echoes, missed detections, false plots), scan by
 scan. Four of scenario 011's six variants use them in place of IQ.
@@ -417,7 +417,7 @@ multiple hypothesis tracking (`hypotheses.py`) and the Poisson multi-Bernoulli m
 (`pmbm.py`); confirmation by existence probability (`lifecycle.py`); GOSPA and trajectory GOSPA
 (`metrics.py`); and sensor coverage, so that a scan counts a miss only against the tracks it
 could have seen (`tracker.Coverage`). Their docstrings and `spec/tracker-001.md` describe them.
-Only scenario 011's tracker (`tracking.scans.PlotTracker`) can be configured to use them today;
+Only scenario 011's tracker (`scan_tracker.PlotTracker`) can be configured to use them today;
 the tracker this page's scenarios build (`pipeline.ScanTracker`) is always GNN, with a
 range-and-rate state.
 

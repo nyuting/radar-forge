@@ -1,7 +1,8 @@
 # Tracker 001 — Tracking architecture
 
 > Status: built, in `src/radar_forge/tracking/` (`motion`, `measurement`, `filters`, `imm`, `association`,
-> `initiation`, `lifecycle`, `tracker`, `hypotheses`, `pmbm`, `metrics`, `clutter_map`, `scans`). Where
+> `initiation`, `lifecycle`, `tracker`, `hypotheses`, `pmbm`, `metrics`, `clutter_map`), and
+> `scan_tracker.py` beside it. Where
 > this page and the code differ in a name, the code's name stands.
 >
 > The tracker after the tracking refactor: one Gaussian filter, a batched track bank, one
@@ -50,14 +51,14 @@ The filter is functions over a bank of tracks, and the hypothesiser is the gate.
 one constructor argument and no pipeline code. A branch on the type of a transform, filter or
 tracker in the filter, the tracker or `pipeline.py` breaks this. There is one `Tracker`.
 
-**Dependencies.** `tracking/` imports NumPy, SciPy, `coordinates.py` (the ENU ↔ range-azimuth
-conversions `scans.py` uses) and the private `_periodic.fold` (the guarded half-open fold that
-`CoordinateLayout` shares with `dsp.fold_into_period`;
-`RangeAzimuthElevationRangeRate.predicted_measurement` still wraps inline), never `dsp`,
-`pipeline`, `scenario`, `verify` or `figures` at run time. `scans.py` also imports
-`plot_simulator.py`, and names `Scenario` and `TrackingSettings` under `TYPE_CHECKING` only,
-because `scenario.py` imports `plot_simulator.py`. The pipeline builds an IQ scenario's
-`Scan`, `scans.py` a plot-level one's.
+**Dependencies.** `tracking/` imports NumPy, SciPy and the private `_periodic.fold` (the
+guarded half-open fold that `CoordinateLayout` shares with `dsp.fold_into_period`;
+`RangeAzimuthElevationRangeRate.predicted_measurement` still wraps inline), and nothing
+else of the package: never `settings`, `scenario`, `trajectory`, `plot_simulator`,
+`scan_tracker`, `pipeline`, `verify`, `dsp` or `figures`. `settings.py` and `scenario.py`
+import nothing from `tracking/` but `hypotheses`' two default MHT thresholds, the defaults
+of `[tracking] confirm_score` and `delete_drop`. The pipeline builds an IQ scenario's `Scan`,
+`scan_tracker.py` a plot-level one's.
 
 ## 3. The filter
 

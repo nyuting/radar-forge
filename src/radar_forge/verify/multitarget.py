@@ -2,7 +2,7 @@ r"""The ``multitarget`` stage: many targets through the plot model and a configu
 
 A plot-level scenario (``[sensor]``) is played scan by scan
 (:func:`~radar_forge.plot_simulator.plot_scans`) into
-:class:`~radar_forge.tracking.scans.PlotTracker`.
+:class:`~radar_forge.scan_tracker.PlotTracker`.
 Each scan's confirmed tracks are scored against the aircraft in coverage by GOSPA [1], each
 truth at its track's own time; over the run the stage measures swaps at every crossing the arcs
 hold, the IMM's latency to its turn mode after each turn onset, the position NEES, the measured
@@ -39,11 +39,11 @@ from scipy.stats import chi2
 from radar_forge import figures
 from radar_forge.coordinates import range_azimuth_to_east_north_m
 from radar_forge.plot_simulator import PlotScan, plot_scans
+from radar_forge.scan_tracker import PlotTracker, tracker_name
 from radar_forge.scenario import Scenario
 from radar_forge.tracking.filters import TrackBank, TrackStatus, is_confirmed
 from radar_forge.tracking.metrics import gospa, nees, trajectory_gospa
 from radar_forge.tracking.pmbm import PmbmTracker
-from radar_forge.tracking.scans import PlotTracker, tracker_name
 from radar_forge.verify import stepper
 
 __all__ = ["merged_counts", "multitarget", "pair_scores", "pair_windows", "play"]

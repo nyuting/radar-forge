@@ -26,6 +26,7 @@ from radar_forge.plot_simulator import (
     poisson_clutter_plots,
     resolve,
 )
+from radar_forge.scan_tracker import PlotTracker
 from radar_forge.scenario import Scenario, load_scenario
 from radar_forge.tracking.association import GlobalNearestNeighbour
 from radar_forge.tracking.filters import TaylorLinearisation, TrackStatus
@@ -40,7 +41,6 @@ from radar_forge.tracking.initiation import DebiasedSphericalInitiator, DirectSt
 from radar_forge.tracking.lifecycle import LifecyclePolicy
 from radar_forge.tracking.measurement import LinearMeasurement, RangeAzimuthElevationRangeRate
 from radar_forge.tracking.motion import ConstantVelocity
-from radar_forge.tracking.scans import PlotTracker
 from radar_forge.tracking.tracker import Scan, Tracker
 from radar_forge.trajectory import Arc
 

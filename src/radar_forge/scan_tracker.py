@@ -1,4 +1,4 @@
-r"""The ground-plane tracker scenario 011's plot-level scans feed: :class:`PlotTracker`.
+r"""The tracker a plot-level scenario's scans feed, built from ``[tracking]``: :class:`PlotTracker`.
 
 :class:`PlotTracker` builds a :class:`~radar_forge.tracking.Tracker` (GNN, the JPDA family or
 MHT) or a :class:`~radar_forge.tracking.pmbm.PmbmTracker` from ``[tracking]`` and feeds it each
@@ -12,13 +12,15 @@ import dataclasses
 import math
 from collections.abc import Sequence
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 
 from radar_forge.coordinates import east_north_to_range_azimuth_rad
 from radar_forge.plot_simulator import LEAST_DENSITY_PER_M_RAD, PlotScan, sector_index
+from radar_forge.scenario import Scenario
+from radar_forge.settings import TrackingSettings
 from radar_forge.tracking.association import (
     GlobalNearestNeighbour,
     JointProbabilisticDataAssociation,
@@ -39,11 +41,6 @@ from radar_forge.tracking.measurement import RangeAzimuthElevationRangeRate
 from radar_forge.tracking.motion import ConstantTurn, ConstantVelocity
 from radar_forge.tracking.pmbm import PmbmTracker
 from radar_forge.tracking.tracker import Scan, Tracker
-
-if TYPE_CHECKING:
-    # Types only: scenario.py imports plot_simulator, which this module imports.
-    from radar_forge.scenario import Scenario
-    from radar_forge.settings import TrackingSettings
 
 __all__ = ["VARIANTS", "PlotTracker", "tracker_name"]
 
