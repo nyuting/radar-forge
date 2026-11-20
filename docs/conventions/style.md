@@ -60,7 +60,7 @@ to `CONSTANT_LITERALS`.
 
 The cube is `(n_pulses, n_samples)`: slow time on axis 0 (becomes Doppler), fast time on axis 1
 (becomes range); extra channels go last. A *pulse* is one slow-time sample on both paths, one
-chirp of an FMCW dwell included. An array that crosses a function boundary is named for its
+chirp of an FMCW burst included. An array that crosses a function boundary is named for its
 domains, fast axis first: `data_ftst` (raw baseband), `data_rfst` (after range compression),
 `data_rv` (the range-Doppler map). `img` and `img_db` are for display only; never feed one back
 into a detector. On disk, the layout is [data-001](../../spec/data-001-formats.md)'s.
@@ -74,12 +74,34 @@ a quotation, or a released name that renaming would break. Say why in a comment 
 ### 3.3 Circular axes
 
 Doppler is always a circle; range is one when returns come from beyond one repetition interval;
-so is azimuth. Declare the period once where the axis is made (`Coordinate.period`,
+so is azimuth. The whole width before a value folds is its *period*, `*_period_*` in a name
+(prose may say span). Declare it once where the axis is made (`Coordinate.period`,
 `RangeDopplerProduct.range_period_m`) and apply it where values are consumed (`wrap`,
 `CoordinateLayout.residual`). Never pad, roll or `np.interp` across the edge. Convert an index to a
 value with the axis's own formula, so a fractional index wraps. Keep a fold half-open (`x % p` can
 round to `p`). Average angles about a nearby reference, not as unit vectors. Unwrap a history
 before fitting a slope to it.
+
+### 3.4 Words
+
+One word per concept, in names, docstrings, comments and pages. The glossary under Notation in
+[the user guide's README](../user-guide/README.md#notation) defines each and gives the word other
+libraries use; a name follows it:
+
+- **scan**, one revisit of the scene (`n_scans`, `scan_period_s`, `[scans]`); "frame" only for
+  a coordinate frame. **burst**, one CPI at one PRF (`[[burst]]`, `n_pulses_per_burst`); never
+  "dwell" for it. **pulse**, the slow-time unit (`n_pulses`); **chirp** only for an LFM sweep.
+- **detection** (a CFAR cluster in cells), **plot** (what reaches the tracker, in physical
+  units) and **measurement** (a plot's vector and covariance in the filter) are three layers;
+  a picture is a **figure** (`figures.py`).
+- **range rate** for the derivative of a route's length (`bistatic_range_rate_mps`,
+  `fold_range_rate_mps`); "radial velocity" only for the halved monostatic display and the
+  one-way inputs of `TargetGeometry.monostatic`.
+- **trajectory** for the truth, **track** for its estimate; **clutter density** for false plots
+  per unit of measurement space ("intensity" only for PMBM's Poisson birth and the
+  process-noise intensity); **geodetic** for
+  latitude, longitude and height; "monostatic or bistatic" spelled out, **geometry** where a
+  noun is needed.
 
 ## 4. Docstrings
 
