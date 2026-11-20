@@ -123,9 +123,9 @@ Everyone answers questions 1 and 2. Then choose one direction for question 3.
      detection with CA-CFAR **at the same false-alarm probability**, measured on held-out seeds.
    - **D. Planning with a world model.** This is the use world models were invented for. The
      scenarios offer three waveforms with different weaknesses: the low-PRF FMCW of
-     `scenario_003_tracking.toml` folds velocity; the pulsed medium-PRF of
+     `scenario_003_tracking.toml` folds the rate; the pulsed medium-PRF of
      `scenario_003_ukf_pulsed_medium_prf.toml` folds range; the dual-PRF FMCW of
-     `scenario_003_tracking_dual_prf.toml` resolves velocity but splits its pulses between two
+     `scenario_003_tracking_dual_prf.toml` resolves the rate but splits its pulses between two
      bursts. Treat the waveform as the action. Use a world model (learned, or the tracker's own)
      to choose the waveform scan by scan, and compare with always using one. Count what each
      action costs in time and energy on target, so the comparison is fair.

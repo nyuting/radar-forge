@@ -58,9 +58,9 @@ Nothing conformal is implemented in `radar-forge`. You will write it in your own
 
   Pick one and say why.
 - Useful entry points:
-  - `radar_forge.scan_tracker`: `ScanTracker(scenario)` and its `process`, fed by
-  `radar_forge.pipeline.scan_plots`. Each
-    scan returns a `TrackBank`, whose rows carry each track's `mean`, `covariance` and `nis`.
+  - `radar_forge.scan_tracker`: `ScanTracker(scenario)` and its `process(plots, time_s)`, fed
+    by `radar_forge.pipeline.scan_plots`. Each scan returns one `(bank, association)` pair, a
+    `TrackBank` whose rows carry each track's `mean`, `covariance` and `nis`.
     The `track` stage of `radar_forge.verify` scores each target's primary track into
     `metrics.csv` (RMSE, NEES fraction, latency); nothing reports the mean NIS any more.
   - `radar_forge.scenario.load_scenario` and `radar_forge.pipeline.scan_iq`. Each scan carries

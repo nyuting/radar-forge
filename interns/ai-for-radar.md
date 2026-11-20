@@ -28,12 +28,16 @@ do you know a model's uncertainty is honest?
 
 Know this before you choose. Each item is something you may have to build in your own script.
 
-- **No clutter.** The background is thermal noise only. Any clutter is clutter you add yourself,
-  with parameters justified from a cited source on real radar data.
-- **One target per shipped scenario, one receive channel.** Two targets, or crossing tracks, are
-  yours to synthesise. `radar_forge.propagation.line_of_sight_paths` takes a `TargetGeometry` of
-  any number of targets and their RCS, so one call can place several targets in one IQ cube.
-- **One tracker.** A KF, EKF or UKF with radial constant-velocity motion
+- **Little clutter.** The IQ background is thermal noise, apart from scenario 005's leakage and
+  near clutter for a noise radar; scenario 011's clutter is false plots, not IQ. Any other
+  clutter is clutter you add yourself, with parameters justified from a cited source on real
+  radar data.
+- **Few targets in IQ, one receive channel in most.** Scenarios 001 to 005 have one target and
+  one channel; 006 has two aircraft in one cell and a 16-channel array, and 011's IQ check four
+  pairs. Crossing tracks in IQ are yours to synthesise.
+  `radar_forge.propagation.line_of_sight_paths` takes a `TargetGeometry` of any number of
+  targets and their RCS, so one call can place several targets in one IQ cube.
+- **A forward tracker only.** A KF, EKF or UKF with constant-velocity motion of bistatic range
   (`radar_forge.tracking.motion.ConstantVelocity.bistatic_range`) or Cartesian constant-velocity
   or constant-acceleration motion (`ConstantVelocity`, `ConstantAcceleration`), a chi-square
   gate, and global or greedy nearest-neighbour assignment. IMM, the JPDA family, MHT and PMBM
@@ -87,11 +91,11 @@ The "Build first" column is what the library lacks for that direction. Count it 
 
 | Technique | What it is | Baseline | Question | Build first |
 | :--- | :--- | :--- | :--- | :--- |
-| Differentiable simulation ("inverse rendering") | Fit scene parameters by gradient descent through a differentiable copy of the forward model | FFT peak with interpolation; the Cramér-Rao lower bound (CRLB) | Fit range, velocity and RCS through a PyTorch copy of the FMCW IQ model. Does the fit reach the CRLB, and where does it stick in local minima? | The PyTorch IQ model, checked against `fmcw_deramp_baseband` |
+| Differentiable simulation ("inverse rendering") | Fit scene parameters by gradient descent through a differentiable copy of the forward model | FFT peak with interpolation; the Cramér-Rao lower bound (CRLB) | Fit range, range rate and RCS through a PyTorch copy of the FMCW IQ model. Does the fit reach the CRLB, and where does it stick in local minima? | The PyTorch IQ model, checked against `fmcw_deramp_baseband` |
 | Normalizing flows | An invertible network with an exact likelihood | CA-CFAR and OS-CFAR; the likelihood-ratio test that knows the true clutter law (a ceiling, not a rival) | Is a flow-learned clutter density, used as a likelihood-ratio detector, better than CFAR at equal Pfa? Does it keep its Pfa when the clutter level changes, as CFAR does? | Clutter; see [task 8](evt-thresholds.md) |
 | Uncertainty quantification | Separating aleatoric from epistemic uncertainty, and checking calibration | NEES and NIS of the library's UKF | Does a deep ensemble of a learned motion model flag a flight regime it was not trained on, before its errors grow? | The learned motion model |
 | Neural SDE | A learned drift and diffusion in continuous time | `ConstantVelocity`, `ConstantAcceleration` | The ADS-B fixes are 2–8 s apart. Does a neural SDE handle the irregular spacing better than a constant-velocity model with a time-scaled process noise, with an honest covariance? | Overlaps [task 5, direction A](world-models.md#the-questions) |
-| Mixture of experts | A gating network that weights specialist models | An IMM filter: Markov switching between motion models | Does a learned gate switch between motion models faster or more accurately than IMM's Markov chain? | An IMM, about one day |
+| Mixture of experts | A gating network that weights specialist models | An IMM filter: Markov switching between motion models | Does a learned gate switch between motion models faster or more accurately than IMM's Markov chain? | — (`radar_forge.tracking.imm` has the IMM) |
 | Transformer | Attention over a sequence | Constant-velocity Kalman prediction | What does attention over 30 s of track history buy over a constant-velocity filter, at each prediction horizon? The data is one aircraft: say what that limits. | — |
 | Foundation model | A large pretrained model used without training, or fine-tuned | Constant-velocity and constant-acceleration Kalman prediction | Does a pretrained time-series model forecast the ADS-B track better than a Kalman filter, per operation? | **Ask us first.** Pretrained weights come from outside, and their use needs our agreement |
 | Physics-informed network | A network trained with a physics residual in its loss | A Rauch–Tung–Striebel (RTS) smoother | The RTS smoother is optimal when its motion model is right. Does a kinematics-constrained network reconstruct the ADS-B path better when the model is wrong? | An RTS smoother |

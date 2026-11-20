@@ -41,10 +41,10 @@ it costs.
    powers. Set the declaration threshold for a false-track probability you choose and justify,
    from noise-only runs. Then measure Pd and the declaration delay (scans from the start until
    the target is declared) against SNR.
-4. **Particles.** How do Pd, range and velocity error, and runtime change with the number of
+4. **Particles.** How do Pd, range and range-rate error, and runtime change with the number of
    particles? Show particle depletion happening (for example through the effective sample size),
    and try one fix. Does it help, and what does it cost?
-5. **Compare.** Put your Pd against SNR on the same plot as the
+5. **Compare.** Put your Pd against SNR on the same figure as the
    [floor and the ceiling](track-before-detect.md#the-bounds). Then, at a power where your filter
    declares and the DBT chain struggles, compare its range error and its time to a confirmed
    track with the scenario 003 tracker's (`ScanTracker` in `radar_forge.scan_tracker`, scored by
