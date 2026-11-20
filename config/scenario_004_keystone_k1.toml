@@ -6,7 +6,7 @@
 
 [scenario]
 name = "scenario-004-keystone-k1"
-description = "K1: linear range walk. 500 MHz LFM pulses walk 27.9 range bins in one 20.48 ms dwell; the map loses 25.8 dB until the keystone straightens the walk."
+description = "K1: linear range walk. 500 MHz LFM pulses walk 27.9 range bins in one 20.48 ms burst; the map loses 25.8 dB until the keystone straightens the walk."
 seed = 20261106
 
 [[target]]
@@ -18,7 +18,7 @@ velocity_enu_mps = [0.0, -340.0, 0.0]   # closing along the line of sight: -680 
 [scans]
 start_time_s = 0.0
 duration_s = 0.075   # three scans; a fixed gate holds the target no longer
-scan_period_s = 0.025 # one 20.48 ms dwell every 25 ms
+scan_period_s = 0.025 # one 20.48 ms burst every 25 ms
 
 [site.tx]
 # A tracking radar downrange of a sounding-rocket pad; no [site.rx]: monostatic.

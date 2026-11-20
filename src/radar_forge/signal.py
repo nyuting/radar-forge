@@ -556,7 +556,7 @@ def _delayed(
 
 
 def _check_dwell(radar: Radar, n_pulses: int, waveform: str) -> None:
-    """Reject an empty dwell, or a radar of the other waveform family."""
+    """Reject an empty burst, or a radar of the other waveform family."""
     if n_pulses < 1:
         msg = f"n_pulses must be at least one; got {n_pulses}."
         raise ValueError(msg)

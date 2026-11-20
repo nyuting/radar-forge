@@ -456,8 +456,8 @@ def test_grft_and_cpf_acceleration_approach_the_bound_on_k2(scenario_chips):
 def test_jerk_is_consistent_with_zero_where_the_dwell_cannot_see_it(scenario_chips, variant):
     """The cubic fit's jerk lies within 3 CRB of zero in >= 99 % of 100 trials.
 
-    At this dwell jerk is unobservable: its bound is 4574 m/s^3, while 600 m/s^3 puts 0.02 rad
-    at the dwell's edges about its centre.
+    Over this burst jerk is unobservable: its bound is 4574 m/s^3, while 600 m/s^3 puts 0.02 rad
+    at the burst's edges about its centre.
     """
     chip, _ = scenario_chips[variant]
     found = _trials(chip, NOMINAL_SNR, 100, 14, method="grft", polynomial_order=3)

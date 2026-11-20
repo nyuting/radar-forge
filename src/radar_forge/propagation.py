@@ -325,7 +325,7 @@ def leakage_paths(radar: Radar, lags_samples: ArrayLike, inr_db: ArrayLike) -> P
     r"""Build the transmitter's leakage into the receiver, one path per whole-sample lag.
 
     Leakage is specified at the ADC, not derived (Sabharwal [5] §IV-B to IV-D): what antenna
-    isolation and an analog canceller leave. Lag :math:`m` is the route :math:`c\,m/f_s`, at
+    isolation and an analogue canceller leave. Lag :math:`m` is the route :math:`c\,m/f_s`, at
     zero Doppler; ``inr_db`` is each path's power over the noise in one sample,
     :attr:`~radar_forge.radar.Receiver.noise_power_per_sample_w`, not over the matched band.
     """

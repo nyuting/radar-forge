@@ -179,7 +179,7 @@ def keystone(
     every range frequency, so each echo stays in its pulse-0 range bin (Perry [1]_). Each
     frequency's slow time is rescaled by band-limited (DFT) interpolation, a chirp-z transform
     (Zhu [2]_), or by the baseline, a Hann-tapered sinc of eight pulses each side. DFT
-    interpolation treats the dwell as periodic: the low frequencies, stretched past the last
+    interpolation treats the burst as periodic: the low frequencies, stretched past the last
     pulse, read the first, so the closing pulses ring. Slow time sees only the alias of a
     Doppler beyond :math:`\pm\mathrm{PRF}/2`; the fold factor :math:`F`, the whole PRFs folded
     away, is put back by :math:`e^{+j 2\pi F m f_0/(f_0 + f)}` (Huang [3]_).
@@ -618,7 +618,7 @@ def _chirp_z_plan(
 def _sinc_rescale(
     by_frequency: NDArray[np.complex128], scale: NDArray[np.float64]
 ) -> NDArray[np.complex128]:
-    """Return a Hann-tapered sinc interpolation at ``scale * m``, zero beyond the dwell."""
+    """Return a Hann-tapered sinc interpolation at ``scale * m``, zero beyond the burst."""
     n_pulses = by_frequency.shape[1]
     position = scale[:, None] * np.arange(n_pulses, dtype=np.float64)
     base = np.floor(position).astype(np.int64)

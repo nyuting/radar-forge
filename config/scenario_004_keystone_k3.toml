@@ -18,7 +18,7 @@ velocity_enu_mps = [0.0, -1100.0, 0.0]   # -2200 m/s bistatic: folds to -670.45 
 [scans]
 start_time_s = 0.0
 duration_s = 0.075   # three scans: by the third the target is 110 m bistatic in from 5000 m
-scan_period_s = 0.025 # one 20.48 ms dwell every 25 ms
+scan_period_s = 0.025 # one 20.48 ms burst every 25 ms
 
 [site.tx]
 # A tracking radar downrange of a sounding-rocket pad; no [site.rx]: monostatic.

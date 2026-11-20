@@ -36,7 +36,7 @@ from radar_forge.signal import RangeGate, lfm_chirp
 REPO = Path(__file__).resolve().parents[1]
 
 # A small C-band cube: 256 pulses, 64 range bins of c / f_s, the scenario's 5 % fractional
-# bandwidth; 45 m/s, under half the 100 m/s rate span, walks 6.9 bins in the 128 ms dwell.
+# bandwidth; 45 m/s, under half the 100 m/s rate span, walks 6.9 bins in the 128 ms burst.
 CARRIER_HZ = 6.0e9
 SAMPLE_RATE_HZ = 360.0e6
 BANDWIDTH_HZ = 300.0e6
@@ -289,7 +289,7 @@ class TestDopplerRate:
         """A target accelerating from rest at pulse 0, 6 bins of curvature, < 0.5 bin.
 
         At 1 GHz (30 % fractional bandwidth) the Doppler ends at 524 Hz, under PRF / 2, so
-        slow time is not aliased. Pulses the lowest frequency reads past the dwell, where DFT
+        slow time is not aliased. Pulses the lowest frequency reads past the burst, where DFT
         interpolation wraps, are left out: the first (N - 1) / max sqrt(f0 / (f0 + f)).
         """
         carrier_hz, n_pulses = 1.0e9, 128

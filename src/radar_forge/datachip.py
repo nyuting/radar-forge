@@ -336,7 +336,7 @@ def estimate_fine(
     SNR is measured from the focused peak against ``processing.noise_power_w``. A band off zero
     (:class:`ChipProcessing`, an FMCW profile's) is taken where it lies: read as centred, its
     delay's phase ramp would wrap inside it, and an FMCW range fall up to 0.75 of a bin out. On a
-    chip the walk was not taken out of, the range is the dwell's mean.
+    chip the walk was not taken out of, the range is the burst's mean.
     """
     if method not in FINE_METHODS or chip.domain != "slow_time" or chip.data.ndim != 2:
         msg = "estimate_fine needs a one-channel slow-time chip and a method in FINE_METHODS."
@@ -453,7 +453,7 @@ def _cpf(slow_time: NDArray[np.complex128], polynomial_order: int) -> NDArray[np
 
     :math:`CP(n, \Omega) = \sum_m z_{n+m} z_{n-m} e^{-j\Omega m^2}` peaks at the phase's
     second derivative :math:`2c_2 + 6c_3 n` (O'Shea [8]_), read at the centre and, for
-    the cubic, a quarter of the dwell either side.
+    the cubic, a quarter of the burst either side.
     """
     n_pulses = slow_time.size
     centre = n_pulses // 2
@@ -471,7 +471,7 @@ def _cpf_peak(slow_time: NDArray[np.complex128], centre: int) -> float:
     :math:`m^2` is an integer, so on the grid :math:`\Omega = 2\pi q/L` the CPF is the
     :math:`L`-point DFT of the products placed at :math:`u = m^2`. Only
     :math:`|\Omega| \le 4\pi/N` is searched: a phase whose frequency sweeps more than two PRFs
-    over the dwell aliases in slow time, and beyond it lie only noise peaks.
+    over the burst aliases in slow time, and beyond it lie only noise peaks.
     """
     n_pulses = slow_time.size
     half = min(centre, n_pulses - 1 - centre)
@@ -506,7 +506,7 @@ def _maximum_likelihood(
     The local generalised Radon-Fourier transform: after the keystone the chip's trajectory is
     straight in range, so its sum along the trajectory is the range-focused sequence, and the
     likelihood is maximised over the phase alone (Xu et al. [9]_). The search runs in
-    :math:`c_p N^p`, the phase each term adds over the dwell.
+    :math:`c_p N^p`, the phase each term adds over the burst.
     """
     n_pulses = slow_time.size
     pulse = np.arange(n_pulses, dtype=np.float64)
