@@ -38,6 +38,10 @@ n_sectors = 1          # one batch a scan, at 180 deg: the pair's crossing
 
 [tracking]
 linearisation = "taylor"
+# The likelihood ratio costs a GNN pair against the clutter, and a first plot's
+# debiased position seeds a track.
+cost = "negative_log_likelihood_ratio"
+initiator = "debiased_spherical"
 motion = "cv"
 sigma_acceleration_mps2 = 0.5   # CV quiet, every tracker
 association = "jpda"

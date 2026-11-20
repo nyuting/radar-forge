@@ -71,7 +71,7 @@ a different false-alarm rate. Your job is to find out on a problem we control.
     `range_doppler_product`. Each scan carries its IQ (`scan.cubes`) and the truth
     (`scan.truth.bistatic_range_m`, `scan.truth.bistatic_range_rate_mps`: unfolded, twice the
     slant values here, positive receding). The map has shape `(n_doppler, n_range)`.
-  - `radar_forge.pipeline`: `scan_plots`, `ScanTracker`, and the `track` stage of
+  - `radar_forge.pipeline`: `scan_plots`; `radar_forge.scan_tracker`: `ScanTracker`; and the `track` stage of
     `radar_forge.verify` that scores it. This is the classical baseline.
   - `radar_forge.scenario.truth_geometry`: reads each target's trajectory, resamples it onto the
     scan times and returns its geometry seen from the radar. Its steps, once `load_flight_csv`,

@@ -42,7 +42,7 @@ to find out what happens when the radar starts missing.
   - `radar_forge.detection`
   - `radar_forge.scenario.load_scenario`, and `radar_forge.pipeline`: `scan_iq`,
     `range_doppler_product`
-  - `radar_forge.pipeline`: `scan_plots`, `ScanTracker`; the `track` stage of
+  - `radar_forge.pipeline`: `scan_plots`; `radar_forge.scan_tracker`: `ScanTracker`; the `track` stage of
     `radar_forge.verify` scores the primary track
 
 You should not need to change anything under `src/`. If you think you do, tell us why instead.

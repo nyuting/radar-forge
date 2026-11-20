@@ -57,8 +57,9 @@ guarded half-open fold that `CoordinateLayout` shares with `dsp.fold_into_period
 else of the package: never `settings`, `scenario`, `trajectory`, `plot_simulator`,
 `scan_tracker`, `pipeline`, `verify`, `dsp` or `figures`. `settings.py` and `scenario.py`
 import nothing from `tracking/` but `hypotheses`' two default MHT thresholds, the defaults
-of `[tracking] confirm_score` and `delete_drop`. The pipeline builds an IQ scenario's `Scan`,
-`scan_tracker.py` a plot-level one's.
+of `[tracking] confirm_score` and `delete_drop`. `scan_tracker.py` is the one bridge: it
+reads a `Scenario` and builds and feeds the tracker, a staring scenario's `Scan` from
+`pipeline.Plots` and a rotating one's from `plot_simulator.PlotScan`.
 
 ## 3. The filter
 
@@ -136,8 +137,8 @@ interval at 99.9 %; covariances stay symmetric to `rtol=1e-12` with Cholesky suc
   correlated acceleration for steps long against τ. `"discrete"`,
   the discrete model (σₐ² in m²/s⁴, §6.3.2), is kept because scenario 003 pins it.
 - **State models are configurations**: a motion and a measurement model in one layout.
-  `pipeline.ScanTracker` builds the radial one from a scenario's `[tracking]` table; an ENU
-  one pairs `ConstantVelocity` with a spherical or bistatic model.
+  `scan_tracker.ScanTracker` builds the radial one from an IQ scenario's `[tracking]` table,
+  and a plot-level scenario's ENU one, `ConstantVelocity` (or an IMM) with a spherical model.
 - **Spherical measurements stay spherical.** `RangeAzimuthElevationRangeRate` maps an ENU state to
   `(range_m, azimuth_rad, elevation_rad, range_rate_mps)` about a sensor pose: r = |p − pₛ|,
   azimuth atan2(Δe, Δn) clockwise from north (periodic), elevation atan2(Δu, g) with g the ground
@@ -252,12 +253,12 @@ Built with scenario 011a (`config/scenario_011_*.toml`); none changes the loop.
 ## 7. Integration, performance and validation
 
 **Data flow.** `detection.Detection` (cell indices, W) is converted by `pipeline.scan_plots` to
-plots (bistatic m and m/s, positive receding), which `pipeline.ScanTracker` builds into a `Scan`
+plots (bistatic m and m/s, positive receding), which `scan_tracker.ScanTracker` builds into a `Scan`
 and passes to `Tracker.process(scan)`; that returns the bank, each row with its NIS and the
 measurement it took. The stepper's track stage (`verify/chain.py`) writes `tracks.csv` and
 `metrics.csv` from them (`spec/data-001-formats.md` §6.6, §6.9). Settings come from the scenario
 TOML's `[tracking]` table, read once; scenario-only policy (track-aided unfolding) stays in
-`pipeline.py`. Every
+`scan_tracker.py`. Every
 measurement in a scan carries the scan's time and scans arrive in order. Every sensor registers in
 one `Tracker`, so one target has one track whichever sensor sees it.
 
@@ -285,7 +286,8 @@ the metrics of `spec/data-001-formats.md` §6.9; for many targets GOSPA and traj
   built as a UKF (hides the KF a student looks for); Joseph form everywhere (the UKF has no H).
 - **Spherical measurements stay spherical.** Rejected: Cartesian conversion then a linear KF
   (state-dependent covariance, bias growing with range × angle error).
-- **Mechanism in `tracking/`, policy in `pipeline.py`** (the range-only selector), not in `Tracker`.
+- **Mechanism in `tracking/`, policy in `scan_tracker.py`** (the range-only selector), not in
+  `Tracker`.
 - **D26: `ConstantTurn`, with the turn rate in the state**, in `tracking/motion.py`: exact
   discretisation with series forms near zero turn rate.
 - **D27: the IMM is functions over a bank with per-mode columns**, `tracking/imm.py`: mixing by

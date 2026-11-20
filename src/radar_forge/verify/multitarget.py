@@ -2,7 +2,7 @@ r"""The ``multitarget`` stage: many targets through the plot model and a configu
 
 A plot-level scenario (``[sensor]``) is played scan by scan
 (:func:`~radar_forge.plot_simulator.plot_scans`) into
-:class:`~radar_forge.scan_tracker.PlotTracker`.
+:class:`~radar_forge.scan_tracker.ScanTracker`.
 Each scan's confirmed tracks are scored against the aircraft in coverage by GOSPA [1], each
 truth at its track's own time; over the run the stage measures swaps at every crossing the arcs
 hold, the IMM's latency to its turn mode after each turn onset, the position NEES, the measured
@@ -39,7 +39,7 @@ from scipy.stats import chi2
 from radar_forge import figures
 from radar_forge.coordinates import range_azimuth_to_east_north_m
 from radar_forge.plot_simulator import PlotScan, plot_scans
-from radar_forge.scan_tracker import PlotTracker, tracker_name
+from radar_forge.scan_tracker import ScanTracker, tracker_name
 from radar_forge.scenario import Scenario
 from radar_forge.tracking.filters import TrackBank, TrackStatus, is_confirmed
 from radar_forge.tracking.metrics import gospa, nees, trajectory_gospa
@@ -101,7 +101,7 @@ def _truth(scenario: Scenario, time_s: NDArray[np.float64]) -> NDArray[np.float6
     return np.stack([target.arc.state(time_s)[0] for target in scenario.arcs])
 
 
-def _score_rotation(scenario: Scenario, plots_scan: PlotScan, bank: TrackBank, run: _Run) -> None:
+def _score_scan(scenario: Scenario, plots_scan: PlotScan, bank: TrackBank, run: _Run) -> None:
     """Score one scan's confirmed tracks: GOSPA, its assignment, NEES and mode probability."""
     aircraft = np.array([t.target_class == "aircraft" for t in scenario.arcs])
     present = np.flatnonzero(aircraft & plots_scan.echo_in_coverage)
@@ -330,7 +330,7 @@ def play(scenario: Scenario, n_scans: int | None = None, *, rows: bool = False) 
     settings = scenario.tracking
     primary = tracker_name(settings) if settings else "gnn"
     names = [primary, *(n for n in (settings.trackers if settings else ()) if n != primary)]
-    trackers = {name: PlotTracker(scenario, None if name == primary else name) for name in names}
+    trackers = {name: ScanTracker(scenario, None if name == primary else name) for name in names}
     runs = {name: _Run() for name in names}
     plot_rows: list[dict[str, Any]] = []
     track_rows: list[dict[str, Any]] = []
@@ -342,12 +342,12 @@ def play(scenario: Scenario, n_scans: int | None = None, *, rows: bool = False) 
         # A few trackers, each run over the same scan.
         for name, tracker in trackers.items():
             run = runs[name]
-            for _, association in tracker.rotation(plots_scan):
+            for _, association in tracker.process(plots_scan):
                 if association is not None:
                     run.cluster_tracks += association.cluster_tracks.tolist()
                     run.cluster_events += association.cluster_events.tolist()
             bank = tracker.bank
-            _score_rotation(scenario, plots_scan, bank, run)
+            _score_scan(scenario, plots_scan, bank, run)
             score = _count_hypotheses(tracker, run, bank.n_tracks)
             if rows:
                 track_rows += _track_rows(plots_scan, bank, name, score)
@@ -368,7 +368,7 @@ def play(scenario: Scenario, n_scans: int | None = None, *, rows: bool = False) 
     return runs, plot_rows, track_rows, false_enu, true_enu
 
 
-def _count_hypotheses(tracker: PlotTracker, run: _Run, n_tracks: int) -> NDArray[np.float64]:
+def _count_hypotheses(tracker: ScanTracker, run: _Run, n_tracks: int) -> NDArray[np.float64]:
     """Keep MHT's largest tree and cluster, PMBM's Bernoullis; return MHT's reported scores."""
     inner = tracker.tracker
     if isinstance(inner, PmbmTracker):

@@ -103,13 +103,16 @@ class TrackingSettings:
     Every rate and acceleration is of bistatic range, twice the radial value when monostatic.
     ``range_only_retry`` offers each track range alone when range and rate fail the gate; it
     mixes measurement dimensions, so it needs ``cost = "negative_log_likelihood_ratio"``.
+    ``initiator`` is ``"direct"`` or ``"range_only"`` for an IQ scenario and
+    ``"debiased_spherical"`` for a plot-level one. ``detection_probability`` given, GNN
+    assigns no pair cheaper than ln(P_D / (1 - P_D P_G)); JPDA, MHT and PMBM need it.
     """
 
     linearisation: Literal["taylor", "unscented"] = "unscented"
     white_noise: Literal["continuous", "discrete"] = "continuous"
     sigma_acceleration_mps2: float = 8.0
     acceleration_correlation_time_s: float = 1.0
-    initiator: Literal["direct", "range_only"] = "direct"
+    initiator: Literal["direct", "range_only", "debiased_spherical"] = "direct"
     cost: Literal["nis", "negative_log_likelihood_ratio"] = "nis"
     assignment: Literal["confirmed_first", "joint"] = "confirmed_first"
     range_only_retry: bool = False
@@ -132,7 +135,7 @@ class TrackingSettings:
     sojourn_time_s: tuple[float, ...] = (120.0, 30.0, 20.0)
     turn_rate_sigma_degps: float = 3.0
     clutter_density_source: Literal["oracle", "map"] = "oracle"
-    detection_probability: float = 0.9
+    detection_probability: float | None = None
     max_birth_clutter_density_per_m_rad: float = 0.01
     initial_speed_sigma_mps: float = 150.0
     max_position_sigma_m: float = np.inf

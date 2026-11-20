@@ -78,7 +78,7 @@ plus `spec/data-001-formats.md` (file formats) and `spec/tracker-001.md` (tracki
 | data chip; sub-bin and polynomial-phase estimates; CRB | `crop_slow_time`, `crop_range_doppler`, `estimate_tone`, `estimate_fine`, `cramer_rao_bounds` (datachip.py) |
 | receive array: ENU to array frame, steering e^{+j2π p·u/λ}, per-channel synthesis; weights w^H x; covariance, smoothing, FB | `enu_to_array_frame`, `steering_vectors`; `fmcw_deramp_baseband(rx_response_linear=)` (signal.py); `conventional_weights`, `mvdr_weights`, `apply_weights`; `sample_covariance`, `spatial_smoothing`, `forward_backward_average` (array.py) |
 | DOA: Bartlett, Capon, MUSIC, root-MUSIC, ESPRIT, IAA, SPICE, ML; deterministic CRB, Smith's limit, monopulse | `estimate_doa`, `bartlett_spectrum` ... `deterministic_ml`; `crb_deterministic`, `resolution_snr_db`, `monopulse_ratio` (doa.py) |
-| trajectories (arcs); plot merge P_u = exp(-d²/2), Pd, clutter per m·rad, scans and their sector batches; clutter map | `Arc`, `Leg` (trajectory.py); `resolve`, `detect`, `measure`, `ClutterComponent`, `plot_scans` (plot_simulator.py); `ClutterMap` (tracking/clutter_map.py); `PlotTracker` (scan_tracker.py) |
+| trajectories (arcs); plot merge P_u = exp(-d²/2), Pd, clutter per m·rad, scans and their sector batches; clutter map | `Arc`, `Leg` (trajectory.py); `resolve`, `detect`, `measure`, `ClutterComponent`, `plot_scans` (plot_simulator.py); `ClutterMap` (tracking/clutter_map.py); `ScanTracker` (scan_tracker.py) |
 
 No function yet: Pd (Swerling detection curves).
 

@@ -47,6 +47,10 @@ range_max_m = 40000.0
 [tracking]
 # The EKF (Taylor) on every mode: the coordinated turn is nonlinear.
 linearisation = "taylor"
+# The likelihood ratio costs a GNN pair against the clutter, and a first plot's
+# debiased position seeds a track.
+cost = "negative_log_likelihood_ratio"
+initiator = "debiased_spherical"
 motion = "imm"
 association = "gnn"
 # Mode noise, as continuous white-noise sigma at a 1 s correlation time,

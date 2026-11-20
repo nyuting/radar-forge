@@ -294,7 +294,8 @@ def _settings(kind: Any, table: Mapping[str, Any], name: str) -> Any:
         if choices and value not in choices:
             msg = f"[{name}] {key} must be one of {list(choices)}; got {value!r}."
             raise ValueError(msg)
-        default: Any = defaults[key]
+        # An optional number (float | None, default None) takes a float, as a float does.
+        default: Any = 0.0 if defaults[key] is None else defaults[key]
         given: Any = tuple(value) if isinstance(default, tuple) else value
         # A bool is an int in Python, so the exact type is compared; a float takes an int.
         if not (type(given) is type(default) or (type(default) is float and type(given) is int)):

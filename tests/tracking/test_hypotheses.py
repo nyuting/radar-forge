@@ -26,7 +26,7 @@ from radar_forge.plot_simulator import (
     poisson_clutter_plots,
     resolve,
 )
-from radar_forge.scan_tracker import PlotTracker
+from radar_forge.scan_tracker import ScanTracker
 from radar_forge.scenario import Scenario, load_scenario
 from radar_forge.tracking.association import GlobalNearestNeighbour
 from radar_forge.tracking.filters import TaylorLinearisation, TrackStatus
@@ -236,10 +236,10 @@ def test_tracks_csv_reports_each_scan_as_mht_saw_it_then(tmp_path: Path) -> None
         scenario.tracking, association="mht", existence=False, trackers=()
     )
     scenario = dataclasses.replace(scenario, tracking=tracking, verify={})
-    live = PlotTracker(scenario)
+    live = ScanTracker(scenario)
     seen = []
     for plot_scan in plot_scans(scenario, n_scans=2):
-        live.rotation(plot_scan)
+        live.process(plot_scan)
         seen.append(live.bank)
     verify.run(scenario, ["multitarget"], n_scans=2, out_dir=tmp_path, render=False)
     with (tmp_path / "tracks.csv").open(encoding="utf-8", newline="") as handle:

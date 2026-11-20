@@ -47,7 +47,7 @@ it costs.
 5. **Compare.** Put your Pd against SNR on the same plot as the
    [floor and the ceiling](track-before-detect.md#the-bounds). Then, at a power where your filter
    declares and the DBT chain struggles, compare its range error and its time to a confirmed
-   track with the scenario 003 tracker's (`ScanTracker` in `radar_forge.pipeline`, scored by
+   track with the scenario 003 tracker's (`ScanTracker` in `radar_forge.scan_tracker`, scored by
    the `track` stage of `radar_forge.verify`).
 
 ## Deliverables

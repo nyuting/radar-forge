@@ -493,7 +493,7 @@ def test_the_discrete_noise_rate_variance_floors_above_the_bootstrap_threshold()
     Re-homed from ``tests/core/test_tracking.py``, which ``pipelines/tracking.py`` cites:
     with ``sigma_accel_mps2 = 2`` (one-way), discrete noise adds sigma² T² to the rate variance
     every scan, so on range alone the rate standard deviation floors near 4.1 m/s, above the
-    v_span / 6 = 2.55 m/s promotion threshold, and never unfolds. The state here is bistatic
+    v_period / 6 = 2.55 m/s promotion threshold, and never unfolds. The state here is bistatic
     range, twice the one-way range, so sigma, R and the floor all double at the boundary. The
     floor is the steady state of the Riccati recursion, which 60 scans reach.
     """

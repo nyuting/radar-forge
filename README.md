@@ -164,7 +164,8 @@ radar-forge/
         ├── tracking/           # Models, filters, association, tracker, MHT, PMBM, metrics
         ├── settings.py         # The settings a scenario's TOML tables hold
         ├── scenario.py         # A scenario TOML and its truth
-        ├── pipeline.py         # IQ scans, range-Doppler products, plots, ScanTracker
+        ├── pipeline.py         # IQ scans, range-Doppler products, plots
+        ├── scan_tracker.py     # A scenario's [tracking] table as one tracker, scan by scan
         ├── verify/             # The stepper and its stages, each checked against [verify]
         └── figures.py          # Figures (the visualisation extra)
 ```

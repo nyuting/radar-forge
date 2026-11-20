@@ -31,7 +31,6 @@ from radar_forge.dsp import fold_into_period
 from radar_forge.pipeline import (
     Plots,
     RangeDopplerProduct,
-    ScanTracker,
     range_doppler_product,
     scan_iq,
     scan_plots,
@@ -39,6 +38,7 @@ from radar_forge.pipeline import (
     synthesise,
 )
 from radar_forge.radar import TargetGeometry
+from radar_forge.scan_tracker import ScanTracker
 from radar_forge.scenario import Scenario
 from radar_forge.signal import thermal_noise
 from radar_forge.tracking.filters import TrackStatus, is_confirmed
@@ -350,7 +350,8 @@ def track(ctx: stepper.Context) -> stepper.Context:
     period_m, show, rows = tracker.range_period_m, figures.display_axes(scenario.radar), []
     # Scans are sequential: each one's tracks are the next one's prior.
     for index, found in enumerate(ctx.plots):
-        bank, accepted = tracker.scan(found, float(scenario.scan_times_s[index]))
+        [(bank, _)] = tracker.process(found, float(scenario.scan_times_s[index]))
+        accepted = found.accepted
         ctx.banks.append((bank, accepted))
         for r in range(bank.n_tracks):
             row = {

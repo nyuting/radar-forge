@@ -59,6 +59,10 @@ seed = 20261108
 
 [tracking]
 linearisation = "taylor"
+# The likelihood ratio costs a GNN pair against the clutter, and a first plot's
+# debiased position seeds a track.
+cost = "negative_log_likelihood_ratio"
+initiator = "debiased_spherical"
 motion = "imm"
 mode_sigma_acceleration_mps2 = [0.5, 0.5, 3.1623]
 turn_rate_noise_density_rad2ps3 = 1.6e-5

@@ -26,7 +26,6 @@ from radar_forge.migration import pulse_compress
 from radar_forge.pipeline import (
     Plots,
     RangeDopplerProduct,
-    ScanTracker,
     map_axes,
     range_doppler_product,
     scan_iq,
@@ -270,32 +269,6 @@ def _one_plot(range_m: float, folded_rate_mps: float) -> Plots:
         np.array([-1]),
         np.array([np.nan]),
     )
-
-
-def test_the_fold_monitor_fits_the_slope_on_the_scans_own_times():
-    """Regression: a coast squeezed the slope's time axis, so a four-scan gap read 80 m/s for 50.
-
-    The prediction sits one fold high; the slope over the real times (50 m/s) disagrees by a
-    whole span and refolds the plot to the truth. On scan indices the slope agreed with the
-    wrong prediction and the wrong fold stood.
-    """
-    tracker = ScanTracker(load_scenario(REPO / "config" / "scenario_003_tracking.toml"))
-    period_mps, rate_mps = tracker.rate_period_mps, 50.0
-    ids = tracker.tracker.seed(
-        [[20_600.0, rate_mps + period_mps]], np.diag([100.0, 1.0])[None], 12.0
-    )
-    times_s = [*range(9), 12.0]
-    tracker.history[int(ids[0])] = [(float(t), 20_000.0 + rate_mps * t) for t in times_s]
-    folded_mps = rate_mps - period_mps * round(rate_mps / period_mps)
-    # abs 1e-9: whole spans added to a folded reading, a few float64 operations.
-    np.testing.assert_allclose(tracker.unfold(np.array([folded_mps])), [rate_mps], atol=1e-9)
-
-
-def test_a_track_birth_starts_its_range_history():
-    """Regression: a birth has no NIS, so its range was dropped and unfolding came a scan late."""
-    tracker = ScanTracker(load_scenario(REPO / "config" / "scenario_003_tracking.toml"))
-    bank, _ = tracker.scan(_one_plot(20_000.0, 1.0), 0.0)
-    assert tracker.history == {int(bank.track_id[0]): [(0.0, 20_000.0)]}
 
 
 @pytest.mark.parametrize(

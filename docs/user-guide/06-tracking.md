@@ -5,7 +5,7 @@ running estimate of one target: its state (for example its range and range rate)
 uncertain that estimate is, and whether the tracker trusts it yet. Every track is one row of a
 `TrackBank`, and each step of the filter runs over every row at once. It is the last stage of
 [the chain](README.md#the-chain): it takes the plots from [page 5](05-detection.md), and
-`pipeline.ScanTracker` builds it from a scenario's `[tracking]` table. This page says what is
+`scan_tracker.ScanTracker` builds it from a scenario's `[tracking]` table. This page says what is
 in the package, the equations it runs, the order a scan runs in, how to try it, and what it
 can't do yet.
 
@@ -38,8 +38,8 @@ twice the radial value when monostatic.
 | `clutter_map.py` | `ClutterMap`, the clutter density per (m rad) learnt from the plots no confirmed track took (scenario 011). |
 
 `radar_forge.tracking` exports `Scan` and `Tracker`; everything else is imported from its
-module. Outside the package, `scan_tracker.py` holds `PlotTracker`, the tracker scenario 011
-builds from its `[tracking]` table, fed each scan's plots as sector batches. Not tracker code: `trajectory.py` holds the true
+module. Outside the package, `scan_tracker.py` builds a scenario's tracker from its
+`[tracking]` table and feeds it each scan. Not tracker code: `trajectory.py` holds the true
 trajectories of scenario 011's targets, and `plot_simulator.py` the plots a rotating
 surveillance radar makes of them (merged echoes, missed detections, false plots), scan by
 scan. Four of scenario 011's six variants use them in place of IQ.
@@ -157,20 +157,21 @@ hit, miss, hit, miss, hit confirms on scan 5, and hit, miss, miss, miss deletes 
 
 ### The scenario's tracker
 
-`pipeline.ScanTracker(scenario)` builds a `Tracker` from `[tracking]` (`linearisation`,
-`white_noise`, `initiator`, `cost`, `assignment`, the lifecycle counts) on
-`ConstantVelocity.bistatic_range`, and `ScanTracker.scan(plots, time_s)` feeds it a scan's accepted
-plots. Range is measured modulo the map's span, 149,896 m for S1, while the state stays
-continuous. The rate is measured only where it cannot fold: after dual-PRF pairing, from
+`scan_tracker.ScanTracker(scenario)` builds a `Tracker` from `[tracking]` (`linearisation`,
+`white_noise`, `initiator`, `cost`, `assignment`, `association`, the lifecycle counts) on
+`ConstantVelocity.bistatic_range`, and `ScanTracker.process(plots, time_s)` feeds it a scan's
+accepted plots as one batch; a rotating radar's scan (scenario 011) reaches the same class as
+one batch a sector. Range is measured modulo the map's period, 149,896 m for S1, while the
+state stays continuous. The rate is measured only where it cannot fold: after dual-PRF pairing, from
 one burst whose rate interval covers `max_bistatic_range_rate_mps`, or once a track can unfold
 it (`rate_unfolding = "track_aided"`); otherwise range alone. Track-aided unfolding lets a track
 unfold once it holds N associated ranges, the least N whose least-squares slope is certain to a
-`unfold_sigma_gate`-th of a fold span:
+`unfold_sigma_gate`-th of the rate period:
 
-$$\frac{\sigma_R}{T}\sqrt{\frac{12}{N(N^2-1)}} < \frac{v_{\mathrm{span}}}{g}$$
+$$\frac{\sigma_R}{T}\sqrt{\frac{12}{N(N^2-1)}} < \frac{v_{\mathrm{period}}}{g}$$
 
-with $v_{\mathrm{span}}$ the rate span and $g$ the gate. On S1, $\sigma_R$ = 43.27 m,
-$v_{\mathrm{span}}$ = 30.591 m/s and $g$ = 6 give N = 10. Of the tracks that may unfold, the
+with $v_{\mathrm{period}}$ the rate period and $g$ the gate. On S1, $\sigma_R$ = 43.27 m,
+$v_{\mathrm{period}}$ = 30.591 m/s and $g$ = 6 give N = 10. Of the tracks that may unfold, the
 one with the longest range history then gives each plot the fold nearest its rate, unless that
 lies over half a span from the slope of its last `n_slope_scans` ranges (the **fold monitor**):
 a wrong fold agrees with the prediction that chose it, never with the range.
@@ -417,9 +418,10 @@ multiple hypothesis tracking (`hypotheses.py`) and the Poisson multi-Bernoulli m
 (`pmbm.py`); confirmation by existence probability (`lifecycle.py`); GOSPA and trajectory GOSPA
 (`metrics.py`); and sensor coverage, so that a scan counts a miss only against the tracks it
 could have seen (`tracker.Coverage`). Their docstrings and `spec/tracker-001.md` describe them.
-Only scenario 011's tracker (`scan_tracker.PlotTracker`) can be configured to use them today;
-the tracker this page's scenarios build (`pipeline.ScanTracker`) is always GNN, with a
-range-and-rate state.
+`scan_tracker.ScanTracker` configures any of the associators for either kind of scenario
+(`association`, `coalescence`, `existence` in `[tracking]`, with `detection_probability`);
+this page's scenarios configure GNN, with a range-and-rate state, and PMBM and the IMM need
+a plot-level scenario's ground-plane state.
 
 **Not yet supported:**
 

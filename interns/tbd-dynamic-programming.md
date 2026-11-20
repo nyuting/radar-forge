@@ -45,7 +45,7 @@ number for one real radar, scenario 003, with all four stated, and to say where 
    change with the size of the neighbourhood? Show error bars that mean something.
 5. **Recover the track.** At a power where TBD detects and the DBT chain struggles, compare the
    range error of TBD's best trajectory with the scenario 003 tracker's
-   (`ScanTracker` in `radar_forge.pipeline`, scored by the `track` stage of `radar_forge.verify`).
+   (`ScanTracker` in `radar_forge.scan_tracker`, scored by the `track` stage of `radar_forge.verify`).
    Which would you trust, and for what?
 6. **Cost.** Count the operations and memory per scan as functions of the map size, the
    neighbourhood size and K. What would have to change to run this once a second on embedded
