@@ -5,7 +5,7 @@ the beam crosses each target at its own time, the plot model of
 :mod:`~radar_forge.tracking.scene` merges, detects and measures the echoes, and clutter and
 fixed discretes are added, each plot with the clutter intensity at it. :class:`PlotTracker`
 builds a :class:`~radar_forge.tracking.Tracker` (GNN, the JPDA family or MHT) or a
-:class:`~radar_forge.tracking.rfs.PmbmTracker` from ``[tracking]`` and feeds it each scan
+:class:`~radar_forge.tracking.pmbm.PmbmTracker` from ``[tracking]`` and feeds it each scan
 as sector batches, keeping the clutter map as policy. Nothing here halves a range or does I/O.
 
 References
@@ -43,8 +43,8 @@ from radar_forge.tracking.imm import InteractingMultipleModel
 from radar_forge.tracking.initiation import DebiasedSphericalInitiator
 from radar_forge.tracking.lifecycle import ExistencePolicy, LifecyclePolicy
 from radar_forge.tracking.measurement import RangeAzimuthElevationRangeRate
-from radar_forge.tracking.motion import CartesianMotion, CoordinatedTurn
-from radar_forge.tracking.rfs import PmbmTracker
+from radar_forge.tracking.motion import ConstantTurn, ConstantVelocity
+from radar_forge.tracking.pmbm import PmbmTracker
 from radar_forge.tracking.scene import (
     LEAST_INTENSITY_PER_M_RAD,
     ClutterMap,
@@ -253,14 +253,14 @@ class PlotTracker:
         self.sensor, self.settings = sensor, settings
         self.period_s = scenario.scan_period_s
         quiet, turn, agile = settings.mode_sigma_acceleration_mps2
-        cv = CartesianMotion("xy", sigma_acceleration_mps2=settings.sigma_acceleration_mps2)
+        cv = ConstantVelocity("xy", sigma_acceleration_mps2=settings.sigma_acceleration_mps2)
         motion: Any = cv
         if settings.motion == "imm":
             motion = InteractingMultipleModel(
                 (
-                    CartesianMotion("xy", sigma_acceleration_mps2=quiet),
-                    CoordinatedTurn(turn, settings.turn_rate_noise_density_rad2ps3),
-                    CartesianMotion("xy", sigma_acceleration_mps2=agile),
+                    ConstantVelocity("xy", sigma_acceleration_mps2=quiet),
+                    ConstantTurn(turn, settings.turn_rate_noise_density_rad2ps3),
+                    ConstantVelocity("xy", sigma_acceleration_mps2=agile),
                 ),
                 settings.sojourn_time_s,
                 {"turn_rate_radps": math.radians(settings.turn_rate_sigma_degps)},
@@ -317,7 +317,7 @@ class PlotTracker:
             sigma = settings.sigma_acceleration_mps2 if settings.motion == "cv" else agile
             cv_prior = np.diag([v**2 for v in self._prior_sigma(cv.state_layout.names, settings)])
             self.tracker = PmbmTracker(
-                CartesianMotion("xy", sigma_acceleration_mps2=sigma),
+                ConstantVelocity("xy", sigma_acceleration_mps2=sigma),
                 RangeAzimuthElevationRangeRate(
                     cv.state_layout, np.zeros(3), ("range_m", "azimuth_rad"), fixed={"z_m": 0.0}
                 ),
@@ -346,7 +346,7 @@ class PlotTracker:
         aircraft = [t for t in scenario.arcs if t.target_class == "aircraft"]
         # Position and velocity, east then north, per aircraft: (n, 4) in x, xdot, y, ydot order.
         truth = np.array([np.ravel(np.array(t.arc.state(start_s)).T) for t in aircraft])
-        names = self.tracker.bank.layout.names
+        names = self.tracker.bank.state_layout.names
         mean = np.zeros((len(aircraft), len(names)))
         for k, name in enumerate(_POSITION_VELOCITY):
             mean[:, names.index(name)] = truth[:, k]
@@ -369,7 +369,7 @@ class PlotTracker:
 
     def _covers(self, bank: TrackBank, scan: Scan) -> NDArray[np.bool_]:
         """Return the tracks whose azimuth, extrapolated to the batch, lies in its sector."""
-        layout = bank.layout
+        layout = bank.state_layout
         x, xdot, y, ydot = (bank.mean[:, layout.names.index(n)] for n in _POSITION_VELOCITY)
         dt_s = scan.time_s - bank.time_s
         _, azimuth = east_north_to_range_azimuth_rad(

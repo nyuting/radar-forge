@@ -76,7 +76,7 @@ a quotation, or a released name that renaming would break. Say why in a comment 
 Doppler is always a circle; range is one when returns come from beyond one repetition interval;
 so is azimuth. Declare the period once where the axis is made (`Coordinate.period`,
 `RangeDopplerProduct.range_period_m`) and apply it where values are consumed (`wrap`,
-`StateLayout.residual`). Never pad, roll or `np.interp` across the edge. Convert an index to a
+`CoordinateLayout.residual`). Never pad, roll or `np.interp` across the edge. Convert an index to a
 value with the axis's own formula, so a fractional index wraps. Keep a fold half-open (`x % p` can
 round to `p`). Average angles about a nearby reference, not as unit vectors. Unwrap a history
 before fitting a slope to it.

@@ -7,7 +7,7 @@ target against false alarm [1]: :math:`\ln(P_D g / \lambda)` added on a hit,
 uses no measurement twice; trees sharing a gated measurement or a hypothesis form a cluster,
 whose ``k_best`` hypotheses each scan extends by Murty's ranked assignments [2] [3] and
 N-scan pruning trims [4]. :class:`GlobalHypotheses`, :func:`extend`, :func:`collapse` and
-:func:`split` are what MHT and PMBM (:mod:`~radar_forge.tracking.rfs`) share.
+:func:`split` are what MHT and PMBM (:mod:`~radar_forge.tracking.pmbm`) share.
 :class:`TrackOrientedMHT` is the associator a :class:`~radar_forge.tracking.tracker.Tracker`
 asks for its :meth:`~TrackOrientedMHT.hypotheses`; the tracker updates the leaves and reports,
 at each scan, the leaves of each cluster's best hypothesis, never rewritten later.
@@ -44,7 +44,7 @@ from radar_forge.tracking.association import (
     non_assignment_cost,
 )
 from radar_forge.tracking.filters import TrackBank, is_confirmed
-from radar_forge.tracking.motion import StateLayout
+from radar_forge.tracking.motion import CoordinateLayout
 
 __all__ = [
     "CONFIRM_SCORE",
@@ -419,7 +419,7 @@ class TrackTree:
     next_node: int = 0
 
     @classmethod
-    def empty(cls, layout: StateLayout, n_modes: int = 0) -> TrackTree:
+    def empty(cls, layout: CoordinateLayout, n_modes: int = 0) -> TrackTree:
         """Return a tree with no leaves."""
         nothing = np.zeros(0)
         return cls(

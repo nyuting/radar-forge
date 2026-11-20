@@ -76,7 +76,7 @@ from radar_forge.tracking.filters import (
 from radar_forge.tracking.initiation import DirectStateInitiator
 from radar_forge.tracking.lifecycle import LifecyclePolicy
 from radar_forge.tracking.measurement import LinearMeasurement, marginal
-from radar_forge.tracking.motion import RadialConstantVelocity
+from radar_forge.tracking.motion import ConstantVelocity
 from radar_forge.tracking.tracker import Scan, Tracker
 
 __all__ = [
@@ -589,10 +589,10 @@ class ScanTracker:
         track_aided = {"track_aided": True, "none": False}[settings.rate_unfolding]
         self.measures_rate = dual or track_aided or self.rate_period_mps / 2.0 > max_rate_mps
         names = ("bistatic_range_m", "bistatic_range_rate_mps")[: 1 + self.measures_rate]
-        motion = RadialConstantVelocity(
+        motion = ConstantVelocity.bistatic_range(
             settings.sigma_acceleration_mps2,
             acceleration_correlation_time_s=settings.acceleration_correlation_time_s,
-            process_noise=settings.process_noise,
+            white_noise=settings.white_noise,
         )
         model = LinearMeasurement(
             motion.state_layout, names, periods={names[0]: self.range_period_m}

@@ -70,7 +70,7 @@ from radar_forge.tracking.lifecycle import (
     by_existence,
     m_of_n,
 )
-from radar_forge.tracking.measurement import MarginalModel, MeasurementModel
+from radar_forge.tracking.measurement import MeasurementModel, _MarginalModel
 from radar_forge.tracking.motion import MotionModel, check_covariances
 
 __all__ = [
@@ -289,7 +289,7 @@ class Tracker:
         measurement_index: ArrayLike | None,
     ) -> TrackBank:
         """Return new rows in a bank of their own, each IMM mode at its initial probability."""
-        empty = TrackBank.empty(self.bank.layout, self.bank.n_modes)
+        empty = TrackBank.empty(self.bank.state_layout, self.bank.n_modes)
         modes = None if self.imm is None else self.imm.initial_probability
         return empty.append(
             mean, covariance, time_s, ids, status, measurement_index, mode_probability=modes
@@ -396,14 +396,14 @@ class Tracker:
                 values[:] = -1
             values[seen] = getattr(part, column.name)
             columns[column.name] = values
-        return TrackBank(self.bank.layout, **columns)
+        return TrackBank(self.bank.state_layout, **columns)
 
     def _view(self, scan: Scan, model_id: str) -> Rows:
         """Return the scan as ``model_id`` sees it: itself, or a marginal's components."""
         if model_id == scan.model_id:
             return scan.measurements, scan.noise_covariance
         model = self.models.get(model_id)
-        if not (isinstance(model, MarginalModel) and model.base is self.models[scan.model_id]):
+        if not (isinstance(model, _MarginalModel) and model.base is self.models[scan.model_id]):
             msg = f"the selector offered {model_id!r}: not {scan.model_id!r} or a marginal of it."
             raise ValueError(msg)
         rows = np.asarray(model.indices)

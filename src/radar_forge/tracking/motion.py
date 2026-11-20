@@ -1,18 +1,21 @@
-r"""State layouts and motion models, batched over leading axes.
+r"""Coordinate layouts and motion models, batched over leading axes.
 
 Every model takes states ``(..., n_state)``, so a bank of tracks or all its sigma points go
-through one call. :class:`StateLayout` names each coordinate and wraps its periodic values;
+through one call. :class:`CoordinateLayout` names each coordinate and wraps its periodic values;
 :func:`check_covariances` is the one boundary check of a covariance. Motion:
-:class:`CartesianMotion`, :class:`RadialConstantVelocity` and the nonlinear
-:class:`CoordinatedTurn`; what a sensor reports of a state is in
+:class:`ConstantVelocity` (on ENU axes, or on bistatic range by
+:meth:`ConstantVelocity.bistatic_range`), :class:`ConstantAcceleration` and the nonlinear
+:class:`ConstantTurn`; what a sensor reports of a state is in
 :mod:`~radar_forge.tracking.measurement`.
 
 Conventions: ENU metres (x east, y north, z up). A range rate is the range's time derivative,
 positive receding, and ``doppler_hz = -bistatic_range_rate_mps / wavelength_m``. Bistatic range
-is the path R_T + R_R, twice the slant range when monostatic. Process noise ``"cwna"`` has
-intensity q = 2 sigma² tau, Singer's model [2] over steps longer than tau, and is right for any
-step; ``"dwna"`` holds one acceleration of standard deviation sigma through each step, as
-scenario 003 specifies. The two add equal velocity variance per step only when tau = T/2.
+is the path R_T + R_R, twice the slant range when monostatic. ``white_noise = "continuous"`` is
+continuous white-noise acceleration, whose Q is exact for any step under that model; its
+intensity q = 2 sigma² tau is Singer's [2], an approximation to a correlated acceleration that
+holds only for steps long against tau. ``"discrete"`` holds one acceleration of standard
+deviation sigma through each step, as scenario 003 specifies. The two add equal velocity
+variance per step only when tau = T/2.
 
 References
 ----------
@@ -40,16 +43,16 @@ from radar_forge._periodic import fold
 from radar_forge.tracking._linalg import symmetrise
 
 __all__ = [
-    "CartesianMotion",
+    "ConstantAcceleration",
+    "ConstantTurn",
+    "ConstantVelocity",
     "Coordinate",
-    "CoordinatedTurn",
+    "CoordinateLayout",
     "MotionModel",
-    "RadialConstantVelocity",
-    "StateLayout",
     "check_covariances",
 ]
 
-ProcessNoise = Literal["cwna", "dwna"]
+WhiteNoise = Literal["continuous", "discrete"]
 
 _AXES = ("x", "y", "z")
 
@@ -121,12 +124,10 @@ class Coordinate:
 
 
 @dataclass(frozen=True)
-class StateLayout:
+class CoordinateLayout:
     """The ordered, named coordinates of a vector; code finds a coordinate by name only."""
 
     coordinates: tuple[Coordinate, ...]
-    frame: str = "local"
-    origin_lla_deg_m: tuple[float, float, float] | None = None
     _periodic: NDArray[np.bool_] = field(init=False, repr=False, compare=False)
     _period: NDArray[np.float64] = field(init=False, repr=False, compare=False)
 
@@ -134,8 +135,8 @@ class StateLayout:
         """Check the coordinates and find the periodic ones once."""
         coordinates = tuple(self.coordinates)
         names = [c.name for c in coordinates]
-        if not coordinates or len(set(names)) != len(names) or not self.frame:
-            msg = f"a layout needs unique names and a frame; got {names}, {self.frame!r}."
+        if not coordinates or len(set(names)) != len(names):
+            msg = f"a layout needs coordinates with unique names; got {names}."
             raise ValueError(msg)
         periodic = np.array([c.period is not None for c in coordinates])
         period = np.array([c.period for c in coordinates if c.period is not None], dtype=float)
@@ -167,7 +168,7 @@ class StateLayout:
     ) -> NDArray[np.float64]:
         """Return a copy with each periodic coordinate in [-p/2, p/2), or [0, p) if nonnegative.
 
-        >>> layout = StateLayout((Coordinate("range_m", "m", period=1000.0),))
+        >>> layout = CoordinateLayout((Coordinate("range_m", "m", period=1000.0),))
         >>> layout.wrap([700.0]), layout.wrap([-300.0], interval="nonnegative")
         (array([-300.]), array([700.]))
         """
@@ -190,18 +191,18 @@ class MotionModel(Protocol):
     """A motion model: ``transition`` moves states and ``jacobian`` is its derivative.
 
     ``dt_s`` broadcasts against the states' leading axes ``(...)``. A linear model's
-    ``transition(x)`` is ``jacobian(x) @ x``; the coordinated turn's is not, so the Taylor
+    ``transition(x)`` is ``jacobian(x) @ x``; the constant turn's is not, so the Taylor
     linearisation moves the mean through ``transition`` and the covariance through F.
     """
 
-    state_layout: StateLayout
+    state_layout: CoordinateLayout
 
     def transition(self, state: NDArray[np.float64], dt_s: ArrayLike) -> NDArray[np.float64]:
-        """Return the states moved on by ``dt_s``, ``(..., n_state)``."""
+        """Return f(x), the states moved on by ``dt_s``, ``(..., n_state)``."""
         ...
 
     def jacobian(self, state: NDArray[np.float64], dt_s: ArrayLike) -> NDArray[np.float64]:
-        """Return the transition's Jacobian, ``(..., n_state, n_state)``."""
+        """Return F, the transition's Jacobian, ``(..., n_state, n_state)``."""
         ...
 
     def process_noise(self, state: NDArray[np.float64], dt_s: ArrayLike) -> NDArray[np.float64]:
@@ -209,29 +210,29 @@ class MotionModel(Protocol):
         ...
 
 
-def _noise_intensity(sigma: float, tau_s: float, process_noise: str, order: int) -> float:
-    """Return q = 2 sigma² tau for "cwna", or sigma² for "dwna", after checking the settings."""
-    if process_noise not in ("cwna", "dwna") or (process_noise == "dwna" and order != 1):
-        msg = f"process_noise must be 'cwna', or 'dwna' at order 1; got {process_noise!r}."
+def _noise_intensity(sigma: float, tau_s: float, white_noise: str, order: int) -> float:
+    """Return q = 2 sigma² tau if continuous, sigma² if discrete, after checking the settings."""
+    if white_noise not in ("continuous", "discrete") or (white_noise == "discrete" and order != 1):
+        msg = f"white_noise must be 'continuous', or 'discrete' at order 1; got {white_noise!r}."
         raise ValueError(msg)
     if not (np.isfinite(sigma) and sigma >= 0 and np.isfinite(tau_s) and tau_s > 0):
         msg = f"need a finite sigma >= 0 and correlation time > 0; got {sigma}, {tau_s}."
         raise ValueError(msg)
-    return 2.0 * sigma**2 * tau_s if process_noise == "cwna" else sigma**2
+    return 2.0 * sigma**2 * tau_s if white_noise == "continuous" else sigma**2
 
 
-def _axis_tables(order: int, process_noise: str, intensity: float) -> list[NDArray[np.float64]]:
+def _axis_tables(order: int, white_noise: str, intensity: float) -> list[NDArray[np.float64]]:
     """Return one axis's F and Q as coefficient and exponent tables in T, position first.
 
     With i, j counting up from position and a, b down from the driven derivative:
-    F_ij = T^(j-i) / (j-i)!; CWNA Q_ab = q T^(a+b+1) / ((a+b+1) a! b!); DWNA
+    F_ij = T^(j-i) / (j-i)!; continuous Q_ab = q T^(a+b+1) / ((a+b+1) a! b!); discrete
     Q_ab = sigma² T^(a+b+2) / ((a+1)! (b+1)!), which is sigma² Γ Γᵀ with Γ = (T²/2, T).
     """
     i, j = np.meshgrid(np.arange(order + 1), np.arange(order + 1), indexing="ij")
     a, b = order - i, order - j
     f_exponent = np.maximum(j - i, 0)
     f_coefficient = np.where(j >= i, 1.0 / factorial(f_exponent), 0.0)
-    if process_noise == "cwna":
+    if white_noise == "continuous":
         q_exponent = a + b + 1
         q_coefficient = intensity / (q_exponent * factorial(a) * factorial(b))
     else:
@@ -243,7 +244,9 @@ def _axis_tables(order: int, process_noise: str, intensity: float) -> list[NDArr
 class _PolynomialMotion:
     """A linear motion model whose F and Q are polynomials in T, from tables built once."""
 
-    def __init__(self, layout: StateLayout, axis_tables: list[list[NDArray[np.float64]]]) -> None:
+    def __init__(
+        self, layout: CoordinateLayout, axis_tables: list[list[NDArray[np.float64]]]
+    ) -> None:
         self.state_layout = layout
         tables = [block_diag(*parts) for parts in zip(*axis_tables, strict=True)]
         self._f_coefficient, self._f_exponent, self._q_coefficient, self._q_exponent = tables
@@ -255,7 +258,7 @@ class _PolynomialMotion:
         return result
 
     def transition(self, state: NDArray[np.float64], dt_s: ArrayLike) -> NDArray[np.float64]:
-        """Return F x, ``(..., n_state)``."""
+        """Return f(x) = F x, ``(..., n_state)``."""
         column = np.asarray(state, dtype=np.float64)[..., None]
         return (self.jacobian(state, dt_s) @ column)[..., 0]
 
@@ -266,14 +269,28 @@ class _PolynomialMotion:
         return result
 
 
-class CartesianMotion(_PolynomialMotion):
-    r"""Constant velocity (order 1) or acceleration (order 2) on each ENU axis.
+def _per_axis(
+    axes: str | Sequence[str], order: int, sigma: float, tau_s: float, white_noise: str
+) -> tuple[CoordinateLayout, list[list[NDArray[np.float64]]]]:
+    """Return the per-axis interleaved layout and each axis's tables, after checking the axes."""
+    axes = tuple(axes)
+    if not axes or len(set(axes)) != len(axes) or set(axes) - set(_AXES):
+        msg = f"axes must be unique, from x, y, z; got {axes}."
+        raise ValueError(msg)
+    q = _noise_intensity(sigma, tau_s, white_noise, order)
+    kinds = (("_m", "m"), ("dot_mps", "m/s"), ("ddot_mps2", "m/s^2"))[: order + 1]
+    names = tuple(Coordinate(f"{a}{suffix}", unit) for a in axes for suffix, unit in kinds)
+    return CoordinateLayout(names), [_axis_tables(order, white_noise, q) for _ in axes]
 
-    The state is interleaved per axis, ``[x_m, xdot_mps, (xddot_mps2), y_m, ...]``. F and Q
-    come from closed-form tables, not a matrix exponential: F = [[1, T], [0, 1]],
-    :math:`Q^{cwna} = q [T^3/3, T^2/2; T^2/2, T]`, :math:`Q^{dwna} = \sigma^2 [T^4/4, T^3/2;
-    T^3/2, T^2]`. Order 1 reads ``sigma_acceleration_mps2``, order 2 ``sigma_jerk_mps3``; the
-    defaults give q = 32 m²/s³, measured on scenario 001's truth.
+
+class ConstantVelocity(_PolynomialMotion):
+    r"""Constant velocity on each ENU axis, or on bistatic range, driven by white acceleration.
+
+    The state is interleaved per axis, ``[x_m, xdot_mps, y_m, ydot_mps, ...]``. F and Q come
+    from closed-form tables, not a matrix exponential: F = [[1, T], [0, 1]], continuous
+    :math:`Q = q [T^3/3, T^2/2; T^2/2, T]`, discrete :math:`Q = \sigma^2 [T^4/4, T^3/2; T^3/2,
+    T^2]`. The defaults give q = 32 m²/s³, measured on scenario 001's truth.
+    :meth:`bistatic_range` builds the same tables on bistatic range and its rate.
 
     References
     ----------
@@ -283,74 +300,87 @@ class CartesianMotion(_PolynomialMotion):
     def __init__(
         self,
         axes: str | Sequence[str] = "xyz",
-        order: Literal[1, 2] = 1,
         *,
         sigma_acceleration_mps2: float = 4.0,
-        sigma_jerk_mps3: float = 1.0,
         acceleration_correlation_time_s: float = 1.0,
-        process_noise: ProcessNoise = "cwna",
-        frame: str = "ENU",
-        origin_lla_deg_m: tuple[float, float, float] | None = None,
+        white_noise: WhiteNoise = "continuous",
     ) -> None:
-        axes = tuple(axes)
-        if not axes or len(set(axes)) != len(axes) or set(axes) - set(_AXES) or order not in (1, 2):
-            msg = f"axes must be unique, from x, y, z, and order 1 or 2; got {axes}, {order}."
-            raise ValueError(msg)
-        sigma = sigma_acceleration_mps2 if order == 1 else sigma_jerk_mps3
-        q = _noise_intensity(sigma, acceleration_correlation_time_s, process_noise, order)
-        kinds = (("_m", "m"), ("dot_mps", "m/s"), ("ddot_mps2", "m/s^2"))[: order + 1]
-        names = tuple(Coordinate(f"{a}{suffix}", unit) for a in axes for suffix, unit in kinds)
-        layout = StateLayout(names, frame, origin_lla_deg_m)
-        super().__init__(layout, [_axis_tables(order, process_noise, q) for _ in axes])
+        tau_s = acceleration_correlation_time_s
+        layout, tables = _per_axis(axes, 1, sigma_acceleration_mps2, tau_s, white_noise)
+        super().__init__(layout, tables)
+
+    @classmethod
+    def bistatic_range(
+        cls,
+        sigma_acceleration_mps2: float = 4.0,
+        *,
+        acceleration_correlation_time_s: float = 1.0,
+        white_noise: WhiteNoise = "continuous",
+    ) -> ConstantVelocity:
+        """Return constant velocity on ``[bistatic_range_m, bistatic_range_rate_mps]``.
+
+        The rate is the range's derivative, positive receding, so F is the textbook one with no
+        minus sign. Monostatic, the bistatic range is twice the slant range, so
+        ``sigma_acceleration_mps2`` is twice the target's radial value.
+
+        >>> ConstantVelocity.bistatic_range().jacobian(np.zeros(2), 2.0)
+        array([[1., 2.],
+               [0., 1.]])
+        """
+        tau_s = acceleration_correlation_time_s
+        q = _noise_intensity(sigma_acceleration_mps2, tau_s, white_noise, 1)
+        names = (Coordinate("bistatic_range_m", "m"), Coordinate("bistatic_range_rate_mps", "m/s"))
+        # One axis whose names are not an ENU axis's: the tables are __init__'s, the layout not.
+        model = cls.__new__(cls)
+        _PolynomialMotion.__init__(
+            model, CoordinateLayout(names), [_axis_tables(1, white_noise, q)]
+        )
+        return model
 
 
-class RadialConstantVelocity(_PolynomialMotion):
-    """Constant bistatic range rate: state ``[bistatic_range_m, bistatic_range_rate_mps]``.
+class ConstantAcceleration(_PolynomialMotion):
+    r"""Constant acceleration on each ENU axis, driven by continuous white jerk.
 
-    The rate is the range's derivative, positive receding, so F is the textbook one with no
-    minus sign. Monostatic, the bistatic range is twice the slant range, so
-    ``sigma_acceleration_mps2`` is twice the target's radial value.
-
-    >>> RadialConstantVelocity().jacobian(np.zeros(2), 2.0)
-    array([[1., 2.],
-           [0., 1.]])
+    The state is interleaved per axis, ``[x_m, xdot_mps, xddot_mps2, y_m, ...]``, with
+    :math:`Q = q [T^5/20, T^4/8, T^3/6; T^4/8, T^3/3, T^2/2; T^3/6, T^2/2, T]`,
+    q = 2 sigma_jerk² tau. There is no discrete form.
 
     References
     ----------
-    Bar-Shalom [1], §6.2 and §6.3.2.
+    Bar-Shalom [1], §6.2 (continuous white-noise models).
     """
 
     def __init__(
         self,
-        sigma_acceleration_mps2: float = 4.0,
+        axes: str | Sequence[str] = "xyz",
         *,
+        sigma_jerk_mps3: float = 1.0,
         acceleration_correlation_time_s: float = 1.0,
-        process_noise: ProcessNoise = "cwna",
+        white_noise: WhiteNoise = "continuous",
     ) -> None:
         tau_s = acceleration_correlation_time_s
-        q = _noise_intensity(sigma_acceleration_mps2, tau_s, process_noise, 1)
-        names = (Coordinate("bistatic_range_m", "m"), Coordinate("bistatic_range_rate_mps", "m/s"))
-        super().__init__(StateLayout(names, "radial"), [_axis_tables(1, process_noise, q)])
+        layout, tables = _per_axis(axes, 2, sigma_jerk_mps3, tau_s, white_noise)
+        super().__init__(layout, tables)
 
 
 # Below this |omega T| the turn's coefficients are their Taylor series to second order: the
 # exact forms divide by omega, and the next series term is (omega T)^4, 1e-24, of the first.
 _SERIES_TURN_RAD = 1e-6
 # The one coefficient whose exact form cancels badly, the along-track term's rate derivative,
-# is a series to a wider bound (see CoordinatedTurn._coefficients).
+# is a series to a wider bound (see ConstantTurn._coefficients).
 _SERIES_DERIVATIVE_RAD = 1e-2
 
 
-class CoordinatedTurn:
-    r"""Constant speed and turn rate in the ground plane, the turn rate in the state.
+class ConstantTurn:
+    r"""Constant turn, also called the coordinated turn: speed and turn rate held, rate in state.
 
-    State ``[x_m, xdot_mps, y_m, ydot_mps, turn_rate_radps]``, the rate being the heading's
-    (clockwise from north, positive to the right; Li and Jilkov's ω with its sign reversed).
-    With :math:`s = \sin\omega T`, :math:`c = \cos\omega T`: :math:`x' = x + (s/\omega)\dot x
-    + ((1-c)/\omega)\dot y`, :math:`\dot x' = c\dot x + s\dot y`, :math:`y' = y - ((1-c)/
-    \omega)\dot x + (s/\omega)\dot y`, :math:`\dot y' = -s\dot x + c\dot y`, ω held; 1 - c is
-    written 2 sin²(ωT/2), free of cancellation. Below :math:`|\omega T| = 10^{-6}` the
-    coefficients are their series, so F tends to the CV matrix. Q is CV's ``"cwna"`` per axis
+    State ``[x_m, xdot_mps, y_m, ydot_mps, turn_rate_radps]`` in the ground plane, the rate
+    being the heading's (clockwise from north, positive to the right; Li and Jilkov's ω with its
+    sign reversed). With :math:`s = \sin\omega T`, :math:`c = \cos\omega T`: :math:`x' = x +
+    (s/\omega)\dot x + ((1-c)/\omega)\dot y`, :math:`\dot x' = c\dot x + s\dot y`, :math:`y' =
+    y - ((1-c)/\omega)\dot x + (s/\omega)\dot y`, :math:`\dot y' = -s\dot x + c\dot y`, ω held;
+    1 - c is written 2 sin²(ωT/2), free of cancellation. Below :math:`|\omega T| = 10^{-6}` the
+    coefficients are their series, so F tends to the CV matrix. Q is CV's continuous one per axis
     (q = 2 sigma² tau) and ``turn_rate_noise_density_rad2ps3`` times T on the rate.
 
     References
@@ -365,7 +395,8 @@ class CoordinatedTurn:
         *,
         acceleration_correlation_time_s: float = 1.0,
     ) -> None:
-        q = _noise_intensity(sigma_acceleration_mps2, acceleration_correlation_time_s, "cwna", 1)
+        tau_s = acceleration_correlation_time_s
+        q = _noise_intensity(sigma_acceleration_mps2, tau_s, "continuous", 1)
         if not (
             np.isfinite(turn_rate_noise_density_rad2ps3) and turn_rate_noise_density_rad2ps3 >= 0
         ):
@@ -373,8 +404,8 @@ class CoordinatedTurn:
             raise ValueError(msg)
         names = ("x_m", "xdot_mps", "y_m", "ydot_mps", "turn_rate_radps")
         units = ("m", "m/s", "m", "m/s", "rad/s")
-        self.state_layout = StateLayout(tuple(map(Coordinate, names, units)), "ENU")
-        tables = _axis_tables(1, "cwna", q)
+        self.state_layout = CoordinateLayout(tuple(map(Coordinate, names, units)))
+        tables = _axis_tables(1, "continuous", q)
         self._q_coefficient = block_diag(tables[2], tables[2], [[turn_rate_noise_density_rad2ps3]])
         self._q_exponent = block_diag(tables[3], tables[3], [[1.0]])
 
@@ -409,7 +440,7 @@ class CoordinatedTurn:
         return state, self._coefficients(state[..., 4], step_s)
 
     def transition(self, state: NDArray[np.float64], dt_s: ArrayLike) -> NDArray[np.float64]:
-        """Return the states moved on along their turns, ``(..., 5)``."""
+        """Return f(x), the states moved on along their turns, ``(..., 5)``."""
         state, (along, across, cosine, sine, _, _) = self._parts(state, dt_s)
         x, xdot, y, ydot, rate = np.moveaxis(state, -1, 0)
         return np.stack(
@@ -424,7 +455,7 @@ class CoordinatedTurn:
         )
 
     def jacobian(self, state: NDArray[np.float64], dt_s: ArrayLike) -> NDArray[np.float64]:
-        """Return the transition's Jacobian at each state, ``(..., 5, 5)``."""
+        """Return F, the transition's Jacobian at each state, ``(..., 5, 5)``."""
         state, (along, across, cosine, sine, d_along, d_across) = self._parts(state, dt_s)
         _, xdot, _, ydot, _ = np.moveaxis(state, -1, 0)
         step_s = np.broadcast_to(np.asarray(dt_s, dtype=np.float64), xdot.shape)

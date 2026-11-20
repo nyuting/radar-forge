@@ -53,13 +53,13 @@ multi-target, false-alarm scenario in your own script. Leave `src/` alone.
   - `radar_forge.tracking.tracker`:
     - `Tracker` takes its measurement models, a motion model, a linearisation, a
       `gate_probability` and an `associator` in its constructor; for x/y/z position
-      measurements, build it from `CartesianMotion` and `LinearMeasurement` (the old
+      measurements, build it from `ConstantVelocity` and `LinearMeasurement` (the old
       `build_tracker_enu` shortcut has no successor);
     - `Tracker.process` takes one `Scan` per scan.
   - `radar_forge.tracking.association`: `chi_square_gate_threshold`, `gate`,
     `GlobalNearestNeighbour`, `GreedyNearestNeighbour`, and the `Associator` protocol. Any
     object with an `assign(cost, in_gate)` method can be passed to `Tracker`.
-  - `radar_forge.tracking.motion`: `CartesianMotion`; `radar_forge.tracking.measurement`:
+  - `radar_forge.tracking.motion`: `ConstantVelocity`; `radar_forge.tracking.measurement`:
     `LinearMeasurement` and the `MeasurementModel` protocol.
 - **The protocol is narrow on purpose.** An `Associator` sees only the cost matrix and the gate,
   never the tracks or the measurements. A network that needs more context than a cost matrix does

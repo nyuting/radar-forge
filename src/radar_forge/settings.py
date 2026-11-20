@@ -105,7 +105,7 @@ class TrackingSettings:
     """
 
     linearisation: Literal["taylor", "unscented"] = "unscented"
-    process_noise: Literal["cwna", "dwna"] = "cwna"
+    white_noise: Literal["continuous", "discrete"] = "continuous"
     sigma_acceleration_mps2: float = 8.0
     acceleration_correlation_time_s: float = 1.0
     initiator: Literal["direct", "range_only"] = "direct"

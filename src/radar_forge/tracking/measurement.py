@@ -1,11 +1,12 @@
 r"""Measurement models: what a sensor reports of a state, batched over leading axes.
 
-Every model takes states ``(..., n_state)`` in a :class:`~radar_forge.tracking.motion.StateLayout`
-and reports in its own ``measurement_layout``, so a bank of tracks or all its sigma points go
-through one call. :class:`LinearMeasurement` reports state coordinates directly;
-:class:`RangeAzimuthElevationRangeRate` a monostatic radar's spherical measurement of an ENU
-state; :class:`BistaticRangeRateModel` the path :math:`R_T + R_R` and its rate; :func:`marginal`
-any of them over fewer components.
+Every model takes states ``(..., n_state)`` in a
+:class:`~radar_forge.tracking.motion.CoordinateLayout` and reports in its own
+``measurement_layout``, so a bank of tracks or all its sigma points go through one call;
+``predicted_measurement`` is h(x) and ``jacobian`` is H. :class:`LinearMeasurement` reports
+state coordinates directly; :class:`RangeAzimuthElevationRangeRate` a monostatic radar's
+spherical measurement of an ENU state; :class:`BistaticRangeAndRangeRate` the path
+:math:`R_T + R_R` and its rate; :func:`marginal` any of them over fewer components.
 
 Conventions: ENU metres (x east, y north, z up), azimuth clockwise from north. A range rate is
 the range's time derivative, positive receding, and ``doppler_hz = -bistatic_range_rate_mps /
@@ -27,12 +28,11 @@ from typing import Protocol
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from radar_forge.tracking.motion import Coordinate, StateLayout
+from radar_forge.tracking.motion import Coordinate, CoordinateLayout
 
 __all__ = [
-    "BistaticRangeRateModel",
+    "BistaticRangeAndRangeRate",
     "LinearMeasurement",
-    "MarginalModel",
     "MeasurementModel",
     "RangeAzimuthElevationRangeRate",
     "marginal",
@@ -44,15 +44,15 @@ _AXES = ("x", "y", "z")
 class MeasurementModel(Protocol):
     """A measurement model: h(x) and its Jacobian, for states ``(..., n_state)``."""
 
-    state_layout: StateLayout
-    measurement_layout: StateLayout
+    state_layout: CoordinateLayout
+    measurement_layout: CoordinateLayout
 
-    def predict(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
+    def predicted_measurement(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
         """Return h(x), ``(..., n_meas)``."""
         ...
 
     def jacobian(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
-        """Return the Jacobian of h, ``(..., n_meas, n_state)``."""
+        """Return H, the Jacobian of h, ``(..., n_meas, n_state)``."""
         ...
 
 
@@ -72,7 +72,7 @@ class LinearMeasurement:
 
     def __init__(
         self,
-        state_layout: StateLayout,
+        state_layout: CoordinateLayout,
         names: Sequence[str],
         *,
         periods: Mapping[str, float] | None = None,
@@ -87,16 +87,15 @@ class LinearMeasurement:
         coordinates = tuple(
             Coordinate(c.name, c.unit, periods.get(c.name, c.period)) for c in reported
         )
-        frame, origin = state_layout.frame, state_layout.origin_lla_deg_m
-        self.measurement_layout = StateLayout(coordinates, frame, origin)
+        self.measurement_layout = CoordinateLayout(coordinates)
         self.measurement_matrix = np.eye(state_layout.dimension)[list(self.indices)]
 
-    def predict(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
-        """Return the reported coordinates, ``(..., n_meas)``."""
+    def predicted_measurement(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Return h(x) = H x, the reported coordinates, ``(..., n_meas)``."""
         return np.asarray(state, dtype=np.float64)[..., list(self.indices)]
 
     def jacobian(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
-        """Return H for each state as one read-only view, ``(..., n_meas, n_state)``."""
+        """Return H, the same for each state, as one read-only view ``(..., n_meas, n_state)``."""
         shape = (*np.shape(state)[:-1], *self.measurement_matrix.shape)
         return np.broadcast_to(self.measurement_matrix, shape)
 
@@ -115,7 +114,7 @@ class _CartesianGeometry:
     """Read ENU position (and velocity) from a state by name; fixed values fill absent axes."""
 
     def __init__(
-        self, layout: StateLayout, fixed: Mapping[str, float] | None, *, include_velocity: bool
+        self, layout: CoordinateLayout, fixed: Mapping[str, float] | None, *, include_velocity: bool
     ) -> None:
         fixed = dict(fixed or {})
         suffixes = ("_m", "dot_mps") if include_velocity else ("_m",)
@@ -187,28 +186,28 @@ class RangeAzimuthElevationRangeRate:
 
     def __init__(
         self,
-        state_layout: StateLayout,
+        state_layout: CoordinateLayout,
         sensor_enu_m: ArrayLike,
-        components: Sequence[str] = _SPHERICAL_NAMES,
+        names: Sequence[str] = _SPHERICAL_NAMES,
         fixed: Mapping[str, float] | None = None,
     ) -> None:
-        components = tuple(components)
-        if not components or len(set(components)) != len(components):
-            msg = f"components must be nonempty and unique; got {components}."
+        names = tuple(names)
+        if not names or len(set(names)) != len(names):
+            msg = f"names must be nonempty and unique; got {names}."
             raise ValueError(msg)
-        if set(components) - set(_SPHERICAL_NAMES):
-            msg = f"components must come from {_SPHERICAL_NAMES}; got {components}."
+        if set(names) - set(_SPHERICAL_NAMES):
+            msg = f"names must come from {_SPHERICAL_NAMES}; got {names}."
             raise ValueError(msg)
         self.state_layout = state_layout
         self.sensor_enu_m = _site(sensor_enu_m, "sensor_enu_m")
-        self.components = components
-        self._rate = "range_rate_mps" in components
+        self.names = names
+        self._rate = "range_rate_mps" in names
         self._geometry = _CartesianGeometry(state_layout, fixed, include_velocity=self._rate)
-        reported = tuple(_SPHERICAL[_SPHERICAL_NAMES.index(c)] for c in components)
-        self.measurement_layout = StateLayout(reported, "spherical")
+        reported = tuple(_SPHERICAL[_SPHERICAL_NAMES.index(c)] for c in names)
+        self.measurement_layout = CoordinateLayout(reported)
 
-    def predict(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
-        """Return the reported components, ``(..., n_meas)``."""
+    def predicted_measurement(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Return h(x), the reported components, ``(..., n_meas)``."""
         state = np.asarray(state, dtype=np.float64)
         offset_m = self._geometry.vector(state, "_m") - self.sensor_enu_m
         east_m, north_m, up_m = np.moveaxis(offset_m, -1, 0)
@@ -227,10 +226,10 @@ class RangeAzimuthElevationRangeRate:
         if self._rate:
             velocity_mps = self._geometry.vector(state, "dot_mps")
             values["range_rate_mps"] = np.sum(offset_m * velocity_mps, axis=-1) / range_m
-        return np.stack([values[name] for name in self.components], axis=-1)
+        return np.stack([values[name] for name in self.names], axis=-1)
 
     def jacobian(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
-        """Return the Jacobian, ``(..., n_meas, n_state)``."""
+        """Return H, the Jacobian of h, ``(..., n_meas, n_state)``."""
         state = np.asarray(state, dtype=np.float64)
         offset_m = self._geometry.vector(state, "_m") - self.sensor_enu_m
         east_m, north_m, up_m = np.moveaxis(offset_m, -1, 0)
@@ -253,12 +252,12 @@ class RangeAzimuthElevationRangeRate:
 
         # At most four rows, each built only if reported, so an unreported angle never divides
         # by a zero ground range.
-        position_rows = np.stack([by_position(name) for name in self.components], axis=-2)
-        velocity_rows = np.stack([unit * (c == "range_rate_mps") for c in self.components], -2)
+        position_rows = np.stack([by_position(name) for name in self.names], axis=-2)
+        velocity_rows = np.stack([unit * (c == "range_rate_mps") for c in self.names], -2)
         return self._geometry.scatter(position_rows, velocity_rows if self._rate else None)
 
 
-class BistaticRangeRateModel:
+class BistaticRangeAndRangeRate:
     r"""Bistatic range :math:`R_T + R_R` and its rate, for a transmitter and a receiver.
 
     With :math:`u_k` the unit vector from site k to the target, the rate is :math:`(u_T + u_R)
@@ -281,7 +280,7 @@ class BistaticRangeRateModel:
 
     def __init__(
         self,
-        state_layout: StateLayout,
+        state_layout: CoordinateLayout,
         tx_enu_m: ArrayLike,
         rx_enu_m: ArrayLike,
         fixed: Mapping[str, float] | None = None,
@@ -291,7 +290,7 @@ class BistaticRangeRateModel:
         self.rx_enu_m = _site(rx_enu_m, "rx_enu_m")
         self._geometry = _CartesianGeometry(state_layout, fixed, include_velocity=True)
         names = (Coordinate("bistatic_range_m", "m"), Coordinate("bistatic_range_rate_mps", "m/s"))
-        self.measurement_layout = StateLayout(names, "bistatic")
+        self.measurement_layout = CoordinateLayout(names)
 
     def _legs(self, state: NDArray[np.float64]) -> tuple[NDArray[np.float64], ...]:
         """Return each leg's unit vector ``(..., 2, 3)`` and length ``(..., 2)``, and v."""
@@ -301,14 +300,14 @@ class BistaticRangeRateModel:
         leg_m: NDArray[np.float64] = np.linalg.norm(offset_m, axis=-1)
         return offset_m / leg_m[..., None], leg_m, self._geometry.vector(state, "dot_mps")
 
-    def predict(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
-        """Return ``(bistatic_range_m, bistatic_range_rate_mps)``, ``(..., 2)``."""
+    def predicted_measurement(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Return h(x), ``(bistatic_range_m, bistatic_range_rate_mps)``, ``(..., 2)``."""
         unit, leg_m, velocity_mps = self._legs(state)
         rate_mps = np.sum(unit.sum(axis=-2) * velocity_mps, axis=-1)
         return np.stack([leg_m.sum(axis=-1), rate_mps], axis=-1)
 
     def jacobian(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
-        """Return the Jacobian, ``(..., 2, n_state)``."""
+        """Return H, the Jacobian of h, ``(..., 2, n_state)``."""
         unit, leg_m, velocity_mps = self._legs(state)
         unit_sum = unit.sum(axis=-2)
         along_mps = np.sum(unit * velocity_mps[..., None, :], axis=-1, keepdims=True)
@@ -318,7 +317,7 @@ class BistaticRangeRateModel:
         return self._geometry.scatter(by_position, by_velocity)
 
 
-class MarginalModel:
+class _MarginalModel:
     """The named components of ``base``: those rows of its prediction and Jacobian.
 
     References
@@ -336,18 +335,18 @@ class MarginalModel:
         self.indices = full.indices(names)
         self.state_layout = base.state_layout
         kept = tuple(full.coordinates[i] for i in self.indices)
-        self.measurement_layout = StateLayout(kept, full.frame, full.origin_lla_deg_m)
+        self.measurement_layout = CoordinateLayout(kept)
 
-    def predict(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
-        """Return the kept components, ``(..., n_kept)``."""
-        return self.base.predict(state)[..., list(self.indices)]
+    def predicted_measurement(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Return h(x) of the kept components, ``(..., n_kept)``."""
+        return self.base.predicted_measurement(state)[..., list(self.indices)]
 
     def jacobian(self, state: NDArray[np.float64]) -> NDArray[np.float64]:
-        """Return the kept rows of the base Jacobian, ``(..., n_kept, n_state)``."""
+        """Return H, the kept rows of the base Jacobian, ``(..., n_kept, n_state)``."""
         return self.base.jacobian(state)[..., list(self.indices), :]
 
 
-def marginal(model: MeasurementModel, names: Sequence[str]) -> MarginalModel:
+def marginal(model: MeasurementModel, names: Sequence[str]) -> _MarginalModel:
     """Return the marginal of ``model`` over the named components, such as range alone.
 
     A track that cannot yet trust a measured rate updates on its range through one
@@ -357,4 +356,4 @@ def marginal(model: MeasurementModel, names: Sequence[str]) -> MarginalModel:
     ----------
     Särkkä [3], Appendix A.1 (the marginal of a joint Gaussian).
     """
-    return MarginalModel(model, names)
+    return _MarginalModel(model, names)

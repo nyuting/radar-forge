@@ -210,10 +210,10 @@ class DebiasedSphericalInitiator(_PriorInitiator):
     ) -> Rows | None:
         """Return the converted rows, or None for a model without range and azimuth."""
         if not isinstance(model, RangeAzimuthElevationRangeRate) or not (
-            {"range_m", "azimuth_rad"} <= set(model.components)
+            {"range_m", "azimuth_rad"} <= set(model.names)
         ):
             return None
-        names = [n for n in ("range_m", "azimuth_rad", "elevation_rad") if n in model.components]
+        names = [n for n in ("range_m", "azimuth_rad", "elevation_rad") if n in model.names]
         rows = np.asarray(model.measurement_layout.indices(names))
         block = noise_covariance[:, rows[:, None], rows[None, :]]
         if np.any(block != block * np.eye(len(rows))):

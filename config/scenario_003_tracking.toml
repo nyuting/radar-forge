@@ -80,7 +80,7 @@ max_bistatic_range_rate_mps = 400.0
 # 0.119496 / sqrt(12) = 0.03450 m/s, five orders of magnitude apart in
 # variance, which is what a range-Doppler radar looks like.
 linearisation = "taylor"
-process_noise = "dwna"
+white_noise = "discrete"
 # Twice the 5.0 m/s^2 the target's radial range needs. The target is
 # synthesised from a CSV whose fixes are 2-3 s apart and carry ADS-B position
 # noise, so the simulated target's rate moves 6.8 m/s between scans and by as

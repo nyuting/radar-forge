@@ -1,7 +1,7 @@
 # Tracker 001 — Tracking architecture
 
 > Status: built, in `src/radar_forge/tracking/` (`motion`, `measurement`, `filters`, `imm`, `association`,
-> `initiation`, `lifecycle`, `tracker`, `hypotheses`, `rfs`, `metrics`, `scene`, `scans`). Where
+> `initiation`, `lifecycle`, `tracker`, `hypotheses`, `pmbm`, `metrics`, `scene`, `scans`). Where
 > this page and the code differ in a name, the code's name stands.
 >
 > The tracker after the tracking refactor: one Gaussian filter, a batched track bank, one
@@ -17,7 +17,7 @@ trackers inside the loop, track-to-track fusion, real-time operation.
 1. **Models are data; the filter is generic.** A new sensor or target needs a new model, never a
    new filter.
 2. **One implementation of each equation, and one flow.** Two copies drift.
-3. **Names, not positions.** Code reaches a state component through `StateLayout` by name
+3. **Names, not positions.** Code reaches a state component through `CoordinateLayout` by name
    (`"x_m"`, `"xdot_mps"`).
 4. **Range rate is the time derivative of range, positive receding** (`spec/data-001-formats.md`
    §5); Doppler is `-rate/wavelength`. A sign slip passes every test that uses one sign, so tests
@@ -35,10 +35,10 @@ The filter is functions over a bank of tracks, and the hypothesiser is the gate.
 
 | Piece | Type | Knows about |
 | :--- | :--- | :--- |
-| State layout | `StateLayout`, `Coordinate` | names, units, periods |
-| Motion model | `MotionModel`: `CartesianMotion`, `RadialConstantVelocity`, `CoordinatedTurn` | layout, `transition(x, dt)`, `jacobian(x, dt)`, `process_noise(x, dt)` |
+| State layout | `CoordinateLayout`, `Coordinate` | names, units, periods |
+| Motion model | `MotionModel`: `ConstantVelocity` (and `ConstantVelocity.bistatic_range`), `ConstantAcceleration`, `ConstantTurn` | layout, `transition(x, dt)`, `jacobian(x, dt)`, `process_noise(x, dt)` |
 | Scan | `Scan` | z `(n_meas, m)`, R per measurement, time, model ID, clutter intensity per measurement; one revisit at one time |
-| Measurement model | `MeasurementModel` | layouts, `predict(x)` = h(x), `jacobian(x)` |
+| Measurement model | `MeasurementModel` | layouts, `predicted_measurement(x)` = h(x), `jacobian(x)` = H |
 | Filter, transform | `predict`, `innovate`, `update`, `update_weighted` over a `TrackBank`; protocol `Linearisation`, `TaylorLinearisation`, `UnscentedTransform` | a motion model; a function, a mean, a covariance |
 | IMM | `InteractingMultipleModel`; `imm_predict`, `imm_innovate`, `imm_update` | modes, their union layout, `expm(Λ T)` |
 | Gate, associator | `gate`, `chi_square_gate_threshold`; `GreedyNearestNeighbour`, `GlobalNearestNeighbour`, `JointProbabilisticDataAssociation` | NIS; a cost matrix, or log-likelihoods and clutter intensity for weights |
@@ -52,8 +52,8 @@ tracker in the filter, the tracker or `pipeline.py` breaks this. There is one `T
 
 **Dependencies.** `tracking/` imports NumPy, SciPy, `coordinates.py` (the ENU ↔ range-azimuth
 conversions `scene.py` and `scans.py` use) and the private `_periodic.fold` (the guarded
-half-open fold that `StateLayout` shares with `dsp.fold_into_period`; `scene.py` and
-`RangeAzimuthElevationRangeRate.predict` still wrap inline), never `dsp`, `pipeline`, `scenario`, `verify` or
+half-open fold that `CoordinateLayout` shares with `dsp.fold_into_period`; `scene.py` and
+`RangeAzimuthElevationRangeRate.predicted_measurement` still wrap inline), never `dsp`, `pipeline`, `scenario`, `verify` or
 `figures` at run time; `scans.py` names `Scenario` and `TrackingSettings` under `TYPE_CHECKING` only, because
 `scenario.py` imports `tracking.scene`. The pipeline builds an IQ scenario's `Scan`, `scans.py` a
 plot-level one's.
@@ -120,20 +120,22 @@ interval at 99.9 %; covariances stay symmetric to `rtol=1e-12` with Cholesky suc
 ## 4. State and measurement models
 
 - **Cartesian state**: per-axis interleaved `[x_m, xdot_mps, y_m, ydot_mps, z_m, zdot_mps]` in
-  local ENU (x east, y north, z up); other orders via `CartesianMotion(order=...)`.
-- **Radial state**: `RadialConstantVelocity`, `[bistatic_range_m, bistatic_range_rate_mps]`:
+  local ENU (x east, y north, z up); constant acceleration is `ConstantAcceleration`.
+- **Radial state**: `ConstantVelocity.bistatic_range`, `[bistatic_range_m, bistatic_range_rate_mps]`:
   the route length R_T + R_R and its time derivative, positive receding, with transition
   `[[1, T], [0, 1]]`. Monostatic, both are twice the slant values; nothing in the pipeline
   halves the state, and only a display does (`figures.display_axes`). Scenario 003 tracks with it.
-- **Coordinated turn**: `CoordinatedTurn`, `[x_m, xdot_mps, y_m, ydot_mps, turn_rate_radps]`,
+- **Constant turn** (the coordinated turn): `ConstantTurn`, `[x_m, xdot_mps, y_m, ydot_mps, turn_rate_radps]`,
   the rate the heading's, positive to the right; exact discretisation with series forms near zero
   rate (scenario 011 D26).
-- **Process noise**: `"cwna"`, continuous white-noise acceleration (q in m²/s³; Bar-Shalom, Li and
-  Kirubarajan 2001, §6.2.2), is the default because its Q is right for any step length. `"dwna"`,
+- **Process noise**: `white_noise = "continuous"`, continuous white-noise acceleration (q in
+  m²/s³; Bar-Shalom, Li and Kirubarajan 2001, §6.2.2), is the default because its Q is exact for
+  any step length under that model; its intensity q = 2σ²τ is Singer's, an approximation to a
+  correlated acceleration for steps long against τ. `"discrete"`,
   the discrete model (σₐ² in m²/s⁴, §6.3.2), is kept because scenario 003 pins it.
 - **State models are configurations**: a motion and a measurement model in one layout.
   `pipeline.ScanTracker` builds the radial one from a scenario's `[tracking]` table; an ENU
-  one pairs `CartesianMotion` with a spherical or bistatic model.
+  one pairs `ConstantVelocity` with a spherical or bistatic model.
 - **Spherical measurements stay spherical.** `RangeAzimuthElevationRangeRate` maps an ENU state to
   `(range_m, azimuth_rad, elevation_rad, range_rate_mps)` about a sensor pose: r = |p − pₛ|,
   azimuth atan2(Δe, Δn) clockwise from north (periodic), elevation atan2(Δu, g) with g the ground
@@ -148,7 +150,7 @@ interval at 99.9 %; covariances stay symmetric to `rtol=1e-12` with Cholesky suc
   a false alarm matching in position but not Doppler fails. A Cartesian state carries no range-rate
   component (redundant with velocity, and it makes the covariance singular). The pipeline unfolds a
   folded Doppler first; a track that cannot yet trust its unfolding uses range alone (§5.4).
-- **Bistatic**: `BistaticRangeRateModel` maps an ENU state to `(bistatic_range_m,
+- **Bistatic**: `BistaticRangeAndRangeRate` maps an ENU state to `(bistatic_range_m,
   bistatic_range_rate_mps)` (or excess bistatic range) about transmitter and receiver poses. One
   bistatic measurement cannot fix a position, so seed such tracks with `Tracker.seed`.
 
@@ -242,7 +244,7 @@ Built with scenario 011a (`config/scenario_011_*.toml`); none changes the loop.
 - **Track-oriented MHT** (scenario 011b), `tracking/hypotheses.py`: an associator with a
   `hypotheses` method; `Tracker` then keeps a `TrackTree` of leaves, rows of a bank, scored by
   Blackman's track score, ranked per cluster by `murty_k_best` and N-scan pruned, and reports
-  each cluster's best hypothesis, causally. **PMBM**, `tracking/rfs.py`, is a second tracker
+  each cluster's best hypothesis, causally. **PMBM**, `tracking/pmbm.py`, is a second tracker
   beside the loop: `PmbmTracker` reports each track's marginal Bernoulli.
 
 ## 7. Integration, performance and validation
@@ -282,7 +284,7 @@ the metrics of `spec/data-001-formats.md` §6.9; for many targets GOSPA and traj
 - **Spherical measurements stay spherical.** Rejected: Cartesian conversion then a linear KF
   (state-dependent covariance, bias growing with range × angle error).
 - **Mechanism in `tracking/`, policy in `pipeline.py`** (the range-only selector), not in `Tracker`.
-- **D26: `CoordinatedTurn`, with the turn rate in the state**, in `tracking/motion.py`: exact
+- **D26: `ConstantTurn`, with the turn rate in the state**, in `tracking/motion.py`: exact
   discretisation with series forms near zero turn rate.
 - **D27: the IMM is functions over a bank with per-mode columns**, `tracking/imm.py`: mixing by
   name in the union layout; switching matrix `expm(Λ T)` for the actual interval.

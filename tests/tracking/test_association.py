@@ -41,8 +41,8 @@ from radar_forge.tracking.hypotheses import TrackOrientedMHT
 from radar_forge.tracking.initiation import DebiasedSphericalInitiator
 from radar_forge.tracking.lifecycle import LifecyclePolicy
 from radar_forge.tracking.measurement import LinearMeasurement, RangeAzimuthElevationRangeRate
-from radar_forge.tracking.motion import CartesianMotion
-from radar_forge.tracking.rfs import PmbmTracker
+from radar_forge.tracking.motion import ConstantVelocity
+from radar_forge.tracking.pmbm import PmbmTracker
 from radar_forge.tracking.scene import (
     ClutterComponent,
     detect,
@@ -82,7 +82,7 @@ def test_the_gate_accepts_the_fraction_of_true_measurements_it_claims(
     20 000 measurements drawn from N(H x, H P Hᵀ + R) are scored against one track in one
     call; the acceptance count must sit in its exact Clopper-Pearson 99.9 % interval.
     """
-    layout = CartesianMotion("xy").state_layout
+    layout = ConstantVelocity("xy").state_layout
     model = LinearMeasurement(layout, ("x_m", "y_m"))
     covariance = np.diag([4.0, 1.0, 9.0, 1.0])
     bank = TrackBank.empty(layout).append([[10.0, 1.0, -5.0, 0.0]], [covariance], 0.0, [1], [0])
@@ -105,14 +105,16 @@ def test_a_bank_of_20_tracks_gates_4000_measurements_in_under_a_second(
 
     Timed over the fastest of three runs, so a busy machine's one slow run does not fail it.
     """
-    layout = CartesianMotion().state_layout
+    layout = ConstantVelocity().state_layout
     model = RangeAzimuthElevationRangeRate(layout, np.zeros(3))
     means = rng.uniform(-100.0, 100.0, (20, 6))
     means[:, [0, 2, 4]] = rng.uniform(2_000.0, 20_000.0, (20, 3))
     bank = TrackBank.empty(layout).append(
         means, np.full((20, 6, 6), np.diag([400.0, 25.0] * 3)), 0.0, np.arange(20), np.zeros(20)
     )
-    z = model.predict(means[rng.integers(0, 20, 4_000)]) + rng.normal(0.0, 1.0, (4_000, 4))
+    z = model.predicted_measurement(means[rng.integers(0, 20, 4_000)]) + rng.normal(
+        0.0, 1.0, (4_000, 4)
+    )
     noise = np.diag([100.0, 1e-6, 1e-6, 1.0])
     elapsed_s = []
     for _ in range(3):
@@ -191,7 +193,7 @@ def test_mismatched_cost_and_gate_shapes_are_rejected() -> None:
 
 
 def test_the_likelihood_ratio_is_the_negative_log_likelihood_plus_the_log_density() -> None:
-    layout = CartesianMotion("x").state_layout
+    layout = ConstantVelocity("x").state_layout
     model = LinearMeasurement(layout, ("x_m",))
     bank = TrackBank.empty(layout).append([[0.0, 0.0]], [np.eye(2)], 0.0, [1], [0])
     innovation = innovate(bank, model, TaylorLinearisation(), [[1.0], [3.0]], [[1.0]])
@@ -252,7 +254,7 @@ def test_jpda_weights_are_the_marginals_of_every_feasible_joint_event() -> None:
 
 def test_jpda_with_certain_detection_and_disjoint_gates_is_the_kalman_filter() -> None:
     """P_D = P_G = 1, one measurement per gate, no clutter in it: weight one, KF update."""
-    layout = CartesianMotion("x").state_layout
+    layout = ConstantVelocity("x").state_layout
     model = LinearMeasurement(layout, ["x_m"])
     bank = TrackBank.empty(layout).append(
         [[0.0, 1.0], [1e3, -1.0]], [np.eye(2) * 4.0] * 2, 0.0, [1, 2], [1, 1]
@@ -452,7 +454,7 @@ def _coalescence_ratio(coalescence: str, trials: int, seed: int) -> NDArray[np.f
     (``"mht"``, ``"pmbm"``) MHT or PMBM, neither deleting.
     """
     rng = np.random.default_rng(seed)
-    motion = CartesianMotion("xy", sigma_acceleration_mps2=0.5)
+    motion = ConstantVelocity("xy", sigma_acceleration_mps2=0.5)
     layout = motion.state_layout
     model = RangeAzimuthElevationRangeRate(
         layout, np.zeros(3), ("range_m", "azimuth_rad"), fixed={"z_m": 0.0}

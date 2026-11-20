@@ -36,7 +36,7 @@ from radar_forge.tracking.imm import (
 )
 from radar_forge.tracking.measurement import RangeAzimuthElevationRangeRate
 from radar_forge.tracking.metrics import nees
-from radar_forge.tracking.motion import CartesianMotion, CoordinatedTurn, MotionModel
+from radar_forge.tracking.motion import ConstantTurn, ConstantVelocity, MotionModel
 from radar_forge.tracking.scene import Arc
 
 SEED = 20261106
@@ -50,9 +50,9 @@ def _three_modes() -> InteractingMultipleModel:
     """The terminal-area IMM: CV quiet, coordinated turn and CV agile."""
     return InteractingMultipleModel(
         (
-            CartesianMotion("xy", sigma_acceleration_mps2=0.5),
-            CoordinatedTurn(0.5),
-            CartesianMotion("xy", sigma_acceleration_mps2=np.sqrt(10.0)),
+            ConstantVelocity("xy", sigma_acceleration_mps2=0.5),
+            ConstantTurn(0.5),
+            ConstantVelocity("xy", sigma_acceleration_mps2=np.sqrt(10.0)),
         ),
         (120.0, 30.0, 20.0),
         {"turn_rate_radps": TURN_SIGMA_RADPS},
@@ -123,9 +123,9 @@ def test_a_cv_mode_carries_its_absent_turn_rate_at_the_stand_in_prior() -> None:
 
 
 CASES: dict[str, tuple[MotionModel, Linearisation]] = {
-    "kf": (CartesianMotion("xy", sigma_acceleration_mps2=2.0), TaylorLinearisation()),
-    "ekf": (CoordinatedTurn(2.0, 1e-4), TaylorLinearisation()),
-    "ukf": (CoordinatedTurn(2.0, 1e-4), UnscentedTransform()),
+    "kf": (ConstantVelocity("xy", sigma_acceleration_mps2=2.0), TaylorLinearisation()),
+    "ekf": (ConstantTurn(2.0, 1e-4), TaylorLinearisation()),
+    "ukf": (ConstantTurn(2.0, 1e-4), UnscentedTransform()),
 }
 
 
@@ -154,7 +154,7 @@ def test_a_one_mode_imm_is_its_filter_over_fifty_scans(case: str) -> None:
         time_s = 4.8 * scan
         bare = predict(bare, motion, linearisation, time_s)
         mixed = imm_predict(mixed, imm, linearisation, time_s)
-        truth = model.predict(bare.mean)
+        truth = model.predicted_measurement(bare.mean)
         z = truth + rng.normal(0.0, 1.0, truth.shape) * np.sqrt(np.diag(noise))
         plain = innovate(bare, model, linearisation, z, noise)
         combined, modes = imm_innovate(mixed, model, linearisation, z, noise)
@@ -180,7 +180,7 @@ def test_a_hard_update_moves_mode_probability_by_the_mode_likelihoods() -> None:
         imm.state_layout, np.zeros(3), ("range_m", "azimuth_rad"), fixed={"z_m": 0.0}
     )
     noise = np.diag([33.4**2, np.radians(0.15) ** 2])
-    z = model.predict(bank.mean) + np.array([150.0, 0.004])
+    z = model.predicted_measurement(bank.mean) + np.array([150.0, 0.004])
     combined, modes = imm_innovate(bank, model, linearisation, z, noise)
     updated = imm_update(bank, combined, modes, [[1.0, 0.0]])
     likelihood = np.exp([m.log_likelihood[0, 0] for m in modes])
@@ -202,7 +202,7 @@ def _a4() -> tuple[Arc, float]:
 
 
 def _run_v1(
-    motion: CartesianMotion | CoordinatedTurn | InteractingMultipleModel, period_s: float, seed: int
+    motion: ConstantVelocity | ConstantTurn | InteractingMultipleModel, period_s: float, seed: int
 ) -> dict[str, NDArray[np.float64]]:
     """Track A4 alone in every trial at once, the trials the rows of one bank.
 
@@ -279,11 +279,11 @@ def _run_v1(
     return {key: np.array(value) for key, value in records.items()}
 
 
-def _models() -> dict[str, CartesianMotion | CoordinatedTurn | InteractingMultipleModel]:
+def _models() -> dict[str, ConstantVelocity | ConstantTurn | InteractingMultipleModel]:
     """V1's trackers: CV quiet, CV agile and the IMM of the two with the coordinated turn."""
     return {
-        "quiet": CartesianMotion("xy", sigma_acceleration_mps2=0.5),
-        "agile": CartesianMotion("xy", sigma_acceleration_mps2=np.sqrt(10.0)),
+        "quiet": ConstantVelocity("xy", sigma_acceleration_mps2=0.5),
+        "agile": ConstantVelocity("xy", sigma_acceleration_mps2=np.sqrt(10.0)),
         "imm": _three_modes(),
     }
 

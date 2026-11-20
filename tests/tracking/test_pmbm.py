@@ -1,4 +1,4 @@
-"""Tests for radar_forge.tracking.rfs: the PMBM tracker against the paper's update, by hand.
+"""Tests for radar_forge.tracking.pmbm: the PMBM tracker against the paper's update, by hand.
 
 Ground truth is analytic: the single-Bernoulli case is the Kalman filter; a
 first detection's existence, a missed Bernoulli's and two tracks' global weights are the
@@ -16,8 +16,8 @@ import pytest
 from radar_forge.tracking.filters import TrackStatus
 from radar_forge.tracking.initiation import DirectStateInitiator
 from radar_forge.tracking.measurement import LinearMeasurement
-from radar_forge.tracking.motion import CartesianMotion
-from radar_forge.tracking.rfs import PmbmTracker
+from radar_forge.tracking.motion import ConstantVelocity
+from radar_forge.tracking.pmbm import PmbmTracker
 from radar_forge.tracking.tracker import Scan
 
 P_G = 0.99
@@ -28,7 +28,7 @@ Q_M2PS3, R_M2 = 1.0, 4.0
 
 def _pmbm(**settings: object) -> PmbmTracker:
     """PMBM on position along x over a 1000 m coverage."""
-    motion = CartesianMotion("x", sigma_acceleration_mps2=1.0, acceleration_correlation_time_s=0.5)
+    motion = ConstantVelocity("x", sigma_acceleration_mps2=1.0, acceleration_correlation_time_s=0.5)
     options: dict[str, object] = {
         "detection_probability": 0.9,
         "gate_probability": P_G,

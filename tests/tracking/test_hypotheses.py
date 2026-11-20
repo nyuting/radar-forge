@@ -31,7 +31,7 @@ from radar_forge.tracking.hypotheses import (
 from radar_forge.tracking.initiation import DebiasedSphericalInitiator, DirectStateInitiator
 from radar_forge.tracking.lifecycle import LifecyclePolicy
 from radar_forge.tracking.measurement import LinearMeasurement, RangeAzimuthElevationRangeRate
-from radar_forge.tracking.motion import CartesianMotion
+from radar_forge.tracking.motion import ConstantVelocity
 from radar_forge.tracking.scans import PlotTracker, scans
 from radar_forge.tracking.scene import (
     Arc,
@@ -50,7 +50,7 @@ CLUTTER = 0.21683  # n_gate = 1, plots per (m rad) a scan
 
 def _one_axis_mht(**settings: object) -> Tracker:
     """MHT on position along x, R = 1 m², q = 1 m²/s³, clutter density 0.01 per metre."""
-    motion = CartesianMotion("x", sigma_acceleration_mps2=1.0, acceleration_correlation_time_s=0.5)
+    motion = ConstantVelocity("x", sigma_acceleration_mps2=1.0, acceleration_correlation_time_s=0.5)
     return Tracker(
         {"x": LinearMeasurement(motion.state_layout, ("x_m",))},
         motion,
@@ -124,7 +124,7 @@ def test_k_best_one_n_scan_one_is_gnn_with_the_finite_non_assignment_cost() -> N
         ((182.3, -27502.8), 315.0),
     ]
     arcs = [Arc(0.0, xy, math.radians(h), 72.0) for xy, h in targets]
-    motion = CartesianMotion("xy", sigma_acceleration_mps2=0.5)
+    motion = ConstantVelocity("xy", sigma_acceleration_mps2=0.5)
     model = RangeAzimuthElevationRangeRate(
         motion.state_layout, np.zeros(3), ("range_m", "azimuth_rad"), fixed={"z_m": 0.0}
     )

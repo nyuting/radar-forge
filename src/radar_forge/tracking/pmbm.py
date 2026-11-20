@@ -302,7 +302,7 @@ class PmbmTracker:
         existence = np.bincount(track, weights=mass, minlength=ids.size)
         order = np.lexsort((-mass, track))
         likeliest = order[np.searchsorted(track[order], np.arange(ids.size))]
-        mean = np.zeros((ids.size, local.layout.dimension))
+        mean = np.zeros((ids.size, local.state_layout.dimension))
         np.add.at(mean, track, mass[:, None] * local.mean)
         mean /= np.maximum(existence, np.finfo(float).tiny)[:, None]
         offset = local.mean - mean[track]
