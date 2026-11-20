@@ -49,7 +49,7 @@ N_LONG = 4096
 FIXED_WINDOWS = [name for name in WINDOW_NAMES if name not in ("taylor", "chebyshev")]
 # Scenario 001 S3's two bursts: rate spans in about 5:6, maps of 60 and 50 km.
 PERIOD_A_MPS, PERIOD_B_MPS = 76.48, 91.78
-SPAN_A_M, SPAN_B_M, REPEAT_M = 60_000.0, 50_000.0, 300_000.0
+PERIOD_A_M, PERIOD_B_M, REPEAT_M = 60_000.0, 50_000.0, 300_000.0
 
 
 def any_window(name: str, n_samples: int, **kwargs: bool) -> np.ndarray:
@@ -458,25 +458,25 @@ class TestMtiFilter:
 
 class TestFold:
     def test_fold_into_period_is_half_open_at_the_top(self) -> None:
-        np.testing.assert_allclose(fold_into_period(130_000.0, SPAN_A_M, lower=0.0), 10_000.0)
-        np.testing.assert_allclose(fold_into_period(SPAN_A_M, SPAN_A_M, lower=0.0), 0.0)
+        np.testing.assert_allclose(fold_into_period(130_000.0, PERIOD_A_M, lower=0.0), 10_000.0)
+        np.testing.assert_allclose(fold_into_period(PERIOD_A_M, PERIOD_A_M, lower=0.0), 0.0)
 
     def test_a_tiny_negative_value_folds_to_the_bottom_not_the_top(self) -> None:
         """np.mod(-1e-17, 15.3) rounds to 15.3 itself, the open edge; it must read 0.0."""
         assert float(fold_into_period(-1e-17, 15.3, lower=0.0)) == 0.0
 
-    def test_fold_velocity_is_closed_at_the_top_as_the_map_is(self) -> None:
+    def test_fold_range_rate_is_closed_at_the_top_as_the_map_is(self) -> None:
         """Both edges read +v_ua, since rate bin 0 is +v_ua: catches the closing-positive edge."""
         np.testing.assert_allclose(fold_range_rate_mps([7.65, -7.65], 15.3), [7.65, 7.65])
         folded_mps = fold_range_rate_mps(np.linspace(-500.0, 500.0, 2001), 15.3)
         assert np.all((folded_mps > -7.65) & (folded_mps <= 7.65))
 
-    def test_fold_velocity_takes_the_span_the_map_wraps_at(self) -> None:
+    def test_fold_range_rate_takes_the_period_the_map_wraps_at(self) -> None:
         """One whole span past a rate is the same rate: the argument is the span, not half."""
         np.testing.assert_allclose(fold_range_rate_mps(15.3 + 1.0, 15.3), 1.0, rtol=1e-12)
 
     @pytest.mark.parametrize("n_folds", [-3, 2])
-    def test_a_folded_target_lands_where_fold_velocity_says(self, n_folds: int) -> None:
+    def test_a_folded_target_lands_where_fold_range_rate_says(self, n_folds: int) -> None:
         """Synthesise a target n_folds intervals off bin 7; the FFT and the fold must agree."""
         rate_mps = doppler_bin_centres_mps(N_PULSES, PULSE_REPETITION_INTERVAL_S, WAVELENGTH_M)
         period_mps = WAVELENGTH_M / PULSE_REPETITION_INTERVAL_S
@@ -510,7 +510,7 @@ class TestUnfold:
         p, q = pq
         max_range_rate_mps = 0.999 * p * q * base_mps / 2.0
         true_mps = fraction * max_range_rate_mps
-        velocity_mps, residual_mps = unfold_doppler_dual_prf(
+        range_rate_mps, residual_mps = unfold_doppler_dual_prf(
             fold_range_rate_mps(true_mps, p * base_mps),
             fold_range_rate_mps(true_mps, q * base_mps),
             p * base_mps,
@@ -519,7 +519,7 @@ class TestUnfold:
             tolerance_mps=base_mps / 4.0,
         )
         # A mod and a few adds: float error scales with the span.
-        np.testing.assert_allclose(velocity_mps, true_mps, atol=1e-9 * max_range_rate_mps)
+        np.testing.assert_allclose(range_rate_mps, true_mps, atol=1e-9 * max_range_rate_mps)
         assert residual_mps < 1e-9 * max_range_rate_mps
 
     @given(pq=coprime_pair, base_m=st.floats(100.0, 50_000.0), fraction=st.floats(0.0, 0.999))
@@ -539,7 +539,7 @@ class TestUnfold:
 
     def test_a_target_outside_the_bound_aliases_to_a_confident_wrong_answer(self) -> None:
         """300 m/s on S3's bursts reads as 300 - 6 x 76.48 m/s, with no warning."""
-        velocity_mps, residual_mps = unfold_doppler_dual_prf(
+        range_rate_mps, residual_mps = unfold_doppler_dual_prf(
             fold_range_rate_mps(300.0, PERIOD_A_MPS),
             fold_range_rate_mps(300.0, PERIOD_B_MPS),
             PERIOD_A_MPS,
@@ -547,13 +547,13 @@ class TestUnfold:
             max_range_rate_mps=191.0,
             tolerance_mps=1.0,
         )
-        np.testing.assert_allclose(velocity_mps, 300.0 - 6.0 * PERIOD_A_MPS, atol=1e-9)
+        np.testing.assert_allclose(range_rate_mps, 300.0 - 6.0 * PERIOD_A_MPS, atol=1e-9)
         assert residual_mps < 1.0
 
     def test_pairs_every_a_reading_with_every_b_reading(self) -> None:
         """A column against a row: only the diagonal pairs a target with itself."""
         true_mps = np.array([10.0, 80.0, -120.0])
-        velocity_mps, _ = unfold_doppler_dual_prf(
+        range_rate_mps, _ = unfold_doppler_dual_prf(
             fold_range_rate_mps(true_mps, PERIOD_A_MPS)[:, None],
             fold_range_rate_mps(true_mps, PERIOD_B_MPS)[None, :],
             PERIOD_A_MPS,
@@ -561,18 +561,18 @@ class TestUnfold:
             max_range_rate_mps=191.0,
             tolerance_mps=1.0,
         )
-        np.testing.assert_allclose(np.diag(velocity_mps), true_mps, atol=1e-9)
-        assert np.all(np.isnan(velocity_mps[~np.eye(3, dtype=bool)]))
+        np.testing.assert_allclose(np.diag(range_rate_mps), true_mps, atol=1e-9)
+        assert np.all(np.isnan(range_rate_mps[~np.eye(3, dtype=bool)]))
 
     def test_the_miss_is_measured_round_the_second_maps_circle(self) -> None:
         """20 m below the 50 km wrap and 30 m past it are 50 m apart, not 49.95 km."""
         _, residual_m = unfold_range_dual_prf(
-            49_980.0, 30.0, SPAN_A_M, SPAN_B_M, max_range_m=SPAN_A_M, tolerance_m=50.0
+            49_980.0, 30.0, PERIOD_A_M, PERIOD_B_M, max_range_m=PERIOD_A_M, tolerance_m=50.0
         )
         np.testing.assert_allclose(residual_m, 50.0, atol=1e-6)
 
     def test_an_inconsistent_pair_is_reported_unresolved(self) -> None:
-        velocity_mps, residual_mps = unfold_doppler_dual_prf(
+        range_rate_mps, residual_mps = unfold_doppler_dual_prf(
             3.52,
             -11.78 + 5.0,
             PERIOD_A_MPS,
@@ -580,7 +580,7 @@ class TestUnfold:
             max_range_rate_mps=191.0,
             tolerance_mps=1.0,
         )
-        assert np.isnan(velocity_mps)
+        assert np.isnan(range_rate_mps)
         assert residual_mps > 1.0
 
     def test_a_value_on_the_lower_bound_is_recovered(self) -> None:
@@ -659,7 +659,9 @@ class TestUnfold:
 
     def test_unfold_range_rejects_a_negative_bound(self) -> None:
         with pytest.raises(ValueError, match="max_range_m"):
-            unfold_range_dual_prf(0.0, 0.0, SPAN_A_M, SPAN_B_M, max_range_m=-1.0, tolerance_m=50.0)
+            unfold_range_dual_prf(
+                0.0, 0.0, PERIOD_A_M, PERIOD_B_M, max_range_m=-1.0, tolerance_m=50.0
+            )
 
 
 # --- Scenario 005: batched correlation of a continuous stream ---
