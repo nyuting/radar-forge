@@ -28,7 +28,7 @@ Both axes are **bistatic**. Range is $R_b = R_T + R_R$, the length of the route,
 range for a monostatic radar; rate is its time derivative $\dot R_b$, **positive receding**. The
 Doppler FFT measures $f_d = -\dot R_b / \lambda$ (written once, in `propagation.doppler_shift_hz`),
 so the rate axis falls as the bin index rises. A monostatic figure or CSV halves both and calls
-them range and radial velocity (`plots.display_axes`); nothing before the display does.
+them range and radial velocity (`figures.display_axes`); nothing before the display does.
 
 A pulsed radar has one extra step first: a **matched filter** compresses each long pulse into a
 short peak. Two more tools sit beside the chain. An **MTI** (moving-target indicator) filter
@@ -45,17 +45,17 @@ undo that.
 | Processing loss of a window | $L$ | $L = -10\log_{10}\frac{(\sum_n w[n])^2}{N\sum_n w[n]^2}$ | `dsp.processing_loss_db` | 0 dB (the pipeline applies no window); Hann 1.78 dB, 60 dB Taylor 1.89 dB over 256 chirps |
 | Pulse compression gain | — | $B T_c$ | `dsp.matched_filter` | — (S1 is FMCW; S2's pulse has $B T_c = 20$, 13.0 dB) |
 | Range bins | $N_s$ | $N_s = f_s / \mathrm{PRF}$ | `Radar.n_samples_per_pri` | 1000 |
-| Range bin spacing | $\Delta R_b$ | $\Delta R_b = \frac{c f_s T_c}{B N_s}$ | `dsp.range_bin_centers_m`, `RangeDopplerProduct.range_bin_m` | 149.8962 m (74.9481 m slant) |
-| Range span | $R_{\mathrm{span}}$ | $\frac{c f_s T_c}{B}$ | `RangeDopplerProduct.range_period_m`, `Radar.unambiguous_bistatic_range_m` | 149 896.2 m (74 948.1 m slant) |
-| Doppler bins | $N$ | one per chirp | `Scenario.n_pulses` | 256 |
-| Rate resolution | $\Delta v$ | $\Delta v = \frac{\lambda}{N T_{\mathrm{PRI}}}$ | `dsp.doppler_bin_centers_mps`, `RangeDopplerProduct.rate_bin_mps` | 0.119496 m/s (0.059748 m/s radial) |
-| Unambiguous rate | $v_{ua}$ | $v_{ua} = \lambda\,\mathrm{PRF}/2$; the map spans $(-v_{ua}, +v_{ua}]$ | `RangeDopplerProduct.rate_period_mps` $/2$ | 15.2955 m/s (7.6478 m/s radial) |
-| Folded rate | — | $\dot R_b$ wrapped into $(-v_{ua}, +v_{ua}]$ | `dsp.fold_velocity_mps` | +160 m/s (receding at 80 m/s) reads as +7.0447 m/s |
+| Range bin spacing | $\Delta R_b$ | $\Delta R_b = \frac{c f_s T_c}{B N_s}$ | `dsp.range_bin_centres_m`, `RangeDopplerProduct.range_bin_m` | 149.8962 m (74.9481 m slant) |
+| Range period | $R_{\mathrm{period}}$ | $\frac{c f_s T_c}{B}$ | `RangeDopplerProduct.range_period_m`, `Radar.unambiguous_bistatic_range_m` | 149 896.2 m (74 948.1 m slant) |
+| Doppler bins | $N$ | one per chirp | `Scenario.n_pulses_per_burst` | 256 |
+| Rate resolution | $\Delta v$ | $\Delta v = \frac{\lambda}{N T_{\mathrm{PRI}}}$ | `dsp.doppler_bin_centres_mps`, `RangeDopplerProduct.rate_bin_mps` | 0.119496 m/s (0.059748 m/s radial) |
+| Rate period | $v_{\mathrm{period}}$ | $v_{\mathrm{period}} = \lambda\,\mathrm{PRF}$; the map holds $(-v_{\mathrm{period}}/2, +v_{\mathrm{period}}/2]$ | `RangeDopplerProduct.rate_period_mps`, `Radar.unambiguous_bistatic_range_rate_mps` | 30.5911 m/s: ±15.2955 m/s (±7.6478 m/s radial) |
+| Folded rate | — | $\dot R_b$ wrapped into $(-v_{\mathrm{period}}/2, +v_{\mathrm{period}}/2]$ | `dsp.fold_range_rate_mps` | +160 m/s (receding at 80 m/s) reads as +7.0447 m/s |
 | Integration gain of the two FFTs | — | $N_s N$ | `dsp.range_doppler_map` | 256 000, 54.08 dB |
-| MTI blind rate | — | $\lambda\,\mathrm{PRF} = 2 v_{ua}$ | `dsp.mti_filter`, `Radar.unambiguous_bistatic_range_rate_mps` | 30.5911 m/s |
-| Dual-PRF $v_{ua}$ (S3) | $v_{ua,a}$, $v_{ua,b}$ | $\lambda\,\mathrm{PRF}/2$ per burst | as above | S3: 76.4777 / 91.7732 m/s |
-| Dual-PRF rate reach (S3) | — | $q\, v_{ua,a}$ for PRFs in ratio $p:q$ | `dsp.unfold_doppler_dual_prf` | S3: ±458.866 m/s; +160 m/s unfolds to +160.0000 |
-| Dual-PRF range reach (S3) | $S_a$, $S_b$ | map spans repeat after $p S_a = q S_b$ | `dsp.unfold_range_dual_prf` | S3: spans 119 917.0 / 99 930.8 m, repeat after ≈600 km |
+| MTI blind rate | — | $\lambda\,\mathrm{PRF} = v_{\mathrm{period}}$ | `dsp.mti_filter`, `Radar.unambiguous_bistatic_range_rate_mps` | 30.5911 m/s |
+| Dual-PRF rate periods (S3) | $v_{\mathrm{period},a}$, $v_{\mathrm{period},b}$ | $\lambda\,\mathrm{PRF}$ per burst | as above | S3: 152.9553 / 183.5464 m/s |
+| Dual-PRF rate reach (S3) | — | $\pm q\, v_{\mathrm{period},a}/2$ for PRFs in ratio $p:q$ | `dsp.unfold_doppler_dual_prf` | S3: ±458.866 m/s; +160 m/s unfolds to +160.0000 |
+| Dual-PRF range reach (S3) | $R_{\mathrm{period},a}$, $R_{\mathrm{period},b}$ | the two periods repeat together after $p R_{\mathrm{period},a} = q R_{\mathrm{period},b}$ | `dsp.unfold_range_dual_prf` | S3: periods 119 917.0 / 99 930.8 m, repeat after ≈600 km |
 
 The dual-PRF rows use S3 (`config/scenario_001_fmcw_dual_prf.toml`), because S1 has one burst.
 Every range and rate is bistatic; a monostatic display shows half of each.
@@ -71,8 +71,8 @@ Symbols used only on this page:
 | $T_{\mathrm{PRI}}$ | time between chirps, $1/\mathrm{PRF}$ | s | `pulse_repetition_interval_s` |
 | $R_b$, $\dot R_b$ | bistatic range $R_T + R_R$, and its rate, positive receding | m, m/s | `bistatic_range_m`, `bistatic_range_rate_mps` |
 | $\Delta R_b$, $\Delta v$ | range bin spacing, rate bin spacing | m, m/s | `range_bin_m`, `rate_bin_mps` (negative: the axis falls) |
-| $v_{ua}$ | unambiguous rate, half the rate span | m/s | `rate_period_mps / 2` |
-| $S$ | span of one FMCW map's range axis, $N_s \Delta R_b$ | m | `RangeDopplerProduct.range_period_m` |
+| $v_{\mathrm{period}}$ | rate period, the whole rate span; the map holds $\pm v_{\mathrm{period}}/2$ | m/s | `rate_period_mps` |
+| $R_{\mathrm{period}}$ | range period, the span of one FMCW map's range axis, $N_s \Delta R_b$ | m | `RangeDopplerProduct.range_period_m` |
 
 The bin centres come from the deramp relation $R_b = c f_b / \alpha$. Bin $k$ of the range FFT
 holds beat frequency $f_b = k f_s / N_s$, so
@@ -87,8 +87,9 @@ and with $\dot R_b = -\lambda f_d$ the rate bins are
 
 $$\Delta v = \frac{\lambda}{N T_{\mathrm{PRI}}}$$
 
-apart, over $(-v_{ua}, +v_{ua}]$ with $v_{ua} = \lambda / (2 T_{\mathrm{PRI}})$. Only a longer
-dwell (more chirps) makes $\Delta v$ smaller. Zero-padding does not.
+apart, over $(-v_{\mathrm{period}}/2, +v_{\mathrm{period}}/2]$ with
+$v_{\mathrm{period}} = \lambda / T_{\mathrm{PRI}}$. Only a longer burst (more chirps) makes
+$\Delta v$ smaller. Zero-padding does not.
 
 A window's cost is its processing loss, the SNR it throws away by down-weighting the edges:
 
@@ -115,26 +116,28 @@ $$L = -10\log_{10}\frac{\left(\sum_n w[n]\right)^2}{N\sum_n w[n]^2}.$$
 4. **Doppler FFT.** `dsp.doppler_fft(profiles, weights=..., axis=0)` turns slow time into Doppler.
    Output `(n_doppler_bins, n_range_bins)`, `fftshift`-ed: zero Doppler at bin `n // 2`. The
    index rises with $f_d$, so it falls with rate: receding targets sit at indices below `n // 2`,
-   closing targets at indices above it, and a figure draws row 0, $+v_{ua}$, at the top.
+   closing targets at indices above it, and a figure draws row 0, $+v_{\mathrm{period}}/2$, at
+   the top.
    `dsp.range_doppler_map(cube, fast_time_weights=..., slow_time_weights=...)` runs steps 3 and
    4 in one call.
-5. **Label the axes.** `dsp.range_bin_centers_m(n_bins, bandwidth_hz, chirp_duration_s,
+5. **Label the axes.** `dsp.range_bin_centres_m(n_bins, bandwidth_hz, chirp_duration_s,
    sample_rate_hz)` gives `(n_range_bins,)` bistatic ranges, not halved;
-   `dsp.doppler_bin_centers_mps(n_bins, pulse_repetition_interval_s, wavelength_m)` gives
-   `(n_doppler_bins,)` rates, from $+v_{ua}$ down. `pipeline.map_axes(radar, n_pulses)` returns
-   both for a burst (a pulsed range bin is one sample of delay, $c/f_s$).
+   `dsp.doppler_bin_centres_mps(n_bins, pulse_repetition_interval_s, wavelength_m)` gives
+   `(n_doppler_bins,)` rates, from $+v_{\mathrm{period}}/2$ down.
+   `pipeline.map_axes(radar, n_pulses)` returns both for a burst (a pulsed range bin is one
+   sample of delay, $c/f_s$).
    `pipeline.range_doppler_product(cube, radar)` does steps 2 to 5 and returns a
    `RangeDopplerProduct` holding `rd_map`, `range_axis_m` and `rate_axis_mps`, with each axis's
-   span as `range_period_m` and `rate_period_mps`.
-6. **MTI (optional).** `dsp.mti_filter(cube, n_pulses=2, axis=0)` differences neighbouring
+   period as `range_period_m` and `rate_period_mps`.
+6. **MTI (optional).** `dsp.mti_filter(cube, n_taps=2, axis=0)` differences neighbouring
    chirps: $x[m+1] - x[m]$, or $x[m+2] - 2x[m+1] + x[m]$ for three. `axis` has no default.
    Stationary echoes cancel. The slow-time axis gets `n_pulses - 1` shorter, and targets at
    multiples of the blind rate $\lambda\,\mathrm{PRF}$ cancel too.
-7. **Fold and unfold.** `dsp.fold_velocity_mps(rate_mps, span_mps)` predicts where a target of
-   true rate `rate_mps` appears: in $(-\mathrm{span}/2, +\mathrm{span}/2]$, closed at the top as
-   the map is. Range folds
-   with `dsp.fold_into_period(range_m, span_m, lower=0.0)`. `unfold_doppler_dual_prf` and
-   `unfold_range_dual_prf` take one reading from each of two bursts and try every candidate
+7. **Fold and unfold.** `dsp.fold_range_rate_mps(range_rate_mps, period_mps)` predicts where a target
+   of true rate `range_rate_mps` appears: in $(-v_{\mathrm{period}}/2, +v_{\mathrm{period}}/2]$, closed at
+   the top as the map is. Range folds with `dsp.fold_into_period(range_m, period_m, lower=0.0)`.
+   `unfold_doppler_dual_prf` and `unfold_range_dual_prf` take one reading from each of two
+   bursts and try every candidate
    $a + kP_a$ inside the bounds you give, keeping the one that best matches the second reading.
    Both call `unfold_dual_period`, which returns `nan` when no candidate is within `tolerance`,
    and the residual so you can judge the match.
@@ -148,40 +151,41 @@ two bursts:
 ```python
 import numpy as np
 
-from radar_forge import dsp, plots
-from radar_forge.pipeline import frames, range_doppler_product
+from radar_forge import dsp, figures
+from radar_forge.pipeline import range_doppler_product, scan_iq
 from radar_forge.scenario import load_scenario
+from radar_forge.units import power_to_db
 
 s1 = load_scenario("config/scenario_001_fmcw_low_prf.toml")
-frame = next(frames(s1, n_frames=1))
-product = range_doppler_product(frame.cubes[0], s1.radar)  # FMCW: range FFT, then Doppler FFT
+scan = next(scan_iq(s1, n_scans=1))
+product = range_doppler_product(scan.cubes[0], s1.radar)  # FMCW: range FFT, then Doppler FFT
 range_m, rate_mps = product.range_axis_m, product.rate_axis_mps
-gain_db = 10 * np.log10(product.rd_map.size)
-show = plots.display_axes(s1.radar)
+gain_db = power_to_db(product.rd_map.size)
+show = figures.display_axes(s1.radar)
 print(f"map {product.rd_map.shape}, gain of the two FFTs {gain_db:.2f} dB")
 print(f"range bins {product.range_bin_m:.4f} m apart; bin N/2 at {range_m[500]:.1f} m")
 print(f"rate step {product.rate_bin_mps:+.6f} m/s, {rate_mps[0]:+.4f} down to {rate_mps[-1]:+.4f}")
 print(f"shown as {show.range_name} and {show.rate_name}, times {show.scale}")
 
-truth_m = frame.truth.bistatic_range_m[0]
-truth_mps = frame.truth.bistatic_range_rate_mps[0]
-folded_mps = dsp.fold_velocity_mps(truth_mps, product.rate_period_mps)
+truth_m = scan.truth.bistatic_range_m[0]
+truth_mps = scan.truth.bistatic_range_rate_mps[0]
+folded_mps = dsp.fold_range_rate_mps(truth_mps, product.rate_period_mps)
 print(f"truth {truth_m:.1f} m, {truth_mps:+.4f} m/s, folded {folded_mps:+.4f} m/s")
 rate_bin, range_bin = np.unravel_index(np.abs(product.rd_map).argmax(), product.rd_map.shape)
 print(f"peak ({rate_bin}, {range_bin}): {range_m[range_bin]:.1f} m, {rate_mps[rate_bin]:+.4f} m/s")
 for name, level in (("rectangular", None), ("hann", None), ("taylor", -60.0)):
-    w = dsp.window(name, s1.n_pulses[0], sidelobe_level_db=level)
+    w = dsp.window(name, s1.n_pulses_per_burst[0], sidelobe_level_db=level)
     gain, loss = dsp.coherent_gain_linear(w), dsp.processing_loss_db(w)
     print(f"{name:<11} gain {gain:.3f}  loss {loss:.2f} dB")
 
 a, b = load_scenario("config/scenario_001_fmcw_dual_prf.toml").radars
-span_a = a.unambiguous_bistatic_range_rate_mps
-span_b = b.unambiguous_bistatic_range_rate_mps
-read_a, read_b = dsp.fold_velocity_mps(160.0, span_a), dsp.fold_velocity_mps(160.0, span_b)
+period_a = a.unambiguous_bistatic_range_rate_mps
+period_b = b.unambiguous_bistatic_range_rate_mps
+read_a, read_b = dsp.fold_range_rate_mps(160.0, period_a), dsp.fold_range_rate_mps(160.0, period_b)
 true_mps, _ = dsp.unfold_doppler_dual_prf(
-    read_a, read_b, span_a, span_b, max_velocity_mps=458.0, tolerance_mps=0.7
+    read_a, read_b, period_a, period_b, max_range_rate_mps=458.0, tolerance_mps=0.7
 )
-print(f"S3 spans {span_a:.4f} / {span_b:.4f} m/s; +160 m/s reads {read_a:+.4f} / {read_b:+.4f}")
+print(f"S3 spans {period_a:.4f} / {period_b:.4f} m/s; +160 m/s reads {read_a:+.4f} / {read_b:+.4f}")
 print(f"unfolds to {true_mps:+.4f} m/s")
 ```
 
@@ -212,7 +216,7 @@ coarser burst (B's bins are 1.4340 m/s apart).
 Use [scenario 001](../../config/scenario_001_fmcw_low_prf.toml), S1:
 
 ```bash
-uv run python scripts/run_scenario.py config/scenario_001_fmcw_low_prf.toml --frames 10
+uv run python scripts/run_scenario.py config/scenario_001_fmcw_low_prf.toml --scans 10
 ```
 
 **Knob:** in a copy of the TOML in `config/`, set `n_pulses = 64` (was 256) in `[[burst]]`, and
@@ -222,39 +226,41 @@ run it with `--out runs/s1_64`. Then compare `rd_00009.png` in the two run folde
 - The rate bins get four times wider, 0.1195 → 0.4780 m/s, which the figures show halved,
   0.0597 → 0.2390 m/s. The map's rows look coarser, and `sigma_rate_mps` in `detections.csv`, a
   bin over √12, grows from 0.0172 to 0.0690 m/s.
-- $v_{ua}$ does not change: it is set by the PRF, not the dwell. Both figures still run
-  ±7.65 m/s, and the peak still sits on the dashed crosshair of the folded truth (at frame 9 the
-  target recedes at 39.32 m/s, which folds to −6.57 m/s).
-- `[rd]` prints frame 0's peak and median cell. The peak stands 51.71 dB above the median with
+- $v_{\mathrm{period}}$ does not change: it is set by the PRF, not the burst's length. Both
+  figures still run ±7.65 m/s, and the peak still sits on the dashed crosshair of the folded
+  truth (at scan 9 the target recedes at 39.32 m/s, which folds to −6.57 m/s).
+- `[rd]` prints scan 0's peak and median cell. The peak stands 51.71 dB above the median with
   256 chirps (−36.75 against −88.47 dBW) and 42.10 dB with 64 (−52.31 against −94.40 dBW). That
   is 6.02 dB from a quarter of the Doppler integration gain, and most of the other 3.6 dB is
-  straddle loss: frame 0's folded rate, −5.019 m/s, lies 10.50 of the wider bins from zero,
+  straddle loss: scan 0's folded rate, −5.019 m/s, lies 10.50 of the wider bins from zero,
   halfway between two of them.
 - The copy ends `1 check(s) failed`: `[geometry]` predicts 45.99 dB of SNR, and `[verify]`
   holds 52.01 dB, the figure for 256 chirps. The check is right to fail; a TOML's numbers belong
   to its own settings.
 
 For dual-PRF unfolding, run `config/scenario_001_fmcw_dual_prf.toml` the same way: it writes
-one map per burst, `rd_burst0_*.png` and `rd_burst1_*.png`, each folded at its own $v_{ua}$, and
-`detections.csv` gives each pair a `pair_id` and its unfolded rate.
+one map per burst, `rd_burst0_*.png` and `rd_burst1_*.png`, each folded at its own rate
+period, and `detections.csv` gives each pair a `pair_id` and its unfolded rate.
 
 Intern task: [Can an unrolled solver beat a taper?](../../interns/unrolled-sparse-rd.md)
 
 ## Things that look like bugs and aren't
 
-**The rate axis runs backwards.** `doppler_bin_centers_mps` falls with index, from exactly
-$+v_{ua}$ at bin 0 to $-v_{ua} + \Delta v$ at the last bin. The FFT index rises with Doppler, and
-Doppler is minus the rate over $\lambda$. So the interval is $(-v_{ua}, +v_{ua}]$, closed at the
-top, and `fold_velocity_mps` folds into the same one.
+**The rate axis runs backwards.** `doppler_bin_centres_mps` falls with index, from exactly
+$+v_{\mathrm{period}}/2$ at bin 0 to $-v_{\mathrm{period}}/2 + \Delta v$ at the last bin. The FFT
+index rises with Doppler, and Doppler is minus the rate over $\lambda$. So the interval is
+$(-v_{\mathrm{period}}/2, +v_{\mathrm{period}}/2]$, closed at the top, and `fold_range_rate_mps`
+folds into the same one.
 
-**The target's rate on the S1 map is nowhere near the truth.** S1's $v_{ua}$ is only 15.30 m/s
+**The target's rate on the S1 map is nowhere near the truth.** S1's map holds only ±15.30 m/s
 (7.65 m/s radial on the figure), so an aircraft at tens of m/s folds several times. The dashed
-crosshair marks where folding puts it; the red cross marks the true rate, off the plot when it
+crosshair marks where folding puts it; the red cross marks the true rate, off the figure when it
 folds.
 
-**`Radar.unambiguous_bistatic_range_rate_mps` is twice $v_{ua}$.** It is the span the rate axis
-covers before it repeats, $\lambda\,\mathrm{PRF}$. `fold_velocity_mps` and the unfolding
-functions take the same span, as the example does.
+**`Radar.unambiguous_bistatic_range_rate_mps` is 30.59 m/s, twice the edge of the axis.** It is
+the rate period $v_{\mathrm{period}}$, the whole width the rate axis covers before it repeats,
+$\lambda\,\mathrm{PRF}$. `fold_range_rate_mps` and the unfolding functions take the same period,
+as the example does.
 
 **The rectangular window costs "−0.00 dB", and raw windows have a coherent gain below 1.** The
 first is negative zero, $-10\log_{10} 1$. The second is SciPy's scaling: its shapes peak at 1,
@@ -274,7 +280,7 @@ FFT that was taken.
 - MTI has only the two- and three-pulse cancellers. No staggered PRI, so blind rates stay, and no
   Doppler filter bank.
 - No range migration correction. Over S1's 256 ms CPI the target's route changes by at most
-  0.19 of a bin in the 120-frame window.
+  0.19 of a bin in the 120-scan window.
 - Dual-PRF unfolding assumes one target per range. Two targets give ghost pairings, and the
   answer degrades sharply once noise nears half a bin. A target outside the bounds you pass can
   come back as a confident wrong answer: on S3, +600 m/s comes back as −317.73 m/s.

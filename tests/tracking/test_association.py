@@ -8,6 +8,7 @@ by a Clopper-Pearson interval rather than a tolerance (docs/conventions/testing.
 from __future__ import annotations
 
 import itertools
+import math
 import time
 
 import numpy as np
@@ -15,6 +16,13 @@ import pytest
 from numpy.typing import NDArray
 from scipy.stats import beta
 
+from radar_forge.plot_simulator import (
+    ClutterComponent,
+    detect,
+    measure,
+    poisson_clutter_plots,
+    resolve,
+)
 from radar_forge.tracking.association import (
     GlobalNearestNeighbour,
     GreedyNearestNeighbour,
@@ -26,6 +34,7 @@ from radar_forge.tracking.association import (
     greedy_nearest_neighbour,
     joint_probabilistic_data_association,
     murty_k_best,
+    non_assignment_cost,
     probabilistic_data_association,
 )
 from radar_forge.tracking.filters import (
@@ -37,20 +46,11 @@ from radar_forge.tracking.filters import (
 )
 from radar_forge.tracking.hypotheses import TrackOrientedMHT
 from radar_forge.tracking.initiation import DebiasedSphericalInitiator
-from radar_forge.tracking.models import (
-    CartesianMotion,
-    LinearMeasurement,
-    RangeAzimuthElevationRangeRate,
-)
-from radar_forge.tracking.rfs import PmbmTracker
-from radar_forge.tracking.scene import (
-    ClutterComponent,
-    detect,
-    measure,
-    poisson_clutter_plots,
-    resolve,
-)
-from radar_forge.tracking.tracker import LifecyclePolicy, Scan, Tracker
+from radar_forge.tracking.lifecycle import LifecyclePolicy
+from radar_forge.tracking.measurement import LinearMeasurement, RangeAzimuthElevationRangeRate
+from radar_forge.tracking.motion import ConstantVelocity
+from radar_forge.tracking.pmbm import PmbmTracker
+from radar_forge.tracking.tracker import Scan, Tracker
 
 ALL = np.ones((2, 2), dtype=bool)
 
@@ -82,7 +82,7 @@ def test_the_gate_accepts_the_fraction_of_true_measurements_it_claims(
     20 000 measurements drawn from N(H x, H P Hᵀ + R) are scored against one track in one
     call; the acceptance count must sit in its exact Clopper-Pearson 99.9 % interval.
     """
-    layout = CartesianMotion("xy").state_layout
+    layout = ConstantVelocity("xy").state_layout
     model = LinearMeasurement(layout, ("x_m", "y_m"))
     covariance = np.diag([4.0, 1.0, 9.0, 1.0])
     bank = TrackBank.empty(layout).append([[10.0, 1.0, -5.0, 0.0]], [covariance], 0.0, [1], [0])
@@ -105,14 +105,16 @@ def test_a_bank_of_20_tracks_gates_4000_measurements_in_under_a_second(
 
     Timed over the fastest of three runs, so a busy machine's one slow run does not fail it.
     """
-    layout = CartesianMotion().state_layout
+    layout = ConstantVelocity().state_layout
     model = RangeAzimuthElevationRangeRate(layout, np.zeros(3))
     means = rng.uniform(-100.0, 100.0, (20, 6))
     means[:, [0, 2, 4]] = rng.uniform(2_000.0, 20_000.0, (20, 3))
     bank = TrackBank.empty(layout).append(
         means, np.full((20, 6, 6), np.diag([400.0, 25.0] * 3)), 0.0, np.arange(20), np.zeros(20)
     )
-    z = model.predict(means[rng.integers(0, 20, 4_000)]) + rng.normal(0.0, 1.0, (4_000, 4))
+    z = model.predicted_measurement(means[rng.integers(0, 20, 4_000)]) + rng.normal(
+        0.0, 1.0, (4_000, 4)
+    )
     noise = np.diag([100.0, 1e-6, 1e-6, 1.0])
     elapsed_s = []
     for _ in range(3):
@@ -161,6 +163,13 @@ def test_a_finite_non_assignment_cost_leaves_a_dear_pair_unmade() -> None:
     np.testing.assert_array_equal(assigned, [1, -1])
 
 
+def test_at_the_non_assignment_cost_a_hit_scores_as_a_miss() -> None:
+    """A hit adds ln(P_D) - cost to the track score, a miss ln(1 - P_D P_G)."""
+    cost = non_assignment_cost(0.9, 0.99)
+    np.testing.assert_allclose(cost, math.log(0.9 / 0.109), rtol=1e-15)
+    np.testing.assert_allclose(math.log(0.9) - cost, math.log(1 - 0.9 * 0.99), rtol=1e-14)
+
+
 def test_gnn_takes_negative_costs_such_as_a_log_likelihood_ratio() -> None:
     cost = np.array([[-5.0, -1.0], [-4.0, -6.0]])
     np.testing.assert_array_equal(global_nearest_neighbour(cost, ALL)[0], [0, 1])
@@ -184,7 +193,7 @@ def test_mismatched_cost_and_gate_shapes_are_rejected() -> None:
 
 
 def test_the_likelihood_ratio_is_the_negative_log_likelihood_plus_the_log_density() -> None:
-    layout = CartesianMotion("x").state_layout
+    layout = ConstantVelocity("x").state_layout
     model = LinearMeasurement(layout, ("x_m",))
     bank = TrackBank.empty(layout).append([[0.0, 0.0]], [np.eye(2)], 0.0, [1], [0])
     innovation = innovate(bank, model, TaylorLinearisation(), [[1.0], [3.0]], [[1.0]])
@@ -196,7 +205,7 @@ def test_the_likelihood_ratio_is_the_negative_log_likelihood_plus_the_log_densit
         association_cost(innovation, "negative_log_likelihood_ratio")
 
 
-# --- probabilistic association (spec 011 D28; criteria A3, A18) ---
+# --- probabilistic association ---
 
 P_D, P_G = 0.9, 0.99
 
@@ -235,7 +244,7 @@ def test_jpda_weights_are_the_marginals_of_every_feasible_joint_event() -> None:
     log_g, in_gate = rng.normal(-3.0, 1.0, (3, 4)), rng.random((3, 4)) < 0.7
     clutter = rng.uniform(0.01, 0.1, 4)
     result = joint_probabilistic_data_association(
-        log_g, in_gate, clutter_intensity=clutter, detection_probability=P_D, gate_probability=P_G
+        log_g, in_gate, clutter_density=clutter, detection_probability=P_D, gate_probability=P_G
     )
     expected = _brute_force(log_g, in_gate, clutter, np.ones(3))
     # rtol 1e-12: sums of at most a few dozen products.
@@ -244,8 +253,8 @@ def test_jpda_weights_are_the_marginals_of_every_feasible_joint_event() -> None:
 
 
 def test_jpda_with_certain_detection_and_disjoint_gates_is_the_kalman_filter() -> None:
-    """A3(a): P_D = P_G = 1, one measurement per gate, no clutter in it: weight one, KF update."""
-    layout = CartesianMotion("x").state_layout
+    """P_D = P_G = 1, one measurement per gate, no clutter in it: weight one, KF update."""
+    layout = ConstantVelocity("x").state_layout
     model = LinearMeasurement(layout, ["x_m"])
     bank = TrackBank.empty(layout).append(
         [[0.0, 1.0], [1e3, -1.0]], [np.eye(2) * 4.0] * 2, 0.0, [1, 2], [1, 1]
@@ -255,7 +264,7 @@ def test_jpda_with_certain_detection_and_disjoint_gates_is_the_kalman_filter() -
     weights = joint_probabilistic_data_association(
         innovation.log_likelihood,
         in_gate,
-        clutter_intensity=[1e-3, 1e-3],
+        clutter_density=[1e-3, 1e-3],
         detection_probability=1.0,
         gate_probability=1.0,
     ).weights
@@ -263,35 +272,35 @@ def test_jpda_with_certain_detection_and_disjoint_gates_is_the_kalman_filter() -
     np.testing.assert_allclose(weights, [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], rtol=0, atol=1e-290)
     weighted = update_weighted(bank, innovation, weights)
     kalman = update(bank, innovation, [0, 1])
-    # rtol 1e-10 (A3): the same correction through the mixture's moments.
+    # rtol 1e-10: the same correction through the mixture's moments.
     np.testing.assert_allclose(weighted.mean, kalman.mean, rtol=1e-10)
     np.testing.assert_allclose(weighted.covariance, kalman.covariance, rtol=1e-10)
 
 
 def test_jpda_on_one_track_is_pda() -> None:
-    """A3(b): one track in clutter, JPDA's weights against PDA's closed form, rtol 1e-10."""
+    """One track in clutter, JPDA's weights against PDA's closed form, rtol 1e-10."""
     log_g, clutter = np.array([[-4.0, -2.5, -6.0]]), np.array([0.02, 0.05, 0.01])
     in_gate = np.ones((1, 3), bool)
     joint = joint_probabilistic_data_association(
-        log_g, in_gate, clutter_intensity=clutter, detection_probability=P_D, gate_probability=P_G
+        log_g, in_gate, clutter_density=clutter, detection_probability=P_D, gate_probability=P_G
     )
     ratio = P_D * np.exp(log_g[0]) / clutter
     miss = 1 - P_D * P_G
     expected = np.append(ratio, miss) / (miss + ratio.sum())
     np.testing.assert_allclose(joint.weights[0], expected, rtol=1e-10)
     alone = probabilistic_data_association(
-        log_g, in_gate, clutter_intensity=clutter, detection_probability=P_D, gate_probability=P_G
+        log_g, in_gate, clutter_density=clutter, detection_probability=P_D, gate_probability=P_G
     )
     np.testing.assert_allclose(alone.weights, joint.weights, rtol=1e-10)
 
 
 def test_a_cluster_past_the_event_bound_raises_naming_its_size() -> None:
-    """A18: no silent truncation; six tracks sharing twelve measurements pass 1000 events."""
+    """No silent truncation; six tracks sharing twelve measurements pass 1000 events."""
     with pytest.raises(ValueError, match="6 tracks and 12 measurements"):
         joint_probabilistic_data_association(
             np.zeros((6, 12)),
             np.ones((6, 12), bool),
-            clutter_intensity=np.ones(12),
+            clutter_density=np.ones(12),
             detection_probability=P_D,
             gate_probability=P_G,
             max_events_per_cluster=1000,
@@ -326,7 +335,7 @@ def test_jpda_star_drops_the_swapped_labelling_and_set_moves_its_mass_onto_the_k
         got = joint_probabilistic_data_association(
             np.log(ratio),
             np.ones((2, 2), bool),
-            clutter_intensity=clutter,
+            clutter_density=clutter,
             detection_probability=P_D,
             gate_probability=P_G,
             coalescence=coalescence,
@@ -341,7 +350,7 @@ def test_jipda_existence_after_a_miss_is_the_ipda_recursion() -> None:
     result = joint_probabilistic_data_association(
         np.zeros((1, 0)),
         np.zeros((1, 0), bool),
-        clutter_intensity=np.ones(0),
+        clutter_density=np.ones(0),
         detection_probability=P_D,
         gate_probability=P_G,
         existence=[r],
@@ -360,7 +369,7 @@ def test_jipda_weights_are_jpda_with_detection_scaled_by_existence() -> None:
     result = joint_probabilistic_data_association(
         log_g,
         in_gate,
-        clutter_intensity=clutter,
+        clutter_density=clutter,
         detection_probability=P_D,
         gate_probability=P_G,
         existence=prior,
@@ -378,7 +387,7 @@ def test_jipda_weights_are_jpda_with_detection_scaled_by_existence() -> None:
 def test_nearest_neighbour_associators_return_no_weights() -> None:
     """GNN and greedy only assign, so the tracker keeps their hard-assignment path."""
     for associator in (GlobalNearestNeighbour(), GreedyNearestNeighbour()):
-        assert associator.weights(np.zeros((1, 1)), [[True]], clutter_intensity=[1.0]) is None
+        assert associator.weights(np.zeros((1, 1)), [[True]], clutter_density=[1.0]) is None
 
 
 def _every_assignment(
@@ -413,7 +422,7 @@ def test_murty_ranks_every_assignment_by_cost_as_enumeration_does(rng: np.random
 def test_murty_first_assignment_is_gnn_with_the_same_non_assignment_cost(
     rng: np.random.Generator,
 ) -> None:
-    """k = 1 is global_nearest_neighbour bit for bit: one solve of the same matrix (A4)."""
+    """k = 1 is global_nearest_neighbour bit for bit: one solve of the same matrix."""
     for _ in range(50):
         cost = rng.normal(size=(4, 6))
         gated = rng.random((4, 6)) < 0.5
@@ -428,24 +437,24 @@ def test_murty_stops_where_the_next_assignment_costs_more_than_the_gap() -> None
     np.testing.assert_array_equal(totals, [1.0, 1.5])
 
 
-# --- spec 011 A16: coalescence shown, and fixed (the V3 pair at d = 1 across range) ---
+# --- coalescence shown, and fixed (V3's pair, scenario_011_cst_sweep, at d = 1 across range) ---
 
 ALPHA_RANGE_M, ALPHA_AZIMUTH_RAD = 115.75, np.radians(1.4)
-WINDOW_INTENSITY = 0.21683  # n_gate = 1, plots per (m rad) a scan
+WINDOW_DENSITY = 0.21683  # n_gate = 1, plots per (m rad) a scan
 
 
 def _coalescence_ratio(coalescence: str, trials: int, seed: int) -> NDArray[np.float64]:
     """Return each trial's mean estimated over true separation of a pair, last 20 scans.
 
-    Spec 011 V3's point d = 1 across range: a pair 1.4 deg apart in azimuth at 20 km, both
+    V3's point d = 1 across range: a pair 1.4 deg apart in azimuth at 20 km, both
     flying out along their own bearings at 72 m/s so d holds, 40 scans at 4.8 s. Plots merge
-    with P_u(1) = 0.61 (scene.resolve), are detected at Pd 0.9 and measured with spec 011's
+    with P_u(1) = 0.61 (scene.resolve), are detected at Pd 0.9 and measured with scenario 011's
     noise, in a window of clutter at n_gate = 1 (range 5 km by azimuth 10 deg about the pair).
     Each trial seeds both tracks at the truth, confirmed, and runs JPDA jointly on them, or
-    (``"mht"``, ``"pmbm"``, spec 011b) MHT or PMBM, neither deleting.
+    (``"mht"``, ``"pmbm"``) MHT or PMBM, neither deleting.
     """
     rng = np.random.default_rng(seed)
-    motion = CartesianMotion("xy", sigma_acceleration_mps2=0.5)
+    motion = ConstantVelocity("xy", sigma_acceleration_mps2=0.5)
     layout = motion.state_layout
     model = RangeAzimuthElevationRangeRate(
         layout, np.zeros(3), ("range_m", "azimuth_rad"), fixed={"z_m": 0.0}
@@ -466,7 +475,7 @@ def _coalescence_ratio(coalescence: str, trials: int, seed: int) -> NDArray[np.f
                 gate_probability=0.99,
                 coverage_volume=2 * np.pi * 39e3,
                 survival_probability=1.0,
-                max_birth_clutter_intensity=0.01,
+                max_birth_clutter_density=0.01,
             )
         else:
             associator: TrackOrientedMHT | JointProbabilisticDataAssociation = (
@@ -483,7 +492,7 @@ def _coalescence_ratio(coalescence: str, trials: int, seed: int) -> NDArray[np.f
                 initiator,
                 LifecyclePolicy(1, 1, 40, max_coast_time_s=1e3),
                 assignment="joint",
-                max_birth_clutter_intensity=0.01,
+                max_birth_clutter_density=0.01,
             )
         position = 20e3 * np.column_stack([np.sin(azimuths), np.cos(azimuths)])
         velocity = 72.0 * np.column_stack([np.sin(azimuths), np.cos(azimuths)])
@@ -513,7 +522,7 @@ def _coalescence_ratio(coalescence: str, trials: int, seed: int) -> NDArray[np.f
                 sigma_azimuth_rad=np.radians(0.15),
                 rng=rng,
             )
-            window = ClutterComponent(WINDOW_INTENSITY, truth_r - 2500.0, truth_r + 2500.0)
+            window = ClutterComponent(WINDOW_DENSITY, truth_r - 2500.0, truth_r + 2500.0)
             clutter_r, clutter_az, _ = poisson_clutter_plots([window], time_s, rng)
             near = np.abs(clutter_az - np.radians(45.0)) < np.radians(5.0)
             z = np.column_stack(
@@ -522,9 +531,7 @@ def _coalescence_ratio(coalescence: str, trials: int, seed: int) -> NDArray[np.f
                     np.concatenate([plot_az[found], clutter_az[near]]),
                 ]
             )
-            bank = tracker.process(
-                Scan(time_s, z, noise, "plots", np.full(len(z), WINDOW_INTENSITY))
-            )
+            bank = tracker.process(Scan(time_s, z, noise, "plots", np.full(len(z), WINDOW_DENSITY)))
             if scan > 20 and bank.n_tracks == 2:
                 estimate = np.linalg.norm(bank.mean[0, [0, 2]] - bank.mean[1, [0, 2]])
                 ratio.append(estimate / (truth_r * ALPHA_AZIMUTH_RAD))
@@ -535,14 +542,15 @@ def _coalescence_ratio(coalescence: str, trials: int, seed: int) -> NDArray[np.f
 # Slow: 200 trials of 40 scans for each of five trackers, about eight minutes.
 @pytest.mark.slow
 def test_jpda_pulls_a_close_pair_together_more_than_jpda_star_set_mht_and_pmbm() -> None:
-    """A16 (as measured): at d = 1 across range, n_gate = 1, JPDA coalesces most.
+    """As measured: at d = 1 across range, n_gate = 1, JPDA coalesces most.
 
     The coalescence ratio is each trial's mean estimated over true separation over the last
     20 of 40 scans. Its spread is wide: in n_gate = 1 clutter a quiet CV track loses the pair
     in some trials and wanders off (ratios over 2), so the median over the 200 trials is the
-    statistic, and JPDA's must lie below both fixes' and MHT's and PMBM's (spec 011b), which
-    commit to one plot a track rather than pull both to the merged one. Spec 011's bounds,
-    JPDA at most 0.8 and the fixes at least 0.9, do not hold here: the medians measured 1.14
+    statistic, and JPDA's must lie below both fixes' and MHT's and PMBM's, which
+    commit to one plot a track rather than pull both to the merged one. The scenario was designed
+    expecting a ratio of at most 0.8 for JPDA and at least 0.9 for the fixes; neither holds here:
+    the medians measured 1.14
     (JPDA), 1.40 (JPDA*), 1.24 (set), 1.89 (MHT) and 1.56 (PMBM), the means 1.35, 1.53,
     1.42, 2.10 and 1.73.
     """

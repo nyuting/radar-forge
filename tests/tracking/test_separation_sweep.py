@@ -1,10 +1,10 @@
-"""Spec 011b V3, the separation sweep, through the multitarget stage's own code.
+"""V3, the separation sweep, through the multitarget stage's own code.
 
 Each trial is V3's scene (``config/scenario_011_cst_sweep.toml``) with the pair moved to one
 point, a separation d in resolution cells across or along range and a clutter level n_gate,
-and given its own seed; ``stages.tracking.play`` plays it once into all seven trackers and
+and given its own seed; ``verify.multitarget.play`` plays it once into all seven trackers and
 ``pair_scores`` judges each. The sweep is 30 points of 100 trials, ``slow``; two points run
-unmarked, over one seeded trial of 20 rotations.
+unmarked, over one seeded trial of 20 scans.
 """
 
 from __future__ import annotations
@@ -20,11 +20,11 @@ from numpy.typing import NDArray
 from scipy.stats import norm
 
 from radar_forge.scenario import ArcTarget, Scenario, load_scenario
-from radar_forge.stages.tracking import pair_scores, play
-from radar_forge.tracking.scene import Arc
+from radar_forge.trajectory import Arc
+from radar_forge.verify.multitarget import pair_scores, play
 
 V3 = load_scenario(Path(__file__).resolve().parents[2] / "config" / "scenario_011_cst_sweep.toml")
-# The reference gate of spec 011 §3.2, m rad: n_gate expected false plots in it a scan.
+# The reference gate, m rad: n_gate expected false plots in it a scan.
 REFERENCE_GATE_M_RAD = 4.6123
 POINTS = [
     (d, n_gate, across)
@@ -34,7 +34,7 @@ POINTS = [
 ]
 
 
-def _scene(d: float, n_gate: float, across: bool, seed: int, n_frames: int = 40) -> Scenario:
+def _scene(d: float, n_gate: float, across: bool, seed: int, n_scans: int = 40) -> Scenario:
     """Return V3 with its pair d cells apart, across range (azimuth) or along it, at 20 km."""
     assert V3.sensor is not None
     if across:
@@ -50,13 +50,13 @@ def _scene(d: float, n_gate: float, across: bool, seed: int, n_frames: int = 40)
         for k, (r, a) in enumerate(zip(range_m, azimuth, strict=True))
     )
     disc = dataclasses.replace(
-        V3.clutter_plots.components[0], intensity_per_m_rad=n_gate / REFERENCE_GATE_M_RAD
+        V3.clutter_plots.components[0], density_per_m_rad=n_gate / REFERENCE_GATE_M_RAD
     )
     return dataclasses.replace(
         V3,
         arcs=arcs,
         clutter_plots=dataclasses.replace(V3.clutter_plots, components=(disc,)),
-        duration_s=n_frames * V3.sensor.scan_period_s,
+        duration_s=n_scans * V3.scan_period_s,
         seed=seed,
         verify={},
     )
@@ -92,14 +92,14 @@ def test_a_pair_four_cells_apart_in_light_clutter_is_resolved_by_every_tracker(
 ) -> None:
     """A pair 4 cells apart merges in 0.03 % of scans (P_u(4) = e^-8) and n_gate = 0.1 clutter
     rarely draws a track off: every tracker, from its cue at the truth, holds both aircraft.
-    One seeded trial of the 20 rotations a pair is judged over."""
-    scenario = _scene(4.0, 0.1, across, 20261109, n_frames=20)
+    One seeded trial of the 20 scans a pair is judged over."""
+    scenario = _scene(4.0, 0.1, across, 20261109, n_scans=20)
     resolved = {name: pair_scores(scenario, run)[0] for name, run in play(scenario)[0].items()}
     assert resolved == dict.fromkeys(resolved, 1.0)
     assert set(resolved) == {"jpda", "gnn", "jpda_star", "set", "jipda", "mht", "pmbm"}
 
 
-# Slow: 30 points of 100 trials, each 40 rotations of seven trackers: about an hour.
+# Slow: 30 points of 100 trials, each 40 scans of seven trackers: about an hour.
 @pytest.mark.slow
 @pytest.mark.parametrize(
     ("d", "n_gate", "across"),
@@ -109,7 +109,7 @@ def test_a_pair_four_cells_apart_in_light_clutter_is_resolved_by_every_tracker(
 def test_pmbm_resolves_a_pair_as_often_as_any_tracker_less_0_05(
     d: float, n_gate: float, across: bool
 ) -> None:
-    """A17: PMBM's P(resolved) is at least every other tracker's less 0.05, at every point.
+    """PMBM's P(resolved) is at least every other tracker's less 0.05, at every point.
 
     [14]: the others approximate PMBM's posterior; one beating it materially is a bug in one
     of them. A Monte Carlo statistic gets a confidence interval: a 100-trial paired difference
@@ -124,14 +124,14 @@ def test_pmbm_resolves_a_pair_as_often_as_any_tracker_less_0_05(
         assert _upper_lead(resolved["pmbm"], values) >= -0.05, name
 
 
-# Slow: the 100 trials of A17's point d = 1 across range at n_gate = 1, shared with it.
+# Slow: the 100 trials of the point d = 1 across range at n_gate = 1, shared with the PMBM test.
 @pytest.mark.slow
 def test_mht_resolves_the_pair_one_cell_apart_as_often_as_jpda() -> None:
-    """A16 (MHT clause): at d = 1 across range, n_gate = 1, P(resolved) for MHT >= JPDA's.
+    """At d = 1 across range, n_gate = 1, MHT's P(resolved) is at least JPDA's.
 
     Measured while building it: every tracker 0.00 of 60 trials; 61 % of scans merge the
-    pair into one plot 244 m from each aircraft, outside both 99 % gates, so the clause
-    holds without saying much. Rejected only at 99 % confidence, as A17 is.
+    pair into one plot 244 m from each aircraft, outside both 99 % gates, so the comparison
+    holds without saying much. Rejected only at 99 % confidence, as in the PMBM test above.
     """
     resolved = _resolved(1.0, 1.0, True, 100)
     print({name: float(values.mean()) for name, values in resolved.items()})

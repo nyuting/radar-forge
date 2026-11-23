@@ -32,6 +32,8 @@ from numpy.typing import ArrayLike, NDArray
 from scipy import sparse, spatial
 from scipy.sparse import csgraph
 
+from radar_forge._periodic import fold
+
 __all__ = ["cluster_points", "mean_shift"]
 
 # A seed that moves less than this fraction of a bandwidth has reached its mode.
@@ -195,17 +197,17 @@ def _scaled(
         raise ValueError(msg)
     n_columns = rows.shape[1]
     radius = np.asarray(scale, dtype=np.float64)
-    span = np.asarray(np.nan if period is None else period, dtype=np.float64)
-    if radius.ndim > 1 or span.ndim > 1 or not {radius.size, span.size} <= {1, n_columns}:
+    periods = np.asarray(np.nan if period is None else period, dtype=np.float64)
+    if radius.ndim > 1 or periods.ndim > 1 or not {radius.size, periods.size} <= {1, n_columns}:
         msg = f"{name} and period must be scalars or one value per column ({n_columns})."
         raise ValueError(msg)
     if not np.all(np.isfinite(radius) & (radius > 0.0)):
         msg = f"{name} must be finite and positive, got {scale!r}."
         raise ValueError(msg)
-    if not np.all(np.isnan(span) | (np.isfinite(span) & (span > 0.0))):
+    if not np.all(np.isnan(periods) | (np.isfinite(periods) & (periods > 0.0))):
         msg = f"period must be positive, or nan on a column that does not wrap, got {period!r}."
         raise ValueError(msg)
-    ratio = np.broadcast_to(span / radius, (n_columns,))
+    ratio = np.broadcast_to(periods / radius, (n_columns,))
     if not np.isfinite(ratio).any():
         return rows / radius, None
     box = np.where(np.isfinite(ratio), ratio, 0.0)
@@ -218,13 +220,13 @@ def _wrapped(scaled: NDArray[np.float64], box: NDArray[np.float64] | None) -> ND
         return scaled
     wraps = box > 0.0
     inside = scaled.copy()
-    inside[:, wraps] %= box[wraps]
-    # A tiny negative coordinate can round up to exactly the period.
-    inside[:, wraps] = np.where(inside[:, wraps] >= box[wraps], 0.0, inside[:, wraps])
+    inside[:, wraps] = fold(inside[:, wraps], box[wraps], lower=0.0)
     return inside
 
 
 def _short_way(gap: NDArray[np.float64], box: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Return a difference on a circle of circumference ``box`` in ``[-box / 2, box / 2)``."""
+    """Return a difference on a circle of circumference ``box`` in ``[-box / 2, box / 2]``."""
+    # Unguarded: a sum that rounds onto the edge gives +box / 2, where _periodic.fold gives
+    # -box / 2.
     result: NDArray[np.float64] = (gap + box / 2.0) % box - box / 2.0
     return result

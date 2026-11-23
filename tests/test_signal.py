@@ -18,7 +18,15 @@ from scipy.signal import fftconvolve
 
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.propagation import PropagationPaths, line_of_sight_paths
-from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter
+from radar_forge.radar import (
+    Radar,
+    Receiver,
+    Site,
+    TargetGeometry,
+    Transmitter,
+    range_resolution_m,
+    sweep_rate_hzps,
+)
 from radar_forge.signal import (
     ambiguity_function,
     beat_frequency_hz,
@@ -29,9 +37,7 @@ from radar_forge.signal import (
     noise_waveform,
     pulsed_baseband,
     range_gate_first_sample,
-    range_resolution_m,
     stream_baseband,
-    sweep_rate_hzps,
     thermal_noise,
 )
 
@@ -71,7 +77,7 @@ def _doppler_rate_mps(radar: Radar, doppler_bin: int, n_pulses: int = N_PULSES) 
 
 
 def _fmcw_bistatic_range_m(range_bin: int) -> float:
-    """S1's bistatic range at the centre of a fast-time FFT bin: R_b = c f_b / alpha."""
+    """S1's range (scenario_001_fmcw_low_prf) at a fast-time FFT bin's centre: c f_b / alpha."""
     beat_hz = range_bin * S1_RADAR.receiver.sample_rate_hz / S1_RADAR.n_samples_per_pri
     return SPEED_OF_LIGHT_MPS * beat_hz / S1_RADAR.transmitter.sweep_rate_hzps
 

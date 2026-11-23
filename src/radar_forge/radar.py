@@ -1,11 +1,12 @@
 r"""The radar: transmitter, receiver, sites, and the route geometry of a target.
 
-One :class:`Radar` covers both sitings: ``rx_site=None`` is the zero-baseline,
+One :class:`Radar` covers monostatic and bistatic: ``rx_site=None`` is the zero-baseline,
 monostatic case. Sites are stationary and synchronised, with no direct signal. A
 target's route has transmit and receive ranges :math:`R_T`, :math:`R_R`, the
 bistatic range :math:`R_b = R_T + R_R` (monostatic :math:`2R`) and its rate
 :math:`dR_b/dt`, positive receding. Positions are WGS-84 local east, north, up
-metres; azimuth is zero north, clockwise (``spec/data-001-formats.md`` §5).
+metres; azimuth is zero north, clockwise (``spec/data-001-formats.md`` §5). The conversions
+between geodetic, ENU and range-azimuth-elevation live in :mod:`radar_forge.coordinates`.
 
 References
 ----------
@@ -33,9 +34,13 @@ from radar_forge.constants import (
     BOLTZMANN_JPK,
     SPEED_OF_LIGHT_MPS,
     STANDARD_NOISE_TEMPERATURE_K,
-    WGS84_FLATTENING,
-    WGS84_SEMI_MAJOR_AXIS_M,
 )
+from radar_forge.coordinates import (
+    enu_axes_in_ecef,
+    enu_to_range_azimuth_elevation_rad,
+    geodetic_to_enu_m,
+)
+from radar_forge.units import db_to_power
 
 __all__ = [
     "Radar",
@@ -44,18 +49,28 @@ __all__ = [
     "TargetGeometry",
     "Transmitter",
     "WaveformKind",
-    "ecef_to_enu_m",
-    "enu_to_range_azimuth_elevation_rad",
-    "geodetic_to_ecef_m",
-    "geodetic_to_enu_m",
-    "range_azimuth_elevation_to_enu_m",
+    "range_resolution_m",
+    "sweep_rate_hzps",
 ]
-
-# First eccentricity squared, e^2 = f(2 - f), derived rather than stored.
-_ECCENTRICITY_SQUARED = WGS84_FLATTENING * (2.0 - WGS84_FLATTENING)
 
 WaveformKind = Literal["fmcw", "pulsed", "noise"]
 """Which waveform family a transmitter emits: deramped FMCW, a pulse train or a noise code."""
+
+
+def range_resolution_m(bandwidth_hz: ArrayLike) -> NDArray[np.float64]:
+    r"""Return the monostatic range resolution :math:`c/2B`, m (Richards [1], §4.6.1)."""
+    result: NDArray[np.float64] = SPEED_OF_LIGHT_MPS / (
+        2.0 * np.asarray(bandwidth_hz, dtype=np.float64)
+    )
+    return result
+
+
+def sweep_rate_hzps(bandwidth_hz: ArrayLike, chirp_duration_s: ArrayLike) -> NDArray[np.float64]:
+    r"""Return the chirp slope :math:`\alpha = B/T`, Hz/s."""
+    result: NDArray[np.float64] = np.asarray(bandwidth_hz, dtype=np.float64) / np.asarray(
+        chirp_duration_s, dtype=np.float64
+    )
+    return result
 
 
 @dataclass(frozen=True)
@@ -89,6 +104,11 @@ class Transmitter:
             raise ValueError(msg)
 
     @property
+    def gain_tx_linear(self) -> float:
+        """Transmit antenna gain as a linear factor."""
+        return float(db_to_power(self.gain_tx_dbi))
+
+    @property
     def wavelength_m(self) -> float:
         r"""Carrier wavelength :math:`\lambda = c/f_c`, m."""
         return SPEED_OF_LIGHT_MPS / self.carrier_frequency_hz
@@ -106,7 +126,7 @@ class Transmitter:
     @property
     def sweep_rate_hzps(self) -> float:
         r"""Chirp slope :math:`\alpha = B/T`, Hz/s."""
-        return self.bandwidth_hz / self.chirp_duration_s
+        return float(sweep_rate_hzps(self.bandwidth_hz, self.chirp_duration_s))
 
 
 @dataclass(frozen=True)
@@ -127,9 +147,14 @@ class Receiver:
             raise ValueError(msg)
 
     @property
+    def gain_rx_linear(self) -> float:
+        """Receive antenna gain as a linear factor."""
+        return float(db_to_power(self.gain_rx_dbi))
+
+    @property
     def noise_figure_linear(self) -> float:
         r"""Noise figure as a linear factor :math:`F \ge 1`."""
-        return float(10.0 ** (self.noise_figure_db / 10.0))
+        return float(db_to_power(self.noise_figure_db))
 
     @property
     def noise_density_w_per_hz(self) -> float:
@@ -144,7 +169,10 @@ class Receiver:
 
 @dataclass(frozen=True)
 class Site:
-    """A fixed antenna position; ``altitude_m`` is above the WGS-84 ellipsoid, not sea level."""
+    """A fixed antenna position; ``altitude_m`` is above the WGS-84 ellipsoid, not sea level.
+
+    The ellipsoid is NIMA [3]'s; :mod:`radar_forge.coordinates` does the conversions.
+    """
 
     latitude_deg: float
     longitude_deg: float
@@ -209,7 +237,12 @@ class TargetGeometry:
         elevation_rad: ArrayLike = 0.0,
         radial_acceleration_mps2: ArrayLike = 0.0,
     ) -> TargetGeometry:
-        """Return one site's geometry: twice the range and its derivatives (receding), beta 0."""
+        """Return one site's geometry: twice the range and its derivatives (receding), beta 0.
+
+        ``radial_velocity_mps`` and ``radial_acceleration_mps2`` are the one-way (monostatic)
+        range rate and its derivative, positive receding: the radial velocity, the one name
+        besides a halved display that the glossary (``docs/user-guide/README.md``) allows.
+        """
         range_arr, rate_arr, azimuth_arr, elevation_arr, acceleration_arr = np.broadcast_arrays(
             np.atleast_1d(np.asarray(range_m, dtype=np.float64)),
             np.asarray(radial_velocity_mps, dtype=np.float64),
@@ -289,16 +322,17 @@ class Radar:
     @property
     def range_resolution_m(self) -> float:
         r"""Range resolution :math:`c/2B`, m: monostatic, and the bistatic best case."""
-        return SPEED_OF_LIGHT_MPS / (2.0 * self.transmitter.bandwidth_hz)
+        return float(range_resolution_m(self.transmitter.bandwidth_hz))
 
     @property
     def unambiguous_delay_s(self) -> float:
         r"""Delay period the map wraps at: one PRI; FMCW :math:`f_s/\alpha` (Oppenheim [7]_ §8.5).
 
         Pulsed, the map holds ``round(PRI f_s)`` samples, equal whenever the PRI is a whole number
-        of samples (every config is). FMCW, it mirrors :func:`~radar_forge.dsp.range_bin_centers_m`
-        and can exceed the chirp (S3: :math:`2T_c` at :math:`f_s = 2B`), though a sawtooth deramp
-        caps the physical reach at :math:`T_c` (Charvat [6]_, ch. 3). A noise code folds nothing,
+        of samples (every config is). FMCW, it mirrors :func:`~radar_forge.dsp.range_bin_centres_m`
+        and can exceed the chirp (S3, ``scenario_001_fmcw_dual_prf``: :math:`2T_c` at
+        :math:`f_s = 2B`), though a sawtooth deramp caps the physical reach at :math:`T_c` (Charvat
+        [6]_, ch. 3). A noise code folds nothing,
         so it is infinite: batched correlation reads each lag whole, past its own batch, and the
         map is a window of lags, :math:`c\,m/f_s` for ``m < n_range_lags``
         (:func:`~radar_forge.pipeline.map_axes`), which an echo beyond it misses.
@@ -421,140 +455,12 @@ def _slant_range_m(offset_enu_m: NDArray[np.float64]) -> NDArray[np.float64]:
 def _look(
     offset_enu_m: NDArray[np.float64], range_m: NDArray[np.float64], site: Site, origin: Site
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Return the unit vector, and (azimuth, elevation) in ``site``'s own frame."""
+    """Return the unit vector, and (azimuth, elevation) in ``site``'s own frame (Misra [4] 4.A)."""
     site_axes_m = offset_enu_m
     if site != origin:
-        site_axes_m = offset_enu_m @ (_enu_axes_in_ecef(origin) @ _enu_axes_in_ecef(site).T)
+        origin_axes = enu_axes_in_ecef(origin.latitude_deg, origin.longitude_deg)
+        site_axes = enu_axes_in_ecef(site.latitude_deg, site.longitude_deg)
+        site_axes_m = offset_enu_m @ (origin_axes @ site_axes.T)
     _, azimuth_rad, elevation_rad = enu_to_range_azimuth_elevation_rad(site_axes_m)
     unit_vector = offset_enu_m / range_m[..., None]
     return unit_vector, np.stack([azimuth_rad, elevation_rad], axis=-1)
-
-
-def _enu_axes_in_ecef(site: Site) -> NDArray[np.float64]:
-    """Return the site's east, north and up axes in ECEF, as rows: ``ecef_to_enu_m``'s rotation."""
-    sin_lat, cos_lat = np.sin(np.radians(site.latitude_deg)), np.cos(np.radians(site.latitude_deg))
-    sin_lon, cos_lon = (
-        np.sin(np.radians(site.longitude_deg)),
-        np.cos(np.radians(site.longitude_deg)),
-    )
-    return np.array(
-        [
-            [-sin_lon, cos_lon, 0.0],
-            [-sin_lat * cos_lon, -sin_lat * sin_lon, cos_lat],
-            [cos_lat * cos_lon, cos_lat * sin_lon, sin_lat],
-        ]
-    )
-
-
-def geodetic_to_ecef_m(
-    latitude_deg: ArrayLike, longitude_deg: ArrayLike, altitude_m: ArrayLike
-) -> NDArray[np.float64]:
-    """Convert WGS-84 geodetic coordinates to ECEF metres ``(..., 3)`` (NIMA [3] eq. 4-14)."""
-    latitude_arr = np.asarray(latitude_deg, dtype=np.float64)
-    if np.any(np.abs(latitude_arr) > 90.0):
-        msg = "latitude_deg must lie in [-90, 90]; values outside it are not a latitude."
-        raise ValueError(msg)
-    altitude_arr = np.asarray(altitude_m, dtype=np.float64)
-    latitude_rad = np.radians(latitude_arr)
-    longitude_rad = np.radians(np.asarray(longitude_deg, dtype=np.float64))
-    sin_latitude = np.sin(latitude_rad)
-    cos_latitude = np.cos(latitude_rad)
-    prime_vertical_radius_m = WGS84_SEMI_MAJOR_AXIS_M / np.sqrt(
-        1.0 - _ECCENTRICITY_SQUARED * sin_latitude**2
-    )
-    x_m = (prime_vertical_radius_m + altitude_arr) * cos_latitude * np.cos(longitude_rad)
-    y_m = (prime_vertical_radius_m + altitude_arr) * cos_latitude * np.sin(longitude_rad)
-    z_m = (prime_vertical_radius_m * (1.0 - _ECCENTRICITY_SQUARED) + altitude_arr) * sin_latitude
-    result: NDArray[np.float64] = np.stack(np.broadcast_arrays(x_m, y_m, z_m), axis=-1)
-    return result
-
-
-def ecef_to_enu_m(
-    ecef_m: ArrayLike,
-    reference_latitude_deg: ArrayLike,
-    reference_longitude_deg: ArrayLike,
-    reference_altitude_m: ArrayLike,
-) -> NDArray[np.float64]:
-    """Translate ECEF metres to a geodetic reference, rotate into its ENU frame (Misra [4] 4.A)."""
-    ecef_arr = np.asarray(ecef_m, dtype=np.float64)
-    if ecef_arr.shape[-1] != 3:
-        msg = f"ecef_m must have shape (..., 3) for (x, y, z); got {ecef_arr.shape}."
-        raise ValueError(msg)
-    offset_m = ecef_arr - geodetic_to_ecef_m(
-        reference_latitude_deg, reference_longitude_deg, reference_altitude_m
-    )
-    latitude_rad = np.radians(np.asarray(reference_latitude_deg, dtype=np.float64))
-    longitude_rad = np.radians(np.asarray(reference_longitude_deg, dtype=np.float64))
-    sin_latitude = np.sin(latitude_rad)
-    cos_latitude = np.cos(latitude_rad)
-    sin_longitude = np.sin(longitude_rad)
-    cos_longitude = np.cos(longitude_rad)
-    delta_x_m = offset_m[..., 0]
-    delta_y_m = offset_m[..., 1]
-    delta_z_m = offset_m[..., 2]
-
-    east_m = -sin_longitude * delta_x_m + cos_longitude * delta_y_m
-    north_m = (
-        -sin_latitude * cos_longitude * delta_x_m
-        - sin_latitude * sin_longitude * delta_y_m
-        + cos_latitude * delta_z_m
-    )
-    up_m = (
-        cos_latitude * cos_longitude * delta_x_m
-        + cos_latitude * sin_longitude * delta_y_m
-        + sin_latitude * delta_z_m
-    )
-    result: NDArray[np.float64] = np.stack(np.broadcast_arrays(east_m, north_m, up_m), axis=-1)
-    return result
-
-
-def geodetic_to_enu_m(
-    latitude_deg: ArrayLike,
-    longitude_deg: ArrayLike,
-    altitude_m: ArrayLike,
-    reference_latitude_deg: ArrayLike,
-    reference_longitude_deg: ArrayLike,
-    reference_altitude_m: ArrayLike,
-) -> NDArray[np.float64]:
-    """Convert geodetic points to east, north, up metres ``(..., 3)`` about a geodetic reference."""
-    ecef_m = geodetic_to_ecef_m(latitude_deg, longitude_deg, altitude_m)
-    return ecef_to_enu_m(
-        ecef_m, reference_latitude_deg, reference_longitude_deg, reference_altitude_m
-    )
-
-
-def enu_to_range_azimuth_elevation_rad(
-    enu_m: ArrayLike,
-) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    """Convert ENU metres ``(..., 3)`` to range, azimuth and elevation (Misra [4] app. 4.A).
-
-    Azimuth is ``atan2(east, north)`` in [0, 2 pi): zero at true north, clockwise.
-    """
-    enu_arr = np.asarray(enu_m, dtype=np.float64)
-    if enu_arr.shape[-1] != 3:
-        msg = f"enu_m must have shape (..., 3) for (east, north, up); got {enu_arr.shape}."
-        raise ValueError(msg)
-    east_m = enu_arr[..., 0]
-    north_m = enu_arr[..., 1]
-    up_m = enu_arr[..., 2]
-    range_m = np.sqrt(east_m**2 + north_m**2 + up_m**2)
-    azimuth_rad = np.mod(np.arctan2(east_m, north_m), 2.0 * np.pi)
-    # A tiny negative angle wraps to 2 pi - eps, which can round to exactly 2 pi.
-    azimuth_rad = np.where(azimuth_rad >= 2.0 * np.pi, 0.0, azimuth_rad)
-    elevation_rad = np.arcsin(np.divide(up_m, range_m))
-    return range_m, azimuth_rad, elevation_rad
-
-
-def range_azimuth_elevation_to_enu_m(
-    range_m: ArrayLike, azimuth_rad: ArrayLike, elevation_rad: ArrayLike
-) -> NDArray[np.float64]:
-    """Convert slant range, azimuth and elevation to east, north, up metres, ``(..., 3)``."""
-    range_arr = np.asarray(range_m, dtype=np.float64)
-    azimuth_arr = np.asarray(azimuth_rad, dtype=np.float64)
-    elevation_arr = np.asarray(elevation_rad, dtype=np.float64)
-    ground_range_m = range_arr * np.cos(elevation_arr)
-    east_m = ground_range_m * np.sin(azimuth_arr)
-    north_m = ground_range_m * np.cos(azimuth_arr)
-    up_m = range_arr * np.sin(elevation_arr)
-    result: NDArray[np.float64] = np.stack(np.broadcast_arrays(east_m, north_m, up_m), axis=-1)
-    return result

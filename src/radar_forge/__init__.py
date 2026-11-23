@@ -5,14 +5,20 @@ there too, but may move. Modules, in signal-path order:
 
 ``constants``
     Every physical constant, defined once.
-``radar``, ``propagation``, ``signal``
-    The radar and its sites; propagation paths and the radar equation; waveforms and IQ.
+``units``
+    A power or an amplitude to and from decibels, each conversion written once.
+``coordinates``, ``radar``, ``propagation``, ``signal``
+    Geodetic and ENU conversions; the radar and its sites; propagation paths and the radar
+    equation; waveforms and IQ.
+``trajectory``, ``plot_simulator``
+    Closed-form target paths; a rotating radar's plots of them, scan by scan, without IQ.
 ``dsp``, ``clutter``, ``detection``, ``clustering``, ``tracking``
     Range-Doppler processing; leakage and clutter cancellation; CFAR and clustering of cells;
     clustering of points; batched multi-target tracking.
-``scenario``, ``pipeline``, ``evaluate``, ``stages``, ``plots``
-    A scenario file, the chain from it to tracks, the stepper that checks each stage, the
-    stages it runs, and figures (the ``visualisation`` extra, imported only when drawing).
+``scenario``, ``pipeline``, ``scan_tracker``, ``verify``, ``figures``
+    A scenario file, the chain from it to plots, its ``[tracking]`` table as one tracker fed a
+    scan at a time, the stepper and the stages it runs, and figures (the ``visualisation``
+    extra, imported only when drawing).
 """
 
 from __future__ import annotations
@@ -20,15 +26,15 @@ from __future__ import annotations
 from radar_forge.clustering import cluster_points, mean_shift
 from radar_forge.detection import Detection, cfar_detect, cfar_detect_2d, cluster_detections
 from radar_forge.dsp import (
-    doppler_bin_centers_mps,
+    doppler_bin_centres_mps,
     doppler_fft,
     matched_filter,
-    range_bin_centers_m,
+    range_bin_centres_m,
     range_doppler_map,
     range_fft,
     window,
 )
-from radar_forge.pipeline import frames, range_doppler_product
+from radar_forge.pipeline import range_doppler_product, scan_iq
 from radar_forge.propagation import (
     doppler_shift_hz,
     line_of_sight_paths,
@@ -45,6 +51,7 @@ from radar_forge.signal import (
     thermal_noise,
 )
 from radar_forge.tracking import Scan, Tracker
+from radar_forge.units import amplitude_to_db, db_to_amplitude, db_to_power, power_to_db
 
 __version__ = "0.0.0"
 
@@ -60,26 +67,30 @@ __all__ = [
     "Transmitter",
     "__version__",
     "ambiguity_function",
+    "amplitude_to_db",
     "cfar_detect",
     "cfar_detect_2d",
     "cluster_detections",
     "cluster_points",
-    "doppler_bin_centers_mps",
+    "db_to_amplitude",
+    "db_to_power",
+    "doppler_bin_centres_mps",
     "doppler_fft",
     "doppler_shift_hz",
     "fmcw_deramp_baseband",
-    "frames",
     "lfm_chirp",
     "line_of_sight_paths",
     "load_scenario",
     "matched_filter",
     "mean_shift",
+    "power_to_db",
     "pulsed_baseband",
-    "range_bin_centers_m",
+    "range_bin_centres_m",
     "range_doppler_map",
     "range_doppler_product",
     "range_fft",
     "received_power_w",
+    "scan_iq",
     "swerling_rcs_m2",
     "thermal_noise",
     "window",

@@ -22,12 +22,13 @@ from typing import Protocol
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from radar_forge.tracking.models import (
+from radar_forge.tracking._linalg import symmetrise
+from radar_forge.tracking.measurement import (
     LinearMeasurement,
     MeasurementModel,
     RangeAzimuthElevationRangeRate,
-    check_covariances,
 )
+from radar_forge.tracking.motion import check_covariances
 
 __all__ = [
     "DebiasedSphericalInitiator",
@@ -90,7 +91,7 @@ class DirectStateInitiator(_PriorInitiator):
 
     Unmeasured coordinates keep the prior, whose measured block must be uncorrelated with the
     rest. ``seed_names`` copies only those, such as range while a folded rate is untrusted.
-    A model that is not a :class:`~radar_forge.tracking.models.LinearMeasurement` starts none.
+    A model that is not a :class:`~radar_forge.tracking.measurement.LinearMeasurement` starts none.
 
     References
     ----------
@@ -186,13 +187,13 @@ def debiased_spherical_to_enu(
     position_m = radius_m[..., None] * direction
     outer = position_m[..., :, None] * position_m[..., None, :]
     covariance_m2 = (radius_m**2 + sigma_r**2)[..., None, None] * second_moment - outer
-    return position_m, (covariance_m2 + np.swapaxes(covariance_m2, -1, -2)) / 2
+    return position_m, symmetrise(covariance_m2)
 
 
 class DebiasedSphericalInitiator(_PriorInitiator):
     """Start a track at a spherical measurement's debiased position; the rest keeps the prior.
 
-    Needs a :class:`~radar_forge.tracking.models.RangeAzimuthElevationRangeRate` model that
+    Needs a :class:`~radar_forge.tracking.measurement.RangeAzimuthElevationRangeRate` model that
     reports range and azimuth, with independent errors; the height keeps the prior when no
     elevation is reported. Every later update uses the spherical model itself.
 
@@ -209,10 +210,10 @@ class DebiasedSphericalInitiator(_PriorInitiator):
     ) -> Rows | None:
         """Return the converted rows, or None for a model without range and azimuth."""
         if not isinstance(model, RangeAzimuthElevationRangeRate) or not (
-            {"range_m", "azimuth_rad"} <= set(model.components)
+            {"range_m", "azimuth_rad"} <= set(model.names)
         ):
             return None
-        names = [n for n in ("range_m", "azimuth_rad", "elevation_rad") if n in model.components]
+        names = [n for n in ("range_m", "azimuth_rad", "elevation_rad") if n in model.names]
         rows = np.asarray(model.measurement_layout.indices(names))
         block = noise_covariance[:, rows[:, None], rows[None, :]]
         if np.any(block != block * np.eye(len(rows))):

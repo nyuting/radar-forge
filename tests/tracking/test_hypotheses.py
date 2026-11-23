@@ -1,9 +1,9 @@
 """Tests for radar_forge.tracking.hypotheses: track-oriented MHT inside the one Tracker loop.
 
 Ground truth is hand-countable: the Wald thresholds, a track score added up by hand from the
-textbook likelihood, a lifecycle scan by scan, the k = 1 case against GNN (spec 011b A4), and
+textbook likelihood, a lifecycle scan by scan, the k = 1 case against GNN, and
 the structural bounds the tree promises (leaves per tree, N-scan agreement). The causal output
-(A19) is checked through the multitarget stage on V4.
+is checked through the multitarget stage on V4.
 """
 
 from __future__ import annotations
@@ -16,7 +16,17 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from radar_forge import evaluate
+from radar_forge import verify
+from radar_forge.coordinates import east_north_to_range_azimuth_rad
+from radar_forge.plot_simulator import (
+    ClutterComponent,
+    detect,
+    measure,
+    plot_scans,
+    poisson_clutter_plots,
+    resolve,
+)
+from radar_forge.scan_tracker import ScanTracker
 from radar_forge.scenario import Scenario, load_scenario
 from radar_forge.tracking.association import GlobalNearestNeighbour
 from radar_forge.tracking.filters import TaylorLinearisation, TrackStatus
@@ -29,22 +39,10 @@ from radar_forge.tracking.hypotheses import (
 )
 from radar_forge.tracking.initiation import DebiasedSphericalInitiator, DirectStateInitiator
 from radar_forge.tracking.lifecycle import LifecyclePolicy
-from radar_forge.tracking.models import (
-    CartesianMotion,
-    LinearMeasurement,
-    RangeAzimuthElevationRangeRate,
-)
-from radar_forge.tracking.scans import PlotTracker, scans
-from radar_forge.tracking.scene import (
-    Arc,
-    ClutterComponent,
-    detect,
-    measure,
-    poisson_clutter_plots,
-    polar,
-    resolve,
-)
+from radar_forge.tracking.measurement import LinearMeasurement, RangeAzimuthElevationRangeRate
+from radar_forge.tracking.motion import ConstantVelocity
 from radar_forge.tracking.tracker import Scan, Tracker
+from radar_forge.trajectory import Arc
 
 REPO = Path(__file__).resolve().parents[2]
 P_D, P_G = 0.9, 0.99
@@ -53,7 +51,7 @@ CLUTTER = 0.21683  # n_gate = 1, plots per (m rad) a scan
 
 def _one_axis_mht(**settings: object) -> Tracker:
     """MHT on position along x, R = 1 m², q = 1 m²/s³, clutter density 0.01 per metre."""
-    motion = CartesianMotion("x", sigma_acceleration_mps2=1.0, acceleration_correlation_time_s=0.5)
+    motion = ConstantVelocity("x", sigma_acceleration_mps2=1.0, acceleration_correlation_time_s=0.5)
     return Tracker(
         {"x": LinearMeasurement(motion.state_layout, ("x_m",))},
         motion,
@@ -71,7 +69,7 @@ def _scan(time_s: float, positions_m: list[float]) -> Scan:
 
 
 def test_the_thresholds_are_walds_at_alpha_1e_4_and_beta_0_1() -> None:
-    """ln((1 - beta)/alpha) and -ln(beta/(1 - alpha)), to the spec's four decimals."""
+    """ln((1 - beta)/alpha) and -ln(beta/(1 - alpha)), to four decimals."""
     assert pytest.approx(9.1050, abs=5e-5) == CONFIRM_SCORE
     assert pytest.approx(2.3025, abs=5e-5) == DELETE_DROP
 
@@ -83,7 +81,7 @@ def test_a_hit_adds_the_log_likelihood_ratio_and_a_miss_the_missed_detection_ter
     1 s on: S = 1 + 100² + q/3 + R; the hit at 5 m scores the 1-D Gaussian there. Deletion
     is off: the branch's peak is its birth's zero, which the miss would fall 2.3025 below.
     """
-    tracker = _one_axis_mht(k_best=1, n_scan=1, delete_drop=math.inf)
+    tracker = _one_axis_mht(k_best=1, n_scan_depth=1, delete_drop=math.inf)
     tracker.process(_scan(0.0, [0.0]))
     tracker.process(_scan(1.0, [5.0]))
     assert tracker.tree is not None
@@ -98,7 +96,7 @@ def test_a_hit_adds_the_log_likelihood_ratio_and_a_miss_the_missed_detection_ter
 
 def test_a_branch_confirms_at_the_threshold_and_dies_falling_the_drop_below_its_peak() -> None:
     """Hits confirm once the score reaches 9.105; one miss (-2.216) survives, two do not."""
-    tracker = _one_axis_mht(k_best=1, n_scan=1)
+    tracker = _one_axis_mht(k_best=1, n_scan_depth=1)
     statuses, scores = [], []
     for time_s, hit in enumerate("hhhhhhmhmm"):
         bank = tracker.process(_scan(float(time_s), [10.0 * time_s] if hit == "h" else []))
@@ -112,11 +110,11 @@ def test_a_branch_confirms_at_the_threshold_and_dies_falling_the_drop_below_its_
     assert statuses[-1] == [TrackStatus.DELETED]  # two misses in a row: 4.43 below it
 
 
-def test_k_best_one_n_scan_one_is_gnn_with_the_finite_non_assignment_cost() -> None:
-    """A4: MHT with n_scan 1, k_best 1 makes GNN's assignments and states on V2's 30° crossings.
+def test_k_best_one_n_scan_depth_one_is_gnn_with_the_finite_non_assignment_cost() -> None:
+    """MHT with n_scan_depth 1, k_best 1 makes GNN's assignments and states on V2's 30° crossings.
 
     Both pairs (X3 across range, X4 along it) are seeded at the truth 40 s before they cross
-    and run through their crossing in n_gate = 1 clutter, one clutter intensity per scan so
+    and run through their crossing in n_gate = 1 clutter, one clutter density per scan so
     both costs are -ln(g / lambda), with deletion and births off. rtol 1e-10: the same
     updates in batches of another size.
     """
@@ -127,7 +125,7 @@ def test_k_best_one_n_scan_one_is_gnn_with_the_finite_non_assignment_cost() -> N
         ((182.3, -27502.8), 315.0),
     ]
     arcs = [Arc(0.0, xy, math.radians(h), 72.0) for xy, h in targets]
-    motion = CartesianMotion("xy", sigma_acceleration_mps2=0.5)
+    motion = ConstantVelocity("xy", sigma_acceleration_mps2=0.5)
     model = RangeAzimuthElevationRangeRate(
         motion.state_layout, np.zeros(3), ("range_m", "azimuth_rad"), fixed={"z_m": 0.0}
     )
@@ -143,7 +141,7 @@ def test_k_best_one_n_scan_one_is_gnn_with_the_finite_non_assignment_cost() -> N
             "negative_log_likelihood_ratio",
             {"plots": CLUTTER},
             assignment="joint",
-            max_birth_clutter_intensity=0.01,
+            max_birth_clutter_density=0.01,
         )
         for associator in (
             GlobalNearestNeighbour(math.log(P_D / (1 - P_D * P_G))),
@@ -160,7 +158,7 @@ def test_k_best_one_n_scan_one_is_gnn_with_the_finite_non_assignment_cost() -> N
     for scan in range(1, 18):
         for pair in (0, 1):
             time_s = start_s + 4.8 * scan + 0.8 * pair
-            ranges, azimuths = polar(
+            ranges, azimuths = east_north_to_range_azimuth_rad(
                 np.array([arcs[2 * pair + k].state(time_s)[0] for k in (0, 1)])
             )
             group = resolve(
@@ -194,10 +192,10 @@ def test_k_best_one_n_scan_one_is_gnn_with_the_finite_non_assignment_cost() -> N
 
 
 def test_no_tree_holds_more_leaves_than_k_best_and_every_tree_agrees_n_scan_back() -> None:
-    """D29: a tree's leaves are at most k_best, and after N-scan pruning they share their
-    ancestor n_scan scans back; a cluttered crossing in 1-D makes many branches to prune."""
+    """A tree's leaves are at most k_best, and after N-scan pruning they share their
+    ancestor n_scan_depth scans back; a cluttered crossing in 1-D makes many branches to prune."""
     rng = np.random.default_rng(7)
-    tracker = _one_axis_mht(k_best=4, n_scan=2)
+    tracker = _one_axis_mht(k_best=4, n_scan_depth=2)
     for time_s in range(30):
         targets = [100.0 + 3.0 * time_s, 190.0 - 3.0 * time_s]
         clutter = rng.uniform(0.0, 300.0, rng.poisson(3.0)).tolist()
@@ -227,9 +225,9 @@ def test_duplicate_hypotheses_merge_and_each_cluster_keeps_its_k_best() -> None:
 
 
 def test_tracks_csv_reports_each_scan_as_mht_saw_it_then(tmp_path: Path) -> None:
-    """A19: V4's tracks.csv row at scan k is MHT's reported state at scan k, recorded live.
+    """V4's tracks.csv row at scan k is MHT's reported state at scan k, recorded live.
 
-    Two rotations of V4 under MHT, played once by hand and once through the stage; MHT may
+    Two scans of V4 under MHT, played once by hand and once through the stage; MHT may
     later prefer another hypothesis, but a row once written is never rewritten.
     """
     scenario = load_scenario(REPO / "config" / "scenario_011_terminal_dense.toml")
@@ -238,12 +236,12 @@ def test_tracks_csv_reports_each_scan_as_mht_saw_it_then(tmp_path: Path) -> None
         scenario.tracking, association="mht", existence=False, trackers=()
     )
     scenario = dataclasses.replace(scenario, tracking=tracking, verify={})
-    live = PlotTracker(scenario)
+    live = ScanTracker(scenario)
     seen = []
-    for rotation in scans(scenario, n_frames=2):
-        live.rotation(rotation)
+    for plot_scan in plot_scans(scenario, n_scans=2):
+        live.process(plot_scan)
         seen.append(live.bank)
-    evaluate.run(scenario, ["multitarget"], n_frames=2, out_dir=tmp_path, render=False)
+    verify.run(scenario, ["multitarget"], n_scans=2, out_dir=tmp_path, render=False)
     with (tmp_path / "tracks.csv").open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
     for k, bank in enumerate(seen):
@@ -283,20 +281,21 @@ def _crossing(seed: int) -> Scenario:
     )
 
 
-# Slow: 200 trials of 22 rotations of three trackers in 16 sector batches, about eight minutes.
+# Slow: 200 trials of 22 scans of three trackers in 16 sector batches, about eight minutes.
 @pytest.mark.slow
 def test_a_pair_closing_across_the_beam_swaps_under_gnn_and_as_often_under_mht(
     tmp_path: Path,
 ) -> None:
-    """A15, as measured: on V2's 10 deg across-range crossing GNN swaps; MHT is no better.
+    """As measured: on V2's 10 deg across-range crossing GNN swaps; MHT is no better.
 
     A swap is the stage's: either aircraft's GOSPA track changed from the scan before the
     closest approach to five after. The pair spends 16 scans inside one resolution cell, where
-    it gives one plot; 3 scans of deferral (n_scan) cannot bridge that, and both trackers'
+    it gives one plot; 3 scans of deferral (n_scan_depth) cannot bridge that, and both trackers'
     tracks take the merged plot and the clutter, so most swaps are tracks lost, not
-    exchanged. The prototype, 200 trials: GNN 0.780, MHT 0.845, JPDA 0.850 (lost 136, 143,
-    145; exchanged 20, 26, 24). Spec 011b's GNN >= 0.2 holds; its MHT <= 0.05 does not, so
-    the bounds are the prototype's 99 % Clopper-Pearson limits: GNN >= 0.69, MHT <= 0.91.
+    exchanged. The prototype, a 200-trial run of this scenario: GNN 0.780, MHT 0.845, JPDA 0.850
+    (lost 136, 143, 145; exchanged 20, 26, 24). The scenario was designed expecting GNN >= 0.2 and
+    MHT <= 0.05: GNN's holds and MHT's does not, so the bounds are the prototype's 99 %
+    Clopper-Pearson limits, GNN >= 0.69 and MHT <= 0.91.
     """
     swaps: dict[str, list[float]] = {
         "swap_fraction": [],
@@ -305,7 +304,7 @@ def test_a_pair_closing_across_the_beam_swaps_under_gnn_and_as_often_under_mht(
     }
     # One scene per trial: each is a run of the stage over its own seed.
     for trial in range(200):
-        report = evaluate.run(
+        report = verify.run(
             _crossing(20261110 + trial), ["multitarget"], out_dir=tmp_path, render=False
         )
         for key, values in swaps.items():

@@ -81,7 +81,7 @@ def scene_toml(
     targets: Sequence[tuple[float, Sequence[float], Sequence[float]]],
     *,
     bistatic: bool = False,
-    n_frames: int = 1,
+    n_scans: int = 1,
     extra: str = "",
 ) -> str:
     """Return a scenario TOML of the small radar and constant-velocity targets.
@@ -91,7 +91,7 @@ def scene_toml(
     tx = SMALL_FMCW
     text = (
         f'[scenario]\nname = "small-scene"\nseed = {SEED}\n\n'
-        f"[frames]\nstart_time_s = 0.0\nduration_s = {float(n_frames)}\nframe_rate_hz = 1.0\n\n"
+        f"[scans]\nstart_time_s = 0.0\nduration_s = {float(n_scans)}\nscan_period_s = 1.0\n\n"
         + _site("site.tx", TX_SITE if bistatic else RX_SITE)
         + (_site("site.rx", RX_SITE) if bistatic else "")
         + f"\n[[burst]]\ncarrier_frequency_hz = {tx.carrier_frequency_hz}\n"
@@ -123,6 +123,6 @@ def write_scene(tmp_path: Path) -> Callable[..., Scenario]:
 
 
 @pytest.fixture
-def one_frame_scenario(write_scene: Callable[..., Scenario]) -> Scenario:
-    """One frame of one 10 dBsm target 2 km north, closing at 30 m/s, monostatic."""
+def one_scan_scenario(write_scene: Callable[..., Scenario]) -> Scenario:
+    """One scan of one 10 dBsm target 2 km north, closing at 30 m/s, monostatic."""
     return write_scene([(10.0, (0.0, 2000.0, 0.0), (0.0, -30.0, 0.0))])

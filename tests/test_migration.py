@@ -3,8 +3,8 @@
 Unit tests run on small cubes built in the range-frequency domain, where an echo is
 ``|P(f)|^2 exp(-j 2 pi (f0 + f) R_b(t) / c)``, so the truth is the model itself. The O(N^2)
 DFT keystone and the Radon-Fourier transform are oracles here, not library code. The slow
-tests run scenario 004's full-size chain: CFAR on the uncorrected and corrected maps (A3, A4)
-and the fold-factor search (A6), 100 and 200 trials.
+tests run scenario 004's full-size chain: CFAR on the uncorrected and corrected maps
+and the fold-factor search, 100 and 200 trials.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 from scipy.signal import czt
 
-from radar_forge import evaluate
+from radar_forge import verify
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
 from radar_forge.detection import cfar_detect
 from radar_forge.dsp import doppler_fft, matched_filter
@@ -36,7 +36,7 @@ from radar_forge.signal import RangeGate, lfm_chirp
 REPO = Path(__file__).resolve().parents[1]
 
 # A small C-band cube: 256 pulses, 64 range bins of c / f_s, the scenario's 5 % fractional
-# bandwidth; 45 m/s, under half the 100 m/s rate span, walks 6.9 bins in the 128 ms dwell.
+# bandwidth; 45 m/s, under half the 100 m/s rate span, walks 6.9 bins in the 128 ms burst.
 CARRIER_HZ = 6.0e9
 SAMPLE_RATE_HZ = 360.0e6
 BANDWIDTH_HZ = 300.0e6
@@ -117,7 +117,7 @@ def _settings_fields(scenario: object) -> dict[str, object]:
 
 class TestRangeSpectrum:
     def test_matched_filter_output_has_the_spectrum_x_times_p_conjugate(self) -> None:
-        """A17: the range spectrum of a compression is X(f) P*(f), in the convolution length.
+        """The range spectrum of a compression is X(f) P*(f), in the convolution length.
 
         Catches a sign flip in the frequency axis or a conjugate on the wrong side. The group
         delay n_ref - 1 is rolled back first, so the product holds exactly; rtol 1e-12 is a few
@@ -145,7 +145,7 @@ class TestRangeSpectrum:
 
 class TestKeystone:
     def test_chirp_z_equals_the_dft_interpolation_oracle(self) -> None:
-        """A16: Bluestein's chirp-z keystone is the O(N^2) band-limited interpolation.
+        """Bluestein's chirp-z keystone is the O(N^2) band-limited interpolation.
 
         rtol 1e-10: both are float64 sums of 64 terms of unit size.
         """
@@ -174,7 +174,7 @@ class TestKeystone:
 
     @pytest.mark.parametrize("method", ["czt", "sinc"])
     def test_walk_is_removed_for_two_velocities_at_once(self, method: str) -> None:
-        """A2 in small: each target's peak track stays within half a bin after the keystone.
+        """On a small cube: each target's peak track stays within half a bin after the keystone.
 
         Two speeds in one cube, so a velocity-dependent correction cannot pass. The end pulses
         ring and are excluded; the sinc baseline's truncation shows in its loss, not here.
@@ -220,7 +220,7 @@ class TestKeystone:
 
 class TestFoldFactor:
     def test_search_finds_the_fold_of_an_ambiguous_target(self) -> None:
-        """A6 in small: a target at 1.4 PRFs of Doppler keystones at F = 1, not at the alias.
+        """On a small cube: a target at 1.4 PRFs of Doppler keystones at F = 1, not at the alias.
 
         At 10 GHz the band is 3 % of the carrier, so 1.4 PRFs stays in fold 1 across it; rate
         -1.4 lambda PRF is closing (positive Doppler) and walks 6.5 bins.
@@ -263,10 +263,10 @@ class TestFoldFactor:
 
 class TestDopplerRate:
     def test_search_finds_the_acceleration_and_recovers_the_peak(self) -> None:
-        """A7 in small: the curve peaks within one step of the truth; the peak is restored.
+        """On a small cube: the curve peaks within one step of the truth; the peak is restored.
 
         At 10 GHz, -100 m/s^2 spreads 13.6 Doppler bins and bends the range a quarter of a bin;
-        the reference is the same target at constant rate. 0.3 dB is spec A4's bound.
+        the reference is the same target at constant rate. 0.3 dB is the allowed loss.
         """
         carrier_hz, acceleration_mps2 = 10.0e9, -100.0
         data = _model_cube(
@@ -286,10 +286,10 @@ class TestDopplerRate:
         assert 10 * np.log10(after / ideal) > -0.3
 
     def test_second_order_keystone_straightens_a_quadratic_range_history(self) -> None:
-        """A18: a target accelerating from rest at pulse 0, 6 bins of curvature, < 0.5 bin.
+        """A target accelerating from rest at pulse 0, 6 bins of curvature, < 0.5 bin.
 
         At 1 GHz (30 % fractional bandwidth) the Doppler ends at 524 Hz, under PRF / 2, so
-        slow time is not aliased. Pulses the lowest frequency reads past the dwell, where DFT
+        slow time is not aliased. Pulses the lowest frequency reads past the burst, where DFT
         interpolation wraps, are left out: the first (N - 1) / max sqrt(f0 / (f0 + f)).
         """
         carrier_hz, n_pulses = 1.0e9, 128
@@ -326,7 +326,7 @@ class TestIntegratedPeak:
 
 @pytest.fixture(scope="module")
 def full_size(request: pytest.FixtureRequest) -> dict[str, object]:
-    """Scenario 004's three variants at frame 0: radar, gate, and the noiseless compressed cube."""
+    """Scenario 004's three variants at scan 0: radar, gate, and the noiseless compressed cube."""
     found: dict[str, object] = {}
     for variant in ("k1", "k2", "k3"):
         scenario = load_scenario(REPO / "config" / f"scenario_004_keystone_{variant}.toml")
@@ -379,7 +379,7 @@ def _detected_fraction(
 @pytest.mark.slow
 @pytest.mark.parametrize("variant", ["k1", "k2", "k3"])
 def test_cfar_misses_the_uncorrected_target_and_finds_the_corrected_one(full_size, variant):
-    """A3 and A4: at 28.89 dB, CA-CFAR at Pfa 1e-6 finds the target in <= 5 % of uncorrected
+    """At 28.89 dB, CA-CFAR at Pfa 1e-6 finds the target in <= 5 % of uncorrected
     maps and >= 95 % of corrected ones, 100 trials each."""
     scenario, _, clean = full_size[variant]
     corrected = compensate_migration(clean, scenario.radar, **_settings_fields(scenario)).data_rfst
@@ -395,7 +395,7 @@ def test_cfar_misses_the_uncorrected_target_and_finds_the_corrected_one(full_siz
 # Slow: 200 keystones and fold searches of 1024 pulses.
 @pytest.mark.slow
 def test_k3_fold_factor_is_found_in_every_noisy_trial(full_size):
-    """A6: F = 1 in 200 of 200 trials at 28.89 dB.
+    """F = 1 in 200 of 200 trials at 28.89 dB.
 
     K3's radar, target and noise per sample, through a 256-sample gate opening 150 bins short
     of the target: the fold factor does not depend on the gate's length, and the search costs
@@ -416,7 +416,7 @@ def test_k3_fold_factor_is_found_in_every_noisy_trial(full_size):
     assert found == [1] * 200
 
 
-# Slow: the keystone stage on a full 1024-pulse frame.
+# Slow: the keystone stage on a full 1024-pulse scan.
 @pytest.mark.slow
 def test_a_dechirp_only_loss_asked_of_a_constant_rate_config_is_measured(tmp_path):
     """Regression: K1 asking for dechirp_only_loss_db once raised KeyError in the check.
@@ -427,8 +427,8 @@ def test_a_dechirp_only_loss_asked_of_a_constant_rate_config_is_measured(tmp_pat
     text = (REPO / "config" / "scenario_004_keystone_k1.toml").read_text(encoding="utf-8")
     path = tmp_path / "k1.toml"
     path.write_text(text + "dechirp_only_loss_db = -25.78\n", encoding="utf-8")
-    report = evaluate.run(
-        load_scenario(path), ["keystone"], n_frames=1, out_dir=tmp_path, render=False
+    report = verify.run(
+        load_scenario(path), ["keystone"], n_scans=1, out_dir=tmp_path, render=False
     )
     assert not report.failures
     # atol 1e-9 dB: the identity filter is one FFT round trip of the same cube.

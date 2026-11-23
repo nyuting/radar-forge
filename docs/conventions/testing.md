@@ -9,7 +9,7 @@ and every warning is an error.
 `tests/` mirrors `src/radar_forge/`: one test module per library module at the top level
 (`test_radar.py`, `test_propagation.py`, `test_signal.py`, `test_dsp.py`, `test_detection.py`,
 `test_clustering.py`, `test_constants.py`), `tests/tracking/` for the tracking package, and `tests/scripts/` for
-`scripts/`. The modules that run a scenario (`scenario`, `pipeline`, `evaluate`, `stages`, `plots`)
+`scripts/`. The modules that run a scenario (`scenario`, `pipeline`, `verify`, `figures`)
 are tested end to end by `test_pipeline.py`, `test_scenarios.py` (each shipped scenario against its
 `[verify]` table) and `tests/scripts/test_run_scenario.py`. Package-wide checks are in
 `test_conventions.py`, budgets in `test_performance.py`, golden data in `tests/data/golden/`. A test
@@ -55,9 +55,9 @@ Only where no analytic truth exists, only in `tests/data/golden/` (the pre-commi
 binary arrays elsewhere), kilobytes not megabytes, with a script that recreates it from a seed
 (`scripts/regen_golden.py` writes `fingerprints.csv`). Regenerating it is a behaviour change with
 its own commit. Prefer derived statistics (peak position, detection count) over a raw array. A
-config too costly for three frames in the fast suite is listed in that script's `FAST_FRAMES`,
-which sets the frames it runs unmarked and is fingerprinted over (0: slow tier only); its three
-frames then run under `slow`.
+config too costly for three scans in the fast suite is listed in that script's `FAST_SCANS`,
+which sets the scans it runs unmarked and is fingerprinted over (0: slow tier only); its three
+scans then run under `slow`.
 
 ## 7. Markers
 
@@ -157,7 +157,7 @@ drop; a sample of deletions is checked by breaking what they guarded.
 - The assertion runs over an empty set (`np.all([])` is `True`): assert it is non-empty.
 - The bound is looser than the bug: assert the exact bin, the closed-form value.
 - The identity holds by construction: compare with something that shares no code.
-- Two quantities coincide in the fixture (`time_s = arange(n)` is the frame index).
+- Two quantities coincide in the fixture (`time_s = arange(n)` is the scan index).
 - The geometry makes the effect vanish: choose one where it is large.
 - Only "something happened" is asserted: assert the data, with non-default arguments.
 

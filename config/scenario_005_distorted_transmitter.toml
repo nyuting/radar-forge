@@ -17,10 +17,10 @@ rcs_dbsm = 10.0        # 10 m^2, Swerling 0 (non-fluctuating)
 trajectory_path = "../data/flight_coordinates.csv"
 altitude_m = 1500.0    # the CSV has no altitude column; held constant
 
-[frames]
+[scans]
 start_time_s = 0.0
 duration_s = 120.0     # scenario 001's window: 33.28-36.72 km bistatic
-frame_rate_hz = 1.0
+scan_period_s = 1.0
 
 [site.tx]
 # The Duke Receiver: 101 Science Drive, Durham NC. Transmit and receive antennas side by
@@ -50,10 +50,10 @@ n_range_lags = 1024
 gain_rx_dbi = 30.0
 noise_figure_db = 3.0
 
-# What antenna isolation and an analog canceller leave at the ADC, per sample over the
+# What antenna isolation and an analogue canceller leave at the ADC, per sample over the
 # noise k T0 F f_s = -131.94 dBW: the front end's short impulse response at lags 0-2.
 [leakage]
-lags = [0, 1, 2]
+lags_samples = [0, 1, 2]
 inr_db = [40.0, 30.0, 20.0]
 
 # Four buildings and stretches of terrain, on whole lags of c / f_s: routes of 16, 40, 80
@@ -88,7 +88,7 @@ n_taps = 192
 odd_orders = [1, 3]
 
 # Cell-averaging CFAR along range. The map holds 2048 x 1024 cells, so pfa = 1e-6 is about
-# two false alarms a frame; the ideal threshold is 11.40 dB.
+# two false alarms a scan; the ideal threshold is 11.40 dB.
 [detection]
 pfa = 1e-6
 n_train = 16
@@ -99,38 +99,38 @@ max_bistatic_range_rate_mps = 400.0   # 200 m/s radial
 
 [verify]
 stages = ["geometry", "iq", "rd", "detect", "leakage"]
-# Fraction of frames whose true bistatic range and rate lie on the map, unfolded: the window
+# Fraction of scans whose true bistatic range and rate lie on the map, unfolded: the window
 # runs 33.28-36.72 km against the 38.37 km of lags, and -110.6...+78.6 m/s against +-305.9.
 truth_in_map_fraction = [1.0, 1.0]
-# P_r N / (k T0 F f_s) on an exact bin at frame 0 (R = 17 560.7 m), by hand: P_r = -163.046 dBW,
+# P_r N / (k T0 F f_s) on an exact bin at scan 0 (R = 17 560.7 m), by hand: P_r = -163.046 dBW,
 # noise -131.944 dBW a sample, N = 819 200 (59.134 dB).
 expected_snr_db = 28.03
 snr_tolerance_db = 0.01
 # Five standard errors of a mean over 819 200 complex samples, 5 x 4.343 / sqrt(N) dB.
 noise_tolerance_db = 0.025
-# Scenario 005 A8: the CFAR peak within one bin of the truth on both axes, every frame: one
+# The CFAR peak within one bin of the truth on both axes, every scan: one
 # lag, c / f_s = 37.474 m bistatic, and one Doppler bin, lambda / CPI = 0.29874 m/s bistatic.
 truth_within_bins = 1.0
 detection_fraction = 1.0
 rate_tolerance_mps = 0.298741
-# Scenario 005 A13: with the third-order columns every path is in the span again, P = 384:
+# With the third-order columns every path is in the span again, P = 384:
 # CA = 40.945 + 0.002 = 40.947 dB. The distortion's power involves |x|^6, a heavy-tailed
 # statistic: its estimate from N samples scatters about 0.02 dB, so 0.1 dB is five sigma.
 cancellation_depth_db = 40.947
 cancellation_tolerance_db = 0.1
-# Not a spec criterion (A9 gives P3's linear baseline, 22.14 dB, a slow test): with the
-# distortion in the span the floor is the clean one, (1 - 384/N), -0.002 dB.
+# With the distortion in the span the floor is the clean one, (1 - 384/N), -0.002 dB. A linear fit
+# leaves it 22.14 dB up: the slow test of the linear basis in tests/test_clutter.py.
 floor_rise_db = 0.0
 floor_rise_tolerance_db = 1.0
-# Scenario 005 A10: within 1.0 dB of the clean run, which carries the same amplifier: the
+# Within 1.0 dB of the clean run, which carries the same amplifier: the
 # target's Bussgang loss, |beta|^2 = -0.057 dB, is in both.
 sinr_loss_db = 0.0
 sinr_loss_tolerance_db = 1.0
-# Scenario 005 A11: the parallel-Hammerstein fit detects the target every frame.
-detections_per_frame = 1
-uncancelled_detections_per_frame = 0
-# Scenario 005 §3.4: the leakage checks hold on its five acceptance frames, 0-4, where the
-# target sits on a Doppler bin at 26.5-27.2 dB clean SINR, the level the tolerances above were
-# derived at (the rd and detect stages check A8 over the whole window). Past them the clean SINR
-# falls to 18.9 dB with straddle, and the residual's swing in the peak cell outgrows 1.0 dB.
-acceptance_frames = 5
+# The parallel-Hammerstein fit detects the target every scan.
+detections_per_scan = 1
+uncancelled_detections_per_scan = 0
+# The leakage checks hold on the five acceptance scans, 0-4, where the target sits on a Doppler
+# bin at 26.5-27.2 dB clean SINR, the level the tolerances above were derived at (the rd and detect
+# stages check the target within one bin over the whole window). Past them the clean SINR falls to
+# 18.9 dB with straddle, and the residual's swing in the peak cell outgrows 1.0 dB.
+acceptance_scans = 5

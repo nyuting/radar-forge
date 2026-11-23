@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Write tests/data/golden/fingerprints.csv: a dozen scalars per config/*.toml, three frames.
+"""Write tests/data/golden/fingerprints.csv: a dozen scalars per config/*.toml, three scans.
 
-A config listed in ``FAST_FRAMES`` is fingerprinted over its fast frames instead.
+A config listed in ``FAST_SCANS`` is fingerprinted over its fast scans instead.
 
     uv run python scripts/regen_golden.py
 
-Each row is one scenario's three-frame run through every stage its ``[verify]`` table names
-(``radar_forge.evaluate.run``): where the peak lands, how bright it and the floor are, how many
+Each row is one scenario's three-scan run through every stage its ``[verify]`` table names
+(``radar_forge.verify.run``): where the peak lands, how bright it and the floor are, how many
 detections, and how well the tracker did. ``tests/test_scenarios.py`` compares a fresh run
 against it at rtol 1e-9, so regenerating it is a behaviour change: review the diff, and commit
 it on its own with the reason.
@@ -20,12 +20,12 @@ import sys
 import tempfile
 from pathlib import Path
 
-from radar_forge.evaluate import run
 from radar_forge.scenario import load_scenario
+from radar_forge.verify import run
 
 REPO = Path(__file__).resolve().parent.parent
 GOLDEN = REPO / "tests" / "data" / "golden" / "fingerprints.csv"
-N_FRAMES = 3
+N_SCANS = 3
 FINGERPRINT = (
     "predicted_snr_db",
     "iq_noise_power_dbw",
@@ -47,32 +47,32 @@ FINGERPRINT = (
     "n_false_plots",
     "n_false_alarms",
 )
-# Frames a config runs in the fast suite and its fingerprint, where three would cost too much:
-# its three-frame run moves to the slow tier, and 0 runs it there only, fingerprint included.
-FAST_FRAMES: dict[str, int] = {
+# Scans a config runs in the fast suite and its fingerprint, where three would cost too much:
+# its three-scan run moves to the slow tier, and 0 runs it there only, fingerprint included.
+FAST_SCANS: dict[str, int] = {
     "scenario_004_keystone_k1": 1,
     "scenario_004_keystone_k2": 1,
     "scenario_004_keystone_k3": 1,
     "scenario_005_distorted_transmitter": 1,
     "scenario_005_static_leakage": 1,
     "scenario_005_varying_clutter": 1,
-    # Scenario 006: a 16-channel cube is 65.5 MB a frame, and the doa stage maps it again.
+    # Scenario 006: a 16-channel cube is 65.5 MB a scan, and the doa stage maps it again.
     "scenario_006_parallel_resolved": 1,
     "scenario_006_parallel_subrayleigh": 1,
     "scenario_006_parallel_sweep": 1,
 }
 
 
-def fingerprint_frames(stem: str) -> int:
-    """Return the frames a config's fingerprint is taken over: its fast frames, else three."""
-    return FAST_FRAMES.get(stem) or N_FRAMES
+def fingerprint_scans(stem: str) -> int:
+    """Return the scans a config's fingerprint is taken over: its fast scans, else three."""
+    return FAST_SCANS.get(stem) or N_SCANS
 
 
 def fingerprint(path: Path) -> dict[str, float]:
-    """Return the fingerprint scalars of a scenario's three-frame run; nan where none."""
+    """Return the fingerprint scalars of a scenario's three-scan run; nan where none."""
     with tempfile.TemporaryDirectory() as out_dir:
-        n_frames = fingerprint_frames(path.stem)
-        report = run(load_scenario(path), n_frames=n_frames, out_dir=out_dir, render=False)
+        n_scans = fingerprint_scans(path.stem)
+        report = run(load_scenario(path), n_scans=n_scans, out_dir=out_dir, render=False)
     return {name: report.values.get(name, math.nan) for name in FINGERPRINT}
 
 

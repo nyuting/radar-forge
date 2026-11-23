@@ -75,6 +75,7 @@ __all__ = [
     "greedy_nearest_neighbour",
     "joint_probabilistic_data_association",
     "murty_k_best",
+    "non_assignment_cost",
     "probabilistic_data_association",
 ]
 
@@ -96,6 +97,21 @@ def chi_square_gate_threshold(probability: float, dim: int) -> float:
         msg = f"need 0 < probability < 1 and dim >= 1; got {probability}, {dim}."
         raise ValueError(msg)
     return float(chi2.ppf(probability, dim))
+
+
+def non_assignment_cost(detection_probability: float, gate_probability: float) -> float:
+    r"""Return :math:`\ln[P_D/(1 - P_D P_G)]`, the cost at which a hit and a miss score alike.
+
+    A hit adds :math:`\ln(P_D g/\lambda)` to a track's score and a miss :math:`\ln(1 - P_D P_G)`,
+    and a pair costs :math:`-\ln g + \ln\lambda` (:func:`association_cost`): a pair costing more
+    is better left unassigned.
+
+    References
+    ----------
+    Blackman [4], the track score as a log-likelihood ratio.
+    """
+    p_d = detection_probability
+    return math.log(p_d / (1 - p_d * gate_probability))
 
 
 def gate(nis: ArrayLike, threshold: float) -> NDArray[np.bool_]:
@@ -298,7 +314,7 @@ class Associator(Protocol):
         log_likelihood: ArrayLike,
         in_gate: ArrayLike,
         *,
-        clutter_intensity: ArrayLike | None,
+        clutter_density: ArrayLike | None,
         existence: ArrayLike | None = None,
         joint: bool = True,
     ) -> AssociationWeights | None:
@@ -355,17 +371,17 @@ class AssociationWeights:
 def _ratios(
     log_likelihood: ArrayLike,
     in_gate: ArrayLike,
-    clutter_intensity: ArrayLike | None,
+    clutter_density: ArrayLike | None,
     detection_probability: float,
     gate_probability: float,
     existence: ArrayLike | None,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     r"""Return :math:`P_D r_t g_{tj} / \lambda_j` (zero outside the gate), the miss terms and r."""
     log_g, mask = _check(log_likelihood, in_gate)
-    clutter = np.asarray(np.nan if clutter_intensity is None else clutter_intensity, dtype=float)
+    clutter = np.asarray(np.nan if clutter_density is None else clutter_density, dtype=float)
     prior = np.ones(len(log_g)) if existence is None else np.asarray(existence, dtype=np.float64)
     if clutter.shape != (log_g.shape[1],) or not np.all(np.isfinite(clutter) & (clutter > 0)):
-        msg = f"clutter_intensity must be positive and finite, one per measurement; got {clutter}."
+        msg = f"clutter_density must be positive and finite, one per measurement; got {clutter}."
         raise ValueError(msg)
     if not (0 < detection_probability <= 1 and 0 < gate_probability <= 1):
         msg = f"need 0 < P_D, P_G <= 1; got {detection_probability}, {gate_probability}."
@@ -406,7 +422,7 @@ def probabilistic_data_association(
     log_likelihood: ArrayLike,
     in_gate: ArrayLike,
     *,
-    clutter_intensity: ArrayLike | None,
+    clutter_density: ArrayLike | None,
     detection_probability: float,
     gate_probability: float,
     existence: ArrayLike | None = None,
@@ -416,7 +432,7 @@ def probabilistic_data_association(
     :math:`\beta_j = L_j / (b + \sum_k L_k)`, :math:`\beta_0 = b / (b + \sum_k L_k)`, with
     :math:`L_j = P_D r g_j / \lambda_j` and :math:`b = 1 - P_D P_G r`; with ``existence`` r
     this is IPDA, and r is updated too. ``log_likelihood`` is :math:`\ln g`, ``(n_tracks,
-    n_meas)``; ``clutter_intensity`` λ per measurement, in its units.
+    n_meas)``; ``clutter_density`` λ per measurement, in its units.
 
     References
     ----------
@@ -425,7 +441,7 @@ def probabilistic_data_association(
     ratio, miss, prior = _ratios(
         log_likelihood,
         in_gate,
-        clutter_intensity,
+        clutter_density,
         detection_probability,
         gate_probability,
         existence,
@@ -502,7 +518,7 @@ def joint_probabilistic_data_association(
     log_likelihood: ArrayLike,
     in_gate: ArrayLike,
     *,
-    clutter_intensity: ArrayLike | None,
+    clutter_density: ArrayLike | None,
     detection_probability: float,
     gate_probability: float,
     existence: ArrayLike | None = None,
@@ -532,7 +548,7 @@ def joint_probabilistic_data_association(
     ratio, miss, prior = _ratios(
         log_likelihood,
         in_gate,
-        clutter_intensity,
+        clutter_density,
         detection_probability,
         gate_probability,
         existence,
@@ -589,7 +605,7 @@ class JointProbabilisticDataAssociation:
         log_likelihood: ArrayLike,
         in_gate: ArrayLike,
         *,
-        clutter_intensity: ArrayLike | None,
+        clutter_density: ArrayLike | None,
         existence: ArrayLike | None = None,
         joint: bool = True,
     ) -> AssociationWeights | None:
@@ -598,7 +614,7 @@ class JointProbabilisticDataAssociation:
             return probabilistic_data_association(
                 log_likelihood,
                 in_gate,
-                clutter_intensity=clutter_intensity,
+                clutter_density=clutter_density,
                 detection_probability=self.detection_probability,
                 gate_probability=self.gate_probability,
                 existence=existence,
@@ -606,7 +622,7 @@ class JointProbabilisticDataAssociation:
         return joint_probabilistic_data_association(
             log_likelihood,
             in_gate,
-            clutter_intensity=clutter_intensity,
+            clutter_density=clutter_density,
             detection_probability=self.detection_probability,
             gate_probability=self.gate_probability,
             existence=existence,

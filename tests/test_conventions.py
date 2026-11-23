@@ -1,15 +1,16 @@
 """Package-wide conventions: the import is light, the API explicit, the docs run.
 
-Four rules from ``CLAUDE.md`` and ``docs/conventions/style.md`` that hold for the whole
+Five rules from ``CLAUDE.md`` and ``docs/conventions/style.md`` that hold for the whole
 library and no module can test of itself:
 
 * ``import radar_forge`` needs no extra: matplotlib, the ``visualisation`` extra, is imported
-  only inside the functions that draw (scenario 001's acceptance A8, kept here);
+  only inside the functions that draw;
 * every module declares ``__all__``, exports no private or repeated name, and every type a
   public callable returns is on its surface; array arguments are ``ArrayLike`` in, float64 out;
 * every docstring example runs and prints what it claims, and every export is documented;
 * every ``python`` block of ``docs/user-guide/`` runs, and prints the ``text`` block after it
-  (a last line ``...`` stands for any further lines).
+  (a last line ``...`` stands for any further lines);
+* no Markdown equation uses a LaTeX macro that GitHub refuses to render.
 """
 
 from __future__ import annotations
@@ -31,18 +32,17 @@ import pytest
 
 import radar_forge
 from radar_forge.dsp import window
-from radar_forge.signal import (
-    bistatic_range_from_beat_frequency_m,
-    range_resolution_m,
-    sweep_rate_hzps,
-)
+from radar_forge.propagation import bistatic_range_from_delay_m, wavenumber_radpm
+from radar_forge.radar import range_resolution_m, sweep_rate_hzps
+from radar_forge.signal import bistatic_range_from_beat_frequency_m
+from radar_forge.units import amplitude_to_db, db_to_amplitude, db_to_power, power_to_db
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 MODULE_NAMES = sorted(
     info.name for info in pkgutil.walk_packages(radar_forge.__path__, prefix="radar_forge.")
 )
 PUBLIC_MODULE_NAMES = [n for n in MODULE_NAMES if not n.rsplit(".", 1)[-1].startswith("_")]
-PACKAGE_NAMES = ["radar_forge.stages", "radar_forge.tracking"]
+PACKAGE_NAMES = ["radar_forge.tracking", "radar_forge.verify"]
 
 
 def test_package_imports_and_has_version():
@@ -57,7 +57,7 @@ def test_package_imports_and_has_version():
 def test_importing_the_library_does_not_pull_in_matplotlib():
     """Regression: one convenience import of pyplot at module level costs every user the extra."""
     code = (
-        "import sys, radar_forge, radar_forge.plots, radar_forge.evaluate; "
+        "import sys, radar_forge, radar_forge.figures, radar_forge.verify; "
         "assert 'matplotlib' not in sys.modules, 'matplotlib imported'"
     )
     result = subprocess.run(
@@ -66,19 +66,19 @@ def test_importing_the_library_does_not_pull_in_matplotlib():
     assert result.returncode == 0, result.stderr
 
 
-# Slow: a fresh interpreter, so no earlier import of radar_forge.stages hides a missing one.
+# Slow: a fresh interpreter, so no earlier import of radar_forge.verify hides a missing one.
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "first_import", ["radar_forge.evaluate", "radar_forge.stages", "radar_forge.stages.core"]
+    "first_import", ["radar_forge.verify.stepper", "radar_forge.verify", "radar_forge.verify.chain"]
 )
 def test_the_core_stages_register_in_their_run_order(first_import: str) -> None:
     """Whichever module is imported first, the five core stages register first, in run order.
 
-    Catches the stages import at the foot of evaluate.py going missing or going lazy, and
-    either stages import breaking on the partly initialised module it passes through.
+    Catches a stage import in verify/__init__.py going missing, lazy or out of order, and a
+    stage module's import breaking on the partly initialised package it passes through.
     """
     code = (
-        f"import {first_import}; from radar_forge.evaluate import STAGES; "
+        f"import {first_import}; from radar_forge.verify import STAGES; "
         "assert list(STAGES)[:5] == ['geometry', 'iq', 'rd', 'detect', 'track'], list(STAGES); "
         "assert list(STAGES).index('keystone') > 4, list(STAGES); "
         "assert list(STAGES).index('leakage') > 4, list(STAGES); "
@@ -111,6 +111,12 @@ def test_no_name_is_exported_twice_or_private(module_name: str) -> None:
         pytest.param(range_resolution_m, ([1e9, 2e9],), id="range_resolution_m"),
         pytest.param(sweep_rate_hzps, ([1e9, 2e9], [1e-5, 2e-5]), id="sweep_rate_hzps"),
         pytest.param(bistatic_range_from_beat_frequency_m, ([1e6], 1e9, 4e-5), id="from_beat"),
+        pytest.param(power_to_db, ([1.0, 2.0],), id="power_to_db"),
+        pytest.param(db_to_power, ([1.0, 2.0],), id="db_to_power"),
+        pytest.param(amplitude_to_db, ([1.0, 2.0],), id="amplitude_to_db"),
+        pytest.param(db_to_amplitude, ([1.0, 2.0],), id="db_to_amplitude"),
+        pytest.param(bistatic_range_from_delay_m, ([1e-6, 2e-6],), id="from_delay"),
+        pytest.param(wavenumber_radpm, ([1e9, 2e9],), id="wavenumber_radpm"),
     ],
 )
 def test_a_python_list_is_accepted_and_a_float64_array_returned(function, arguments):
@@ -121,7 +127,7 @@ def test_a_python_list_is_accepted_and_a_float64_array_returned(function, argume
 
 
 def test_a_window_is_returned_as_a_fresh_writable_array():
-    """Two calls must not share a buffer, or scaling one dwell's window scales every other."""
+    """Two calls must not share a buffer, or scaling one burst's window scales every other."""
     first, second = window("hann", 16), window("hann", 16)
     first *= 2.0
     np.testing.assert_allclose(window("hann", 16), second, rtol=0.0, atol=0.0)
@@ -236,3 +242,134 @@ def test_guide_example_prints_what_the_guide_shows(source, expected, monkeypatch
         wanted = wanted[:-1]
         printed = printed[: len(wanted)]
     assert printed == wanted
+
+
+# GitHub replaces the whole equation with "The following macros are not allowed: ...".
+_REFUSED_MACRO_RE = re.compile(r"\\(operatorname)\b")
+
+
+def test_no_markdown_equation_uses_a_macro_github_refuses() -> None:
+    """Regression: page 2's azimuth showed an error on GitHub; ``\\mathrm{atan2}`` renders."""
+    tracked = subprocess.run(
+        ["git", "ls-files", "*.md"], capture_output=True, text=True, check=True, cwd=REPO
+    ).stdout.split()
+    assert tracked, "git listed no Markdown file: the test would pass without reading anything"
+    found = []
+    for name in tracked:
+        # Code is not rendered as maths: drop fenced blocks and inline code spans first.
+        text = _BLOCK_RE.sub("", (REPO / name).read_text(encoding="utf-8"))
+        text = re.sub(r"`[^`\n]*`", "", text)
+        found += [f"{name}: \\{match.group(1)}" for match in _REFUSED_MACRO_RE.finditer(text)]
+    assert found == []
+
+
+# What a deleted spec left in comments: a decision number, an acceptance-criterion number, or a
+# pointer into a spec that no longer exists. The 011 configs name their aircraft with the same
+# letter and the first digits, so a bare number below the sixth is not a tag unless the words
+# around it say so (a spec, a criterion, a sub-item letter); ruff's codes have three digits.
+_QUOTE_OR_REFERENCE = (
+    r"""(?<!["'])(?<![Ee]q\. \()(?<!Fig\. )(?<!Figure )(?<!Table )(?<!Appendix )"""
+)
+_TAG_RES = {
+    "decision tag": (
+        re.compile(r"\bdecisions?\s+D\d{1,2}\b", re.IGNORECASE),
+        re.compile(r"\b(?:scenario|spec)\s+0\d\d[a-z]?\s+D\d{1,2}\b", re.IGNORECASE),
+        re.compile(r"\bD\d{1,2}\s+item\b"),
+        re.compile(r"[A-Za-z] \(D\d{1,2}\)"),
+        re.compile(r'(?:#|""")\s*D\d{1,2}:'),
+    ),
+    "criterion tag": (
+        re.compile(_QUOTE_OR_REFERENCE + r"""\bA(?:[6-9]|[12]\d)\b(?!["'])"""),
+        re.compile(r"\b(?:spec|criteri(?:on|a)|acceptance)\s+A\d{1,2}\b", re.IGNORECASE),
+        re.compile(r"\b(?:scenario|spec)\s+0\d\d[a-z]?\s+(?:A\d{1,2}|criteri(?:on|a)\s+\d)", re.I),
+        re.compile(r"\bA\d{1,2}\([a-z]\)"),
+        re.compile(r'(?:^|#|""")\s*Criteri(?:on|a)\s+\d+(?:\s+and\s+\d+)?[:,]'),
+    ),
+}
+_SPEC_POINTER_RE = re.compile(r"\bspec(?:ification)?[ -](\d{3})[a-z]?\b", re.IGNORECASE)
+_ADVICE = (
+    "Say the reason in a clause, or point at what exists: a [verify] key, a test, tracker-001."
+)
+
+
+def _tags_in(line: str, live_specs: set[str]) -> list[str]:
+    """Return the kinds of dead reference a line holds, given the numbers of the live specs."""
+    kinds = [kind for kind, patterns in _TAG_RES.items() if any(p.search(line) for p in patterns)]
+    if any(m.group(1) not in live_specs for m in _SPEC_POINTER_RE.finditer(line)):
+        kinds.append("pointer into a deleted spec")
+    return kinds
+
+
+# This file holds the examples the patterns must catch, so the scan leaves it out.
+THIS_FILE = "tests/test_conventions.py"
+
+
+def test_no_file_outside_spec_holds_a_decision_or_criterion_tag() -> None:
+    """A tag names a line of a spec that is deleted when its scenario lands."""
+    tracked = subprocess.run(
+        [
+            "git",
+            "ls-files",
+            "-z",
+            "--",
+            ".",
+            ":!spec",
+            ":!uv.lock",
+            ":!*.csv",
+            ":!*.ipynb",
+            f":!{THIS_FILE}",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=REPO,
+    ).stdout.split("\0")
+    tracked = [name for name in tracked if name]
+    assert tracked, "git listed no file: the test would pass without reading anything"
+    # A spec NNN is live while spec/scenario-NNN-*.md exists; the rest were deleted with their PR.
+    live_specs = {path.name.split("-")[1] for path in (REPO / "spec").glob("scenario-*.md")}
+    found = []
+    for name in tracked:
+        data = (REPO / name).read_bytes()
+        if b"\0" in data:  # git's own test for a binary file: there is no comment to read
+            continue
+        for number, line in enumerate(data.decode("utf-8", errors="replace").splitlines(), 1):
+            found += [
+                f"{name}:{number}: {kind}: {line.strip()[:90]}"
+                for kind in _tags_in(line, live_specs)
+            ]
+    assert not found, "\n".join(found) + "\n" + _ADVICE
+
+
+@pytest.mark.parametrize(
+    ("line", "kinds"),
+    [
+        ("# Scenario 001 A5: every frame detected within one bin.", ["criterion tag"]),
+        ('    """A3(a): P_D = P_G = 1, one measurement per gate."""', ["criterion tag"]),
+        ("# Not a spec criterion; derived as A6. The 2 Hz copy", ["criterion tag"]),
+        ("# the cue spread (spec A14)", ["criterion tag"]),
+        (
+            "# (spec 011 D28; criteria A3, A18)",
+            ["decision tag", "criterion tag", "pointer into a deleted spec"],
+        ),
+        ("Scenario 003 criterion 8 is that the pictures exist", ["criterion tag"]),
+        ("# Criterion 1: 4-of-5 confirms on the fourth hit.", ["criterion tag"]),
+        ("covariance methods train on the chip's cells (D14)", ["decision tag"]),
+        ("# D29: track-oriented MHT runs inside the tracker loop", ["decision tag"]),
+        ("# the pair of aircraft (spec 011 §3.6)", ["pointer into a deleted spec"]),
+        ("# Spec 011b: the same plots also scored by GNN", ["pointer into a deleted spec"]),
+        # Legitimate text a looser pattern would flag.
+        ("# A4: the circuit", []),
+        ("the go-around aircraft (A1)", []),
+        ('name = "A6"', []),
+        ("see eq. (A12) of the appendix, and Fig. A7", []),
+        ("D1 = np.diff(range_m)", []),
+        ("np.sum(D1) + D2[0]", []),
+        ("criterion 2 of the Wald test", []),
+        ("ruff D100 and D213 check docstrings", []),
+        ("spec 007 is built later; see spec/tracker-001.md §5.4", []),
+        ("Tracker-001 §3: the UKF is the KF", []),
+    ],
+)
+def test_the_tag_patterns_fire_on_dead_references_and_only_on_those(line, kinds) -> None:
+    assert sorted(_tags_in(line, {"007", "008", "009", "010"})) == sorted(kinds)

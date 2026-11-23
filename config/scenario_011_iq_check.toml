@@ -3,21 +3,21 @@
 # of aircraft placed in radar coordinates, each pair's members on one bearing at
 # one velocity, so their separation holds for the whole run: 0.5, 1.5, 3 and 6
 # of the map's bistatic range bins (149.896 m). The rd stage detects as
-# scenario 003 does (pipeline.frame_plots); the multitarget stage measures Pd,
+# scenario 003 does (pipeline.scan_plots); the multitarget stage measures Pd,
 # the false-alarm rate over the cells away from the pairs, and the fraction of
-# frames each pair gives one detection: the merge the plot model draws with
+# scans each pair gives one detection: the merge the plot model draws with
 # P_u(d) = exp(-d^2/2). Azimuth is not modelled here: this checks the
-# range-Doppler half of the plot model (spec 011 §3.5).
+# range-Doppler half of the plot model.
 
 [scenario]
 name = "scenario-011-iq-check"
 description = "V5: scenario 001's S3 dual-PRF chain with four pairs of aircraft 0.5 to 6 range bins apart, measuring Pd, false-alarm rate and the merged-detection fraction the plot model assumes."
 seed = 20261109
 
-[frames]
+[scans]
 start_time_s = 0.0
 duration_s = 120.0
-frame_rate_hz = 1.0
+scan_period_s = 1.0
 
 [site.tx]
 # The Duke Receiver, monostatic, as scenario 001.
@@ -69,13 +69,13 @@ truth_in_map_fraction = [1.0, 1.0]
 noise_tolerance_db = 0.08
 # Noise-only maps hold 30 expected false alarms; the Poisson 99.9 % interval lies within two.
 pfa_tolerance_factor = 2.0
-# Spec 011 A13: the plot model is given Pd 0.99 for these targets (40 to 48 dB of SNR; a
+# The plot model is given Pd 0.99 for these targets (40 to 48 dB of SNR; a
 # target counts as detected when its pair's window holds a detection, so a merged pair or a
-# member masked by its partner in the CFAR's training cells counts both): over 120 frames of 8
+# member masked by its partner in the CFAR's training cells counts both): over 120 scans of 8
 # targets the 99 % binomial interval is [0.982, 0.997]; 1.0 measured, 960 of 960.
 pd_min = 0.982
-# Spec 011 A13: false alarms away from the pairs over the design Pfa times the cells left,
-# 170 expected over 120 frames; the 99 % Poisson upper bound is 205, a ratio of 1.21. 173
+# False alarms away from the pairs over the design Pfa times the cells left,
+# 170 expected over 120 scans; the 99 % Poisson upper bound is 205, a ratio of 1.21. 173
 # measured, 1.017.
 false_alarm_rate_max = 1.21
 

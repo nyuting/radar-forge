@@ -11,15 +11,15 @@ As always, leave `src/` alone.
 
 ## What TBD is
 
-The scenario 003 chain is **detect-before-track** (DBT). Every frame it thresholds the
+The scenario 003 chain is **detect-before-track** (DBT). Every scan it thresholds the
 range-Doppler map with CFAR, and hands the tracker only the cells that crossed. Anything below
-the threshold is gone for good. A target too dim to cross the threshold in any single frame is
-never tracked, even though its energy is there, frame after frame, in cells that line up along a
+the threshold is gone for good. A target too dim to cross the threshold in any single scan is
+never tracked, even though its energy is there, scan after scan, in cells that line up along a
 plausible trajectory.
 
 **Track-before-detect** keeps the unthresholded data. It accumulates evidence along candidate
-trajectories over several frames, and declares a target only when a whole trajectory's evidence
-is strong enough. The gain comes from integrating K frames of the target's energy. The price is
+trajectories over several scans, and declares a target only when a whole trajectory's evidence
+is strong enough. The gain comes from integrating K scans of the target's energy. The price is
 that you do not know the trajectory: you search over very many of them, and the best of many
 noise-only trajectories is much stronger than a typical one.
 
@@ -38,7 +38,7 @@ Read about them yourself; [Sources](#sources) says how we expect you to cite wha
 
 | # | Task | The question | Time |
 | :--- | :--- | :--- | :--- |
-| 2 | [How many dB does TBD buy?](tbd-dynamic-programming.md) | Build dynamic-programming TBD on scenario 003's maps. How far below the single-frame threshold can it go, and how close is that to the best any multi-frame detector could do? | about 2 days |
+| 2 | [How many dB does TBD buy?](tbd-dynamic-programming.md) | Build dynamic-programming TBD on scenario 003's maps. How far below the single-scan threshold can it go, and how close is that to the best any multi-scan detector could do? | about 2 days |
 | 3 | [Particle-filter TBD](tbd-particle-filter.md) | Build a particle filter that decides target existence from unthresholded maps. How quickly and reliably does it declare a dim target, and what does it cost? | about 2 days |
 | 4 | [Where can learning beat the textbook?](tbd-learned.md) | Put a learned component into a TBD detector. Where, if anywhere, does it beat the classical one at the same false-track rate? | about 2–3 days |
 
@@ -59,16 +59,16 @@ power first:
   copy next to the original or make the path absolute. Working out what power puts the target
   where you need it is part of your task.
 - Load it with `radar_forge.scenario.load_scenario` and step through
-  `radar_forge.pipeline.frames`. For each frame,
-  `range_doppler_product(frame.cubes[0], scenario.radars[0])` gives the complex map `rd_map`, of
+  `radar_forge.pipeline.scan_iq`. For each scan,
+  `range_doppler_product(scan.cubes[0], scenario.radars[0])` gives the complex map `rd_map`, of
   shape `(n_doppler, n_range)`, with its `range_axis_m` and `rate_axis_mps`. Power is
   `abs(rd_map) ** 2`. This map has not been thresholded.
-- Frames share one random generator, so consume them in order. Skipping or reordering frames
+- Scans share one random generator, so consume them in order. Skipping or reordering scans
   changes the noise.
 - The map's power is an unnormalised FFT output, not a calibrated power in watts. Normalise by an
   estimate of the noise level, and say which estimate you used.
-- Each frame carries the truth: `frame.truth.bistatic_range_m` and
-  `frame.truth.bistatic_range_rate_mps` (unfolded; twice the slant range and its rate here, as
+- Each scan carries the truth: `scan.truth.bistatic_range_m` and
+  `scan.truth.bistatic_range_rate_mps` (unfolded; twice the slant range and its rate here, as
   the map's axes are; positive receding). The map's rate axis folds at its edges; the
   waveform's unambiguous interval is something you should derive and check, not assume.
 
@@ -85,24 +85,24 @@ rely on it.
 Use these, or say exactly where and why you depart from them.
 
 - **SNR** is the per-cell signal-to-noise ratio in the range-Doppler map, after the coherent
-  integration of one frame. Say how you compute it, and whether it includes straddle loss: the
+  integration of one scan. Say how you compute it, and whether it includes straddle loss: the
   target rarely sits at the centre of a range and Doppler bin.
-- **K** is the number of frames a TBD decision uses.
+- **K** is the number of scans a TBD decision uses.
 - **False-track probability** is the probability that a TBD detector, run over K noise-only
-  frames, declares a target anywhere in the map. This replaces the per-cell false-alarm
+  scans, declares a target anywhere in the map. This replaces the per-cell false-alarm
   probability of CFAR, which does not carry over: a per-cell probability of 1e-3 on a map of this
-  size is hundreds of false alarms per frame, and a TBD detector does not decide cell by cell.
+  size is hundreds of false alarms per scan, and a TBD detector does not decide cell by cell.
 - **Detection** means the detector declares a target, and the declared trajectory's final cell is
-  within one range bin and one velocity bin of the truth. A declaration anywhere else is a false
+  within one range bin and one rate bin of the truth. A declaration anywhere else is a false
   track, even if a target is present.
 
 ### The bounds
 
 Quote every TBD result against two bounds at the same false-track probability:
 
-- **The floor: single-frame detection.** What a per-frame threshold achieves on one map.
+- **The floor: single-scan detection.** What a per-scan threshold achieves on one map.
 - **The ceiling: known-trajectory integration.** If you knew exactly which cell the target
-  occupied in each of the K frames, you could sum those K cells' power and threshold the sum.
+  occupied in each of the K scans, you could sum those K cells' power and threshold the sum.
   For a non-fluctuating target in complex Gaussian noise, the statistics of that sum are known in
   closed form. No detector that does not know the trajectory can beat it.
 
@@ -116,10 +116,10 @@ it, and why, is the interesting part.
 - **The threshold.** A TBD score is a maximum over very many trajectories. Its noise-only
   distribution is not the per-cell one, and you will need to estimate its tail at small
   probabilities from a finite number of runs. Say how, and how confident you are.
-- **Velocity folding.** The target's true velocity is well outside the map's unambiguous
+- **Rate folding.** The target's true range rate is well outside the map's unambiguous
   interval. Its Doppler cell wraps around.
 - **How far the target moves.** Measure, from the truth, how far the target moves in range and in
-  Doppler between frames, before you design anything that depends on it. Do not assume both are
+  Doppler between scans, before you design anything that depends on it. Do not assume both are
   small.
 
 ## Sources

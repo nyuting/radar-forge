@@ -50,7 +50,7 @@ from scipy.optimize import minimize, minimize_scalar
 
 from radar_forge._fourier import aboutanios_mulgrew, signed_cycles
 from radar_forge.constants import SPEED_OF_LIGHT_MPS
-from radar_forge.propagation import bistatic_range_rate_from_doppler_mps
+from radar_forge.propagation import bistatic_range_rate_from_doppler_mps, wavenumber_radpm
 
 __all__ = [
     "FINE_METHODS",
@@ -85,10 +85,10 @@ class ChipProcessing:
 
     ``noise_power_w`` is the noise in one cell of the parent's ``data_rfst``; the fold factor,
     acceleration and jerk are what the migration correction applied (bistatic).
-    ``band_centre_hz`` and ``band_width_hz`` place the echo's band in the chip's range spectrum,
+    ``band_centre_hz`` and ``band_extent_hz`` place the echo's band in the chip's range spectrum,
     the FFT along its range bins. A compressed pulse's is its own band about zero, the default.
     A deramped FMCW profile's is the sweep's fast time, one-sided: the sweep's start at 0 Hz and
-    a whole sample rate below it, ``band_centre_hz = -f_s/2``, ``band_width_hz = f_s``.
+    a whole sample rate below it, ``band_centre_hz = -f_s/2``, ``band_extent_hz = f_s``.
     """
 
     carrier_frequency_hz: float
@@ -101,7 +101,7 @@ class ChipProcessing:
     compensated_acceleration_mps2: float = 0.0
     compensated_jerk_mps3: float = 0.0
     band_centre_hz: float = 0.0
-    band_width_hz: float | None = None
+    band_extent_hz: float | None = None
 
 
 @dataclass(frozen=True)
@@ -111,7 +111,7 @@ class DataChip:
     Axis 0 is slow time (``domain = "slow_time"``, every pulse) or shifted Doppler bins. Chip
     cell ``(i, j)`` is parent cell ``((i + axis0_offset) % parent_shape[0], j + range_offset)``,
     and its range and rate are the parent's bin values; on a slow-time chip
-    ``rate_bin_centers_mps`` is the parent's whole Doppler axis.
+    ``rate_bin_centres_mps`` is the parent's whole Doppler axis.
     """
 
     data: NDArray[np.complex128]
@@ -119,8 +119,8 @@ class DataChip:
     axis0_offset: int
     range_offset: int
     parent_shape: tuple[int, int]
-    range_bin_centers_m: NDArray[np.float64]
-    rate_bin_centers_mps: NDArray[np.float64]
+    range_bin_centres_m: NDArray[np.float64]
+    rate_bin_centres_mps: NDArray[np.float64]
     processing: ChipProcessing
 
     def parent_index(
@@ -132,9 +132,9 @@ class DataChip:
 
     def range_at_m(self, fractional_bin: ArrayLike) -> NDArray[np.float64]:
         """Return the bistatic range at fractional chip range indices, by the uniform spacing."""
-        spacing_m = self.range_bin_centers_m[1] - self.range_bin_centers_m[0]
+        spacing_m = self.range_bin_centres_m[1] - self.range_bin_centres_m[0]
         result: NDArray[np.float64] = (
-            self.range_bin_centers_m[0] + np.asarray(fractional_bin, dtype=np.float64) * spacing_m
+            self.range_bin_centres_m[0] + np.asarray(fractional_bin, dtype=np.float64) * spacing_m
         )
         return result
 
@@ -144,10 +144,10 @@ class CramerRaoBounds:
     """Standard deviations the Cramér-Rao bound allows, bistatic; nan for a term not fitted."""
 
     snr_linear: float
-    bistatic_range_m: float
-    bistatic_range_rate_mps: float
-    bistatic_range_acceleration_mps2: float
-    bistatic_range_jerk_mps3: float
+    sigma_bistatic_range_m: float
+    sigma_bistatic_range_rate_mps: float
+    sigma_bistatic_range_acceleration_mps2: float
+    sigma_bistatic_range_jerk_mps3: float
 
 
 @dataclass(frozen=True)
@@ -174,8 +174,8 @@ def crop_slow_time(
     data_rfst: ArrayLike,
     centre_range_bin: int,
     *,
-    range_bin_centers_m: ArrayLike,
-    rate_bin_centers_mps: ArrayLike,
+    range_bin_centres_m: ArrayLike,
+    rate_bin_centres_mps: ArrayLike,
     processing: ChipProcessing,
     half_width_bins: int = 16,
 ) -> DataChip:
@@ -191,8 +191,8 @@ def crop_slow_time(
         0,
         first,
         (data.shape[0], data.shape[1]),
-        np.asarray(range_bin_centers_m, dtype=np.float64)[first:stop].copy(),
-        np.asarray(rate_bin_centers_mps, dtype=np.float64).copy(),
+        np.asarray(range_bin_centres_m, dtype=np.float64)[first:stop].copy(),
+        np.asarray(rate_bin_centres_mps, dtype=np.float64).copy(),
         processing,
     )
 
@@ -202,8 +202,8 @@ def crop_range_doppler(
     centre_doppler_bin: int,
     centre_range_bin: int,
     *,
-    range_bin_centers_m: ArrayLike,
-    rate_bin_centers_mps: ArrayLike,
+    range_bin_centres_m: ArrayLike,
+    rate_bin_centres_mps: ArrayLike,
     processing: ChipProcessing,
     half_width_bins: int = 16,
 ) -> DataChip:
@@ -222,8 +222,8 @@ def crop_range_doppler(
         int(rows[0]),
         first,
         (n_doppler, data.shape[1]),
-        np.asarray(range_bin_centers_m, dtype=np.float64)[first:stop].copy(),
-        np.asarray(rate_bin_centers_mps, dtype=np.float64)[rows],
+        np.asarray(range_bin_centres_m, dtype=np.float64)[first:stop].copy(),
+        np.asarray(rate_bin_centres_mps, dtype=np.float64)[rows],
         processing,
     )
 
@@ -303,13 +303,13 @@ def cramer_rao_bounds(
     factors = np.stack(
         [time_s**p / np.prod(np.arange(1, p + 1)) for p in range(polynomial_order + 1)]
     )
-    wavenumber = 2.0 * np.pi * carrier_frequency_hz / SPEED_OF_LIGHT_MPS
+    carrier_wavenumber_radpm = float(wavenumber_radpm(carrier_frequency_hz))
     band_spread = (2.0 * np.pi / SPEED_OF_LIGHT_MPS) ** 2 * bandwidth_hz**2 / 12.0
     size = polynomial_order + 2
     fisher = np.empty((size, size))
     fisher[0, 0] = 1.0
-    fisher[0, 1:] = fisher[1:, 0] = -wavenumber * factors.mean(axis=1)
-    fisher[1:, 1:] = (wavenumber**2 + band_spread) * (factors @ factors.T) / n_pulses
+    fisher[0, 1:] = fisher[1:, 0] = -carrier_wavenumber_radpm * factors.mean(axis=1)
+    fisher[1:, 1:] = (carrier_wavenumber_radpm**2 + band_spread) * (factors @ factors.T) / n_pulses
     fisher *= 2.0 * snr_linear
     scale = 1.0 / np.sqrt(np.diag(fisher))
     covariance = scale[:, None] * np.linalg.inv(scale[:, None] * fisher * scale) * scale
@@ -336,7 +336,7 @@ def estimate_fine(
     SNR is measured from the focused peak against ``processing.noise_power_w``. A band off zero
     (:class:`ChipProcessing`, an FMCW profile's) is taken where it lies: read as centred, its
     delay's phase ramp would wrap inside it, and an FMCW range fall up to 0.75 of a bin out. On a
-    chip the walk was not taken out of, the range is the dwell's mean.
+    chip the walk was not taken out of, the range is the burst's mean.
     """
     if method not in FINE_METHODS or chip.domain != "slow_time" or chip.data.ndim != 2:
         msg = "estimate_fine needs a one-channel slow-time chip and a method in FINE_METHODS."
@@ -354,7 +354,7 @@ def estimate_fine(
         # top for an FMCW profile is 0 Hz, the sweep's start.
         top_hz = centre_hz + process.sample_rate_hz / 2.0
         frequency_hz = top_hz - np.mod(top_hz - frequency_hz, process.sample_rate_hz)
-    width_hz = process.bandwidth_hz if process.band_width_hz is None else process.band_width_hz
+    width_hz = process.bandwidth_hz if process.band_extent_hz is None else process.band_extent_hz
     band = np.argsort(frequency_hz)
     band = band[np.abs(frequency_hz[band] - centre_hz) <= width_hz / 2.0]
     in_band = np.fft.fft(chip.data, n=n_fft, axis=1)[:, band]
@@ -453,7 +453,7 @@ def _cpf(slow_time: NDArray[np.complex128], polynomial_order: int) -> NDArray[np
 
     :math:`CP(n, \Omega) = \sum_m z_{n+m} z_{n-m} e^{-j\Omega m^2}` peaks at the phase's
     second derivative :math:`2c_2 + 6c_3 n` (O'Shea [8]_), read at the centre and, for
-    the cubic, a quarter of the dwell either side.
+    the cubic, a quarter of the burst either side.
     """
     n_pulses = slow_time.size
     centre = n_pulses // 2
@@ -471,7 +471,7 @@ def _cpf_peak(slow_time: NDArray[np.complex128], centre: int) -> float:
     :math:`m^2` is an integer, so on the grid :math:`\Omega = 2\pi q/L` the CPF is the
     :math:`L`-point DFT of the products placed at :math:`u = m^2`. Only
     :math:`|\Omega| \le 4\pi/N` is searched: a phase whose frequency sweeps more than two PRFs
-    over the dwell aliases in slow time, and beyond it lie only noise peaks.
+    over the burst aliases in slow time, and beyond it lie only noise peaks.
     """
     n_pulses = slow_time.size
     half = min(centre, n_pulses - 1 - centre)
@@ -506,7 +506,7 @@ def _maximum_likelihood(
     The local generalised Radon-Fourier transform: after the keystone the chip's trajectory is
     straight in range, so its sum along the trajectory is the range-focused sequence, and the
     likelihood is maximised over the phase alone (Xu et al. [9]_). The search runs in
-    :math:`c_p N^p`, the phase each term adds over the dwell.
+    :math:`c_p N^p`, the phase each term adds over the burst.
     """
     n_pulses = slow_time.size
     pulse = np.arange(n_pulses, dtype=np.float64)

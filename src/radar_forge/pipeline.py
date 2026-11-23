@@ -1,23 +1,20 @@
-r"""The chain from a scenario to tracks: frames of IQ, range-Doppler maps, plots and scans.
+r"""The chain from a scenario to plots: each scan's IQ, range-Doppler maps and plots.
 
-:func:`frames` plays a :class:`~radar_forge.scenario.Scenario` back one frame at a time, each
+:func:`scan_iq` plays a :class:`~radar_forge.scenario.Scenario` back one scan at a time, each
 burst's cube synthesised from line-of-sight paths; a noise burst's stream also carries its
 leakage and near clutter, beside the code it sent. :func:`range_doppler_product` makes each
 cube a :class:`RangeDopplerProduct`, a pulsed cube through its range gate and ``[migration]``
 (:mod:`radar_forge.migration`), a noise stream once :func:`~radar_forge.clutter.cancel` has
-cleaned it; :func:`frame_plots` runs CFAR along range, clusters, and pairs two bursts by dual
-PRF into :class:`Plots`; :class:`ScanTracker` feeds the accepted plots to a
-:class:`~radar_forge.tracking.Tracker`. The map axes carry bistatic range :math:`R_T + R_R`
-and its rate, positive receding; nothing here halves them. An FMCW scenario with a receive array
-synthesises a channel axis; its map keeps each channel's beside the boresight beam's, which
-detection sees.
+cleaned it; :func:`scan_plots` runs CFAR along range, clusters, and pairs two bursts by dual
+PRF into :class:`Plots`, whose accepted plots :class:`~radar_forge.scan_tracker.ScanTracker`
+tracks. The map axes carry bistatic range :math:`R_T + R_R` and its rate, positive receding;
+nothing here halves them. An FMCW scenario with a receive array synthesises a channel axis; its
+map keeps each channel's beside the boresight beam's, which detection sees.
 
 References
 ----------
 .. [1] M. A. Richards, *Fundamentals of Radar Signal Processing*, 2nd ed., McGraw-Hill, 2014.
-.. [2] Y. Bar-Shalom, X. R. Li and T. Kirubarajan, *Estimation with Applications to Tracking
-       and Navigation*, Wiley, 2001.
-.. [3] K. Kulpa, *Signal Processing in Noise Waveform Radar*, Artech House, 2013.
+.. [2] K. Kulpa, *Signal Processing in Noise Waveform Radar*, Artech House, 2013.
 """
 
 from __future__ import annotations
@@ -36,19 +33,19 @@ from radar_forge.array import (
     ArrayGeometry,
     apply_weights,
     conventional_weights,
-    directions_unit,
     enu_to_array_frame,
     steering_vectors,
 )
 from radar_forge.clutter import CancellationResult, cancel, fill_notch
+from radar_forge.coordinates import directions_unit
 from radar_forge.detection import Detection, cfar_detect, cluster_detections
 from radar_forge.dsp import (
     batched_correlation,
-    delay_bin_centers_m,
-    doppler_bin_centers_mps,
+    delay_bin_centres_m,
+    doppler_bin_centres_mps,
     doppler_fft,
-    fold_velocity_mps,
-    range_bin_centers_m,
+    fold_range_rate_mps,
+    range_bin_centres_m,
     range_doppler_map,
     unfold_doppler_dual_prf,
     unfold_range_dual_prf,
@@ -66,32 +63,18 @@ from radar_forge.signal import (
     pulsed_baseband,
     stream_baseband,
 )
-from radar_forge.tracking.association import GlobalNearestNeighbour
-from radar_forge.tracking.filters import (
-    TaylorLinearisation,
-    TrackBank,
-    TrackStatus,
-    UnscentedTransform,
-)
-from radar_forge.tracking.initiation import DirectStateInitiator
-from radar_forge.tracking.models import LinearMeasurement, RadialConstantVelocity, marginal
-from radar_forge.tracking.tracker import LifecyclePolicy, Scan, Tracker
 
 __all__ = [
-    "Frame",
     "Plots",
     "RangeDopplerProduct",
-    "ScanTracker",
-    "frame_plots",
-    "frame_products",
-    "frames",
+    "ScanIq",
     "map_axes",
     "range_doppler_product",
+    "scan_iq",
+    "scan_plots",
+    "scan_products",
     "synthesise",
 ]
-
-# The model IDs a scan is measured through: the scan's own, and its range-only marginal.
-_MEASURED, _RANGE = "range_rate", "range"
 
 
 def synthesise(
@@ -150,8 +133,8 @@ def synthesise(
 
 
 @dataclass(frozen=True)
-class Frame:
-    """One frame: its time, the targets' true geometry, and one cube per burst.
+class ScanIq:
+    """One scan: its time, the targets' true geometry, and one cube per burst.
 
     A noise burst's cube is its received stream cut into batches, and ``references`` holds
     the code it sent, the same shape; empty for the other waveforms.
@@ -164,23 +147,23 @@ class Frame:
     references: tuple[NDArray[np.complex128], ...] = ()
 
 
-def frames(scenario: Scenario, *, n_frames: int | None = None) -> Iterator[Frame]:
-    """Play a scenario back one frame at a time, every burst drawing noise from one generator.
+def scan_iq(scenario: Scenario, *, n_scans: int | None = None) -> Iterator[ScanIq]:
+    """Play a scenario back one scan at a time, every burst drawing noise from one generator.
 
-    A generator, so a run holds one frame's cubes at a time. Consumed in order it replays bit
-    for bit; skipping a frame changes the noise of every frame after it.
+    A generator, so a run holds one scan's cubes at a time. Consumed in order it replays bit
+    for bit; skipping a scan changes the noise of every scan after it.
     """
-    truths = truth_geometry(scenario)[:n_frames]
+    truths = truth_geometry(scenario)[:n_scans]
     rng = np.random.default_rng(scenario.seed)
     rcs_m2 = list(scenario.rcs_m2)
     array, phase_rad = scenario.array, scattering_phase_rad(scenario)
     radar, distortion = scenario.radar, scenario.transmitter_distortion
     disturbance = disturbance_paths(radar, scenario.leakage, scenario.clutter)
     amplifier = None if distortion is None else functools.partial(cubic_amplifier, a3=distortion.a3)
-    # A loop over frames is the point: each frame is built and handed out before the next.
+    # A loop over scans is the point: each scan is built and handed out before the next.
     for index, truth in enumerate(truths):
         if radar.transmitter.waveform == "noise":
-            n_pulses = scenario.n_pulses[0]
+            n_pulses = scenario.n_pulses_per_burst[0]
             code = noise_waveform(n_pulses * radar.n_samples_per_chirp, rng=rng)
             stream = synthesise(
                 radar,
@@ -193,7 +176,7 @@ def frames(scenario: Scenario, *, n_frames: int | None = None) -> Iterator[Frame
                 amplifier=amplifier,
             )
             references = (code.reshape(n_pulses, -1),)
-            yield Frame(index, float(scenario.frame_times_s[index]), truth, (stream,), references)
+            yield ScanIq(index, float(scenario.scan_times_s[index]), truth, (stream,), references)
             continue
         cubes = tuple(
             synthesise(
@@ -207,10 +190,10 @@ def frames(scenario: Scenario, *, n_frames: int | None = None) -> Iterator[Frame
                 scattering_phase_rad=phase_rad[index],
             )
             for radar, n_pulses, gate in zip(
-                scenario.radars, scenario.n_pulses, scenario.gates, strict=True
+                scenario.radars, scenario.n_pulses_per_burst, scenario.gates, strict=True
             )
         )
-        yield Frame(index, float(scenario.frame_times_s[index]), truth, cubes)
+        yield ScanIq(index, float(scenario.scan_times_s[index]), truth, cubes)
 
 
 def map_axes(
@@ -219,7 +202,7 @@ def map_axes(
     """Return a burst's map axes: bistatic range of each range bin, and rate of each Doppler bin.
 
     FMCW range is the beat axis; a pulsed bin is one sample of delay from the range gate's
-    first, :func:`~radar_forge.dsp.delay_bin_centers_m` (no gate: the whole PRI from zero); a
+    first, :func:`~radar_forge.dsp.delay_bin_centres_m` (no gate: the whole PRI from zero); a
     noise burst's is one lag of its correlation, the same axis from zero for ``m < n_range_lags``,
     a window that does not wrap (:attr:`~radar_forge.radar.Radar.unambiguous_delay_s`).
     """
@@ -230,20 +213,20 @@ def map_axes(
             msg = "a noise burst's map needs n_range_lags, its count of correlation lags."
             raise ValueError(msg)
         # Lag m is m samples of delay from zero: the ungated pulsed axis, c m / f_s.
-        range_axis_m = delay_bin_centers_m(n_range_lags, sample_rate_hz)
+        range_axis_m = delay_bin_centres_m(n_range_lags, sample_rate_hz)
     elif transmitter.waveform == "pulsed":
-        range_axis_m = delay_bin_centers_m(
+        range_axis_m = delay_bin_centres_m(
             gate.n_samples(radar), sample_rate_hz, range_gate_start_m=gate.range_gate_start_m
         )
     else:
-        range_axis_m = range_bin_centers_m(
+        range_axis_m = range_bin_centres_m(
             radar.n_samples_per_pri,
             transmitter.bandwidth_hz,
             transmitter.chirp_duration_s,
             sample_rate_hz,
         )
     pri_s = transmitter.pulse_repetition_interval_s
-    return range_axis_m, doppler_bin_centers_mps(n_pulses, pri_s, radar.wavelength_m)
+    return range_axis_m, doppler_bin_centres_mps(n_pulses, pri_s, radar.wavelength_m)
 
 
 @dataclass(frozen=True)
@@ -251,10 +234,10 @@ class RangeDopplerProduct:
     """One burst's map ``(n_doppler_bins, n_range_bins)`` and its axes (:func:`map_axes`).
 
     Both axes are circles: a fractional index converts by the axis's own uniform formula, so an
-    index past the last bin lies across the wrap, and a rate folds into ``(-span/2, +span/2]``,
-    span = :attr:`rate_period_mps`. A noise burst's range axis is a window of lags instead, which
-    does not wrap: ``range_wraps`` is ``False``.
-    The rate axis falls with index, its sign from :func:`~radar_forge.dsp.doppler_bin_centers_mps`.
+    index past the last bin lies across the wrap, and a rate folds into
+    ``(-period/2, +period/2]``, period = :attr:`rate_period_mps`. A noise burst's range axis is
+    a window of lags instead, which does not wrap: ``range_wraps`` is ``False``.
+    The rate axis falls with index, its sign from :func:`~radar_forge.dsp.doppler_bin_centres_mps`.
     A range-gated map is a window on its range circle, ``unambiguous_range_m`` round. A cube
     with a channel axis keeps each channel's map, ``channels`` ``(n_doppler_bins, n_range_bins,
     n_rx)``, and ``rd_map`` is their conventional beam at boresight.
@@ -295,9 +278,9 @@ class RangeDopplerProduct:
         return result
 
     def rate_at_index_mps(self, index: ArrayLike) -> NDArray[np.float64]:
-        """Return the folded rate at fractional Doppler indices, in ``(-span/2, +span/2]``."""
+        """Return the folded rate at fractional Doppler indices, in ``(-period/2, +period/2]``."""
         rate_mps = self.rate_axis_mps[0] + np.asarray(index) * self.rate_bin_mps
-        return fold_velocity_mps(rate_mps, self.rate_period_mps)
+        return fold_range_rate_mps(rate_mps, self.rate_period_mps)
 
     def index_of(
         self, bistatic_range_m: ArrayLike, rate_mps: ArrayLike
@@ -331,7 +314,7 @@ def range_doppler_product(
     A pulsed chain applies ``migration`` between the two, so detection and tracking see the
     compensated map. A gated map's range circle is the PRI's. A noise burst's stream is
     correlated with its code, ``reference``, batch by batch over ``n_range_lags`` lags, then
-    Doppler-transformed (Kulpa [3] ch. 3). No window on either axis.
+    Doppler-transformed (Kulpa [2] ch. 3). No window on either axis.
     """
     samples = np.asarray(cube, dtype=np.complex128)
     if radar.transmitter.waveform == "noise":
@@ -377,21 +360,21 @@ def range_doppler_product(
     return RangeDopplerProduct(rd_map, *axes, circle_m)
 
 
-def frame_products(
-    scenario: Scenario, frame: Frame, *, cancellation: CancellationResult | None = None
+def scan_products(
+    scenario: Scenario, scan: ScanIq, *, cancellation: CancellationResult | None = None
 ) -> list[RangeDopplerProduct]:
-    """Return each burst's map of one frame, through its range gate and ``[migration]``.
+    """Return each burst's map of one scan, through its range gate and ``[migration]``.
 
     A noise stream is cancelled first, by ``[cancellation]`` unless ``cancellation`` is given,
     and the canceller's notch, exactly empty, is set to the map's noise level before CFAR sees
     it (:func:`~radar_forge.clutter.fill_notch`).
     """
-    if not frame.references:
+    if not scan.references:
         return [
             range_doppler_product(cube, radar, gate=gate, migration=scenario.migration)
-            for cube, radar, gate in zip(frame.cubes, scenario.radars, scenario.gates, strict=True)
+            for cube, radar, gate in zip(scan.cubes, scenario.radars, scenario.gates, strict=True)
         ]
-    code, stream = frame.references[0], frame.cubes[0]
+    code, stream = scan.references[0], scan.cubes[0]
     result = cancellation or cancel(code, stream, scenario.cancellation)
     residual = result.residual.reshape(stream.shape)
     radar, n_range_lags = scenario.radar, scenario.n_range_lags[0]
@@ -404,7 +387,7 @@ def frame_products(
 
 @dataclass(frozen=True)
 class Plots:
-    """Every detection of one frame, every burst's, as columns ``(n_plots,)``.
+    """Every detection of one scan, every burst's, as columns ``(n_plots,)``.
 
     ``bistatic_range_m`` and ``folded_rate_mps`` are as the burst's map shows them;
     ``bistatic_range_rate_mps`` is the unfolded rate, nan until a fold is known. The sigmas are
@@ -500,7 +483,7 @@ def _pair(
 ) -> Plots:
     """Pair two bursts' plots by mutual nearest range, then unfold each pair's rate.
 
-    Ranges are unfolded as rates are, so maps of different spans still pair; a pair must agree
+    Ranges are unfolded as rates are, so maps of different periods still pair; a pair must agree
     within two bins of the coarser map in each (Richards [1] §5.5.4). A plot with no partner in
     range is ``missing_pair``, one whose partner is nearer another ``ambiguous_pair``, and a pair
     whose rates agree on no value ``unresolved_rate``.
@@ -523,7 +506,7 @@ def _pair(
         second.folded_rate_mps[j],
         a.rate_period_mps,
         b.rate_period_mps,
-        max_velocity_mps=max_rate_mps,
+        max_range_rate_mps=max_rate_mps,
         tolerance_mps=2.0 * max(abs(a.rate_bin_mps), abs(b.rate_bin_mps)),
     )
     members = np.concatenate([i, first.burst_index.size + j])
@@ -542,177 +525,8 @@ def _pair(
     return Plots(detections=first.detections + second.detections, status=tuple(status), **columns)
 
 
-def frame_plots(products: Sequence[RangeDopplerProduct], settings: DetectionSettings) -> Plots:
-    """Return one frame's plots from each burst's map, a dual-PRF pair paired and unfolded."""
+def scan_plots(products: Sequence[RangeDopplerProduct], settings: DetectionSettings) -> Plots:
+    """Return one scan's plots from each burst's map, a dual-PRF pair paired and unfolded."""
     max_rate_mps = settings.max_bistatic_range_rate_mps
     plots = [_detect(p, settings, k, max_rate_mps) for k, p in enumerate(products)]
     return plots[0] if len(plots) == 1 else _pair(plots[0], plots[1], products, max_rate_mps)
-
-
-class ScanTracker:
-    r"""The ``[tracking]`` table as a :class:`~radar_forge.tracking.Tracker`, and its scan policy.
-
-    The rate is measured where it cannot fold: after dual-PRF pairing, from one burst whose
-    rate interval exceeds the largest rate, or once a track can unfold it; otherwise range
-    alone. Range is measured modulo the first map's span (the state stays continuous), with a
-    bin over √12 of noise. ``rate_unfolding = "track_aided"`` is scenario 003's policy: a
-    track may unfold after N associated ranges, the least N whose least-squares slope is
-    certain to a ``unfold_sigma_gate``-th of a fold span, :math:`(\sigma_R/T)\sqrt{12/(N(N^2-1))}
-    < v_{span}/g` (Bar-Shalom [2] §5.5). The track with the longest such history gives each
-    plot the fold nearest its rate, unless that lies over half a span from the slope of its last
-    ``n_slope_scans`` ranges, the fold monitor: a wrong fold agrees with the prediction that
-    chose it, never with the range. One reference track serves a scan: single-target policy.
-    """
-
-    def __init__(self, scenario: Scenario) -> None:
-        settings = scenario.tracking
-        if settings is None:
-            msg = f"scenario {scenario.name!r} has no [tracking] table."
-            raise ValueError(msg)
-        range_axis_m, rate_axis_mps = map_axes(scenario.radar, scenario.n_pulses[0])
-        range_bin_m = float(range_axis_m[1] - range_axis_m[0])
-        rate_bin_mps = float(rate_axis_mps[0] - rate_axis_mps[1])
-        self.range_period_m = range_axis_m.size * range_bin_m
-        self.fold_span_mps = rate_axis_mps.size * rate_bin_mps
-        self.scan_interval_s, self.n_slope_scans = (
-            1.0 / scenario.frame_rate_hz,
-            settings.n_slope_scans,
-        )
-        sigma_range_m, sigma_rate_mps = (
-            range_bin_m / math.sqrt(12.0),
-            rate_bin_mps / math.sqrt(12.0),
-        )
-        max_rate_mps, dual = (
-            scenario.detection.max_bistatic_range_rate_mps,
-            len(scenario.radars) == 2,
-        )
-        track_aided = {"track_aided": True, "none": False}[settings.rate_unfolding]
-        self.measures_rate = dual or track_aided or self.fold_span_mps / 2.0 > max_rate_mps
-        names = ("bistatic_range_m", "bistatic_range_rate_mps")[: 1 + self.measures_rate]
-        motion = RadialConstantVelocity(
-            settings.sigma_acceleration_mps2,
-            acceleration_correlation_time_s=settings.acceleration_correlation_time_s,
-            process_noise=settings.process_noise,
-        )
-        model = LinearMeasurement(
-            motion.state_layout, names, periods={names[0]: self.range_period_m}
-        )
-        models: dict[str, Any] = {_MEASURED: model}
-        if self.measures_rate and (settings.range_only_retry or track_aided):
-            models[_RANGE] = marginal(model, names[:1])
-        # One false alarm per scan over the range span and over the rate span a plot can take;
-        # only their ratio decides an assignment, since GNN maximises the pairs first.
-        rate_span_mps = 2.0 * max_rate_mps if dual else self.fold_span_mps
-        density = {
-            _MEASURED: 1.0 / self.range_period_m / (rate_span_mps if self.measures_rate else 1)
-        }
-        density[_RANGE] = 1.0 / self.range_period_m
-        n_scans = np.arange(2, 1000)
-        slope_sigma_mps = (
-            sigma_range_m / self.scan_interval_s * np.sqrt(12 / (n_scans**3 - n_scans))
-        )
-        enough = n_scans[slope_sigma_mps < self.fold_span_mps / settings.unfold_sigma_gate]
-        if track_aided and not enough.size:
-            msg = "the range slope never resolves the fold within 1000 scans; widen the gate."
-            raise ValueError(msg)
-        # Tracks unfold once they hold this many ranges; None without track-aided unfolding.
-        self.n_unfold_scans = int(enough[0]) if track_aided else None
-        # Each track's (scan time, unwrapped range) pairs, from its birth on.
-        self.history: dict[int, list[tuple[float, float]]] = {}
-        n_lives = settings.n_delete_misses + settings.n_reacquire_misses
-        self.tracker = Tracker(
-            models,
-            motion,
-            {"taylor": TaylorLinearisation, "unscented": UnscentedTransform}[
-                settings.linearisation
-            ](),
-            settings.gate_probability,
-            GlobalNearestNeighbour(),
-            DirectStateInitiator(
-                np.zeros(2),
-                np.diag([sigma_range_m**2, max_rate_mps**2]),
-                seed_names={"range_only": names[:1], "direct": None}[settings.initiator],
-            ),
-            LifecyclePolicy(
-                settings.n_confirm_hits,
-                settings.n_confirm_scans,
-                settings.n_delete_misses,
-                settings.n_reacquire_misses,
-                # The miss count deletes; the coast-time limit is set past it, never to fire.
-                max_coast_time_s=(n_lives + 1) * self.scan_interval_s,
-                reacquire_reset=settings.reacquire_reset,
-            ),
-            settings.cost,
-            {k: density[k] for k in models} if settings.cost != "nis" else None,
-            assignment=settings.assignment,
-            model_selector=self._select if len(models) > 1 else None,
-        )
-        noise = np.diag([sigma_range_m**2, sigma_rate_mps**2])
-        self.noise_covariance = noise[: len(names), : len(names)]
-
-    def unfoldable(self, track_id: NDArray[np.int64]) -> NDArray[np.bool_]:
-        """Return which tracks may unfold: all without track-aided unfolding, else by history."""
-        if self.n_unfold_scans is None:
-            return np.ones(track_id.shape, dtype=bool)
-        lengths = [len(self.history.get(int(t), ())) for t in track_id]
-        return np.asarray(lengths, dtype=np.int64) >= self.n_unfold_scans
-
-    def _select(self, bank: TrackBank, model_id: str) -> list[tuple[str, NDArray[np.bool_]]]:
-        """Offer range and rate to every track that may unfold, then range alone to all."""
-        return [(_MEASURED, self.unfoldable(bank.track_id)), (_RANGE, np.ones(bank.n_tracks, bool))]
-
-    def _fold(self, folded_mps: NDArray[np.float64], reference_mps: float) -> NDArray[np.float64]:
-        """Return each folded rate moved by whole spans to the fold nearest ``reference_mps``."""
-        span_mps = self.fold_span_mps
-        result: NDArray[np.float64] = folded_mps + span_mps * np.round(
-            (reference_mps - folded_mps) / span_mps
-        )
-        return result
-
-    def unfold(self, folded_mps: NDArray[np.float64]) -> NDArray[np.float64]:
-        """Return rates unfolded by the reference track and the fold monitor, or as read."""
-        bank = self.tracker.bank
-        ready = np.flatnonzero(self.unfoldable(bank.track_id))
-        if self.n_unfold_scans is None or not ready.size:
-            return folded_mps
-        histories = [self.history[int(bank.track_id[row])] for row in ready]
-        longest = int(np.argmax([len(history) for history in histories]))
-        unfolded_mps = self._fold(folded_mps, float(bank.mean[ready[longest], 1]))
-        # Fit on the scans' own times: a coasted scan leaves a gap, not a shorter step.
-        time_s, recent_m = np.array(histories[longest][-self.n_slope_scans :]).T
-        slope_mps = float(np.polyfit(time_s, recent_m, 1)[0])
-        disagree = np.abs(unfolded_mps - slope_mps) > self.fold_span_mps / 2.0
-        result: NDArray[np.float64] = np.where(
-            disagree, self._fold(folded_mps, slope_mps), unfolded_mps
-        )
-        return result
-
-    def _record(self, bank: TrackBank, ranges_m: NDArray[np.float64], time_s: float) -> None:
-        """Add each track that took a measurement, born or updated, to its range history.
-
-        Ranges are unwrapped across the range period and kept with their scan time.
-        """
-        alive = bank.status != TrackStatus.DELETED
-        living = set(bank.track_id[alive].tolist())
-        self.history = {t: h for t, h in self.history.items() if t in living}
-        period_m = self.range_period_m
-        # One append per measured track: a handful a scan, each to its own list.
-        for row in np.flatnonzero(alive & (bank.measurement_index >= 0)):
-            history = self.history.setdefault(int(bank.track_id[row]), [])
-            range_m = float(ranges_m[bank.measurement_index[row]])
-            if history:
-                last_m = history[-1][1]
-                range_m = last_m + (range_m - last_m + period_m / 2) % period_m - period_m / 2
-            history.append((time_s, range_m))
-
-    def scan(self, plots: Plots, time_s: float) -> tuple[TrackBank, NDArray[np.intp]]:
-        """Track a frame's accepted plots; return the bank and the plot behind each measurement."""
-        accepted = plots.accepted
-        rate_mps = plots.bistatic_range_rate_mps[accepted]
-        if self.n_unfold_scans is not None:
-            rate_mps = self.unfold(plots.folded_rate_mps[accepted])
-        measurements = np.column_stack([plots.bistatic_range_m[accepted], rate_mps])
-        measurements = measurements[:, : self.noise_covariance.shape[0]]
-        bank = self.tracker.process(Scan(time_s, measurements, self.noise_covariance, _MEASURED))
-        self._record(bank, measurements[:, 0], time_s)
-        return bank, accepted

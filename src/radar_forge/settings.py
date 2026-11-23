@@ -20,9 +20,10 @@ from numpy.typing import NDArray
 
 from radar_forge.detection import CfarVariant
 from radar_forge.doa import label_parts
+from radar_forge.plot_simulator import ClutterComponent, FixedDiscretes
 from radar_forge.propagation import dbsm_to_m2
 from radar_forge.tracking.hypotheses import CONFIRM_SCORE, DELETE_DROP
-from radar_forge.tracking.scene import Arc, ClutterComponent, FixedDiscretes
+from radar_forge.trajectory import Arc
 
 __all__ = [
     "ArcTarget",
@@ -46,7 +47,7 @@ __all__ = [
 class Target:
     r"""One point target: a trajectory CSV at a fixed altitude, or a constant ENU motion.
 
-    ``position_enu_m`` is at the first frame, in the receiver site's east, north, up frame; the
+    ``position_enu_m`` is at the first scan, in the receiver site's east, north, up frame; the
     target then follows :math:`p + v t + a t^2/2`. Without ``acceleration_enu_mps2`` its
     route's :math:`\ddot R_b` is not modelled (zero), as for a trajectory.
     """
@@ -102,13 +103,16 @@ class TrackingSettings:
     Every rate and acceleration is of bistatic range, twice the radial value when monostatic.
     ``range_only_retry`` offers each track range alone when range and rate fail the gate; it
     mixes measurement dimensions, so it needs ``cost = "negative_log_likelihood_ratio"``.
+    ``initiator`` is ``"direct"`` or ``"range_only"`` for an IQ scenario and
+    ``"debiased_spherical"`` for a plot-level one. ``detection_probability`` given, GNN
+    leaves unassigned any pair costlier than ln(P_D / (1 - P_D P_G)); JPDA, MHT and PMBM need it.
     """
 
     linearisation: Literal["taylor", "unscented"] = "unscented"
-    process_noise: Literal["cwna", "dwna"] = "cwna"
+    white_noise: Literal["continuous", "discrete"] = "continuous"
     sigma_acceleration_mps2: float = 8.0
     acceleration_correlation_time_s: float = 1.0
-    initiator: Literal["direct", "range_only"] = "direct"
+    initiator: Literal["direct", "range_only", "debiased_spherical"] = "direct"
     cost: Literal["nis", "negative_log_likelihood_ratio"] = "nis"
     assignment: Literal["confirmed_first", "joint"] = "confirmed_first"
     range_only_retry: bool = False
@@ -130,15 +134,15 @@ class TrackingSettings:
     turn_rate_noise_density_rad2ps3: float = 1.6e-5
     sojourn_time_s: tuple[float, ...] = (120.0, 30.0, 20.0)
     turn_rate_sigma_degps: float = 3.0
-    clutter_intensity: Literal["oracle", "map"] = "oracle"
-    detection_probability: float = 0.9
-    max_birth_clutter_intensity_per_m_rad: float = 0.01
+    clutter_density_source: Literal["oracle", "map"] = "oracle"
+    detection_probability: float | None = None
+    max_birth_clutter_density_per_m_rad: float = 0.01
     initial_speed_sigma_mps: float = 150.0
     max_position_sigma_m: float = np.inf
     # Scenario 011b: MHT's tree, PMBM's births and pruning, cues at the truth, and further
-    # trackers to score beside the configured one (tracking.scans.VARIANTS, or "pmbm").
+    # trackers to score beside the configured one (scan_tracker.VARIANTS, or "pmbm").
     k_best: int = 10
-    n_scan: int = 3
+    n_scan_depth: int = 3
     confirm_score: float = CONFIRM_SCORE
     delete_drop: float = DELETE_DROP
     birth_intensity_per_scan: float = 0.05
@@ -172,23 +176,22 @@ class TrackingSettings:
 class SensorSettings:
     """``[sensor]``: a rotating surveillance radar's plots, z = (horizontal range, azimuth).
 
-    The beam crosses azimuth a at ``scan start + a / (2π) scan_period_s``; a rotation reaches
-    the tracker in ``n_sectors`` batches, each at its centre time. Echoes merge within the
-    resolution cell ``range_cell_m`` by ``beamwidth_azimuth_deg``.
+    The beam crosses azimuth a at ``scan start + a / (2π) scan_period_s``, the period
+    ``[scans]`` gives; a scan reaches the tracker in ``n_sectors`` batches, each at its centre
+    time. Echoes merge within the resolution cell ``range_cell_m`` by ``beamwidth_azimuth_deg``.
     """
 
     carrier_frequency_hz: float = 2.8e9
-    scan_period_s: float = 4.8
     beamwidth_azimuth_deg: float = 1.4
     range_cell_m: float = 115.75
     range_min_m: float = 1000.0
     range_max_m: float = 40000.0
     sigma_range_m: float = 33.414
     sigma_azimuth_deg: float = 0.15
-    pd_aircraft: float = 0.9
-    pd_bird: float = 0.3
+    detection_probability_aircraft: float = 0.9
+    detection_probability_bird: float = 0.3
     mti_notch_mps: float = 4.0
-    pd_notch: float = 0.3
+    detection_probability_notch: float = 0.3
     n_sectors: int = 16
 
 
@@ -216,14 +219,14 @@ class LeakageSettings:
     ``inr_db`` is each path's power over the noise in one sample, not over the matched band.
     """
 
-    lags: tuple[int, ...] = ()
+    lags_samples: tuple[int, ...] = ()
     inr_db: tuple[float, ...] = ()
 
     def __post_init__(self) -> None:
         """Require one non-negative whole lag per level."""
-        lags_ok = all(type(lag) is int and lag >= 0 for lag in self.lags)
-        if not (self.lags and lags_ok and len(self.lags) == len(self.inr_db)):
-            msg = "[leakage] needs lags, non-negative integers, and one inr_db for each."
+        lags_ok = all(type(lag) is int and lag >= 0 for lag in self.lags_samples)
+        if not (self.lags_samples and lags_ok and len(self.lags_samples) == len(self.inr_db)):
+            msg = "[leakage] needs lags_samples, non-negative integers, and one inr_db for each."
             raise ValueError(msg)
         object.__setattr__(self, "inr_db", tuple(float(value) for value in self.inr_db))
 

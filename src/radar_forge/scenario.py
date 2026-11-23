@@ -1,10 +1,10 @@
-r"""A scenario: what its TOML file says, and the true geometry of its targets at every frame.
+r"""A scenario: what its TOML file says, and the true geometry of its targets at every scan.
 
 A scenario is data. ``[site.tx]`` and an optional ``[site.rx]`` (absent: monostatic), one
 ``[[burst]]`` per coherent processing interval and ``[receiver]`` make the radar; each
-``[[target]]`` is a recorded trajectory or a constant velocity, played over ``[frames]``;
+``[[target]]`` is a recorded trajectory or a constant velocity, played over ``[scans]``;
 ``[detection]`` and ``[tracking]`` set the processing (:mod:`radar_forge.pipeline`); ``[verify]``
-is read by :mod:`radar_forge.evaluate`. A pulsed ``[[burst]]`` may record a range gate, and
+is read by :mod:`radar_forge.verify`. A pulsed ``[[burst]]`` may record a range gate, and
 ``[migration]`` corrects range migration (:mod:`radar_forge.migration`). A noise burst adds
 ``[leakage]``, ``[[clutter]]``, ``[transmitter_distortion]`` and ``[cancellation]``. A
 plot-level scenario (scenario 011) has a ``[sensor]`` instead of the site, bursts and
@@ -40,8 +40,10 @@ from radar_forge.array import (
     rayleigh_width,
     uniform_linear_array,
 )
+from radar_forge.coordinates import geodetic_to_enu_m
+from radar_forge.plot_simulator import ClutterComponent, FixedDiscretes
 from radar_forge.propagation import dbsm_to_m2
-from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter, geodetic_to_enu_m
+from radar_forge.radar import Radar, Receiver, Site, TargetGeometry, Transmitter
 from radar_forge.settings import (
     ArcTarget,
     CancellationSettings,
@@ -59,7 +61,7 @@ from radar_forge.settings import (
     TrackingSettings,
 )
 from radar_forge.signal import RangeGate
-from radar_forge.tracking.scene import Arc, ClutterComponent, FixedDiscretes, Leg
+from radar_forge.trajectory import Arc, Leg
 
 __all__ = [
     "RangeGate",
@@ -72,7 +74,7 @@ __all__ = [
 _SITE_KEYS = {"latitude_deg", "longitude_deg", "altitude_m"}
 _GATE_KEYS = {"range_gate_start_m", "n_gate_samples"}
 _BURST_KEYS = {f.name for f in fields(Transmitter)} | {"sample_rate_hz", "n_pulses"} | _GATE_KEYS
-_TABLES = {"scenario", "target", "frames", "site", "burst", "receiver"}
+_TABLES = {"scenario", "target", "scans", "site", "burst", "receiver"}
 _OPTIONAL_TABLES = {"detection", "tracking", "verify", "migration"}
 # Scenario 005's continuous noise radar: a [[burst]] key and four tables of its own.
 _BURST_KEYS |= {"n_range_lags"}
@@ -93,11 +95,11 @@ class Scenario:
     description: str
     seed: int
     radars: tuple[Radar, ...]
-    n_pulses: tuple[int, ...]
+    n_pulses_per_burst: tuple[int, ...]
     targets: tuple[Target, ...]
     start_time_s: float
     duration_s: float
-    frame_rate_hz: float
+    scan_period_s: float
     detection: DetectionSettings = field(default_factory=DetectionSettings)
     tracking: TrackingSettings | None = None
     verify: Mapping[str, Any] = field(default_factory=dict)
@@ -120,7 +122,9 @@ class Scenario:
         bursts = len(self.radars)
         plot_level = self.sensor is not None and bursts == 0 and self.arcs and not self.targets
         if not plot_level and not (
-            1 <= bursts <= 2 and len(self.n_pulses) == bursts and min(self.n_pulses) >= 1
+            1 <= bursts <= 2
+            and len(self.n_pulses_per_burst) == bursts
+            and min(self.n_pulses_per_burst) >= 1
         ):
             msg = f"need one burst or a dual-PRF pair, each with n_pulses >= 1; got {bursts}."
             raise ValueError(msg)
@@ -132,14 +136,14 @@ class Scenario:
             msg = "need one range gate per burst; a gate and [migration] need pulsed bursts."
             raise ValueError(msg)
         if not (
-            (self.targets or plot_level) and self.duration_s > 0.0 and self.frame_rate_hz > 0.0
+            (self.targets or plot_level) and self.duration_s > 0.0 and self.scan_period_s > 0.0
         ):
-            msg = "need a [[target]], and duration_s and frame_rate_hz strictly positive."
+            msg = "need a [[target]], and duration_s and scan_period_s strictly positive."
             raise ValueError(msg)
-        if self.n_frames < 1:
+        if self.n_scans < 1:
             msg = (
-                f"[frames] duration_s = {self.duration_s} at frame_rate_hz = "
-                f"{self.frame_rate_hz} holds no frame; it needs at least one."
+                f"[scans] duration_s = {self.duration_s} at scan_period_s = "
+                f"{self.scan_period_s} holds no scan; it needs at least one."
             )
             raise ValueError(msg)
         if bursts == 2 and self.tracking and self.tracking.rate_unfolding != "none":
@@ -156,7 +160,10 @@ class Scenario:
         if not self.n_range_lags:
             object.__setattr__(self, "n_range_lags", (0,) * len(self.radars))
         noise = [radar.transmitter.waveform == "noise" for radar in self.radars]
-        span = [n * r.n_samples_per_chirp for n, r in zip(self.n_pulses, self.radars, strict=True)]
+        span = [
+            n * r.n_samples_per_chirp
+            for n, r in zip(self.n_pulses_per_burst, self.radars, strict=True)
+        ]
         lags_ok = [
             (1 <= lags <= samples) if is_noise else lags == 0
             for lags, samples, is_noise in zip(self.n_range_lags, span, noise, strict=True)
@@ -247,15 +254,15 @@ class Scenario:
         return self.radars[0]
 
     @property
-    def n_frames(self) -> int:
-        """Frames in the window."""
-        return round(self.duration_s * self.frame_rate_hz)
+    def n_scans(self) -> int:
+        """Scans in the window: its duration over the period, rounded to the nearest."""
+        return round(self.duration_s / self.scan_period_s)
 
     @property
-    def frame_times_s(self) -> NDArray[np.float64]:
-        """Frame times, s, on the trajectory files' own ``time_s`` base, ``(n_frames,)``."""
+    def scan_times_s(self) -> NDArray[np.float64]:
+        """Scan start times, s, on the trajectory files' own ``time_s`` base, ``(n_scans,)``."""
         result: NDArray[np.float64] = (
-            self.start_time_s + np.arange(self.n_frames, dtype=np.float64) / self.frame_rate_hz
+            self.start_time_s + np.arange(self.n_scans, dtype=np.float64) * self.scan_period_s
         )
         return result
 
@@ -269,6 +276,14 @@ def _keys(table: Mapping[str, Any], allowed: set[str], name: str) -> dict[str, A
     return dict(table)
 
 
+def _scan_period_s(window: Mapping[str, Any]) -> float:
+    """Return ``[scans] scan_period_s``, or raise naming it: every scenario needs one."""
+    if "scan_period_s" not in window:
+        msg = "[scans] needs scan_period_s, the time from one scan to the next, s."
+        raise ValueError(msg)
+    return float(window["scan_period_s"])
+
+
 def _settings(kind: Any, table: Mapping[str, Any], name: str) -> Any:
     """Build a settings dataclass, refusing an unknown key, a wrong TOML type or choice."""
     defaults = {f.name: f.default for f in fields(kind)}
@@ -279,7 +294,10 @@ def _settings(kind: Any, table: Mapping[str, Any], name: str) -> Any:
         if choices and value not in choices:
             msg = f"[{name}] {key} must be one of {list(choices)}; got {value!r}."
             raise ValueError(msg)
-        default: Any = defaults[key]
+        # An optional number (float | None, default None) takes a float, as a float does.
+        default: Any = (
+            0.0 if defaults[key] is None and float in get_args(hints[key]) else defaults[key]
+        )
         given: Any = tuple(value) if isinstance(default, tuple) else value
         # A bool is an int in Python, so the exact type is compared; a float takes an int.
         if not (type(given) is type(default) or (type(default) is float and type(given) is int)):
@@ -370,24 +388,24 @@ def _clutter_plots(table: Mapping[str, Any]) -> ClutterPlotSettings:
 
 def _plot_level(document: Mapping[str, Any], path: Path) -> Scenario:
     """Build a plot-level scenario: ``[sensor]``, arc targets and ``[clutter_plots]``."""
-    allowed = {"scenario", "target", "frames", "sensor", "clutter_plots", "tracking", "verify"}
-    if set(document) - allowed or {"scenario", "target", "frames"} - set(document):
+    allowed = {"scenario", "target", "scans", "sensor", "clutter_plots", "tracking", "verify"}
+    if set(document) - allowed or {"scenario", "target", "scans"} - set(document):
         msg = f"{path}: a [sensor] scenario has tables {sorted(allowed)}; got {sorted(document)}."
         raise ValueError(msg)
     sensor = _settings(SensorSettings, document["sensor"], "sensor")
     head = _keys(document["scenario"], {"name", "description", "seed"}, "scenario")
-    window = _keys(document["frames"], {"start_time_s", "duration_s"}, "frames")
+    window = _keys(document["scans"], {"start_time_s", "duration_s", "scan_period_s"}, "scans")
     tracking = document.get("tracking")
     return Scenario(
         name=str(head["name"]),
         description=str(head.get("description", "")),
         seed=int(head["seed"]),
         radars=(),
-        n_pulses=(),
+        n_pulses_per_burst=(),
         targets=(),
         start_time_s=float(window["start_time_s"]),
         duration_s=float(window["duration_s"]),
-        frame_rate_hz=1.0 / sensor.scan_period_s,
+        scan_period_s=_scan_period_s(window),
         tracking=None if tracking is None else _settings(TrackingSettings, tracking, "tracking"),
         verify=dict(document.get("verify", {})),
         sensor=sensor,
@@ -402,7 +420,7 @@ def load_scenario(path: Path | str) -> Scenario:
     Examples
     --------
     >>> scenario = load_scenario("config/scenario_001_fmcw_low_prf.toml")
-    >>> scenario.radar.is_monostatic, scenario.n_frames, scenario.tracking is None
+    >>> scenario.radar.is_monostatic, scenario.n_scans, scenario.tracking is None
     (True, 120, True)
     """
     toml_path = Path(path)
@@ -415,18 +433,18 @@ def load_scenario(path: Path | str) -> Scenario:
         raise ValueError(msg)
     _keys(document["site"], {"tx", "rx"}, "site")
     scenario = _keys(document["scenario"], {"name", "description", "seed"}, "scenario")
-    window = _keys(document["frames"], {"start_time_s", "duration_s", "frame_rate_hz"}, "frames")
+    window = _keys(document["scans"], {"start_time_s", "duration_s", "scan_period_s"}, "scans")
     tracking = document.get("tracking")
     return Scenario(
         name=str(scenario["name"]),
         description=str(scenario.get("description", "")),
         seed=int(scenario["seed"]),
         radars=tuple(_radar(b, document["receiver"], document["site"]) for b in document["burst"]),
-        n_pulses=tuple(int(burst["n_pulses"]) for burst in document["burst"]),
+        n_pulses_per_burst=tuple(int(burst["n_pulses"]) for burst in document["burst"]),
         targets=tuple(_target(t, toml_path.parent) for t in document["target"]),
         start_time_s=float(window["start_time_s"]),
         duration_s=float(window["duration_s"]),
-        frame_rate_hz=float(window["frame_rate_hz"]),
+        scan_period_s=_scan_period_s(window),
         detection=_settings(DetectionSettings, document.get("detection", {}), "detection"),
         tracking=None if tracking is None else _settings(TrackingSettings, tracking, "tracking"),
         verify=dict(document.get("verify", {})),
@@ -464,7 +482,7 @@ def _read_trajectory(path: Path, altitude_m: float) -> tuple[NDArray[np.float64]
     """Read a ``time_s, latitude_deg, longitude_deg[, altitude_m]`` CSV (data-001 §6.3).
 
     ``time_s`` is kept as written, not rebased to the first fix, so every target's file and
-    the frame times share one time base.
+    the scan times share one time base.
     """
     with path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
@@ -483,13 +501,13 @@ def _read_trajectory(path: Path, altitude_m: float) -> tuple[NDArray[np.float64]
 
 
 def _motion(target: Target, scenario: Scenario) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Return a target's ENU position and velocity at every frame, ``(n_frames, 3)`` each.
+    """Return a target's ENU position and velocity at every scan, ``(n_scans, 3)`` each.
 
-    A trajectory is interpolated linearly in latitude and longitude onto the frame grid, padded
-    by a frame each side where the track allows, and its velocity is the central difference:
+    A trajectory is interpolated linearly in latitude and longitude onto the scan grid, padded
+    by a scan each side where the track allows, and its velocity is the central difference:
     the mean over the seconds between real fixes, not the instantaneous one.
     """
-    times_s = scenario.frame_times_s
+    times_s = scenario.scan_times_s
     if target.trajectory_path is None:
         velocity_mps = np.asarray(target.velocity_enu_mps, dtype=np.float64)
         elapsed_s = (times_s - times_s[0])[:, None]
@@ -502,7 +520,7 @@ def _motion(target: Target, scenario: Scenario) -> tuple[NDArray[np.float64], ND
             velocity_mps + acceleration_mps2 * elapsed_s,
         )
     fix_time_s, *geodetic = _read_trajectory(target.trajectory_path, target.altitude_m)
-    step_s = 1.0 / scenario.frame_rate_hz
+    step_s = scenario.scan_period_s
     grid_s = np.concatenate([[times_s[0] - step_s], times_s, [times_s[-1] + step_s]])
     inside = (grid_s >= fix_time_s[0]) & (grid_s <= fix_time_s[-1])
     if not inside[1:-1].all():
@@ -511,7 +529,7 @@ def _motion(target: Target, scenario: Scenario) -> tuple[NDArray[np.float64], ND
     grid_s = grid_s[inside]
     if grid_s.size < 2:
         msg = (
-            f"the one-frame window at {times_s[0]} s has no frame of {target.name!r}'s "
+            f"the one-scan window at {times_s[0]} s has no scan of {target.name!r}'s "
             "track either side to difference for a velocity; widen it or move it inside."
         )
         raise ValueError(msg)
@@ -526,12 +544,12 @@ def _motion(target: Target, scenario: Scenario) -> tuple[NDArray[np.float64], ND
         origin.altitude_m,
     )
     velocity_mps = np.gradient(position_m, grid_s, axis=0)
-    frame = slice(int(inside[0]), int(inside[0]) + times_s.size)
-    return position_m[frame], velocity_mps[frame]
+    window = slice(int(inside[0]), int(inside[0]) + times_s.size)
+    return position_m[window], velocity_mps[window]
 
 
 def truth_geometry(scenario: Scenario) -> list[TargetGeometry]:
-    """Return every frame's true geometry, one row per target, unfolded.
+    """Return every scan's true geometry, one row per target, unfolded.
 
     A target with ``acceleration_enu_mps2`` carries its route's whole second derivative, the
     turning term included; every other target's is zero, as :class:`Target` says.
@@ -542,18 +560,18 @@ def truth_geometry(scenario: Scenario) -> list[TargetGeometry]:
     given = [target.acceleration_enu_mps2 for target in scenario.targets]
     modelled = np.array([a is not None for a in given])
     acceleration_mps2 = np.array([a or (0.0, 0.0, 0.0) for a in given])
-    frames = []
-    # One geometry per frame: TargetGeometry holds one frame's targets.
+    truths = []
+    # One geometry per scan: TargetGeometry holds one scan's targets.
     for p, v in zip(position_m, velocity_mps, strict=True):
         if not modelled.any():
-            frames.append(scenario.radar.geometry(p, v))
+            truths.append(scenario.radar.geometry(p, v))
             continue
         route = scenario.radar.geometry(p, v, acceleration_enu_mps2=acceleration_mps2)
         kept = np.where(modelled, route.bistatic_range_acceleration_mps2, 0.0)
-        frames.append(replace(route, bistatic_range_acceleration_mps2=kept))
+        truths.append(replace(route, bistatic_range_acceleration_mps2=kept))
     if scenario.second_aircraft is not None:
-        return [_with_second_aircraft(scenario, route) for route in frames]
-    return frames
+        return [_with_second_aircraft(scenario, route) for route in truths]
+    return truths
 
 
 def _with_second_aircraft(scenario: Scenario, route: TargetGeometry) -> TargetGeometry:
@@ -573,17 +591,17 @@ def _with_second_aircraft(scenario: Scenario, route: TargetGeometry) -> TargetGe
 
 
 def scattering_phase_rad(scenario: Scenario) -> NDArray[np.float64]:
-    """Return each truth row's scattering phase at every frame, ``(n_frames, n_rows)``, rad.
+    """Return each truth row's scattering phase at every scan, ``(n_scans, n_rows)``, rad.
 
-    Zero for every target; aircraft B's is its fixed phase, or uniform on [0, 2 pi) per frame
+    Zero for every target; aircraft B's is its fixed phase, or uniform on [0, 2 pi) per scan
     from ``default_rng([seed, 6])``, a generator of its own, so the noise does not move it.
     """
     n_rows = len(scenario.rcs_m2)
-    phase_rad = np.zeros((scenario.n_frames, n_rows))
+    phase_rad = np.zeros((scenario.n_scans, n_rows))
     settings = scenario.second_aircraft
     if settings is not None and settings.scattering_phase == "uniform":
         rng = np.random.default_rng([scenario.seed, 6])
-        phase_rad[:, -1] = rng.uniform(0.0, 2.0 * np.pi, scenario.n_frames)
+        phase_rad[:, -1] = rng.uniform(0.0, 2.0 * np.pi, scenario.n_scans)
     elif settings is not None:
         phase_rad[:, -1] = float(settings.scattering_phase)
     return phase_rad
